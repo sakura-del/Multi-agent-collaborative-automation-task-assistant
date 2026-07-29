@@ -47,7 +47,9 @@ def configure_logging() -> None:
         processors=shared_processors + [renderer],
         wrapper_class=structlog.make_filtering_bound_logger(level),
         context_class=dict,
-        logger_factory=structlog.PrintLoggerFactory(),
+        # 使用 stdlib LoggerFactory：logger 具备 name 属性，
+        # 与 add_logger_name 处理器兼容，且能复用 logging.basicConfig 的输出配置
+        logger_factory=structlog.stdlib.LoggerFactory(),
         cache_logger_on_first_use=True,
     )
 
