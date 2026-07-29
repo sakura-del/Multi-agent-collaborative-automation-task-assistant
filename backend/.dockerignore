@@ -1,0 +1,26 @@
+# Docker 构建忽略文件，避免把无关文件打入镜像层
+.git
+.gitignore
+.venv
+venv
+env
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+tests
+*.md
+!../README.md
+Dockerfile
+.dockerignore
+docker-compose*.yml
+.github
+.idea
+.vscode
+logs
+*.log
