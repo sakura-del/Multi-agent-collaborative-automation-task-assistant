@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any
 
 import yaml
 from pydantic import BaseModel, Field, field_validator
@@ -81,14 +81,14 @@ class LLMConfig(BaseModel):
     request_timeout: int = 30
     max_retries: int = 3
     cost_budget: LLMCostBudget = LLMCostBudget()
-    fallback_chain: List[LLMFallbackItem] = Field(default_factory=list)
+    fallback_chain: list[LLMFallbackItem] = Field(default_factory=list)
 
     # 各厂商 API Key（从环境变量注入）
-    openai_api_key: Optional[str] = None
+    openai_api_key: str | None = None
     openai_base_url: str = "https://api.openai.com/v1"
-    glm_api_key: Optional[str] = None
+    glm_api_key: str | None = None
     glm_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
-    qwen_api_key: Optional[str] = None
+    qwen_api_key: str | None = None
     qwen_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
 
@@ -121,12 +121,12 @@ class OrchestrationConfig(BaseModel):
 class CORSConfig(BaseModel):
     """CORS 跨域配置"""
 
-    allow_origins: List[str] = Field(
+    allow_origins: list[str] = Field(
         default_factory=lambda: ["http://localhost:5173", "http://localhost:3000"]
     )
     allow_credentials: bool = True
-    allow_methods: List[str] = Field(default_factory=lambda: ["*"])
-    allow_headers: List[str] = Field(default_factory=lambda: ["*"])
+    allow_methods: list[str] = Field(default_factory=lambda: ["*"])
+    allow_headers: list[str] = Field(default_factory=lambda: ["*"])
 
 
 # ===== 顶层 Settings =====
@@ -163,7 +163,17 @@ class Settings(BaseSettings):
     jwt_access_token_expire_minutes: int = 60
     jwt_refresh_token_expire_days: int = 7
 
-    @field_validator("app", "database", "redis", "llm", "rag", "agent", "orchestration", "cors", mode="before")
+    @field_validator(
+        "app",
+        "database",
+        "redis",
+        "llm",
+        "rag",
+        "agent",
+        "orchestration",
+        "cors",
+        mode="before",
+    )
     @classmethod
     def _ensure_dict(cls, v: Any) -> Any:
         """允许 Pydantic 把环境变量注入的字符串/字典正确解析为子模型。"""
