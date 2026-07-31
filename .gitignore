@@ -43,6 +43,7 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 htmlcov/
+.black-cache/
 
 # 类型检查
 .mypy_cache/
