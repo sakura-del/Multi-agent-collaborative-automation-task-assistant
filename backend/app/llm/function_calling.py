@@ -236,7 +236,7 @@ async def execute_tool_call(
         result = {"error": f"工具执行失败: {exc}"}
 
     # 结果序列化为字符串（dict/list 转 JSON，其余 str() 兜底）
-    if isinstance(result, (dict, list)):
+    if isinstance(result, dict | list):
         content = json.dumps(result, ensure_ascii=False, default=str)
     elif isinstance(result, str):
         content = result
