@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 class AppException(Exception):
@@ -19,9 +19,9 @@ class AppException(Exception):
 
     def __init__(
         self,
-        message: Optional[str] = None,
+        message: str | None = None,
         *,
-        details: Optional[Dict[str, Any]] = None,
+        details: dict[str, Any] | None = None,
     ) -> None:
         self.message = message or self.default_message
         self.details = details or {}

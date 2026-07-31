@@ -13,8 +13,8 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from typing import AsyncIterator, Awaitable, Callable
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,12 +23,13 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
 from app import __version__
+from app.api.middleware import AuthContextMiddleware
 from app.api.v1.router import api_router
 from app.core.config import settings
 from app.core.exceptions import AppException
 from app.core.logging import bind_request_context, configure_logging, get_logger
+from app.core.redis import RedisManager
 from app.db.session import engine
-
 
 # ===== 应用生命周期 =====
 
@@ -48,6 +49,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     logger.info("应用关闭，释放资源")
     await engine.dispose()
+    await RedisManager.close()
 
 
 # ===== 中间件 =====
@@ -98,6 +100,8 @@ def create_app() -> FastAPI:
         allow_headers=settings.cors.allow_headers,
     )
     app.add_middleware(RequestIDMiddleware)
+    # 鉴权上下文中间件：预解析 token 注入 request.state，不强制拦截
+    app.add_middleware(AuthContextMiddleware)
 
     # 全局异常处理：把 AppException 转成统一 JSON 响应结构
     @app.exception_handler(AppException)

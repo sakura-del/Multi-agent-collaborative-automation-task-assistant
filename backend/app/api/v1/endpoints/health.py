@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 from fastapi import APIRouter
 
@@ -19,7 +19,7 @@ router = APIRouter(tags=["health"])
 
 
 @router.get("/health", summary="健康检查")
-async def health_check() -> Dict[str, Any]:
+async def health_check() -> dict[str, Any]:
     """返回应用基础信息，供探针与监控使用。"""
     return {
         "status": "ok",
@@ -30,7 +30,7 @@ async def health_check() -> Dict[str, Any]:
 
 
 @router.get("/health/ready", summary="就绪检查")
-async def readiness_check() -> Dict[str, Any]:
+async def readiness_check() -> dict[str, Any]:
     """就绪检查：阶段0仅返回静态就绪状态。
 
     后续阶段会补充：
