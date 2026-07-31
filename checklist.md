@@ -9,48 +9,54 @@
 ## 阶段零：项目初始化与环境搭建（1周）
 
 ### 0.1 技术栈确认与依赖初始化
-- [ ] 创建 Python 虚拟环境（Python 3.11+）
-- [ ] 初始化 FastAPI 后端项目，配置 `pyproject.toml`
-- [ ] 初始化 Vue3 前端项目，配置 `package.json`
-- [ ] 确认代码风格规范（PEP 8 + Black + Ruff）
+- [x] 创建 Python 虚拟环境（Python 3.11+）
+- [x] 初始化 FastAPI 后端项目，配置 `pyproject.toml`
+- [x] 初始化 Vue3 前端项目，配置 `package.json`
+- [x] 确认代码风格规范（PEP 8 + Black + Ruff）
 
 ### 0.2 数据库 Schema 设计与建表
-- [ ] 创建 PostgreSQL 数据库实例
-- [ ] 编写 SQL 迁移脚本
-- [ ] 建立 `USER` 表
-- [ ] 建立 `TASK` 表
-- [ ] 建立 `SUBTASK` 表
-- [ ] 建立 `AGENT` 表
-- [ ] 建立 `EXECUTION_LOG` 表
-- [ ] 建立 `VALIDATION_RESULT` 表
-- [ ] 建立 `HUMAN_FEEDBACK` 表
-- [ ] 建立 `FAILURE_CASE` 表
-- [ ] 建立 `KNOWLEDGE_DOC` 表
-- [ ] 建立 `DOC_CHUNK` 表
-- [ ] 建立 `VECTOR_INDEX` 表
-- [ ] 建立 `TASK_DAG` 表
-- [ ] 建立 `AGENT_INTERACTION` 表
-- [ ] 验证外键关联与索引正确性
+- [x] 创建 PostgreSQL 数据库实例
+- [x] 编写 SQL 迁移脚本
+- [x] 建立 `USER` 表
+- [x] 建立 `TASK` 表
+- [x] 建立 `SUBTASK` 表
+- [x] 建立 `AGENT` 表
+- [x] 建立 `EXECUTION_LOG` 表
+- [x] 建立 `VALIDATION_RESULT` 表
+- [x] 建立 `HUMAN_FEEDBACK` 表
+- [x] 建立 `FAILURE_CASE` 表
+- [x] 建立 `KNOWLEDGE_DOC` 表
+- [x] 建立 `DOC_CHUNK` 表
+- [x] 建立 `VECTOR_INDEX` 表
+- [x] 建立 `TASK_DAG` 表
+- [x] 建立 `AGENT_INTERACTION` 表
+- [x] 验证外键关联与索引正确性
 
 ### 0.3 Docker Compose 编排
-- [ ] 编写 `docker-compose.yml`
-- [ ] 编排 PostgreSQL 容器，配置数据卷
-- [ ] 编排 Redis 容器，配置数据卷
-- [ ] 编排 Chroma 容器
-- [ ] 编排 Nginx 容器
-- [ ] 配置容器间网络通信
-- [ ] 验证 `docker-compose up` 一键启动成功
+- [x] 编写 `docker-compose.yml`
+- [x] 编排 PostgreSQL 容器，配置数据卷
+- [x] 编排 Redis 容器，配置数据卷
+- [x] 编排 Chroma 容器
+- [x] 编排 Nginx 容器
+- [x] 配置容器间网络通信
+- [x] 验证 `docker-compose up` 一键启动成功
 
 ### 0.4 Git 仓库与 CI/CD 基础配置
-- [ ] 初始化 Git 仓库
-- [ ] 配置 `.gitignore`
-- [ ] 配置 pre-commit hooks（Black + Ruff + 类型检查）
-- [ ] 设置 GitHub Actions 基础流水线（lint + test）
+- [x] 初始化 Git 仓库
+- [x] 配置 `.gitignore`
+- [x] 配置 pre-commit hooks（Black + Ruff + 类型检查）
+- [x] 设置 GitHub Actions 基础流水线（lint + test）
 
 ### 0.5 项目文档结构
-- [ ] 创建 `README.md`
-- [ ] 创建 API 文档模板
-- [ ] 创建开发规范文档
+- [x] 创建 `README.md`
+- [x] 创建 API 文档模板（FastAPI 自动生成 /docs）
+- [x] 创建开发规范文档（`docs/DEVELOPMENT.md`）
+
+### 0.6 鉴权与多用户隔离（阶段0任务3）
+- [x] JWT 注册/登录/刷新机制
+- [x] FastAPI 中间件校验 Token 并注入用户上下文
+- [x] USER 表关联密码哈希与角色字段
+- [x] user_id 隔离查询约定文档化
 
 **阶段零验收：** Docker Compose 环境可一键启动，数据库所有表可正常读写，Git 仓库与 CI/CD 就绪。
 
@@ -59,49 +65,58 @@
 ## 阶段一：基础骨架 — 五层架构框架（2周）
 
 ### 1.1 五层目录结构搭建
-- [ ] 创建 `interaction/` 用户交互层目录（含 models/services/api）
-- [ ] 创建 `orchestration/` 多Agent调度层目录
-- [ ] 创建 `tools/` 工具调用层目录
-- [ ] 创建 `knowledge/` RAG知识库层目录
-- [ ] 创建 `llm/` 底层大模型层目录
-- [ ] 创建公共模块 `common/`（异常、工具函数、常量）
+- [x] 创建 `interaction/` 用户交互层目录（含 models/services/api）
+- [x] 创建 `orchestration/` 多Agent调度层目录
+- [x] 创建 `tools/` 工具调用层目录
+- [x] 创建 `knowledge/` RAG知识库层目录
+- [x] 创建 `llm/` 底层大模型层目录
+- [x] 创建公共模块 `common/`（异常、工具函数、常量）
 
 ### 1.2 配置管理系统
-- [ ] 基于 Pydantic Settings 实现配置基类
-- [ ] 编写 `default.yaml` 默认配置文件
-- [ ] 实现环境变量覆盖逻辑
-- [ ] 配置 LLM 模型参数项
-- [ ] 配置数据库连接参数项
-- [ ] 配置 Redis 参数项
-- [ ] 配置工具注册参数项
+- [x] 基于 Pydantic Settings 实现配置基类
+- [x] 编写 `default.yaml` 默认配置文件
+- [x] 实现环境变量覆盖逻辑
+- [x] 配置 LLM 模型参数项
+- [x] 配置数据库连接参数项
+- [x] 配置 Redis 参数项
+- [x] 配置工具注册参数项
 
 ### 1.3 日志系统
-- [ ] 基于 structlog 实现结构化日志
-- [ ] 支持 JSON 格式输出
-- [ ] 实现日志分级（DEBUG/INFO/WARNING/ERROR）
-- [ ] 实现按 Agent ID 和 Task ID 关联追踪
+- [x] 基于 structlog 实现结构化日志
+- [x] 支持 JSON 格式输出
+- [x] 实现日志分级（DEBUG/INFO/WARNING/ERROR）
+- [x] 实现按 Agent ID 和 Task ID 关联追踪
 - [ ] 配置日志文件轮转
 
 ### 1.4 FastAPI 基础框架
-- [ ] 搭建 FastAPI 应用入口
-- [ ] 配置 CORS 中间件
-- [ ] 配置全局异常处理中间件
-- [ ] 实现请求 ID 追踪中间件
-- [ ] 配置 API 版本路由 `/api/v1`
-- [ ] 预留 WebSocket 端点
-- [ ] 实现 `/health` 健康检查端点
+- [x] 搭建 FastAPI 应用入口
+- [x] 配置 CORS 中间件
+- [x] 配置全局异常处理中间件
+- [x] 实现请求 ID 追踪中间件
+- [x] 配置 API 版本路由 `/api/v1`
+- [x] 预留 WebSocket 端点
+- [x] 实现 `/health` 健康检查端点
 
 ### 1.5 数据库 ORM 映射
-- [ ] 使用 SQLAlchemy 2.0 创建 13 张表 ORM 模型
-- [ ] 实现基础 CRUD Repository 模式
-- [ ] 配置异步 Session 管理
-- [ ] 编写 ORM 模型与 Schema 一致性验证测试
+- [x] 使用 SQLAlchemy 2.0 创建 13 张表 ORM 模型
+- [x] 实现基础 CRUD Repository 模式
+- [x] 配置异步 Session 管理
+- [x] 编写 ORM 模型与 Schema 一致性验证测试
 
 ### 1.6 Redis 连接与基础工具
-- [ ] 配置 aioredis 异步连接池
-- [ ] 实现缓存装饰器
-- [ ] 实现分布式锁
-- [ ] 实现任务状态快速读写工具
+- [x] 配置 aioredis 异步连接池
+- [x] 实现缓存装饰器
+- [x] 实现分布式锁
+- [x] 实现任务状态快速读写工具
+
+### 1.7 链路追踪基础
+- [x] RequestIDMiddleware 注入 trace_id 贯穿调用链
+- [x] bind_request_context 绑定 trace_id/task_id/agent_id/user_id 到 contextvars
+
+### 1.8 核心模块单元测试
+- [x] config / security / repository / redis / logging / auth 测试覆盖
+- [x] 覆盖率 ≥70%（实测 89.94%）
+- [x] Ruff + Black lint 全通过
 
 **阶段一验收：** FastAPI 正常启动，`/health` 返回 200；ORM 模型与数据库一致；日志按 JSON 输出；配置系统支持环境变量覆盖。
 
@@ -110,47 +125,47 @@
 ## 阶段二：底层大模型层（1.5周）
 
 ### 2.1 LLM 抽象接口设计
-- [ ] 定义 `BaseLLM` 抽象基类
-- [ ] 统一 `chat()` 接口签名
-- [ ] 统一 `embed()` 接口签名
-- [ ] 统一 `function_call()` 接口签名
-- [ ] 支持流式输出
-- [ ] 支持异步调用
+- [x] 定义 `BaseLLM` 抽象基类
+- [x] 统一 `chat()` 接口签名
+- [x] 统一 `embed()` 接口签名
+- [x] 统一 `function_call()` 接口签名
+- [x] 支持流式输出
+- [x] 支持异步调用
 
 ### 2.2 OpenAI 适配器实现
-- [ ] 基于 openai SDK 实现 GPT-4 适配器
-- [ ] 实现 GPT-4o 适配器
-- [ ] 支持 System/User/Assistant 消息角色
-- [ ] 支持温度调节
-- [ ] 支持 max_tokens 控制
+- [x] 基于 openai SDK 实现 GPT-4 适配器
+- [x] 实现 GPT-4o 适配器
+- [x] 支持 System/User/Assistant 消息角色
+- [x] 支持温度调节
+- [x] 支持 max_tokens 控制
 
 ### 2.3 国产模型适配器
-- [ ] 实现 GLM 适配器
-- [ ] 实现 Qwen 适配器
-- [ ] 通过 LangChain 统一接口封装
-- [ ] 验证与 OpenAI 适配器接口一致
+- [x] 实现 GLM 适配器
+- [x] 实现 Qwen 适配器
+- [x] 通过 LangChain 统一接口封装
+- [x] 验证与 OpenAI 适配器接口一致
 
 ### 2.4 Function Calling 封装
-- [ ] 实现工具 Schema 自动转换（Python 函数签名 → JSON Schema）
-- [ ] 实现 FC 请求构建
-- [ ] 实现 FC 响应解析
-- [ ] 实现多轮工具调用循环
-- [ ] 编写 FC 单元测试
+- [x] 实现工具 Schema 自动转换（Python 函数签名 → JSON Schema）
+- [x] 实现 FC 请求构建
+- [x] 实现 FC 响应解析
+- [x] 实现多轮工具调用循环
+- [x] 编写 FC 单元测试
 
 ### 2.5 模型热切换机制
-- [ ] 实现基于配置的模型工厂模式
-- [ ] 支持运行时切换 LLM 模型
-- [ ] 实现自动降级（主模型超时 → 备用模型）
-- [ ] 编写降级测试用例
+- [x] 实现基于配置的模型工厂模式
+- [x] 支持运行时切换 LLM 模型
+- [x] 实现自动降级（主模型超时 → 备用模型）
+- [x] 编写降级测试用例
 
 ### 2.6 Prompt 模板管理
-- [ ] 基于 Jinja2 实现 Prompt 模板系统
-- [ ] 支持变量注入
-- [ ] 支持模板继承
-- [ ] 支持版本管理
-- [ ] 支持 A/B 测试
+- [x] 基于 Jinja2 实现 Prompt 模板系统
+- [x] 支持变量注入
+- [x] 支持模板继承
+- [x] 支持版本管理
+- [x] 支持 A/B 测试
 
-**阶段二验收：** 配置切换 GPT-4/GLM/Qwen 零代码修改；FC 正确解析工具调用；主模型超时自动降级；Prompt 模板支持变量注入与版本管理。
+**阶段二验收：** 配置切换 GPT-4/GLM/Qwen 零代码修改；FC 正确解析工具调用；主模型超时自动降级；Prompt 模板支持变量注入与版本管理。LLM 层单元测试覆盖率 ≈93%（103 个测试全通过），含 Mock LLM 边界测试（超时/异常/格式错误）。
 
 ---
 
@@ -607,7 +622,7 @@
 
 ## 里程碑检查点
 
-- [ ] **M1 — 基础设施就绪（第3周末）：** 五层架构搭建完成，LLM接口可用，可通过API调用LLM完成简单对话
+- [x] **M1 — 基础设施就绪（第3周末）：** 五层架构搭建完成，LLM接口可用，可通过API调用LLM完成简单对话
 - [ ] **M2 — Agent骨架可运行（第8周末）：** 四大Agent基础版完成，DAG引擎运行，输入简单任务可完成拆解→执行→校验闭环
 - [ ] **M3 — 系统集成闭环（第13周末）：** RAG/工具/流水线就绪，Web界面可监控，用户可提交任务实时查看DAG状态并干预
 - [ ] **M4 — 创新功能验证（第16周末）：** 四大创新点开发完成，可演示配置切换/反馈存库/拆解对比/自愈过程

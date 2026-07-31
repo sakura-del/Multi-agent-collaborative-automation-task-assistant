@@ -29,22 +29,33 @@
 ## 项目结构
 
 ```
-.
-├── interaction/        # 用户交互层
-├── orchestration/      # 多 Agent 调度层
-├── tools/              # 工具调用层
-├── knowledge/          # RAG 知识库层
-├── llm/                # 底层大模型层
-├── common/             # 公共模块（异常、工具、常量）
-├── docs/               # 项目文档
-├── dev-plan-v2.md      # 分模块开发计划
-└── checklist.md        # 任务清单
+├── backend/                # FastAPI 后端
+│   ├── app/
+│   │   ├── api/            # 路由层（endpoints / deps / middleware）
+│   │   ├── core/           # 基础设施（config / logging / security / exceptions）
+│   │   ├── db/             # 数据库（base / session / models 13张表ORM）
+│   │   ├── schemas/        # Pydantic 请求/响应模型
+│   │   ├── interaction/    # 用户交互层（阶段1填充）
+│   │   ├── orchestration/  # 多Agent调度层（阶段3-4填充）
+│   │   ├── tools/          # 工具调用层（阶段6填充）
+│   │   ├── knowledge/      # RAG知识库层（阶段5填充）
+│   │   └── llm/            # 底层大模型层（阶段2填充）
+│   ├── alembic/            # 数据库迁移
+│   └── tests/              # 测试
+├── frontend/               # Vue3 + TypeScript 前端
+├── config/                 # 全局配置（default.yaml）
+├── nginx/                  # Nginx 反向代理配置
+├── docs/                   # 项目文档
+├── docker-compose.yml      # 五容器编排
+├── dev-plan-v2.md          # 分模块开发计划
+└── checklist.md            # 任务清单
 ```
 
 ## 开发文档
 
 - [分模块开发计划 v2](dev-plan-v2.md)
 - [任务清单](checklist.md)
+- [开发规范文档](docs/DEVELOPMENT.md)
 
 ## 开发阶段
 
