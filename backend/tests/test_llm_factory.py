@@ -13,13 +13,14 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import pytest
 
 from app.core.exceptions import LLMException
 from app.llm.adapters import GLMAdapter, OpenAIAdapter, QwenAdapter
-from app.llm.base import BaseLLM
 from app.llm.factory import LLMManager, create_llm, register_adapter
-from app.llm.models import LLMResponse, Message, MessageRole, Usage
+from app.llm.models import Message, MessageRole
 from tests.llm.mock_llm import MockLLM, make_text_response
 
 
@@ -75,7 +76,8 @@ class TestLLMManagerConfig:
             glm_base_url = "https://open.bigmodel.cn/api/paas/v4"
             qwen_api_key = "qwen-1"
             qwen_base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-            fallback_chain = [
+            # ClassVar 明确表示这是类变量（测试夹具配置），而非实例的可变默认值
+            fallback_chain: ClassVar[list] = [
                 type("Item", (), {"provider": "glm", "model": "glm-4-flash"})(),
                 type("Item", (), {"provider": "qwen", "model": "qwen-turbo"})(),
             ]
@@ -185,9 +187,7 @@ class TestLLMManagerChat:
 
         timeout_exc = type("APITimeoutError", (Exception,), {})("timeout")
         for key in [("mock", "p"), ("mock", "b1"), ("mock", "b2")]:
-            manager._instances[key] = MockLLM(
-                responses=[], raise_on_call=timeout_exc
-            )
+            manager._instances[key] = MockLLM(responses=[], raise_on_call=timeout_exc)
 
         with pytest.raises(LLMException) as exc_info:
             await manager.chat([Message(role=MessageRole.USER, content="q")])

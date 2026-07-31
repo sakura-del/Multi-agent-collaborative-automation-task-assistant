@@ -98,7 +98,7 @@ def function_to_tool_schema(
     sig = inspect.signature(func)
     try:
         hints = get_type_hints(func)
-    except Exception:  # noqa: BLE001
+    except Exception:
         # 类型注解解析失败时回退为 string
         hints = {}
 
@@ -177,9 +177,7 @@ class ToolRegistry:
     def get_func(self, name: str) -> ToolFunc:
         """按名称获取工具执行函数，不存在抛异常。"""
         if name not in self._funcs:
-            raise LLMException(
-                f"工具 {name} 未注册", details={"tool_name": name}
-            )
+            raise LLMException(f"工具 {name} 未注册", details={"tool_name": name})
         return self._funcs[name]
 
     def __contains__(self, name: str) -> bool:
@@ -228,7 +226,7 @@ async def execute_tool_call(
         result = func(**args)
         if inspect.isawaitable(result):
             result = await result
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         # 捕获工具异常，回传给模型让其修正（自愈机制的基础）
         logger.warning(
             "tool_exec_failed",

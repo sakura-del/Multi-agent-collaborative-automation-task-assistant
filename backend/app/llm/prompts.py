@@ -199,7 +199,9 @@ class PromptManager:
 
     # ===== 渲染 =====
 
-    def render(self, name: str, variables: dict[str, Any] | None = None, *, version: str | None = None) -> str:
+    def render(
+        self, name: str, variables: dict[str, Any] | None = None, *, version: str | None = None
+    ) -> str:
         """渲染模板：注入变量并返回最终 Prompt 字符串。
 
         参数：
@@ -215,7 +217,7 @@ class PromptManager:
             # from_string 避免与 FileSystemLoader 的命名冲突，支持动态内容渲染
             jinja_tpl = self._env.from_string(tpl.content)
             return jinja_tpl.render(**(variables or {}))
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning(
                 "prompt_render_failed",
                 name=name,

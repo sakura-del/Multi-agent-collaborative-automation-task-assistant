@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 
 from app.llm.base import BaseLLM
-from app.llm.models import LLMResponse, Message, MessageRole, Usage
+from app.llm.models import Message, MessageRole
 from tests.llm.mock_llm import MockLLM, make_text_response
 
 

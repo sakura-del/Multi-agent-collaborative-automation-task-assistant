@@ -16,7 +16,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from app.llm.base import BaseLLM
-from app.llm.models import LLMResponse, Message, MessageRole, ToolCall, Usage
+from app.llm.models import LLMResponse, Message, ToolCall, Usage
 
 
 class MockLLM(BaseLLM):
@@ -135,10 +135,7 @@ def make_tool_call_response(
     """
     return LLMResponse(
         content=content,
-        tool_calls=[
-            ToolCall(id=tid, name=name, arguments=args)
-            for tid, name, args in tool_calls
-        ],
+        tool_calls=[ToolCall(id=tid, name=name, arguments=args) for tid, name, args in tool_calls],
         finish_reason="tool_calls",
         usage=Usage(prompt_tokens=10, completion_tokens=5),
     )

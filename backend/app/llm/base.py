@@ -21,7 +21,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from app.core.logging import get_logger
-from app.llm.models import LLMResponse, Message, ToolSchema, Usage
+from app.llm.models import LLMResponse, Message, ToolSchema
 
 logger = get_logger(__name__)
 

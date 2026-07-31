@@ -26,7 +26,6 @@ from app.llm.function_calling import (
 from app.llm.models import Message, MessageRole, ToolCall
 from tests.llm.mock_llm import MockLLM, make_text_response, make_tool_call_response
 
-
 # ===== 1. 类型转换测试 =====
 
 
@@ -47,9 +46,8 @@ class TestPythonTypeToSchema:
 
     def test_list_type(self):
         """list[str] → array with items=string。"""
-        from typing import List
 
-        result = python_type_to_json_schema(List[str])
+        result = python_type_to_json_schema(list[str])
         assert result["type"] == "array"
         assert result["items"] == {"type": "string"}
 
@@ -96,9 +94,7 @@ class TestFunctionToToolSchema:
             """原始文档"""
             return x
 
-        schema = function_to_tool_schema(
-            my_func, name="custom_name", description="custom desc"
-        )
+        schema = function_to_tool_schema(my_func, name="custom_name", description="custom desc")
         assert schema.name == "custom_name"
         assert schema.description == "custom desc"
 
@@ -354,10 +350,7 @@ class TestFunctionCallLoop:
 
         # 每轮都调用工具，永不停止
         mock = MockLLM(
-            responses=[
-                make_tool_call_response([("c1", "loop_tool", "{}")])
-                for _ in range(15)
-            ]
+            responses=[make_tool_call_response([("c1", "loop_tool", "{}")]) for _ in range(15)]
         )
         with pytest.raises(LLMException) as exc_info:
             await run_function_call_loop(

@@ -32,7 +32,8 @@ jobs:
       - name: Install linters
         run: |
           python -m pip install --upgrade pip
-          pip install black ruff mypy
+          # 固定版本与 .pre-commit-config.yaml 保持一致，确保本地与 CI 格式化结果可复现
+          pip install black==24.4.2 ruff==0.4.4 mypy==1.10.0
 
       - name: Run Black (check formatting)
         working-directory: backend

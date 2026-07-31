@@ -11,13 +11,13 @@
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class MessageRole(str, Enum):
+class MessageRole(StrEnum):
     """消息角色，与 OpenAI Chat Completion 角色对齐。"""
 
     SYSTEM = "system"
@@ -31,9 +31,7 @@ class ToolCall(BaseModel):
 
     id: str = Field(..., description="工具调用唯一标识，回传结果时需匹配")
     name: str = Field(..., description="工具函数名")
-    arguments: str = Field(
-        ..., description="工具参数（JSON 字符串），由调用方解析为 dict"
-    )
+    arguments: str = Field(..., description="工具参数（JSON 字符串），由调用方解析为 dict")
 
 
 class Message(BaseModel):
@@ -81,9 +79,7 @@ class LLMResponse(BaseModel):
 
     content: str | None = Field(default=None, description="模型生成的文本")
     role: MessageRole = MessageRole.ASSISTANT
-    tool_calls: list[ToolCall] | None = Field(
-        default=None, description="模型请求的工具调用列表"
-    )
+    tool_calls: list[ToolCall] | None = Field(default=None, description="模型请求的工具调用列表")
     usage: Usage = Field(default_factory=Usage)
     finish_reason: str | None = Field(
         default=None, description="结束原因：stop/length/tool_calls/error"
