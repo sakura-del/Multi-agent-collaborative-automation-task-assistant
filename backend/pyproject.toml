@@ -17,6 +17,7 @@ dependencies = [
     # 配置与校验
     "pydantic>=2.6.0",
     "pydantic-settings>=2.1.0",
+    "email-validator>=2.0.0",
     "python-dotenv>=1.0.0",
     "PyYAML>=6.0.1",
 
@@ -32,7 +33,7 @@ dependencies = [
 
     # 鉴权
     "python-jose[cryptography]>=3.3.0",
-    "passlib[bcrypt]>=1.7.4",
+    "bcrypt>=4.0.0",
 
     # LLM 层
     "openai>=1.12.0",
@@ -75,6 +76,8 @@ dev = [
     "pytest-cov>=4.1.0",
     "httpx>=0.26.0",
     "aiosqlite>=0.19.0",  # 测试环境用 SQLite 内存库替代 PostgreSQL
+    "fakeredis>=2.21.0",  # 测试环境用 fake redis 替代真实 Redis
+    "lupa>=2.0",  # fakeredis 的 Lua eval 支持（分布式锁测试需要）
     "black>=24.2.0",
     "ruff>=0.2.2",
     "mypy>=1.8.0",
@@ -124,7 +127,16 @@ select = [
     "UP",  # pyupgrade
     "RUF", # ruff-specific
 ]
-ignore = ["E501"]  # 行长由 Black 处理
+ignore = [
+    "E501",   # 行长由 Black 处理
+    # 中文项目常见误报：RUF001/002/003 把中文全角标点识别为"歧义字符"，
+    # 中文文档/注释/字符串中本就需要全角标点，禁用这三条规则
+    "RUF001", # ambiguous-unicode-character-string
+    "RUF002", # ambiguous-unicode-character-docstring
+    "RUF003", # ambiguous-unicode-character-comment
+    # FastAPI 标准模式：在默认参数中调用 Depends()，B008 误报
+    "B008",   # function-call-in-default-argument
+]
 
 [tool.ruff.lint.isort]
 known-first-party = ["app"]
