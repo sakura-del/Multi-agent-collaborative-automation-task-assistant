@@ -20,7 +20,7 @@ class Base(DeclarativeBase):
     """
 
     @declared_attr.directive
-    def __tablename__(cls) -> str:  # noqa: N805
+    def __tablename__(cls) -> str:
         # 类名转 snake_case，子类可显式覆盖
         name = cls.__name__
         result = [name[0].lower()]

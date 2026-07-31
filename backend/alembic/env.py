@@ -23,6 +23,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.core.config import settings  # noqa: E402
 from app.db.base import Base  # noqa: E402
+# 触发所有 ORM 模型注册到 Base.metadata，让 autogenerate 能发现
+import app.db.models  # noqa: E402, F401
 
 # alembic.ini 配置
 config = context.config
