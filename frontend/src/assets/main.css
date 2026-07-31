@@ -1,0 +1,28 @@
+/* 全局基础样式：阶段0最小化，后续按设计稿扩展 */
+:root {
+  --color-primary: #3b82f6;
+  --color-bg: #f9fafb;
+  --color-card: #ffffff;
+  --color-text: #1f2937;
+  --color-border: #e5e7eb;
+  --color-error: #ef4444;
+  --color-success: #10b981;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--color-bg);
+  color: var(--color-text);
+  line-height: 1.6;
+}
+
+button {
+  cursor: pointer;
+  font-family: inherit;
+}
