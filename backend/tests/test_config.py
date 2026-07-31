@@ -35,7 +35,13 @@ class TestConfigLoading:
 
     def test_env_override_jwt_secret(self, app_settings) -> None:
         """环境变量 JWT_SECRET_KEY 应覆盖默认密钥。"""
-        assert app_settings.jwt_secret_key == "test-secret-key-not-for-production"
+        import os
+
+        # conftest 或 CI 已通过环境变量设置 JWT_SECRET_KEY，
+        # settings 应读取到该值（不硬编码具体值，兼容不同环境的密钥）
+        expected = os.environ.get("JWT_SECRET_KEY")
+        assert expected is not None
+        assert app_settings.jwt_secret_key == expected
 
     def test_yaml_defaults_loaded(self) -> None:
         """default.yaml 存在时应被加载为默认配置基线。"""

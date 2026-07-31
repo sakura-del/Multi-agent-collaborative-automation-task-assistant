@@ -68,6 +68,7 @@ jobs:
           python -m pip install --upgrade pip
           # 阶段1：安装运行时依赖 + 测试依赖
           # 注意：passlib 已移除，改用 bcrypt 直接哈希；新增 email-validator
+          # 依赖列表需与 backend/pyproject.toml 保持同步，避免遗漏导致 import 失败
           pip install \
             "fastapi>=0.110.0" \
             "uvicorn[standard]>=0.27.0" \
@@ -87,6 +88,8 @@ jobs:
             "httpx>=0.26.0" \
             "tenacity>=8.2.3" \
             "networkx>=3.2.1" \
+            "openai>=1.12.0" \
+            "jinja2>=3.1.3" \
             "pytest>=8.0.0" \
             "pytest-asyncio>=0.23.5" \
             "pytest-cov>=4.1.0" \
