@@ -65,19 +65,22 @@ jobs:
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          # 阶段0仅安装测试需要的最小依赖集，避免下载重型模型依赖
+          # 阶段1：安装运行时依赖 + 测试依赖
+          # 注意：passlib 已移除，改用 bcrypt 直接哈希；新增 email-validator
           pip install \
             "fastapi>=0.110.0" \
             "uvicorn[standard]>=0.27.0" \
             "pydantic>=2.6.0" \
             "pydantic-settings>=2.1.0" \
+            "email-validator>=2.0.0" \
             "PyYAML>=6.0.1" \
             "sqlalchemy[asyncio]>=2.0.25" \
             "asyncpg>=0.29.0" \
+            "alembic>=1.13.0" \
             "redis>=5.0.0" \
             "structlog>=24.1.0" \
             "python-jose[cryptography]>=3.3.0" \
-            "passlib[bcrypt]>=1.7.4" \
+            "bcrypt>=4.0.0" \
             "python-multipart>=0.0.9" \
             "websockets>=12.0" \
             "httpx>=0.26.0" \
@@ -85,7 +88,10 @@ jobs:
             "networkx>=3.2.1" \
             "pytest>=8.0.0" \
             "pytest-asyncio>=0.23.5" \
-            "pytest-cov>=4.1.0"
+            "pytest-cov>=4.1.0" \
+            "aiosqlite>=0.19.0" \
+            "fakeredis>=2.21.0" \
+            "lupa>=2.0"
 
       - name: Run pytest with coverage
         working-directory: backend

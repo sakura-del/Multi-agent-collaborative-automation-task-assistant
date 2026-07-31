@@ -23,12 +23,14 @@ WORKDIR /app
 COPY pyproject.toml ./
 
 # 安装项目依赖（不安装 dev 依赖以减小镜像体积）
+# 注：阶段0仅安装基础运行依赖，RAG/LLM 重依赖在对应阶段按需添加
 RUN pip install --upgrade pip && \
     pip install \
     "fastapi>=0.110.0" \
     "uvicorn[standard]>=0.27.0" \
     "pydantic>=2.6.0" \
     "pydantic-settings>=2.1.0" \
+    "email-validator>=2.0.0" \
     "PyYAML>=6.0.1" \
     "sqlalchemy[asyncio]>=2.0.25" \
     "asyncpg>=0.29.0" \
@@ -36,7 +38,7 @@ RUN pip install --upgrade pip && \
     "redis>=5.0.0" \
     "structlog>=24.1.0" \
     "python-jose[cryptography]>=3.3.0" \
-    "passlib[bcrypt]>=1.7.4" \
+    "bcrypt>=4.0.0" \
     "python-multipart>=0.0.9" \
     "websockets>=12.0" \
     "httpx>=0.26.0" \

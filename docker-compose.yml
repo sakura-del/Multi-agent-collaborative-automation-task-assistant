@@ -20,7 +20,9 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-multi_agent_assistant}
       TZ: Asia/Shanghai
     ports:
-      - "5432:5432"
+      # 主机端口改为 5433 避免与本机其他 PG 容器（vector_pg）冲突；
+      # 容器间通信仍走 postgres:5432，无需改 backend 配置
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -64,7 +66,8 @@ services:
     volumes:
       - chroma_data:/chroma/chroma
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/v1/heartbeat"]
+      # chroma 镜像无 curl，改用 python urllib 探测 heartbeat
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/v1/heartbeat').status==200 else 1)"]
       interval: 15s
       timeout: 5s
       retries: 5
