@@ -44,7 +44,7 @@ def configure_logging() -> None:
         renderer = structlog.dev.ConsoleRenderer(colors=True)
 
     structlog.configure(
-        processors=shared_processors + [renderer],
+        processors=[*shared_processors, renderer],
         wrapper_class=structlog.make_filtering_bound_logger(level),
         context_class=dict,
         # 使用 stdlib LoggerFactory：logger 具备 name 属性，
