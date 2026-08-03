@@ -69,6 +69,9 @@ jobs:
           # 阶段1：安装运行时依赖 + 测试依赖
           # 注意：passlib 已移除，改用 bcrypt 直接哈希；新增 email-validator
           # 依赖列表需与 backend/pyproject.toml 保持同步，避免遗漏导致 import 失败
+          # 阶段5新增 RAG 测试必需包：chromadb(向量库)、jieba(中文分词)、rank-bm25(BM25 索引)
+          # 重型可选包(sentence-transformers/FlagEmbedding/PyMuPDF/python-docx)在测试中通过
+          # sys.modules mock 注入避开，无需在 CI 安装以节省时间
           pip install \
             "fastapi>=0.110.0" \
             "uvicorn[standard]>=0.27.0" \
@@ -95,7 +98,10 @@ jobs:
             "pytest-cov>=4.1.0" \
             "aiosqlite>=0.19.0" \
             "fakeredis>=2.21.0" \
-            "lupa>=2.0"
+            "lupa>=2.0" \
+            "chromadb>=0.4.22" \
+            "jieba>=0.42.1" \
+            "rank-bm25>=0.2.2"
 
       - name: Run pytest with coverage
         working-directory: backend
