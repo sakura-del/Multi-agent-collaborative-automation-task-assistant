@@ -94,6 +94,7 @@ secrets/
 postgres_data/
 redis_data/
 chroma_data/
+.chroma_db/
 
 # ===== 日志 =====
 logs/

@@ -1,6 +1,17 @@
-"""knowledge.models 子模块。
+from app.knowledge.models.document import (
+    ChunkStrategy,
+    DocumentType,
+    IndexStats,
+    ParsedDocument,
+    RetrievalResult,
+    TextChunk,
+)
 
-职责：RAG知识库层：文档索引、向量检索、BM25、重排序、知识管理
-
-此包为阶段1骨架占位，具体实现见对应阶段开发计划。
-"""
+__all__ = [
+    "ChunkStrategy",
+    "DocumentType",
+    "IndexStats",
+    "ParsedDocument",
+    "RetrievalResult",
+    "TextChunk",
+]
