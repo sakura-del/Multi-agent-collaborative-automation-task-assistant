@@ -35,6 +35,10 @@ class AppConfig(BaseModel):
     port: int = 8000
     log_level: str = "DEBUG"
     log_format: str = "json"  # json / console
+    # 文档上传与任务产物的受控存储目录（用户专属子目录隔离）
+    upload_root: str = "/app/data/uploads"
+    artifact_root: str = "/app/data/artifacts"
+    max_upload_bytes: int = 30 * 1024 * 1024
 
 
 class DatabaseConfig(BaseModel):

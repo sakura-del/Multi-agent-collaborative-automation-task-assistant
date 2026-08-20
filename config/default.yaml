@@ -9,6 +9,10 @@ app:
   port: 8000
   log_level: "DEBUG"
   log_format: "json"          # json / console
+  # 文档上传与任务产物的受控存储目录（按 user_id 划分子目录）
+  upload_root: "/app/data/uploads"
+  artifact_root: "/app/data/artifacts"
+  max_upload_bytes: 31457280  # 30 MB
 
 database:
   pool_size: 10
