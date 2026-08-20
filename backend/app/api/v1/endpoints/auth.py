@@ -18,6 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_active_user
+from app.core.config import settings
 from app.core.exceptions import UnauthorizedException, ValidationException
 from app.core.security import (
     TOKEN_TYPE_REFRESH,
@@ -39,6 +40,11 @@ from app.schemas.auth import (
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+def _access_token_expires_in() -> int:
+    """access_token 有效期（秒），统一从 settings 派生，避免与令牌实际有效期脱节。"""
+    return settings.jwt_access_token_expire_minutes * 60
 
 
 @router.post("/register", response_model=UserOut, status_code=201, summary="注册新用户")
@@ -91,7 +97,7 @@ async def login(
     return TokenOut(
         access_token=create_access_token(user.id, role=user.role),
         refresh_token=create_refresh_token(user.id),
-        expires_in=60 * 60,  # 与 jwt_access_token_expire_minutes 对应（秒）
+        expires_in=_access_token_expires_in(),
     )
 
 

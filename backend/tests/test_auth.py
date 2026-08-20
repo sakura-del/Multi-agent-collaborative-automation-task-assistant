@@ -121,6 +121,19 @@ class TestLogin:
         )
         assert resp.status_code == 401
 
+    def test_login_expires_in_uses_settings(self, client, monkeypatch) -> None:
+        """expires_in 应从 settings 派生，而非硬编码。"""
+        from app.api.v1.endpoints import auth
+
+        monkeypatch.setattr(auth.settings, "jwt_access_token_expire_minutes", 15)
+        self._register(client, username="expiryuser")
+        response = client.post(
+            "/api/v1/auth/login",
+            json={"account": "expiryuser", "password": "password123"},
+        )
+        assert response.status_code == 200
+        assert response.json()["expires_in"] == 900
+
 
 class TestMe:
     """当前用户信息端点。"""
