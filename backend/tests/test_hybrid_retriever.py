@@ -82,6 +82,35 @@ class TestHybridRetrieverBasic:
         assert len(results) <= 2
 
 
+class TestWhereFilter:
+    """where 过滤：按元数据（如 user_id）隔离检索结果。"""
+
+    def _index_two_users(self, retriever: HybridRetriever) -> None:
+        chunks = [
+            TextChunk(
+                chunk_id=f"{uid}-c{i}",
+                doc_id=f"{uid}-d{i}",
+                text=f"RAG 检索增强系统 编号 {i}",
+                metadata={"user_id": uid},
+            )
+            for uid in ("user-a", "user-b")
+            for i in range(4)
+        ]
+        retriever._vector_store.add_chunks(chunks)
+        retriever._bm25_index.add_chunks(chunks)
+
+    def test_where_returns_only_requested_owner(self, retriever: HybridRetriever) -> None:
+        self._index_two_users(retriever)
+        results = retriever.search("RAG 检索", top_k=10, where={"user_id": "user-a"})
+        assert results
+        assert {r.metadata["user_id"] for r in results} == {"user-a"}
+
+    def test_where_unknown_owner_returns_empty(self, retriever: HybridRetriever) -> None:
+        self._index_two_users(retriever)
+        results = retriever.search("RAG 检索", top_k=10, where={"user_id": "user-c"})
+        assert results == []
+
+
 class TestRRFFusion:
     """RRF 融合算法验证。"""
 

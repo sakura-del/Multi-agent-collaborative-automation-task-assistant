@@ -16,6 +16,8 @@ RRF 优势：
 
 from __future__ import annotations
 
+from typing import Any
+
 from app.core.logging import get_logger
 from app.knowledge.models.document import RetrievalResult
 from app.knowledge.services.bm25_index import BM25Index
@@ -55,23 +57,29 @@ class HybridRetriever:
         query: str,
         top_k: int = 10,
         *,
+        where: dict[str, Any] | None = None,
         vector_top_k: int | None = None,
         bm25_top_k: int | None = None,
     ) -> list[RetrievalResult]:
         """混合检索：并行执行向量与 BM25 检索，RRF 融合后返回 top_k。
 
         vector_top_k / bm25_top_k 控制各路召回数量，默认为 top_k * 2 以提高融合质量。
+        where 为元数据过滤条件（如 {"user_id": "u1"}），两路检索均生效。
         """
         # 召回数量：各路取更多候选，融合后截断到 top_k
         v_k = vector_top_k or max(top_k * 2, top_k)
         b_k = bm25_top_k or max(top_k * 2, top_k)
 
-        # 双路检索
+        # 双路检索（均按 where 过滤，保证融合前候选已隔离）
         vector_results = (
-            self._vector_store.search(query, top_k=v_k) if self._vector_store.is_ready else []
+            self._vector_store.search(query, top_k=v_k, where=where)
+            if self._vector_store.is_ready
+            else []
         )
         bm25_results = (
-            self._bm25_index.search(query, top_k=b_k) if self._bm25_index.is_ready else []
+            self._bm25_index.search(query, top_k=b_k, where=where)
+            if self._bm25_index.is_ready
+            else []
         )
 
         # RRF 融合

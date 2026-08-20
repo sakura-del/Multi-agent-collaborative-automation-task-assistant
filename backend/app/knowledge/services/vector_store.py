@@ -102,6 +102,8 @@ class VectorStore:
                 "doc_source": c.metadata.get("doc_source", ""),
                 "start_offset": c.start_offset,
                 "end_offset": c.end_offset,
+                # user_id 随 chunk 元数据落库，供检索时 where 过滤（多用户隔离）
+                "user_id": c.metadata.get("user_id", ""),
             }
             for c in chunks
         ]

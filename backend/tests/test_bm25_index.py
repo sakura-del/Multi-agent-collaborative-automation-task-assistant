@@ -179,6 +179,43 @@ class TestBM25Search:
         assert all(r.chunk_id == "c1" for r in results)
 
 
+class TestBM25WhereFilter:
+    """where 过滤：按元数据（如 user_id）隔离检索结果。"""
+
+    def _index_two_users(self) -> BM25Index:
+        index = BM25Index()
+        for uid in ("user-a", "user-b"):
+            for i in range(5):
+                index.add_chunk(
+                    TextChunk(
+                        chunk_id=f"{uid}-c{i}",
+                        doc_id=f"{uid}-d{i}",
+                        text=f"RAG 检索系统 编号 {i}",
+                        metadata={"user_id": uid},
+                    )
+                )
+        return index
+
+    def test_where_returns_only_requested_owner(self) -> None:
+        index = self._index_two_users()
+        results = index.search("RAG 检索", top_k=10, where={"user_id": "user-a"})
+        assert results
+        assert {r.metadata["user_id"] for r in results} == {"user-a"}
+
+    def test_where_filters_before_top_k_slice(self) -> None:
+        """过滤必须作用于全部候选（先过滤后截断），而非只对已截断的全局 top。"""
+        index = self._index_two_users()
+        # 两用户内容完全同构，全局排序可能混合；过滤 user-b 后仍应满 top_k
+        results = index.search("RAG 检索", top_k=3, where={"user_id": "user-b"})
+        assert len(results) == 3
+        assert all(r.metadata["user_id"] == "user-b" for r in results)
+
+    def test_where_without_metadata_match_returns_empty(self) -> None:
+        index = self._index_two_users()
+        results = index.search("RAG 检索", top_k=10, where={"user_id": "user-c"})
+        assert results == []
+
+
 class TestBM25Remove:
     """BM25 索引删除操作。"""
 

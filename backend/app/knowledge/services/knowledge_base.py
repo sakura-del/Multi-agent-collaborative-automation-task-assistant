@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import time
+from typing import Any
 
 from app.core.logging import get_logger
 from app.knowledge.models.document import RetrievalResult
@@ -59,6 +60,8 @@ class KnowledgeBase:
         query: str,
         top_k: int = 5,
         *,
+        where: dict[str, Any],
+        namespace: str,
         skip_cache: bool = False,
         skip_rerank: bool = False,
     ) -> list[RetrievalResult]:
@@ -66,23 +69,27 @@ class KnowledgeBase:
 
         参数：
             top_k: 最终返回结果数
+            where: 元数据过滤条件（如 {"user_id": "u1"}），多用户隔离的强制入口
+            namespace: 缓存隔离命名空间（通常为 user_id），同 query 不同用户不串缓存
             skip_cache: 跳过缓存读写（用于检索测试）
             skip_rerank: 跳过重排（用于对比评测）
         """
         start = time.perf_counter()
 
-        # 1. 查缓存
+        # 1. 查缓存（按 namespace 隔离）
         if not skip_cache and self._cache is not None:
-            cached = self._cache.get(query, top_k=top_k)
+            cached = self._cache.get(namespace, query, top_k=top_k)
             if cached is not None:
                 self._cache_hits += 1
-                logger.info("kb_query_cache_hit", query_len=len(query), top_k=top_k)
+                logger.info(
+                    "kb_query_cache_hit", namespace=namespace, query_len=len(query), top_k=top_k
+                )
                 return cached
             self._cache_misses += 1
 
-        # 2. 混合检索（召回更多候选，供重排筛选）
+        # 2. 混合检索（召回更多候选，供重排筛选；按 where 过滤）
         recall_k = top_k * 3 if self._reranker and not skip_rerank else top_k
-        results = self._retriever.search(query, top_k=recall_k)
+        results = self._retriever.search(query, top_k=recall_k, where=where)
 
         # 3. 重排精排
         if self._reranker and not skip_rerank and results:
@@ -91,13 +98,14 @@ class KnowledgeBase:
         else:
             results = results[:top_k]
 
-        # 4. 写缓存
+        # 4. 写缓存（按 namespace 隔离）
         if not skip_cache and self._cache is not None:
-            self._cache.set(query, results, top_k=top_k)
+            self._cache.set(namespace, query, results, top_k=top_k)
 
         elapsed = time.perf_counter() - start
         logger.info(
             "kb_query_done",
+            namespace=namespace,
             query_len=len(query),
             top_k=top_k,
             results=len(results),
@@ -113,8 +121,12 @@ class KnowledgeBase:
             return 0.0
         return self._cache_hits / total
 
-    def invalidate_cache(self) -> None:
-        """清空检索缓存（文档更新后调用）。"""
+    def invalidate_cache(self, namespace: str | None = None) -> None:
+        """清空检索缓存。
+
+        传入 namespace 时只失效该用户（文档更新后调用）；
+        不传时清空全部用户（重建索引等全局场景）。
+        """
         if self._cache is not None:
-            self._cache.clear()
-            logger.info("kb_cache_invalidated")
+            self._cache.clear(namespace)
+            logger.info("kb_cache_invalidated", namespace=namespace)

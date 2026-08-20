@@ -9,7 +9,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 from typing import Any
 
@@ -48,14 +47,18 @@ class RetrievalCache:
         """缓存是否可用（Redis 或内存）。"""
         return True  # 内存回退保证始终可用
 
-    def _make_key(self, query: str, top_k: int) -> str:
-        """生成确定性缓存键。"""
-        raw = f"rag:retrieval:{query}:{top_k}"
-        return hashlib.md5(raw.encode("utf-8")).hexdigest()
+    def _make_key(self, namespace: str, query: str, top_k: int) -> str:
+        """生成确定性缓存键。
 
-    def get(self, query: str, top_k: int = 5) -> list[RetrievalResult] | None:
+        采用带前缀的原始键（非 md5）：namespace（通常为 user_id）参与键构造，
+        既保证不同用户同名查询不串缓存，又让 Redis 可按
+        ``rag:retrieval:{namespace}:*`` 前缀扫描以精确定向清除某用户的缓存。
+        """
+        return f"rag:retrieval:{namespace}:{query}:{top_k}"
+
+    def get(self, namespace: str, query: str, top_k: int = 5) -> list[RetrievalResult] | None:
         """查询缓存。未命中返回 None。"""
-        key = self._make_key(query, top_k)
+        key = self._make_key(namespace, query, top_k)
         try:
             if self._redis is not None:
                 data = self._redis.get(key)
@@ -70,12 +73,13 @@ class RetrievalCache:
 
     def set(
         self,
+        namespace: str,
         query: str,
         results: list[RetrievalResult],
         top_k: int = 5,
     ) -> None:
         """写入缓存。"""
-        key = self._make_key(query, top_k)
+        key = self._make_key(namespace, query, top_k)
         data = self._serialize(results)
         try:
             if self._redis is not None:
@@ -85,9 +89,9 @@ class RetrievalCache:
         except Exception as exc:
             logger.warning("cache_set_failed", error=str(exc))
 
-    def invalidate(self, query: str, top_k: int = 5) -> None:
-        """使指定查询的缓存失效。"""
-        key = self._make_key(query, top_k)
+    def invalidate(self, namespace: str, query: str, top_k: int = 5) -> None:
+        """使指定 namespace 下指定查询的缓存失效。"""
+        key = self._make_key(namespace, query, top_k)
         try:
             if self._redis is not None:
                 self._redis.delete(key)
@@ -96,15 +100,27 @@ class RetrievalCache:
         except Exception as exc:
             logger.warning("cache_invalidate_failed", error=str(exc))
 
-    def clear(self) -> None:
-        """清空全部缓存。"""
+    def clear(self, namespace: str | None = None) -> None:
+        """清空缓存。
+
+        传入 namespace 时只删除该 namespace 的键（文档更新后仅失效该用户）；
+        不传时删除全部（重建索引等全局场景）。
+        """
         try:
             if self._redis is not None:
-                # 按 rag:retrieval: 前缀扫描删除
-                for key in self._redis.scan_iter("rag:retrieval:*"):
+                # 键为带前缀原始键，可按 namespace 前缀扫描精确定向清除
+                pattern = (
+                    f"rag:retrieval:{namespace}:*" if namespace is not None else "rag:retrieval:*"
+                )
+                for key in self._redis.scan_iter(pattern):
                     self._redis.delete(key)
             else:
-                self._memory.clear()
+                if namespace is not None:
+                    prefix = f"rag:retrieval:{namespace}:"
+                    for key in [k for k in self._memory if k.startswith(prefix)]:
+                        self._memory.pop(key, None)
+                else:
+                    self._memory.clear()
         except Exception as exc:
             logger.warning("cache_clear_failed", error=str(exc))
 

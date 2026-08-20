@@ -130,8 +130,18 @@ class BM25Index:
         self._bm25 = None
         self._dirty = True
 
-    def search(self, query: str, top_k: int = 10) -> list[RetrievalResult]:
-        """关键词检索，返回 top_k 条结果。"""
+    def search(
+        self,
+        query: str,
+        top_k: int = 10,
+        *,
+        where: dict[str, Any] | None = None,
+    ) -> list[RetrievalResult]:
+        """关键词检索，返回 top_k 条结果。
+
+        参数 where 为元数据过滤条件（如 {"user_id": "u1"}）：
+        在候选全集上先过滤再截断 top_k，仅过滤已截断结果会漏掉符合条件的候选。
+        """
         if not self.is_ready:
             return []
         self._rebuild_if_dirty()
@@ -142,14 +152,28 @@ class BM25Index:
 
         # BM25Okapi.get_scores 返回每个文档的得分数组
         scores = self._bm25.get_scores(query_tokens)
-        # 按得分降序取 top_k
+        # 按得分降序，先按 where 过滤候选，再截断 top_k
         scored = list(zip(self._doc_ids_ordered, scores, strict=False))
         scored.sort(key=lambda x: x[1], reverse=True)
 
+        # 命中词集合：用于识别"真正匹配了查询词"的候选。
+        # BM25 的 IDF 在查询词覆盖全部文档时为负，得分可能 < 0，
+        # 因此不能用 score<=0 判定未命中（会误杀全量匹配场景）。
+        query_token_set = set(query_tokens)
+
+        def _matches(chunk_id: str, where: dict[str, Any]) -> bool:
+            meta = self._meta[chunk_id][1]
+            return all(meta.get(k) == v for k, v in where.items())
+
         results: list[RetrievalResult] = []
-        for chunk_id, score in scored[:top_k]:
-            if score <= 0:
-                continue  # 过滤零分（无关键词匹配）
+        for chunk_id, score in scored:
+            if len(results) >= top_k:
+                break
+            if where and not _matches(chunk_id, where):
+                continue
+            # 未命中任何查询词（得分为 0 表示 rank_bm25 完全未匹配）
+            if score == 0 and not (query_token_set & set(self._documents[chunk_id])):
+                continue
             text, metadata, doc_id = self._meta[chunk_id]
             results.append(
                 RetrievalResult(
