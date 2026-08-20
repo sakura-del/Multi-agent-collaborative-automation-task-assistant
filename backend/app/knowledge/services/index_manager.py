@@ -22,6 +22,7 @@ from app.knowledge.models.document import (
     ChunkStrategy,
     IndexStats,
     ParsedDocument,
+    TextChunk,
 )
 from app.knowledge.services.bm25_index import BM25Index
 from app.knowledge.services.chunker import DocumentChunker
@@ -94,6 +95,54 @@ class IndexManager:
             strategy=(strategy or self._default_strategy).value,
         )
         return document
+
+    @property
+    def collection_name(self) -> str:
+        """Chroma collection 名称（供 VectorIndex 表落库）。"""
+        return self._vector_store.collection_name
+
+    @property
+    def embedding_dimension(self) -> int:
+        """当前嵌入模型向量维度（供 VectorIndex 表落库）。"""
+        return self._vector_store.embedding_dimension
+
+    def prepare_document(
+        self,
+        source: str,
+        *,
+        doc_id: str,
+        strategy: ChunkStrategy,
+        metadata: dict[str, Any],
+    ) -> tuple[ParsedDocument, list[TextChunk]]:
+        """解析 + 分块（不写索引）：供 service 层在自管事务中编排持久化。
+
+        metadata 会合并进文档与每个分块（如 user_id），
+        供 Chroma where 过滤与 BM25 元数据过滤使用。
+        """
+        document = self._parser.parse(source, doc_id=doc_id)
+        document.metadata.update(metadata)
+        chunks = self._chunker.chunk(document, strategy=strategy)
+        return document, chunks
+
+    def index_chunks(self, chunks: list[TextChunk]) -> None:
+        """把分块写入向量与 BM25 双索引（不持久化 ORM 行）。"""
+        if not chunks:
+            return
+        self._vector_store.add_chunks(chunks)
+        self._bm25_index.add_chunks(chunks)
+        for chunk in chunks:
+            info = self._docs.setdefault(
+                chunk.doc_id,
+                {"source": "<service>", "chunks": 0, "time": datetime.now().isoformat()},
+            )
+            info["chunks"] += 1
+
+    def rebuild_bm25_from_chunks(self, chunks: list[TextChunk]) -> int:
+        """从持久化的分块重建 BM25 索引（启动恢复场景）。返回重建条数。"""
+        self._bm25_index.clear()
+        self._bm25_index.add_chunks(chunks)
+        logger.info("bm25_rebuilt_from_db", chunks=len(chunks))
+        return len(chunks)
 
     def add_text(
         self,

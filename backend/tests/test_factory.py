@@ -15,6 +15,7 @@ from app.knowledge.services.chunker import DocumentChunker
 from app.knowledge.services.document_parser import DocumentParser
 from app.knowledge.services.embedding import MockEmbeddingService
 from app.knowledge.services.factory import (
+    KnowledgeBaseNotInitializedError,
     get_index_manager,
     get_kb,
     init_kb,
@@ -101,17 +102,20 @@ class TestInitKb:
 
 
 class TestGetKb:
-    """get_kb 懒加载与单例获取。"""
+    """get_kb 单例获取：未初始化时显式报错（不隐式 Mock 回退）。"""
 
-    def test_get_kb_lazy_init(self) -> None:
-        """未初始化时 get_kb 应自动用 Mock 模式初始化。"""
-        kb = get_kb()
-        assert isinstance(kb, KnowledgeBase)
-        assert isinstance(factory._embedding, MockEmbeddingService)
+    def test_get_kb_raises_when_not_initialized(self) -> None:
+        """未初始化时 get_kb 应抛出明确的初始化错误。"""
+        with pytest.raises(KnowledgeBaseNotInitializedError):
+            get_kb()
 
     def test_get_kb_returns_same_instance(self) -> None:
-        """多次调用 get_kb 应返回同一单例。"""
-        kb1 = get_kb()
+        """初始化后多次调用 get_kb 应返回同一单例。"""
+        kb1 = init_kb(
+            force_mock_embedding=True,
+            force_mock_reranker=True,
+            chroma_persist_dir="",
+        )
         kb2 = get_kb()
         assert kb1 is kb2
 
@@ -119,15 +123,20 @@ class TestGetKb:
 class TestGetIndexManager:
     """get_index_manager 单例获取。"""
 
+    def test_raises_when_not_initialized(self) -> None:
+        """未初始化时应抛出明确的初始化错误。"""
+        with pytest.raises(KnowledgeBaseNotInitializedError):
+            get_index_manager()
+
     def test_returns_index_manager(self) -> None:
-        """应返回 IndexManager 实例。"""
+        """初始化后应返回 IndexManager 实例。"""
+        init_kb(
+            force_mock_embedding=True,
+            force_mock_reranker=True,
+            chroma_persist_dir="",
+        )
         mgr = get_index_manager()
         assert isinstance(mgr, IndexManager)
-
-    def test_triggers_kb_init(self) -> None:
-        """未初始化时应触发 KB 初始化。"""
-        mgr = get_index_manager()
-        assert factory._kb is not None
         assert mgr is factory._index_manager
 
 

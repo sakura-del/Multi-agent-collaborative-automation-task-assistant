@@ -21,9 +21,12 @@ from app.knowledge.models.document import (
     RetrievalResult,
     TextChunk,
 )
+from app.knowledge.services.document_storage import DocumentStorage, StoredDocument
 from app.knowledge.services.factory import (
+    KnowledgeBaseNotInitializedError,
     get_index_manager,
     get_kb,
+    get_storage,
     init_kb,
     reset_kb,
 )
@@ -31,14 +34,18 @@ from app.knowledge.services.knowledge_base import KnowledgeBase
 
 __all__ = [
     "ChunkStrategy",
+    "DocumentStorage",
     "DocumentType",
     "IndexStats",
     "KnowledgeBase",
+    "KnowledgeBaseNotInitializedError",
     "ParsedDocument",
     "RetrievalResult",
+    "StoredDocument",
     "TextChunk",
     "get_index_manager",
     "get_kb",
+    "get_storage",
     "init_kb",
     "reset_kb",
 ]

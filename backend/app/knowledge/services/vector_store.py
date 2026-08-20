@@ -73,6 +73,16 @@ class VectorStore:
         )
 
     @property
+    def collection_name(self) -> str:
+        """Chroma collection 名称。"""
+        return self._collection_name
+
+    @property
+    def embedding_dimension(self) -> int:
+        """嵌入服务向量维度。"""
+        return self._embedding.dimension
+
+    @property
     def size(self) -> int:
         """已索引的向量数。"""
         self._ensure_collection()

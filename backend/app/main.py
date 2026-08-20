@@ -38,12 +38,31 @@ from app.db.session import engine
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """应用启动与关闭钩子。
 
-    启动：初始化日志、预热连接池（engine 懒加载，此处仅记录日志）。
-    关闭：释放数据库 engine 等资源。
+    启动：初始化日志、显式初始化 RAG 组件（生产访问路径不允许隐式 Mock 回退），
+    并从持久化的 ready 分块重建 BM25 内存索引（断点恢复）。
+    关闭：释放数据库 engine 与 Redis 资源。
     """
     configure_logging()
     logger = get_logger(__name__)
     logger.info("应用启动", version=__version__, env=settings.app.env)
+
+    # 显式初始化知识库：嵌入/重排按配置选择真实或 Mock（环境变量 RAG_EMBEDDING_MOCK 控制）
+    from app.db.session import AsyncSessionLocal
+    from app.knowledge.services.document_service import KnowledgeDocumentService
+    from app.knowledge.services.factory import get_index_manager, get_kb, get_storage, init_kb
+
+    init_kb()
+    async with AsyncSessionLocal() as session:
+        service = KnowledgeDocumentService(
+            session,
+            storage=get_storage(),
+            index_manager=get_index_manager(),
+            kb=get_kb(),
+        )
+        try:
+            await service.rebuild_bm25()
+        except Exception as exc:  # 首次启动表未建或库为空时不阻塞启动
+            logger.warning("bm25_startup_rebuild_skipped", error=str(exc))
 
     yield
 

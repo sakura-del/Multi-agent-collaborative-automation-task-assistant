@@ -1,209 +1,143 @@
-"""知识库管理 API：文档上传/删除/重建/检索测试。
+"""知识库管理 API：鉴权 multipart 上传/删除/统计/检索（owner 隔离）。
 
 端点设计：
-    POST   /api/v1/knowledge/documents        上传文档（文本或文件路径）
-    DELETE /api/v1/knowledge/documents/{doc_id} 删除文档
-    POST   /api/v1/knowledge/documents/rebuild  全量重建索引
-    GET    /api/v1/knowledge/stats              索引统计
-    POST   /api/v1/knowledge/search             检索测试
+    POST   /api/v1/knowledge/documents        上传文档（multipart file + title）
+    GET    /api/v1/knowledge/documents        列出当前用户文档
+    DELETE /api/v1/knowledge/documents/{doc_id} 删除当前用户文档
+    GET    /api/v1/knowledge/stats            当前用户索引统计
+    POST   /api/v1/knowledge/search           当前用户检索
 
 设计要点：
-- 依赖注入：通过 get_knowledge_base 提供单例，便于测试替换
-- 轻量封装：API 层仅做参数校验与结果序列化，业务逻辑在服务层
+- 全部端点经 get_current_active_user 鉴权，业务调用一律传 current_user.id
+- 跨用户访问返回 404（与不存在同语义，避免泄漏资源存在性）
+- 上传为 multipart file，不再接受服务端 file_path 或裸 text（P0 路径读取修复）
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, File, Form, UploadFile
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import get_current_active_user
+from app.db.models.user import User
+from app.db.session import get_db
 from app.knowledge.models.document import ChunkStrategy
-from app.knowledge.services.knowledge_base import KnowledgeBase
+from app.knowledge.services.document_service import KnowledgeDocumentService
+from app.knowledge.services.factory import get_index_manager, get_kb, get_storage
+from app.schemas.knowledge import (
+    KnowledgeDocumentList,
+    KnowledgeDocumentOut,
+    KnowledgeSearchIn,
+    KnowledgeSearchItem,
+    KnowledgeSearchOut,
+    KnowledgeStatsOut,
+)
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
-
-
-# ===== 请求/响应模型 =====
-
-
-class DocumentUploadRequest(BaseModel):
-    """文档上传请求：文本内容或文件路径。"""
-
-    text: str | None = None  # 直接上传文本
-    file_path: str | None = None  # 上传文件路径
-    doc_id: str | None = None
-    strategy: str = "recursive"  # recursive / semantic / sliding_window
-
-
-class SearchRequest(BaseModel):
-    """检索测试请求。"""
-
-    query: str
-    top_k: int = 5
-    skip_cache: bool = False
-    skip_rerank: bool = False
-
-
-class SearchResponseItem(BaseModel):
-    """单条检索结果。"""
-
-    chunk_id: str
-    doc_id: str
-    text: str
-    score: float
-    source: str
-
-
-class SearchResponse(BaseModel):
-    """检索测试响应。"""
-
-    query: str
-    total: int
-    results: list[SearchResponseItem]
-
-
-class StatsResponse(BaseModel):
-    """索引统计响应。"""
-
-    total_docs: int
-    total_chunks: int
-    vector_index_ready: bool
-    bm25_index_ready: bool
-    last_update: str | None = None
-
-
-class DocumentListResponse(BaseModel):
-    """文档列表响应。"""
-
-    documents: list[dict[str, Any]]
 
 
 # ===== 依赖注入 =====
 
 
-def get_knowledge_base() -> KnowledgeBase:
-    """获取知识库单例。
-
-    生产环境由应用启动时初始化并注入；
-    此处提供懒加载回退，确保 API 可独立调用。
-    """
-    from app.knowledge.services.factory import get_kb
-
-    return get_kb()
+def get_document_service(db: AsyncSession = Depends(get_db)) -> KnowledgeDocumentService:
+    """构造文档服务：数据库会话 + 全局 RAG 单例。"""
+    return KnowledgeDocumentService(
+        db,
+        storage=get_storage(),
+        index_manager=get_index_manager(),
+        kb=get_kb(),
+    )
 
 
 # ===== 端点 =====
 
 
-@router.post("/documents", response_model=dict)
+@router.post(
+    "/documents",
+    response_model=KnowledgeDocumentOut,
+    status_code=201,
+    summary="上传文档（multipart）",
+)
 async def upload_document(
-    req: DocumentUploadRequest,
-    kb: KnowledgeBase = Depends(get_knowledge_base),
-) -> dict[str, Any]:
-    """上传文档到知识库：自动解析→分块→索引。"""
-    if not req.text and not req.file_path:
-        raise HTTPException(status_code=400, detail="需提供 text 或 file_path")
-
-    from app.knowledge.services.factory import get_index_manager
-
-    mgr = get_index_manager()
-    try:
-        strategy = ChunkStrategy(req.strategy)
-    except ValueError:
-        strategy = ChunkStrategy.RECURSIVE
-
-    if req.text:
-        document = mgr.add_text(req.text, doc_id=req.doc_id, strategy=strategy)
-    else:
-        document = mgr.add_document(req.file_path, doc_id=req.doc_id, strategy=strategy)
-
-    # 文档更新后清空检索缓存
-    kb.invalidate_cache()
-    return {
-        "doc_id": document.doc_id,
-        "doc_type": document.doc_type.value,
-        "text_length": len(document.text),
-        "sections": len(document.sections),
-    }
+    file: Annotated[UploadFile, File(description="pdf/docx/md/txt 文件，≤30MB")],
+    title: Annotated[str, Form(min_length=1, max_length=256)],
+    strategy: Annotated[ChunkStrategy, Form()] = ChunkStrategy.RECURSIVE,
+    current_user: User = Depends(get_current_active_user),
+    service: KnowledgeDocumentService = Depends(get_document_service),
+) -> KnowledgeDocumentOut:
+    """上传文档：受控存储 → 解析分块 → 双索引 → 持久化。"""
+    doc = await service.ingest(current_user.id, file, title=title, strategy=strategy)
+    return KnowledgeDocumentOut.model_validate(doc)
 
 
-@router.delete("/documents/{doc_id}", response_model=dict)
-async def delete_document(
-    doc_id: str,
-    kb: KnowledgeBase = Depends(get_knowledge_base),
-) -> dict[str, Any]:
-    """从知识库删除指定文档。"""
-    from app.knowledge.services.factory import get_index_manager
-
-    mgr = get_index_manager()
-    removed = mgr.remove_document(doc_id)
-    if removed == 0:
-        raise HTTPException(status_code=404, detail=f"文档 {doc_id} 不存在")
-    kb.invalidate_cache()
-    return {"doc_id": doc_id, "removed_chunks": removed}
-
-
-@router.post("/documents/rebuild", response_model=dict)
-async def rebuild_index(
-    kb: KnowledgeBase = Depends(get_knowledge_base),
-) -> dict[str, Any]:
-    """清空并全量重建索引（需重新上传文档）。"""
-    from app.knowledge.services.factory import get_index_manager
-
-    mgr = get_index_manager()
-    mgr.clear()
-    kb.invalidate_cache()
-    return {"status": "index_cleared", "message": "索引已清空，请重新上传文档"}
-
-
-@router.get("/stats", response_model=StatsResponse)
-async def get_stats(
-    kb: KnowledgeBase = Depends(get_knowledge_base),
-) -> StatsResponse:
-    """获取索引统计信息。"""
-    from app.knowledge.services.factory import get_index_manager
-
-    mgr = get_index_manager()
-    stats = mgr.get_stats()
-    return StatsResponse(
-        total_docs=stats.total_docs,
-        total_chunks=stats.total_chunks,
-        vector_index_ready=stats.vector_index_ready,
-        bm25_index_ready=stats.bm25_index_ready,
-        last_update=stats.last_update,
-    )
-
-
-@router.get("/documents", response_model=DocumentListResponse)
+@router.get(
+    "/documents",
+    response_model=KnowledgeDocumentList,
+    summary="列出当前用户文档",
+)
 async def list_documents(
-    kb: KnowledgeBase = Depends(get_knowledge_base),
-) -> DocumentListResponse:
-    """列出已入库文档。"""
-    from app.knowledge.services.factory import get_index_manager
+    current_user: User = Depends(get_current_active_user),
+    service: KnowledgeDocumentService = Depends(get_document_service),
+) -> KnowledgeDocumentList:
+    """列出当前用户名下的全部文档。"""
+    docs = await service.list(current_user.id)
+    return KnowledgeDocumentList(documents=[KnowledgeDocumentOut.model_validate(d) for d in docs])
 
-    mgr = get_index_manager()
-    return DocumentListResponse(documents=mgr.list_documents())
+
+@router.delete(
+    "/documents/{doc_id}",
+    response_model=KnowledgeDocumentOut,
+    summary="删除当前用户文档",
+)
+async def delete_document(
+    doc_id: UUID,
+    current_user: User = Depends(get_current_active_user),
+    service: KnowledgeDocumentService = Depends(get_document_service),
+) -> KnowledgeDocumentOut:
+    """删除文档；跨用户或不存在的 doc_id 返回 404。"""
+    doc = await service.delete(current_user.id, doc_id)
+    return KnowledgeDocumentOut.model_validate(doc)
 
 
-@router.post("/search", response_model=SearchResponse)
-async def search(
-    req: SearchRequest,
-    kb: KnowledgeBase = Depends(get_knowledge_base),
-) -> SearchResponse:
-    """检索测试：返回与查询最相关的文档片段。"""
-    results = kb.query(
-        req.query,
-        top_k=req.top_k,
-        skip_cache=req.skip_cache,
-        skip_rerank=req.skip_rerank,
+@router.get(
+    "/stats",
+    response_model=KnowledgeStatsOut,
+    summary="当前用户索引统计",
+)
+async def get_stats(
+    current_user: User = Depends(get_current_active_user),
+    service: KnowledgeDocumentService = Depends(get_document_service),
+) -> KnowledgeStatsOut:
+    """统计当前用户的文档数与分块数。"""
+    total_docs, total_chunks = await service.stats(current_user.id)
+    return KnowledgeStatsOut(
+        total_docs=total_docs,
+        total_chunks=total_chunks,
+        vector_index_ready=True,
+        bm25_index_ready=True,
     )
-    return SearchResponse(
+
+
+@router.post(
+    "/search",
+    response_model=KnowledgeSearchOut,
+    summary="当前用户知识库检索",
+)
+async def search(
+    req: KnowledgeSearchIn,
+    current_user: User = Depends(get_current_active_user),
+    service: KnowledgeDocumentService = Depends(get_document_service),
+) -> KnowledgeSearchOut:
+    """检索当前用户的知识库（强制 user_id 过滤）。"""
+    results = await service.search(current_user.id, req)
+    return KnowledgeSearchOut(
         query=req.query,
         total=len(results),
         results=[
-            SearchResponseItem(
+            KnowledgeSearchItem(
                 chunk_id=r.chunk_id,
                 doc_id=r.doc_id,
                 text=r.text,

@@ -1,9 +1,11 @@
 """知识库组件工厂：管理单例实例的生命周期。
 
-应用启动时调用 init_kb() 初始化全部组件；
+应用启动时（lifespan）调用 init_kb() 显式初始化全部组件；
 各模块通过 get_kb() / get_index_manager() 获取单例。
 
-使用 Mock 模式时无需下载模型，适合 CI 与开发环境。
+生产访问路径不允许隐式回退：未初始化时 get_kb() 抛出明确的初始化错误，
+避免端点悄悄创建内存 Mock 库导致数据"看起来在、实际没持久化"。
+测试显式调用 init_kb(force_mock_*=True, chroma_persist_dir="")。
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ from app.knowledge.services.bm25_index import BM25Index
 from app.knowledge.services.cache import RetrievalCache
 from app.knowledge.services.chunker import DocumentChunker
 from app.knowledge.services.document_parser import DocumentParser
+from app.knowledge.services.document_storage import DocumentStorage
 from app.knowledge.services.embedding import (
     BaseEmbeddingService,
     create_embedding_service,
@@ -38,6 +41,16 @@ _bm25_index: BM25Index | None = None
 _embedding: BaseEmbeddingService | None = None
 _reranker: BaseReranker | None = None
 _cache: RetrievalCache | None = None
+_storage: DocumentStorage | None = None
+
+
+class KnowledgeBaseNotInitializedError(RuntimeError):
+    """知识库未初始化：生产访问路径必须显式 init_kb()。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "知识库未初始化：请先在应用生命周期中调用 init_kb()（测试可用 force_mock 参数）"
+        )
 
 
 def init_kb(
@@ -56,7 +69,7 @@ def init_kb(
         chroma_persist_dir: Chroma 持久化路径，None 时读环境变量
     """
     global _kb, _index_manager, _parser, _chunker, _vector_store
-    global _bm25_index, _embedding, _reranker, _cache
+    global _bm25_index, _embedding, _reranker, _cache, _storage
 
     if _kb is not None:
         return _kb
@@ -98,6 +111,12 @@ def init_kb(
         cache=_cache,
     )
 
+    # 受控存储：上传根目录与大小上限来自全局配置
+    from app.core.config import get_settings
+
+    app_cfg = get_settings().app
+    _storage = DocumentStorage(app_cfg.upload_root, max_file_bytes=app_cfg.max_upload_bytes)
+
     logger.info(
         "knowledge_base_initialized",
         embedding_type=type(_embedding).__name__,
@@ -108,28 +127,34 @@ def init_kb(
 
 
 def get_kb() -> KnowledgeBase:
-    """获取知识库单例。未初始化时自动用 Mock 模式初始化。"""
+    """获取知识库单例。
+
+    未初始化时抛出明确错误（生产访问路径不隐式回退 Mock）；
+    测试应在 fixture 中显式调用 init_kb(force_mock_*=True)。
+    """
     if _kb is None:
-        init_kb(
-            force_mock_embedding=True,
-            force_mock_reranker=True,
-            chroma_persist_dir="",  # 内存模式
-        )
+        raise KnowledgeBaseNotInitializedError()
     return _kb
 
 
+def get_storage() -> DocumentStorage:
+    """获取受控文档存储单例。未初始化时抛出明确错误。"""
+    if _storage is None:
+        raise KnowledgeBaseNotInitializedError()
+    return _storage
+
+
 def get_index_manager() -> IndexManager:
-    """获取索引管理器单例。"""
+    """获取索引管理器单例。未初始化时抛出明确错误。"""
     if _index_manager is None:
-        get_kb()  # 触发初始化
-    assert _index_manager is not None
+        raise KnowledgeBaseNotInitializedError()
     return _index_manager
 
 
 def reset_kb() -> None:
     """重置知识库（测试用：清空单例与索引）。"""
     global _kb, _index_manager, _parser, _chunker, _vector_store
-    global _bm25_index, _embedding, _reranker, _cache
+    global _bm25_index, _embedding, _reranker, _cache, _storage
 
     if _vector_store is not None:
         _vector_store.clear()
@@ -145,3 +170,4 @@ def reset_kb() -> None:
     _embedding = None
     _reranker = None
     _cache = None
+    _storage = None

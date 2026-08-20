@@ -26,12 +26,21 @@ _READ_CHUNK_SIZE = 1024 * 1024
 
 @dataclass(frozen=True)
 class StoredDocument:
-    """落盘后的文档描述。"""
+    """落盘后的文档描述。
+
+    doc_uuid 由文件名（uuid4）派生，供上层作为 KnowledgeDoc 主键，
+    保证文件与数据库记录一一对应。
+    """
 
     path: Path
     original_name: str
     extension: str
     size: int
+
+    @property
+    def doc_uuid(self) -> UUID:
+        """从文件名解析出的 UUID（落盘时以 uuid4.hex 命名）。"""
+        return UUID(self.path.stem)
 
 
 class DocumentStorage:
