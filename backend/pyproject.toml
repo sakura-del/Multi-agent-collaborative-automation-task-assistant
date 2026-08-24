@@ -2,7 +2,7 @@
 name = "multi-agent-assistant"
 version = "0.1.0"
 description = "多智能体协作自动化任务助手 - 后端应用"
-readme = "../README.md"
+readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Academic" }
 authors = [{ name = "sakura-del" }]
@@ -46,8 +46,6 @@ dependencies = [
     "chromadb>=0.4.22",
     "rank-bm25>=0.2.2",
     "jieba>=0.42.1",
-    "sentence-transformers>=2.4.0",
-    "FlagEmbedding>=1.2.10",
 
     # 文档解析
     "PyMuPDF>=1.23.26",
@@ -69,6 +67,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# RAG 真实模型：嵌入（sentence-transformers）+ 重排（FlagEmbedding）。
+# 体量大（含 torch 等），后端镜像安装本组使 Compose 自包含可离线跑真实模型；
+# CI 用 Mock 模式（RAG_EMBEDDING_MOCK=1 / RAG_RERANKER_MOCK=1）无需安装。
+rag-models = [
+    "sentence-transformers>=2.4.0",
+    "FlagEmbedding>=1.2.10",
+]
+
 # 开发依赖：测试、格式化、类型检查
 dev = [
     "pytest>=8.0.0",

@@ -1,10 +1,14 @@
 # 多智能体协作自动化任务助手 - Docker Compose 编排
-# 阶段0：PostgreSQL + Redis + Chroma + Nginx + backend 五容器
+# Plan 1 Task 6：自包含启动
+#   - backend 依赖从 pyproject 派生（含 rag-models），迁移由 entrypoint 自动执行
+#   - nginx 镜像内构建前端，不再依赖宿主机 frontend/dist
+#   - 仅 nginx 暴露主机端口；嵌套环境变量名与 pydantic-settings 对齐（DATABASE__URL 等）
+#   - JWT_SECRET_KEY 为必需项，缺失即拒绝启动
 #
 # 使用方式：
-#   1. 复制 .env.example 为 .env 并填写真实密钥
-#   2. docker-compose up -d
-#   3. 访问 http://localhost (Nginx) 或 http://localhost:8000 (直连后端)
+#   1. 复制 .env.example 为 .env 并填写真实密钥（JWT_SECRET_KEY 必填）
+#   2. docker compose up -d --build
+#   3. 访问 http://localhost（Nginx 唯一入口）
 
 name: multi-agent-assistant
 
@@ -78,32 +82,36 @@ services:
   # ===== FastAPI 后端 =====
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      # pyproject readme 指向 ../README.md，build context 必须是仓库根
+      context: .
+      dockerfile: backend/Dockerfile
     container_name: maa-backend
     restart: unless-stopped
     environment:
-      APP_ENV: ${APP_ENV:-development}
-      APP_DEBUG: ${APP_DEBUG:-true}
-      APP_LOG_LEVEL: ${APP_LOG_LEVEL:-DEBUG}
-      APP_LOG_FORMAT: ${APP_LOG_FORMAT:-json}
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-maa}:${POSTGRES_PASSWORD:-maa_secret_pwd}@postgres:5432/${POSTGRES_DB:-multi_agent_assistant}
-      REDIS_URL: redis://redis:6379/0
-      CHROMA_HOST: chroma
-      CHROMA_PORT: 8000
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production}
+      # 嵌套配置：pydantic-settings 以 __ 为分隔符映射到 settings.database.url 等
+      DATABASE__URL: postgresql+asyncpg://${POSTGRES_USER:-maa}:${POSTGRES_PASSWORD:-maa_secret_pwd}@postgres:5432/${POSTGRES_DB:-multi_agent_assistant}
+      REDIS__URL: redis://redis:6379/0
+      RAG__CHROMA_HOST: chroma
+      RAG__CHROMA_PORT: "8000"
+      # 受控存储目录（容器内 /app/data，命名卷持久化）
+      APP__UPLOAD_ROOT: /app/data/uploads
+      APP__ARTIFACT_ROOT: /app/data/artifacts
+      # 嵌入/重排模型缓存（HuggingFace 缓存目录指向命名卷，避免重复下载）
+      HF_HOME: /app/.cache
+      # 嵌入/重排：默认 Mock（自包含、离线、快）；设为 0 启用真实 BGE 模型（首次下载约 2.5GB 权重）
+      RAG_EMBEDDING_MOCK: ${RAG_EMBEDDING_MOCK:-1}
+      RAG_RERANKER_MOCK: ${RAG_RERANKER_MOCK:-1}
+      # JWT 密钥为必需项：.env 缺失时 compose 直接报错，避免回退弱密钥
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY is required in .env}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       GLM_API_KEY: ${GLM_API_KEY:-}
       QWEN_API_KEY: ${QWEN_API_KEY:-}
-    ports:
-      - "8000:8000"
+    # 不暴露主机端口：所有流量经 Nginx；调试可临时加回 "8000:8000"
     volumes:
-      # 开发模式：挂载源码支持热重载
-      - ./backend/app:/app/app:ro
-      - ./backend/alembic:/app/alembic:ro
-      - ./backend/alembic.ini:/app/alembic.ini:ro
-      - ./config:/app/../config:ro
-      - ./logs:/app/logs
+      - uploads_data:/app/data/uploads
+      - artifacts_data:/app/data/artifacts
+      # 嵌入/重排模型缓存（首次拉取后复用，避免重复下载）
+      - model_cache:/app/.cache
     depends_on:
       postgres:
         condition: service_healthy
@@ -112,24 +120,24 @@ services:
       chroma:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/v1/health"]
+      # 就绪探针真实探测 DB/Redis/Chroma，任一失败容器标记 unhealthy
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/v1/health/ready"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 20s
+      start_period: 60s
     networks:
       - maa-network
 
-  # ===== Nginx 反向代理 =====
+  # ===== Nginx 反向代理（唯一对外入口） =====
   nginx:
-    image: nginx:1.25-alpine
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile
     container_name: maa-nginx
     restart: unless-stopped
     ports:
       - "80:80"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./frontend/dist:/usr/share/nginx/html:ro
     depends_on:
       backend:
         condition: service_healthy
@@ -147,3 +155,9 @@ volumes:
     name: maa-redis-data
   chroma_data:
     name: maa-chroma-data
+  uploads_data:
+    name: maa-uploads-data
+  artifacts_data:
+    name: maa-artifacts-data
+  model_cache:
+    name: maa-model-cache

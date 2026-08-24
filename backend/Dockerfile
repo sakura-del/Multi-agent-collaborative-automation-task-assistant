@@ -1,5 +1,5 @@
 # 多智能体协作自动化任务助手 - 后端镜像
-# 阶段0：基础 Python 运行环境 + 依赖安装
+# Plan 1 Task 6：依赖从 pyproject 派生（含 rag-models），迁移经 entrypoint 自包含
 
 FROM python:3.11-slim AS base
 
@@ -9,56 +9,51 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# 系统依赖：build-essential 用于编译 psycopg / cryptography 等
-# libpq-dev 给 asyncpg；curl 用于健康探针
+# 系统依赖：build-essential 用于编译；libpq-dev 给 asyncpg；curl 用于健康探针
+# libgomp1：sentence-transformers(torch) 运行依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
+    libgomp1 \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# 先单独复制依赖描述文件，利用 Docker 层缓存
-COPY pyproject.toml ./
+# 先单独复制构建元数据与 app 包，供 pip 读取 pyproject 并 find 到 app 包
+# 注意：setuptools 要求 readme 指向包根内部文件，故 backend/README.md 需拷入 /app
+# build context 必须是仓库根（见 compose）
+COPY backend/pyproject.toml ./
+COPY backend/README.md ./
+COPY backend/app ./app
 
-# 安装项目依赖（不安装 dev 依赖以减小镜像体积）
-# 注：阶段0仅安装基础运行依赖，RAG/LLM 重依赖在对应阶段按需添加
+# 依赖从 pyproject 派生：.[rag-models] 安装运行时 + RAG 真实模型依赖
+# torch 先装 CPU 版（--index-url whl/cpu），避免 sentence-transformers 连带拉取
+# CUDA wheel（cudnn/nccl/triton 等 1GB+），容器内仅 CPU 推理
+# CI 安装 ./backend[dev] 并用 Mock 嵌入/重排，不依赖本镜像
 RUN pip install --upgrade pip && \
-    pip install \
-    "fastapi>=0.110.0" \
-    "uvicorn[standard]>=0.27.0" \
-    "pydantic>=2.6.0" \
-    "pydantic-settings>=2.1.0" \
-    "email-validator>=2.0.0" \
-    "PyYAML>=6.0.1" \
-    "sqlalchemy[asyncio]>=2.0.25" \
-    "asyncpg>=0.29.0" \
-    "alembic>=1.13.0" \
-    "redis>=5.0.0" \
-    "structlog>=24.1.0" \
-    "python-jose[cryptography]>=3.3.0" \
-    "bcrypt>=4.0.0" \
-    "python-multipart>=0.0.9" \
-    "websockets>=12.0" \
-    "httpx>=0.26.0" \
-    "tenacity>=8.2.3" \
-    "networkx>=3.2.1"
+    pip install torch --index-url https://download.pytorch.org/whl/cpu && \
+    pip install ".[rag-models]"
 
-# 复制源码
-COPY app ./app
-COPY alembic ./alembic
-COPY alembic.ini ./
+# 复制其余运行时文件
+COPY backend/alembic ./alembic
+COPY backend/alembic.ini ./
+COPY backend/entrypoint.sh ./
+COPY config ./config
+RUN chmod +x ./entrypoint.sh
 
-# 创建非 root 用户运行应用
-RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+# 创建非 root 用户运行应用；uploads/artifacts/.cache 持久化目录在容器内预建
+# （/app/.cache 为 HF_HOME，真实模型权重缓存于此；预建保证命名卷首次挂载继承 appuser 属主）
+RUN useradd -m -u 1000 appuser && \
+    mkdir -p /app/data/uploads /app/data/artifacts /app/.cache && \
+    chown -R appuser:appuser /app
 USER appuser
 
 EXPOSE 8000
 
-# 健康检查：调用 /health 端点
-HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+# 存活探针走 /health；就绪判定由 Compose healthcheck 走 /health/ready
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -fsS http://localhost:8000/api/v1/health || exit 1
 
-# 开发模式：热重载；生产环境应通过 docker-compose 覆盖为 gunicorn+uvicorn workers
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# 生产模式：entrypoint 先迁移再启动，不加 --reload
+ENTRYPOINT ["/app/entrypoint.sh"]

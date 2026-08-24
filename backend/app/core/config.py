@@ -105,6 +105,9 @@ class RAGConfig(BaseModel):
     chunk_overlap: int = 64
     retrieval_top_k: int = 10
     rerank_top_k: int = 5
+    # Chroma 服务地址（容器内走服务名；本地开发默认 localhost）
+    chroma_host: str = "chroma"
+    chroma_port: int = 8000
 
 
 class AgentConfig(BaseModel):

@@ -1,9 +1,12 @@
 """健康检查端点测试。
 
 阶段0验收：`/health` 返回 200，包含 status / version 字段。
+就绪检查为真实探测（DB/Redis/Chroma），通过 monkeypatch 探针控制结果。
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 from fastapi.testclient import TestClient
 
@@ -41,12 +44,44 @@ def test_health_check_echoes_custom_request_id() -> None:
     assert response.headers["X-Request-ID"] == custom_id
 
 
-def test_readiness_check_endpoint() -> None:
-    """`/health/ready` 应返回 ready 状态。"""
+def test_readiness_check_endpoint_all_ok(monkeypatch) -> None:
+    """`/health/ready` 全部探测通过时应返回 200 且三项 ok。"""
+    from app.api.v1.endpoints import health
+
+    async def _ok() -> bool:
+        return True
+
+    monkeypatch.setattr(health, "probe_database", _ok)
+    monkeypatch.setattr(health, "probe_redis", _ok)
+    monkeypatch.setattr(health, "probe_chroma", _ok)
+
     client = TestClient(app)
     response = client.get("/api/v1/health/ready")
 
     assert response.status_code == 200
-    body = response.json()
+    body: dict[str, Any] = response.json()
     assert body["status"] == "ready"
-    assert "checks" in body
+    assert set(body["checks"]) == {"database", "redis", "chroma"}
+
+
+def test_readiness_check_endpoint_db_down(monkeypatch) -> None:
+    """`/health/ready` 数据库探测失败时应返回 503 且 database=failed。"""
+    from app.api.v1.endpoints import health
+
+    async def _ok() -> bool:
+        return True
+
+    async def _bad() -> bool:
+        return False
+
+    monkeypatch.setattr(health, "probe_database", _bad)
+    monkeypatch.setattr(health, "probe_redis", _ok)
+    monkeypatch.setattr(health, "probe_chroma", _ok)
+
+    client = TestClient(app)
+    response = client.get("/api/v1/health/ready")
+
+    assert response.status_code == 503
+    body: dict[str, Any] = response.json()
+    assert body["status"] == "not_ready"
+    assert body["checks"]["database"] == "failed"
