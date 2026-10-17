@@ -64,9 +64,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         except Exception as exc:  # 首次启动表未建或库为空时不阻塞启动
             logger.warning("bm25_startup_rebuild_skipped", error=str(exc))
 
+    # ===== 任务运行时（Plan 2 Task 4）=====
+    from app.orchestration.runtime import RuntimeContainer
+    from app.orchestration.services.task_execution import TaskExecution
+
+    container = RuntimeContainer()
+    await container.start()
+    task_execution = TaskExecution(container)
+    app.state.container = container
+    app.state.runtime = task_execution
+    try:
+        await task_execution.recover()
+    except Exception as exc:  # 测试库未建表时不阻塞启动
+        logger.warning("task_runtime_recover_skipped", error=str(exc))
+
     yield
 
     logger.info("应用关闭，释放资源")
+    await container.close()
     await engine.dispose()
     await RedisManager.close()
 

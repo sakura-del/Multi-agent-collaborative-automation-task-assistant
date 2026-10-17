@@ -1,9 +1,20 @@
-"""任务调度器单元测试：并行调度、优先级、闭环执行、失败重试。"""
+"""任务调度器单元测试：并行调度、优先级、闭环执行、失败重试、观察者持久化。"""
+
+import uuid
 
 import pytest
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
+import app.db.models  # noqa: F401  确保全部 ORM 注册到 Base.metadata
+from app.db.base import Base
+from app.db.models.task import Subtask, Task
+from app.orchestration.base_agent import BaseAgent
 from app.orchestration.dag_engine import TaskDAG
-from app.orchestration.scheduler import TaskScheduler
+from app.orchestration.persistence import DatabaseScheduleObserver
+from app.orchestration.retry import RetryPolicy
+from app.orchestration.scheduler import NodeResult, TaskScheduler
+from app.orchestration.task_state import SubtaskStatus
 
 
 def _make_agent_factory():
@@ -25,6 +36,63 @@ def _make_agent_factory():
         raise ValueError(f"未知 agent_type: {agent_type}")
 
     return factory
+
+
+def _capturing_agent_factory(captured: list[dict]):
+    """创建会记录 input_data 的 Agent 工厂，用于断言节点执行上下文。"""
+
+    def factory(agent_type: str):
+        if agent_type == "executor":
+
+            class _CaptureAgent(BaseAgent):
+                @property
+                def agent_type(self) -> str:
+                    return "executor"
+
+                async def _run(self, input_data: dict) -> dict:
+                    captured.append(dict(input_data))
+                    return {"result": f"done-{input_data['node_id']}"}
+
+            return _CaptureAgent()
+
+        from app.orchestration.agents.validator import ValidatorAgent
+
+        return ValidatorAgent(rules={"min_length": 1, "required_keywords": []})
+
+    return factory
+
+
+class _RecordingObserver:
+    """内存观察者：记录全部转换与结果，供顺序断言。"""
+
+    def __init__(self) -> None:
+        self.transitions: list[tuple[str, str, str, str]] = []
+        self.results: list[NodeResult] = []
+
+    async def on_transition(
+        self,
+        task_id: str,
+        node_id: str,
+        old: SubtaskStatus,
+        new: SubtaskStatus,
+    ) -> None:
+        self.transitions.append((task_id, node_id, old.value, new.value))
+
+    async def on_result(self, task_id: str, result: NodeResult) -> None:
+        self.results.append(result)
+
+
+class _RecordingPublisher:
+    """内存事件发布器：记录事件，可模拟发布失败。"""
+
+    def __init__(self, fail: bool = False) -> None:
+        self.events: list = []
+        self.fail = fail
+
+    async def publish(self, event) -> None:
+        if self.fail:
+            raise RuntimeError("模拟发布失败")
+        self.events.append(event)
 
 
 @pytest.mark.asyncio
@@ -87,8 +155,6 @@ class TestTaskSchedulerFailure:
             from app.orchestration.agents.validator import ValidatorAgent
 
             if agent_type == "executor":
-                # 创建一个总是失败的 Agent
-                from app.orchestration.base_agent import BaseAgent
 
                 class _FailAgent(BaseAgent):
                     @property
@@ -105,9 +171,7 @@ class TestTaskSchedulerFailure:
 
         scheduler = TaskScheduler(
             agent_factory=failing_factory,
-            retry_policy=__import__(
-                "app.orchestration.retry", fromlist=["RetryPolicy"]
-            ).RetryPolicy(max_retries=1, backoff_times=[0.01]),
+            retry_policy=RetryPolicy(max_retries=1, backoff_times=[0.01]),
         )
         result = await scheduler.run(dag, task_id="t1")
         assert not result.success
@@ -163,3 +227,215 @@ class TestTaskSchedulerResume:
         result = await scheduler.run(dag, task_id="t1")
         assert result.success
         assert len(result.completed) == 4
+
+
+@pytest.mark.asyncio
+class TestSchedulerObserver:
+    """观察者测试：状态转换顺序、结果唯一性、节点执行上下文。"""
+
+    async def test_observer_receives_ordered_transitions_and_single_result(self) -> None:
+        """单节点成功：observer 按 READY→RUNNING→VALIDATING→COMPLETED 顺序收到转换。"""
+        observer = _RecordingObserver()
+        dag = TaskDAG()
+        dag.add_node("n1", title="任务", description="描述")
+        scheduler = TaskScheduler(agent_factory=_make_agent_factory(), observer=observer)
+
+        result = await scheduler.run(dag, task_id="t1")
+
+        assert result.success
+        assert [transition[3] for transition in observer.transitions] == [
+            "ready",
+            "running",
+            "validating",
+            "completed",
+        ]
+        assert all(transition[0] == "t1" for transition in observer.transitions)
+        assert all(transition[1] == "n1" for transition in observer.transitions)
+        assert len(observer.results) == 1
+        assert observer.results[0].status is SubtaskStatus.COMPLETED
+
+    async def test_observer_receives_retry_sequence(self) -> None:
+        """重试路径：observer 收到完整顺序，且最终结果只通知一次。"""
+        attempts = {"value": 0}
+
+        def flaky_factory(agent_type: str):
+            if agent_type == "executor":
+
+                class _FlakyAgent(BaseAgent):
+                    @property
+                    def agent_type(self) -> str:
+                        return "executor"
+
+                    async def _run(self, input_data: dict) -> dict:
+                        attempts["value"] += 1
+                        if attempts["value"] == 1:
+                            raise RuntimeError("首次失败")
+                        return {"result": "ok"}
+
+                return _FlakyAgent()
+
+            from app.orchestration.agents.validator import ValidatorAgent
+
+            return ValidatorAgent(rules={"min_length": 1, "required_keywords": []})
+
+        observer = _RecordingObserver()
+        scheduler = TaskScheduler(
+            agent_factory=flaky_factory,
+            retry_policy=RetryPolicy(max_retries=1, backoff_times=[0.01]),
+            observer=observer,
+        )
+        dag = TaskDAG()
+        dag.add_node("n1", title="重试任务", description="首次失败后成功")
+
+        result = await scheduler.run(dag, task_id="t1")
+
+        assert result.success
+        assert [transition[3] for transition in observer.transitions] == [
+            "ready",
+            "running",
+            "failed",
+            "retrying",
+            "ready",
+            "running",
+            "validating",
+            "completed",
+        ]
+        assert len(observer.results) == 1
+
+    async def test_executor_receives_task_context_and_dependency_outputs(self) -> None:
+        """节点执行上下文携带 task_id、trace_id、subtask_id 与依赖节点输出。"""
+        captured: list[dict] = []
+        dag = TaskDAG()
+        dag.add_node("n1", title="任务1", description="描述1")
+        dag.add_node("n2", title="任务2", description="描述2")
+        dag.add_edge("n1", "n2")
+        subtask_ids = {"n1": str(uuid.uuid4()), "n2": str(uuid.uuid4())}
+
+        scheduler = TaskScheduler(agent_factory=_capturing_agent_factory(captured))
+        result = await scheduler.run(
+            dag,
+            task_id="task-1",
+            trace_id="trace-1",
+            subtask_ids=subtask_ids,
+        )
+
+        assert result.success
+        by_node = {item["node_id"]: item for item in captured}
+        assert by_node["n1"]["task_id"] == "task-1"
+        assert by_node["n1"]["trace_id"] == "trace-1"
+        assert by_node["n1"]["subtask_id"] == subtask_ids["n1"]
+        assert by_node["n2"]["dependency_outputs"]["n1"]["result"] == "done-n1"
+
+
+@pytest.mark.asyncio
+class TestDatabaseScheduleObserver:
+    """数据库观察者测试：持久化、事件发布与失败隔离。"""
+
+    async def _setup(self):
+        engine = create_async_engine(
+            "sqlite+aiosqlite:///:memory:",
+            poolclass=StaticPool,
+        )
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        task_id = uuid.uuid4()
+        subtask_id = uuid.uuid4()
+        async with session_factory() as session:
+            session.add(
+                Task(
+                    id=task_id,
+                    user_id=uuid.uuid4(),
+                    title="观察者任务",
+                    description="持久化测试",
+                    status="running",
+                )
+            )
+            session.add(
+                Subtask(
+                    id=subtask_id,
+                    task_id=task_id,
+                    node_id="n1",
+                    title="节点",
+                    description="描述",
+                    status="pending",
+                )
+            )
+            await session.commit()
+        return engine, session_factory, task_id, subtask_id
+
+    async def test_transition_and_result_are_persisted_and_published(self) -> None:
+        """状态转换与最终结果写入 SUBTASK，并各自发布一条事件。"""
+        engine, session_factory, task_id, subtask_id = await self._setup()
+        publisher = _RecordingPublisher()
+        observer = DatabaseScheduleObserver(session_factory=session_factory, publisher=publisher)
+        try:
+            await observer.on_transition(
+                str(task_id), "n1", SubtaskStatus.PENDING, SubtaskStatus.READY
+            )
+            async with session_factory() as session:
+                subtask = await session.get(Subtask, subtask_id)
+                assert subtask is not None
+                assert subtask.status == "ready"
+            assert [event.event_type for event in publisher.events] == ["node_status"]
+            assert publisher.events[0].event_id == 1
+
+            await observer.on_result(
+                str(task_id),
+                NodeResult(
+                    node_id="n1",
+                    status=SubtaskStatus.COMPLETED,
+                    output={"result": "ok"},
+                    validation={"passed": True},
+                    attempts=2,
+                ),
+            )
+            async with session_factory() as session:
+                subtask = await session.get(Subtask, subtask_id)
+                assert subtask is not None
+                assert subtask.status == "completed"
+                assert subtask.retry_count == 1
+                assert subtask.output_data is not None
+                assert subtask.output_data["output"] == {"result": "ok"}
+                assert subtask.completed_at is not None
+            assert [event.event_id for event in publisher.events] == [1, 2]
+        finally:
+            await engine.dispose()
+
+    async def test_invalid_task_id_is_ignored(self) -> None:
+        """非法 task_id 不抛异常、不产生事件。"""
+        publisher = _RecordingPublisher()
+        observer = DatabaseScheduleObserver(publisher=publisher)
+        await observer.on_transition("not-a-uuid", "n1", SubtaskStatus.PENDING, SubtaskStatus.READY)
+        assert publisher.events == []
+
+    async def test_commit_failure_does_not_publish(self) -> None:
+        """数据库失败时不发布事件、不向调度器抛异常。"""
+
+        def broken_factory():
+            raise RuntimeError("数据库不可用")
+
+        publisher = _RecordingPublisher()
+        observer = DatabaseScheduleObserver(session_factory=broken_factory, publisher=publisher)
+        await observer.on_transition(
+            str(uuid.uuid4()), "n1", SubtaskStatus.PENDING, SubtaskStatus.READY
+        )
+        assert publisher.events == []
+
+    async def test_publish_failure_keeps_committed_transition(self) -> None:
+        """发布失败不影响已提交的数据库状态，也不抛异常。"""
+        engine, session_factory, task_id, subtask_id = await self._setup()
+        observer = DatabaseScheduleObserver(
+            session_factory=session_factory,
+            publisher=_RecordingPublisher(fail=True),
+        )
+        try:
+            await observer.on_transition(
+                str(task_id), "n1", SubtaskStatus.PENDING, SubtaskStatus.READY
+            )
+            async with session_factory() as session:
+                subtask = await session.get(Subtask, subtask_id)
+                assert subtask is not None
+                assert subtask.status == "ready"
+        finally:
+            await engine.dispose()

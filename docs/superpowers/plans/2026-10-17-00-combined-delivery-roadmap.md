@@ -236,5 +236,23 @@ npm run build
 - [x] 服务器仓库 + Python 3.11 venv + 573 tests 全绿（2026-10-17）
 - [x] 服务器 Compose build / up / readiness 全通过（五容器 healthy，2026-10-17）
 - [x] B 的 Q3 补跑、归档、tag `baseline-v1` 并推送（2026-10-17）
-- [ ] Plan 2 worktree 与 Task 1（下一步）
+- [x] 备份：`codex/literature-review` 分支已推送 GitHub（HTTPS `backup` remote）
+- [x] Plan 2 Task 1：运行时 ORM 字段 + 共享契约 + 可回滚迁移
+      （582 passed；服务器 PostgreSQL 上 `upgrade → downgrade -1 → upgrade` round-trip 通过）
+- [x] Plan 2 Task 2：owner-scoped 任务/事件仓库
+      （591 passed + 1 PostgreSQL 集成测试通过；本地与服务器双重验证）
+- [x] Plan 2 Task 3：Scheduler 状态转换持久化观察者
+      （628 passed；READY/CANCELLED 状态、DatabaseScheduleObserver、事件发布协议）
+- [x] Plan 2 Task 4：运行时容器与 TaskExecution 深模块
+      （638 passed；submit/approve/control/快照/事件/恢复 六个接口，服务器 PG 集成通过）
+- [x] Plan 2 Task 5：任务 HTTP 命令与查询接口
+      （651 passed；`/api/v1/tasks` 六条路由 + OpenAPI 15 条路径，401/404/422 契约测试齐全）
+- [x] Plan 2 Task 6：鉴权事件回放与 WebSocket 流式推送
+      （660 passed；ws-ticket + 快照/补拉/实时事件、Redis 与内存双实现、16 条 OpenAPI 路径）
+- [x] Plan 2 Task 7：可重启端到端任务执行验证
+      （663 passed；确定性 BaseLLM 驱动 Planner，HTTP E2E + 崩溃恢复 + task_recovery 事件）
+- [x] Plan 2 Exit Gate：PASSED（2026-10-17，commit `0751819`）
+      （服务器 PostgreSQL+Redis 验收 `ok=true`；完整链路任务 `529b57ec`、恢复任务 `ab823084`；
+      证据见 `2026-08-09-00-execution-notes.md` §Plan 2 Exit Gate）
+- [ ] Plan 3：文献综述工作流闭环（下一步，从合并后的 `codex/literature-review` 拉分支）
 

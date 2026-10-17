@@ -1,196 +1,225 @@
-"""规划 Agent：需求解析 → 任务拆解 → DAG 生成。
+"""规划 Agent：需求解析 → 结构化规划（TaskPlan）→ DAG 生成。
 
 职责：
-1. 需求解析：从自然语言提取意图、约束、输出要求
-2. 任务拆解：LLM 驱动递归分解为可执行子任务
-3. DAG 生成：构建节点+边+拓扑序，输出依赖关系
+1. 需求解析：从自然语言提取意图、约束、输出要求（确定性，不依赖 LLM）
+2. 任务规划：LLM 输出符合 `TaskPlan` schema 的结构化计划
+3. DAG 生成：由 TaskPlan.nodes 构建 TaskDAG 并校验依赖/循环
+4. 通知执行 Agent：把无依赖的根节点通过消息总线派发
 
-输出结构对齐数据库 Subtask / TaskDag 表，供调度器消费。
+输出结构：
+    {"requirement_analysis": {...}, "plan": TaskPlan JSON,
+     "subtasks": [PlanNode JSON], "dag": TaskDAG JSON}
+
+schema 违规以 `PlannerPlanInvalidError` 抛出（保留原始输出），由 TaskExecution
+执行一次 schema 修复调用；修复仍失败才进入 WAITING_HUMAN。
 """
 
 from __future__ import annotations
 
 import json
-import uuid
 from typing import Any
+
+from pydantic import ValidationError
 
 from app.core.logging import get_logger
 from app.llm.models import Message, MessageRole
 from app.orchestration.base_agent import BaseAgent
+from app.orchestration.contracts import PlanNode, TaskPlan
+from app.orchestration.dag_engine import TaskDAG
 from app.orchestration.messages import MessageType
 
 logger = get_logger(__name__)
 
-# 需求解析 Prompt：提取结构化意图，约束 LLM 输出 JSON
-_PARSE_PROMPT = """你是一个需求分析专家。请解析以下任务需求，提取意图、约束与输出要求。
+_PLAN_PROMPT = """你是文献综述任务规划专家。请把用户需求拆解为可执行的结构化计划。
 
 任务需求：
 {requirement}
 
-请以 JSON 格式返回（仅输出 JSON，不要其他文字）：
+要求：
+- 每个节点可独立执行，标注节点间依赖（dependencies 列出前置节点 id）
+- 节点 id 用小写字母开头（如 n1, n2）
+- search / extract / write / validate / review 五类节点按需组合
+- 只输出 JSON，不要任何解释文字
+
+输出 JSON schema：
 {{
-  "intent": "任务核心意图（一句话）",
-  "constraints": ["约束1", "约束2"],
-  "output_format": "期望输出格式（如 markdown/pdf/xlsx）",
-  "success_criteria": "完成标准描述"
-}}
-"""
-
-# 任务拆解 Prompt：将需求分解为有序子任务
-_DECOMPOSE_PROMPT = """你是一个任务规划专家。请将以下需求拆解为可执行的子任务列表。
-
-需求意图：{intent}
-约束条件：{constraints}
-输出格式：{output_format}
-
-拆解要求：
-- 每个子任务应可独立执行
-- 标注子任务间的依赖关系（depends_on 列出前置节点编号）
-- 节点编号用 n1, n2, n3 ...
-
-请以 JSON 格式返回（仅输出 JSON）：
-{{
+  "version": 1,
+  "topic": "研究主题（5-200 字）",
+  "research_questions": ["研究问题（1-10 条）"],
+  "search_queries": ["检索词（1-20 条）"],
+  "acceptance_criteria": ["验收标准（1-20 条）"],
   "nodes": [
-    {{"node_id": "n1", "title": "子任务标题", "description": "详细描述", "depends_on": []}},
-    {{"node_id": "n2", "title": "...", "description": "...", "depends_on": ["n1"]}}
+    {{
+      "id": "n1",
+      "type": "search | extract | write | validate | review",
+      "title": "节点标题",
+      "dependencies": [],
+      "input": {{}},
+      "required_evidence": 1
+    }}
   ]
 }}
+{repair_section}"""
+
+_REPAIR_SECTION = """
+上一次输出未通过 schema 校验，请修正后重新输出完整 JSON。
+错误信息：{error}
+上一次输出（截断）：{previous_output}
 """
+
+
+class PlannerPlanInvalidError(ValueError):
+    """规划输出不是合法 JSON 或不符合 TaskPlan schema。"""
+
+    def __init__(self, message: str, *, raw_output: str = "") -> None:
+        super().__init__(message)
+        self.raw_output = raw_output
 
 
 class PlannerAgent(BaseAgent):
-    """规划 Agent：将用户需求转化为可执行的子任务 DAG。"""
+    """规划 Agent：将用户需求转化为 TaskPlan 与可执行子任务 DAG。"""
 
     @property
     def agent_type(self) -> str:
         return "planner"
 
     async def _run(self, input_data: dict[str, Any]) -> dict[str, Any]:
-        """执行规划流程：解析 → 拆解 → DAG 生成 → 通知执行 Agent。
-
-        input_data 需包含 requirement 字段（用户自然语言需求）。
-        返回 {requirement_analysis, subtasks, dag}。
-        """
-        requirement = input_data["requirement"]
+        """执行规划流程：解析 → 生成 TaskPlan → 构建 DAG → 派发根节点。"""
+        requirement = str(input_data.get("requirement", "")).strip()
+        if not requirement:
+            raise ValueError("规划输入缺少 requirement")
         trace_id = input_data.get("trace_id", "")
 
-        # 步骤1：需求解析
-        analysis = await self._parse_requirement(requirement)
-        logger.info("planner_parsed", trace_id=trace_id, intent=analysis.get("intent"))
+        analysis = self._analyze_requirement(requirement)
+        plan = await self._generate_plan(requirement, input_data.get("repair"))
+        logger.info(
+            "planner_planned",
+            trace_id=trace_id,
+            topic=plan.topic,
+            node_count=len(plan.nodes),
+        )
 
-        # 步骤2：任务拆解
-        decomposition = await self._decompose(analysis)
-        nodes = decomposition.get("nodes", [])
-        logger.info("planner_decomposed", trace_id=trace_id, node_count=len(nodes))
+        dag = self.build_dag(plan)
 
-        # 步骤3：构建 DAG（校验依赖 + 拓扑排序）
-        dag = self._build_dag(nodes)
-
-        # 步骤4：通知执行 Agent 接收首批无依赖子任务
-        for node in nodes:
-            if not node.get("depends_on"):
+        # 无依赖的根节点通知执行 Agent（阶段4 调度器接管前保留该行为）
+        for node in plan.nodes:
+            if not node.dependencies:
                 await self._send_message(
                     "executor",
                     MessageType.TASK_ASSIGN,
                     {
-                        "node_id": node["node_id"],
-                        "title": node["title"],
-                        "description": node["description"],
+                        "node_id": node.id,
+                        "title": node.title,
+                        "description": f"{node.type}: {node.title}",
                     },
                     trace_id=trace_id,
                 )
 
         return {
             "requirement_analysis": analysis,
-            "subtasks": nodes,
-            "dag": dag,
+            "plan": plan.model_dump(mode="json"),
+            "subtasks": [node.model_dump(mode="json") for node in plan.nodes],
+            "dag": dag.to_dict(),
         }
 
-    async def _parse_requirement(self, requirement: str) -> dict[str, Any]:
-        """LLM 驱动的需求解析，返回结构化意图。"""
-        if self.llm is None:
-            # 无 LLM 时的降级：返回最小可用结构，便于测试
-            return {
-                "intent": requirement[:100],
-                "constraints": [],
-                "output_format": "markdown",
-                "success_criteria": "完成用户需求",
-            }
+    @staticmethod
+    def _analyze_requirement(requirement: str) -> dict[str, Any]:
+        """确定性需求解析（不调用 LLM，避免规划链路两次模型开销）。"""
+        return {
+            "intent": requirement[:100],
+            "constraints": [],
+            "output_format": "markdown",
+            "success_criteria": "完成用户需求",
+        }
 
-        response = await self.llm.chat(
-            [
-                Message(role=MessageRole.SYSTEM, content="你是需求分析专家，只输出 JSON。"),
-                Message(
-                    role=MessageRole.USER,
-                    content=_PARSE_PROMPT.format(requirement=requirement),
-                ),
-            ],
-            temperature=0.2,  # 低温度保证结构化输出稳定
+    async def _generate_plan(
+        self,
+        requirement: str,
+        repair: dict[str, Any] | None,
+    ) -> TaskPlan:
+        """调用 LLM 生成 TaskPlan；schema 违规抛 PlannerPlanInvalidError。"""
+        if self.llm is None:
+            return self._degraded_plan(requirement)
+
+        prompt = _PLAN_PROMPT.format(
+            requirement=requirement,
+            repair_section=self._repair_section(repair),
         )
-        return self._safe_parse_json(response.content or "{}")
-
-    async def _decompose(self, analysis: dict[str, Any]) -> dict[str, Any]:
-        """LLM 驱动的任务拆解，返回子任务节点列表。"""
-        if self.llm is None:
-            return {"nodes": []}
-
         response = await self.llm.chat(
             [
                 Message(role=MessageRole.SYSTEM, content="你是任务规划专家，只输出 JSON。"),
-                Message(
-                    role=MessageRole.USER,
-                    content=_DECOMPOSE_PROMPT.format(
-                        intent=analysis.get("intent", ""),
-                        constraints=analysis.get("constraints", []),
-                        output_format=analysis.get("output_format", "markdown"),
-                    ),
+                Message(role=MessageRole.USER, content=prompt),
+            ],
+            temperature=0.2,
+        )
+        content = response.content or ""
+        payload = self._safe_parse_json(content)
+        if not payload:
+            raise PlannerPlanInvalidError("规划输出不是合法 JSON", raw_output=content)
+        try:
+            return TaskPlan.model_validate(payload)
+        except ValidationError as exc:
+            raise PlannerPlanInvalidError(
+                f"规划未通过 TaskPlan schema 校验: {exc.errors()[:3]}",
+                raw_output=content,
+            ) from exc
+
+    @staticmethod
+    def _repair_section(repair: dict[str, Any] | None) -> str:
+        if not repair:
+            return ""
+        return _REPAIR_SECTION.format(
+            error=str(repair.get("error", ""))[:500],
+            previous_output=str(repair.get("previous_output", ""))[:2000],
+        )
+
+    @staticmethod
+    def _degraded_plan(requirement: str) -> TaskPlan:
+        """无 LLM 时的确定性降级计划：检索 → 提取 → 撰写。"""
+        topic = requirement if len(requirement) >= 5 else f"{requirement} 文献综述"
+        return TaskPlan(
+            version=1,
+            topic=topic[:200],
+            research_questions=[requirement[:200]],
+            search_queries=[requirement[:200]],
+            acceptance_criteria=["生成带可回溯引用的综述"],
+            nodes=[
+                PlanNode(
+                    id="n1",
+                    type="search",
+                    title="检索文献",
+                    input={"query": requirement[:200]},
+                ),
+                PlanNode(
+                    id="n2",
+                    type="extract",
+                    title="提取证据",
+                    dependencies=["n1"],
+                ),
+                PlanNode(
+                    id="n3",
+                    type="write",
+                    title="撰写综述",
+                    dependencies=["n2"],
                 ),
             ],
-            temperature=0.3,
         )
-        return self._safe_parse_json(response.content or '{"nodes": []}')
 
-    def _build_dag(self, nodes: list[dict[str, Any]]) -> dict[str, Any]:
-        """从节点列表构建 DAG 结构（含拓扑排序）。
-
-        边由 depends_on 推导：前置依赖 → 当前节点。
-        拓扑序用 Kahn 算法计算，检测循环依赖。
-        """
-        node_ids = {n["node_id"] for n in nodes}
-        edges: list[dict[str, str]] = []
-        # 邻接表 + 入度表
-        in_degree: dict[str, int] = {n["node_id"]: 0 for n in nodes}
-        adjacency: dict[str, list[str]] = {n["node_id"]: [] for n in nodes}
-
-        for node in nodes:
-            for dep in node.get("depends_on", []):
-                if dep in node_ids:
-                    edges.append({"from": dep, "to": node["node_id"]})
-                    adjacency[dep].append(node["node_id"])
-                    in_degree[node["node_id"]] += 1
-
-        # Kahn 拓扑排序
-        queue = [nid for nid, deg in in_degree.items() if deg == 0]
-        topo_order: list[str] = []
-        while queue:
-            nid = queue.pop(0)
-            topo_order.append(nid)
-            for child in adjacency[nid]:
-                in_degree[child] -= 1
-                if in_degree[child] == 0:
-                    queue.append(child)
-
-        # 拓扑序不完整说明存在循环依赖
-        if len(topo_order) != len(nodes):
-            cyclic = set(in_degree) - set(topo_order)
-            raise ValueError(f"DAG 存在循环依赖，涉及节点: {cyclic}")
-
-        return {
-            "nodes": nodes,
-            "edges": edges,
-            "topological_order": topo_order,
-            "task_id": str(uuid.uuid4()),
-        }
+    @staticmethod
+    def build_dag(plan: TaskPlan) -> TaskDAG:
+        """由 TaskPlan 构建 TaskDAG；循环依赖由 add_edge 抛 DAGCycleError。"""
+        dag = TaskDAG()
+        for node in plan.nodes:
+            dag.add_node(
+                node.id,
+                title=node.title,
+                description=f"{node.type}: {node.title}",
+                type=node.type,
+            )
+        for node in plan.nodes:
+            for dependency in node.dependencies:
+                dag.add_edge(dependency, node.id)
+        return dag
 
     @staticmethod
     def _safe_parse_json(text: str) -> dict[str, Any]:

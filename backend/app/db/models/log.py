@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -58,8 +58,22 @@ class ExecutionLog(Base):
         Integer, nullable=True, comment="本次操作耗时(毫秒)"
     )
 
+    # ===== 任务事件流字段（Plan 2）=====
+    # 事件类型：node_started / node_completed / task_status / log 等
+    event_type: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="log", comment="事件类型"
+    )
+    # 任务内递增事件序号，保证客户端可按序回放
+    event_seq: Mapped[int] = mapped_column(Integer, nullable=False, comment="任务内递增事件序号")
+    # 第几次尝试（节点重试时递增）
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="第几次尝试")
+
     logged_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), index=True, nullable=False, comment="日志产生时间"
+    )
+
+    __table_args__ = (
+        UniqueConstraint("task_id", "event_seq", name="uq_execution_log_task_event_seq"),
     )
 
 

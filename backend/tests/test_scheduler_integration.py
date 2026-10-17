@@ -41,7 +41,7 @@ class TestClosedLoopIntegration:
         3. 每个节点：ExecutorAgent 执行 → ValidatorAgent 校验
         4. 全部节点完成，闭环成功
         """
-        # 步骤1：规划 Agent 拆解需求（无 LLM 降级模式）
+        # 步骤1：规划 Agent 拆解需求（无 LLM 降级模式，产出合法三节点 TaskPlan）
         planner = PlannerAgent()
         plan_result = await planner.execute(
             {"requirement": "生成一份市场分析报告并校验质量", "trace_id": "integration-1"}
@@ -49,13 +49,10 @@ class TestClosedLoopIntegration:
         assert "dag" in plan_result
         assert "subtasks" in plan_result
 
-        # 步骤2：用规划结果构建 DAG（手动构建，因为降级模式 subtasks 为空）
-        dag = TaskDAG()
-        dag.add_node("n1", title="收集数据", description="收集市场数据", priority=8)
-        dag.add_node("n2", title="分析数据", description="分析收集的数据", priority=6)
-        dag.add_node("n3", title="撰写报告", description="基于分析撰写报告", priority=7)
-        dag.add_edge("n1", "n2")
-        dag.add_edge("n2", "n3")
+        # 步骤2：直接用规划结果构建 DAG（不手工造节点/边）
+        dag = TaskDAG.from_dict(plan_result["dag"])
+        assert dag.node_count == 3
+        assert dag.topological_order() == ["n1", "n2", "n3"]
 
         # 步骤3：调度器执行 DAG（执行→校验闭环）
         scheduler = TaskScheduler(agent_factory=_agent_factory)
