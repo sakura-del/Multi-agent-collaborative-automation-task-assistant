@@ -261,5 +261,5 @@ npm run build
   - [x] Task 4：确定性引用校验与定向重做（718 passed；五项固定检查 + 两次重生成后转人工）
   - [x] Task 5：复盘汇总与 Markdown/DOCX 导出（734 passed；产物哈希 + owner-scoped 下载 + 服务器实测落盘）
   - [x] Task 6：冻结离线演示语料 + CLI（744 passed；服务器已下载 10 篇/36MB + sha256 清单，语料测试 11 passed）
-  - [ ] Plan 3 Exit Gate：离线真实模型任务（引用全可回溯 + 重启恢复保留已完成节点 + Markdown/DOCX 哈希记录）——**进行中**：n1 确定性校验通过（96.0），n2 抽取节点因 LLM 未引用 `[E{n}]` 触发 `evidence_is_cited` 失败并经两次重生成转人工（任务 `2fe4579b`）；下一步排查 `validation_feedback` 注入与重生成行为
+  - [ ] Plan 3 Exit Gate：离线真实模型任务（引用全可回溯 + 重启恢复保留已完成节点 + Markdown/DOCX 哈希记录）——**进行中**：已修复「容器无 LLM 导致静默降级」（`12f9c85`）与「依赖标记未重定位」（`cc548e5`）；实跑达 n1–n4 完成/确定性 96.0，n5 待验证；**当前阻塞：LLM 密钥被网关判定失效（500 Failed to validate API key），需更换密钥后重跑**
 
