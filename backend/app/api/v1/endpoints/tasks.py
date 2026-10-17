@@ -18,6 +18,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import FileResponse
 
 from app.api.deps import get_current_active_user
 from app.db.models.user import User
@@ -133,3 +134,24 @@ async def list_events(
     events = await execution.events_after(current_user.id, task_id, after)
     next_event_id = events[-1].event_id if events else after
     return TaskEventPage(events=events, next_event_id=next_event_id)
+
+
+@router.get(
+    "/{task_id}/artifacts/{artifact_id}",
+    summary="下载任务导出产物（Markdown/DOCX）",
+    response_class=FileResponse,
+)
+async def download_artifact(
+    task_id: UUID,
+    artifact_id: str,
+    execution: ExecutionDep,
+    current_user: CurrentUserDep,
+) -> FileResponse:
+    """owner-scoped 下载：路径由服务端 artifact_id 解析，下载名固定。"""
+    path, download_name = await execution.resolve_artifact(current_user.id, task_id, artifact_id)
+    media_type = (
+        "text/markdown"
+        if path.suffix == ".md"
+        else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    return FileResponse(path, media_type=media_type, filename=download_name)

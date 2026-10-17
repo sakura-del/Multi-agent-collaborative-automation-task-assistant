@@ -66,11 +66,13 @@ class ReviewerAgent(BaseAgent):
         return None
 
     async def _run(self, input_data: dict[str, Any]) -> dict[str, Any]:
-        """执行复盘：统计 → 归因 → 报告。
+        """执行复盘：文献场景基于持久化结果组装；否则走日志统计 → 归因。
 
         input_data 需包含 trace_id（指定要复盘的任务链路）。
-        返回 {summary, stats, root_cause}。
         """
+        if isinstance(input_data.get("results"), list):
+            return await self._build_literature_review(input_data)
+
         trace_id = input_data.get("trace_id", "default")
 
         # 步骤1：收集该链路日志
@@ -101,6 +103,185 @@ class ReviewerAgent(BaseAgent):
             error_count=stats["error_count"],
         )
         return report
+
+    async def _build_literature_review(self, input_data: dict[str, Any]) -> dict[str, Any]:
+        """文献场景复盘：只消费已持久化的 ExecutionResult / ValidationReport / 事件统计。
+
+        不调用 arXiv、RAG 或文件工具；LLM 仅用于润色摘要与局限性（无 LLM 时纯规则组装，
+        结果保持不变）。
+        """
+        results_payload = input_data.get("results") or []
+        if not results_payload:
+            raise ValueError("复盘缺少节点结果")
+        from app.orchestration.contracts import ExecutionResult, ValidationReport
+
+        results = [ExecutionResult.model_validate(item) for item in results_payload]
+        validations = [
+            ValidationReport.model_validate(item) for item in (input_data.get("validations") or [])
+        ]
+        topic = str(input_data.get("topic") or "文献综述")
+        event_stats = dict(input_data.get("event_stats") or {})
+
+        body_parts: list[str] = []
+        citations: dict[str, dict[str, Any]] = {}
+        for result in results:
+            content = (result.content or "").strip()
+            if content:
+                body_parts.append(content)
+            for item in result.evidence:
+                url = str(item.source_url) if item.source_url else ""
+                if url and url not in citations:
+                    citations[url] = {
+                        "title": item.excerpt[:60],
+                        "source_url": url,
+                        "doc_id": str(item.doc_id) if item.doc_id else None,
+                        "chunk_id": str(item.chunk_id) if item.chunk_id else None,
+                    }
+            for artifact in result.artifacts:
+                url = str(artifact.get("source_url") or "")
+                if url and url not in citations:
+                    citations[url] = {
+                        "title": str(artifact.get("title") or artifact.get("source_id") or ""),
+                        "source_url": url,
+                        "source_id": artifact.get("source_id"),
+                    }
+
+        bibliography = [
+            {"index": index, **entry} for index, entry in enumerate(citations.values(), start=1)
+        ]
+        scores = self._literature_scores(validations)
+        issues = [
+            check.message
+            for validation in validations
+            for check in validation.checks
+            if not check.passed
+        ] + [validation.feedback for validation in validations if validation.feedback]
+
+        abstract = self._first_paragraph(body_parts[0] if body_parts else "")
+        limitations: list[str] = [
+            validation.feedback for validation in validations if validation.feedback
+        ]
+
+        if self.llm is not None:
+            polished = await self._polish_literature_review(
+                topic, results, validations, event_stats
+            )
+            abstract = str(polished.get("abstract") or abstract)
+            refined = polished.get("limitations")
+            if isinstance(refined, list) and refined:
+                limitations = [str(item) for item in refined]
+
+        final_markdown = self._compose_review_markdown(
+            topic=topic,
+            abstract=abstract,
+            body="\n\n".join(body_parts),
+            limitations=limitations or ["（无）"],
+            bibliography=bibliography,
+        )
+        stats = {
+            "node_count": len(results),
+            "event_count": int(event_stats.get("event_count", 0)),
+            "total_tokens": sum(
+                result.prompt_tokens + result.completion_tokens for result in results
+            ),
+            "documents": len(citations),
+            "validations": len(validations),
+            "title": topic,
+            "abstract": abstract,
+            "limitations": limitations,
+        }
+        logger.info(
+            "reviewer_literature_done",
+            topic=topic,
+            nodes=len(results),
+            citations=len(citations),
+        )
+        return {
+            "summary": f"共 {len(results)} 个节点完成，引用 {len(citations)} 条文献。",
+            "final_markdown": final_markdown,
+            "bibliography": bibliography,
+            "scores": scores,
+            "issues": issues,
+            "stats": stats,
+        }
+
+    async def _polish_literature_review(
+        self,
+        topic: str,
+        results: list[Any],
+        validations: list[Any],
+        event_stats: dict[str, Any],
+    ) -> dict[str, Any]:
+        """可选 LLM 润色：失败时静默回退到确定性组装。"""
+        # 方法内导入：避免 agents 包与 workflows 包互相导入
+        from app.orchestration.workflows.prompts import render_reviewer_prompt
+
+        prompt = render_reviewer_prompt(
+            topic=topic,
+            results_json=json.dumps(
+                [item.model_dump(mode="json") for item in results], ensure_ascii=False
+            ),
+            validations_json=json.dumps(
+                [item.model_dump(mode="json") for item in validations], ensure_ascii=False
+            ),
+            event_stats_json=json.dumps(event_stats, ensure_ascii=False),
+        )
+        try:
+            response = await self.llm.chat(
+                [
+                    Message(
+                        role=MessageRole.SYSTEM,
+                        content="你是文献综述复盘专家，只输出 JSON。",
+                    ),
+                    Message(role=MessageRole.USER, content=prompt),
+                ],
+                temperature=0.2,
+            )
+            payload = json.loads(response.content or "{}")
+        except Exception as exc:
+            logger.warning("reviewer_polish_failed", error=str(exc))
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    @staticmethod
+    def _literature_scores(validations: list[Any]) -> dict[str, float]:
+        if not validations:
+            return {"citation_traceability": 0.0, "quality": 0.0}
+        mean = sum(item.score for item in validations) / len(validations) / 100.0
+        score = round(mean, 4)
+        return {"citation_traceability": score, "quality": score}
+
+    @staticmethod
+    def _first_paragraph(text: str) -> str:
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#") and not stripped.startswith("-"):
+                return stripped[:300]
+        return ""
+
+    @staticmethod
+    def _compose_review_markdown(
+        *,
+        topic: str,
+        abstract: str,
+        body: str,
+        limitations: list[str],
+        bibliography: list[dict[str, Any]],
+    ) -> str:
+        parts = [f"# {topic}"]
+        if abstract:
+            parts.append(f"## 摘要\n{abstract}")
+        if body:
+            parts.append(body)
+        parts.append("## 局限性\n" + "\n".join(f"- {item}" for item in limitations))
+        if bibliography:
+            lines = []
+            for entry in bibliography:
+                title = entry.get("title") or entry.get("source_id") or "未命名文献"
+                url = entry.get("source_url") or ""
+                lines.append(f"- [{entry['index']}] {title} — {url}".rstrip(" —"))
+            parts.append("## 参考文献\n" + "\n".join(lines))
+        return "\n\n".join(parts)
 
     def _compute_stats(self, logs: list[dict[str, Any]]) -> dict[str, Any]:
         """从日志列表计算性能统计指标。"""

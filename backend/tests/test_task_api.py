@@ -117,7 +117,29 @@ class _StaticReviewer(BaseAgent):
         return "reviewer"
 
     async def _run(self, input_data: dict[str, Any]) -> dict[str, Any]:
-        return {"summary": "任务执行成功。", "stats": {"error_count": 0}, "root_cause": {}}
+        return {
+            "summary": "任务执行成功。",
+            "final_markdown": (
+                "# 检索增强生成证据核验\n\n"
+                "## 摘要\n确定性测试复盘。\n\n"
+                "## 参考文献\n- [1] 测试文献 — https://arxiv.org/abs/2401.12341v1"
+            ),
+            "bibliography": [
+                {
+                    "index": 1,
+                    "title": "测试文献",
+                    "source_url": "https://arxiv.org/abs/2401.12341v1",
+                }
+            ],
+            "scores": {"citation_traceability": 1.0},
+            "issues": [],
+            "stats": {
+                "title": "检索增强生成证据核验",
+                "abstract": "确定性测试复盘。",
+                "total_logs": 0,
+                "error_count": 0,
+            },
+        }
 
 
 # ===== 夹具 =====
@@ -466,6 +488,78 @@ class TestControl:
             headers=_auth(token),
         )
         assert resp.status_code == 422
+
+
+class TestArtifacts:
+    """Plan 3 Task 5：完成任务导出 Markdown/DOCX 并可 owner-scoped 下载。"""
+
+    def test_completed_task_exports_downloadable_artifacts(self, api_env) -> None:
+        client, install_runtime = api_env
+        install_runtime()
+        token = _register_and_login(client, "wanda")
+        task_id = _create(client, token).json()["task_id"]
+        _wait_status(client, token, task_id, {TaskStatus.WAITING_APPROVAL.value})
+        client.post(
+            f"/api/v1/tasks/{task_id}/plan/approve",
+            json={"revision": 1},
+            headers=_auth(token),
+        )
+        completed = _wait_status(client, token, task_id, {TaskStatus.COMPLETED.value})
+
+        artifacts = completed["artifacts"]
+        kinds = {item.get("kind") for item in artifacts}
+        assert kinds == {"markdown", "docx"}
+        for item in artifacts:
+            assert item["sha256"] and item["size"] > 0
+            assert item["download_name"].startswith("literature_review_")
+
+        markdown = next(item for item in artifacts if item["kind"] == "markdown")
+        response = client.get(
+            f"/api/v1/tasks/{task_id}/artifacts/{markdown['artifact_id']}",
+            headers=_auth(token),
+        )
+        assert response.status_code == 200
+        assert "检索增强" in response.text
+        assert "参考文献" in response.text
+
+        docx_artifact = next(item for item in artifacts if item["kind"] == "docx")
+        docx_response = client.get(
+            f"/api/v1/tasks/{task_id}/artifacts/{docx_artifact['artifact_id']}",
+            headers=_auth(token),
+        )
+        assert docx_response.status_code == 200
+        assert docx_response.content[:2] == b"PK"  # DOCX = ZIP 容器
+
+    def test_artifact_download_is_owner_scoped(self, api_env) -> None:
+        client, install_runtime = api_env
+        install_runtime()
+        owner = _register_and_login(client, "yara")
+        intruder = _register_and_login(client, "zane")
+        task_id = _create(client, owner).json()["task_id"]
+        _wait_status(client, owner, task_id, {TaskStatus.WAITING_APPROVAL.value})
+        client.post(
+            f"/api/v1/tasks/{task_id}/plan/approve",
+            json={"revision": 1},
+            headers=_auth(owner),
+        )
+        completed = _wait_status(client, owner, task_id, {TaskStatus.COMPLETED.value})
+        artifact_id = completed["artifacts"][0]["artifact_id"]
+
+        assert (
+            client.get(
+                f"/api/v1/tasks/{task_id}/artifacts/{artifact_id}",
+                headers=_auth(intruder),
+            ).status_code
+            == 404
+        )
+        for bad_id in ("not-a-real-id", "a" * 31):
+            assert (
+                client.get(
+                    f"/api/v1/tasks/{task_id}/artifacts/{bad_id}",
+                    headers=_auth(owner),
+                ).status_code
+                == 404
+            )
 
 
 class TestEvents:

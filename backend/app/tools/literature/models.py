@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
@@ -43,3 +44,21 @@ class LiteratureRecord(BaseModel):
         if value.tzinfo is None:
             return value.replace(tzinfo=UTC)
         return value.astimezone(UTC)
+
+
+class Artifact(BaseModel):
+    """服务端生成的导出产物元数据（Plan 3 Task 5）。
+
+    `artifact_id` 由服务端 uuid4 生成，客户端只能用它做查找；
+    真实路径固定为 `<artifact_root>/<user_id>/<task_id>/<artifact_id><suffix>`。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    artifact_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    kind: Literal["markdown", "docx"]
+    filename: str = Field(min_length=1, max_length=128)
+    download_name: str = Field(min_length=1, max_length=200)
+    size: int = Field(ge=0)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    created_at: datetime

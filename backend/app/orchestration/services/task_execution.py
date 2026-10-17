@@ -15,14 +15,17 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 
 from pydantic import ValidationError as PydanticValidationError
-from sqlalchemy import select
+from sqlalchemy import func, select
 
+from app.core.config import get_settings
 from app.core.exceptions import NotFoundException, ValidationException
 from app.core.logging import get_logger
+from app.db.models.log import ExecutionLog
 from app.db.models.task import Subtask, Task
 from app.db.repositories.event import EventRepository
 from app.db.repositories.task import TaskRepository
@@ -31,6 +34,7 @@ from app.knowledge.services.context_builder import LiteratureContextBuilder
 from app.orchestration.agents.planner import PlannerAgent
 from app.orchestration.agents.validator import ValidatorAgent
 from app.orchestration.contracts import (
+    ExecutionResult,
     LiteratureReviewRequest,
     SubtaskSnapshot,
     TaskCommand,
@@ -404,7 +408,7 @@ class TaskExecution:
                 return
 
             await self._start_reviewing(task_id, result)
-            await self._finish_reviewing(task_id, result)
+            await self._finish_reviewing(task_id, result, dag.topological_order())
         except asyncio.CancelledError:
             logger.info("task_execution_cancelled", task_id=str(task_id))
             raise
@@ -545,27 +549,62 @@ class TaskExecution:
             await session.commit()
         await self._publish(event)
 
-    async def _finish_reviewing(self, task_id: UUID, result: Any) -> None:
-        """复盘 Agent 汇总结果 → COMPLETED。"""
+    async def _finish_reviewing(
+        self,
+        task_id: UUID,
+        result: Any,
+        ordered_nodes: list[str] | None = None,
+    ) -> None:
+        """复盘汇总 → 导出产物 → COMPLETED（同一事务写入 final_output/review_report/artifacts）。"""
         async with self._session_factory() as session:
-            task = await TaskRepository(session).get(task_id)
-            trace_id = self._trace_id(task) if task else "task"
+            repo = TaskRepository(session)
+            task = await repo.lock_for_update(task_id)
+            if task.status != TaskStatus.REVIEWING.value:
+                return
+            trace_id = self._trace_id(task)
+            task_type = task.task_type
+            user_id = task.user_id
+            title = task.title
+            event_count = int(
+                (
+                    await session.execute(
+                        select(func.count())
+                        .select_from(ExecutionLog)
+                        .where(ExecutionLog.task_id == task_id)
+                    )
+                ).scalar_one()
+            )
 
         reviewer = self.container.create_agent("reviewer")
-        review_report = await reviewer.execute(
-            {
-                "trace_id": trace_id,
-                "logs": [],
-                "results": {
-                    node_id: {
-                        "status": node_result.status.value,
-                        "error": node_result.error,
-                        "attempts": node_result.attempts,
-                    }
-                    for node_id, node_result in result.node_results.items()
-                },
-            }
-        )
+        if task_type == "literature_review":
+            execution_results = self._ordered_execution_results(result, ordered_nodes or [])
+            validations = self._ordered_validations(result, ordered_nodes or [])
+            review_report = await reviewer.execute(
+                {
+                    "trace_id": trace_id,
+                    "topic": title,
+                    "results": [item.model_dump(mode="json") for item in execution_results],
+                    "validations": validations,
+                    "event_stats": {"event_count": event_count, "task_id": str(task_id)},
+                }
+            )
+            artifacts = self._export_literature_artifacts(user_id, task_id, review_report)
+        else:
+            review_report = await reviewer.execute(
+                {
+                    "trace_id": trace_id,
+                    "logs": [],
+                    "results": {
+                        node_id: {
+                            "status": node_result.status.value,
+                            "error": node_result.error,
+                            "attempts": node_result.attempts,
+                        }
+                        for node_id, node_result in result.node_results.items()
+                    },
+                }
+            )
+            artifacts = [{"type": "review_summary", "summary": review_report.get("summary", "")}]
 
         async with self._session_factory() as session:
             repo = TaskRepository(session)
@@ -573,21 +612,127 @@ class TaskExecution:
             if task.status != TaskStatus.REVIEWING.value:
                 return
             task.review_report = review_report
-            task.final_output = str(review_report.get("summary", ""))
-            task.artifacts = [
-                {"type": "review_summary", "summary": review_report.get("summary", "")}
-            ]
+            task.final_output = str(
+                review_report.get("final_markdown") or review_report.get("summary") or ""
+            )
+            task.artifacts = artifacts
             await repo.transition(task, {TaskStatus.REVIEWING}, TaskStatus.COMPLETED)
             event = await self._append_event(
                 session,
                 task_id,
                 event_type="task_completed",
                 status=TaskStatus.COMPLETED.value,
-                payload={"summary": review_report.get("summary", "")},
+                payload={
+                    "summary": str(review_report.get("summary", ""))[:500],
+                    "artifacts": [
+                        item.get("artifact_id")
+                        for item in artifacts
+                        if isinstance(item, dict) and item.get("artifact_id")
+                    ],
+                },
             )
             await session.commit()
         await self._publish(event)
-        logger.info("task_completed", task_id=str(task_id))
+        logger.info("task_completed", task_id=str(task_id), artifacts=len(artifacts))
+
+    # ===== 复盘产物 =====
+
+    @staticmethod
+    def _ordered_execution_results(
+        result: Any,
+        ordered_nodes: list[str],
+    ) -> list[ExecutionResult]:
+        """按 DAG 拓扑序还原类型化执行结果；缺少类型化负载时退化为正文结果。"""
+        items: list[ExecutionResult] = []
+        for node_id in ordered_nodes:
+            node_result = result.node_results.get(node_id)
+            if node_result is None:
+                continue
+            output = node_result.output if isinstance(node_result.output, dict) else {}
+            payload = output.get("execution_result")
+            if isinstance(payload, dict):
+                try:
+                    items.append(ExecutionResult.model_validate(payload))
+                    continue
+                except PydanticValidationError:
+                    pass
+            content = str(output.get("result") or "").strip()
+            if content:
+                items.append(ExecutionResult(node_id=node_id, content=content, duration_ms=0))
+        return items
+
+    @staticmethod
+    def _ordered_validations(result: Any, ordered_nodes: list[str]) -> list[dict[str, Any]]:
+        """按 DAG 拓扑序收集已持久化的校验报告。"""
+        validations: list[dict[str, Any]] = []
+        for node_id in ordered_nodes:
+            node_result = result.node_results.get(node_id)
+            if node_result is None or not isinstance(node_result.validation, dict):
+                continue
+            validations.append(node_result.validation)
+        return validations
+
+    def _export_literature_artifacts(
+        self,
+        user_id: UUID,
+        task_id: UUID,
+        review_report: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """导出 Markdown/DOCX；复盘输出不符合 ReviewReport 时退化为摘要产物。"""
+        try:
+            return self._export_artifacts(user_id, task_id, review_report)
+        except PydanticValidationError:
+            logger.warning("literature_review_report_invalid", task_id=str(task_id))
+            return [
+                {
+                    "type": "review_summary",
+                    "summary": str(review_report.get("summary", "")),
+                }
+            ]
+
+    def _export_artifacts(
+        self,
+        user_id: UUID,
+        task_id: UUID,
+        review_report: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """把 ReviewReport 导出为 Markdown/DOCX，返回可持久化的 artifact 元数据。"""
+        from app.orchestration.contracts import ReviewReport
+        from app.tools.literature.exporter import LiteratureExporter
+
+        exporter = LiteratureExporter(get_settings().app.artifact_root)
+        # 复盘报告可能带 summary 等附加键，导出前只取 ReviewReport 字段
+        known_fields = set(ReviewReport.model_fields)
+        report = ReviewReport.model_validate(
+            {key: value for key, value in review_report.items() if key in known_fields}
+        )
+        return [
+            exporter.export_markdown(user_id, task_id, report).model_dump(mode="json"),
+            exporter.export_docx(user_id, task_id, report).model_dump(mode="json"),
+        ]
+
+    async def resolve_artifact(
+        self,
+        user_id: UUID,
+        task_id: UUID,
+        artifact_id: str,
+    ) -> tuple[Path, str]:
+        """owner-scoped 解析产物路径与固定下载名；不存在/越权一律 404。"""
+        from app.tools.literature.exporter import LiteratureExporter
+
+        async with self._session_factory() as session:
+            task = await TaskRepository(session).get_for_user(user_id, task_id)
+            if task is None:
+                raise NotFoundException("任务不存在")
+            download_name = ""
+            for item in task.artifacts or []:
+                if isinstance(item, dict) and item.get("artifact_id") == artifact_id:
+                    download_name = str(item.get("download_name") or "")
+                    break
+
+        exporter = LiteratureExporter(get_settings().app.artifact_root)
+        path = exporter.resolve_for_user(user_id, task_id, artifact_id)
+        return path, download_name or f"artifact-{artifact_id}{path.suffix}"
 
     # ===== 控制命令实现 =====
 

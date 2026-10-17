@@ -13,6 +13,7 @@ from app.llm.prompts import TEMPLATE_DIR, get_prompt_manager
 
 PLANNER_TEMPLATE_NAME = "literature.planner"
 EXECUTOR_TEMPLATE_NAME = "literature.executor"
+REVIEWER_TEMPLATE_NAME = "literature.reviewer"
 
 
 def _render(name: str, filename: str, variables: dict[str, Any]) -> str:
@@ -56,5 +57,25 @@ def render_executor_prompt(
             "evidence_text": evidence_text or "（无检索证据）",
             "dependency_section": dependency_section,
             "validation_feedback_section": validation_feedback_section,
+        },
+    )
+
+
+def render_reviewer_prompt(
+    *,
+    topic: str,
+    results_json: str,
+    validations_json: str,
+    event_stats_json: str,
+) -> str:
+    """复盘 Prompt：只允许基于已持久化结果生成摘要/局限性。"""
+    return _render(
+        REVIEWER_TEMPLATE_NAME,
+        "literature_reviewer_system.j2",
+        {
+            "topic": topic,
+            "results_json": results_json,
+            "validations_json": validations_json,
+            "event_stats_json": event_stats_json,
         },
     )

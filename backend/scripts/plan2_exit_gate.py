@@ -226,7 +226,21 @@ async def run(init_schema: bool) -> dict[str, Any]:
         async with engine.begin() as connection:
             await connection.run_sync(Base.metadata.create_all)
 
-    report: dict[str, Any] = {"phases": [], "failures": []}
+    # 导出产物根目录：服务器默认 /app/data/artifacts 只在容器内可写，
+    # 这里统一落到临时目录并记录路径。
+    import tempfile
+    from pathlib import Path as _Path
+
+    from app.core.config import get_settings
+
+    artifact_root = _Path(tempfile.mkdtemp(prefix="maa-artifacts-"))
+    get_settings().app.artifact_root = str(artifact_root)
+
+    report: dict[str, Any] = {
+        "phases": [],
+        "failures": [],
+        "artifact_root": str(artifact_root),
+    }
     username = f"exitgate{int(time.time())}"
 
     async with app.router.lifespan_context(app):

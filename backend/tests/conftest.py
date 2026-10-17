@@ -45,6 +45,15 @@ def app_settings():
     return get_settings()
 
 
+@pytest.fixture(autouse=True)
+def _isolate_artifact_root(tmp_path, monkeypatch):
+    """把导出产物根目录指到临时目录，避免测试写入 /app/data/artifacts。"""
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings().app, "artifact_root", str(tmp_path / "artifacts"))
+    yield
+
+
 @pytest_asyncio.fixture
 async def db_engine():
     """每个测试函数创建独立的内存 SQLite engine，保证测试隔离。
