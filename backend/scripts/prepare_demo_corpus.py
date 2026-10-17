@@ -51,9 +51,11 @@ def load_query(path: Path) -> dict[str, Any]:
 
 
 async def search_records(query: dict[str, Any]) -> list[LiteratureRecord]:
+    """检索候选：请求量大于目标篇数，抵消本地日期过滤造成的损耗。"""
+    requested = int(query.get("max_results", REQUIRED_CORPUS_SIZE))
     search = LiteratureSearch(
         query=str(query["query"]),
-        max_results=int(query.get("max_results", REQUIRED_CORPUS_SIZE)),
+        max_results=max(requested * 3, 30),
         date_from=_parse_date(query.get("date_from")),
         date_to=_parse_date(query.get("date_to")),
     )
