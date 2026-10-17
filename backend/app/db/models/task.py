@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -41,6 +41,34 @@ class Task(Base):
     # 优先级：0-9，数字越大越紧急
     priority: Mapped[int] = mapped_column(Integer, default=5, nullable=False, comment="优先级 0-9")
 
+    # ===== 持久化任务运行时字段（Plan 2）=====
+    # 任务类型：首版只实现 literature_review
+    task_type: Mapped[str] = mapped_column(
+        String(32), default="literature_review", nullable=False, comment="任务类型"
+    )
+    # 用户提交的任务配置（主题/关键词/文献数量/语言等）
+    config: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=dict, nullable=False, comment="任务配置"
+    )
+    # 结构化规划（TaskPlan JSON），确认后版本递增
+    plan: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True, comment="结构化规划")
+    # 规划版本：0 表示尚未生成规划
+    plan_version: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False, comment="规划版本"
+    )
+    # 暂停前状态：用于恢复时回到暂停前状态
+    paused_from_status: Mapped[str | None] = mapped_column(
+        String(16), nullable=True, comment="暂停前状态"
+    )
+    # 复盘 Agent 产出的质量报告
+    review_report: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON, nullable=True, comment="复盘报告"
+    )
+    # 任务产出物清单（Markdown/DOCX 等下载信息）
+    artifacts: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, default=list, nullable=False, comment="产出物清单"
+    )
+
     # 任务输出格式要求（如 markdown / pdf / xlsx）
     output_format: Mapped[str | None] = mapped_column(String(32), nullable=True, comment="输出格式")
     # 最终产出物（文件路径或文本）
@@ -67,6 +95,7 @@ class Subtask(Base):
     """子任务表：DAG 节点。"""
 
     __tablename__ = "subtask"
+    __table_args__ = (UniqueConstraint("task_id", "node_id", name="uq_subtask_task_node"),)
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4, comment="子任务ID")
     task_id: Mapped[uuid.UUID] = mapped_column(
