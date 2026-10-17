@@ -236,5 +236,8 @@ npm run build
 - [x] 服务器仓库 + Python 3.11 venv + 573 tests 全绿（2026-10-17）
 - [x] 服务器 Compose build / up / readiness 全通过（五容器 healthy，2026-10-17）
 - [x] B 的 Q3 补跑、归档、tag `baseline-v1` 并推送（2026-10-17）
-- [ ] Plan 2 worktree 与 Task 1（下一步）
+- [x] 备份：`codex/literature-review` 分支已推送 GitHub（HTTPS `backup` remote）
+- [x] Plan 2 Task 1：运行时 ORM 字段 + 共享契约 + 可回滚迁移
+      （582 passed；服务器 PostgreSQL 上 `upgrade → downgrade -1 → upgrade` round-trip 通过）
+- [ ] Plan 2 Task 2：owner-scoped 任务/事件仓库（下一步）
 
