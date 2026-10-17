@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 from uuid import UUID
 
@@ -305,13 +306,15 @@ class LiteratureReviewWorkflow:
                 description=prepared_node["description"],
                 evidence=evidence,
                 evidence_text=prepared_node["evidence_context"],
-                dependency_outputs=dependency_outputs or {},
+                dependency_outputs=self._rebased_dependency_outputs(
+                    dependency_outputs or {}, evidence
+                ),
                 validation_feedback=validation_feedback,
                 trace_id=self._trace_id(task),
             )
 
         # validate / review：不调用任何工具，只汇总依赖输出
-        content = self._summarize_dependencies(plan_node, dependency_outputs or {})
+        content = self._summarize_dependencies(dependency_outputs or {})
         warnings = [] if content else ["missing_dependency_output"]
         return ExecutionResult(
             node_id=plan_node.id,
@@ -419,19 +422,69 @@ class LiteratureReviewWorkflow:
             return current_plan.search_queries[0]
         return str(getattr(task, "title", "") or "")[:300] or "literature review"
 
-    @staticmethod
-    def _summarize_dependencies(
-        node: PlanNode,
+    def _rebased_dependency_outputs(
+        self,
         dependency_outputs: dict[str, Any],
+        target_evidence: list[Evidence],
+    ) -> dict[str, str]:
+        """把依赖输出中的 `[E{n}]` 重定位到当前节点证据池（保持本地编号可解析）。"""
+        index = {
+            (str(item.doc_id), str(item.chunk_id)): position
+            for position, item in enumerate(target_evidence, start=1)
+        }
+        rebased: dict[str, str] = {}
+        for dep_id, output in dependency_outputs.items():
+            if isinstance(output, dict):
+                text = str(output.get("result", "") or output.get("content", ""))
+            else:
+                text = str(output)
+            rebased[dep_id] = self._rebase_markers(text, dep_id, index)
+        return rebased
+
+    def _summarize_dependencies(
+        self,
+        dependency_outputs: dict[str, Any],
+        target_evidence: list[Evidence] | None = None,
     ) -> str:
+        """汇总依赖输出；把各依赖节点的局部 `[E{n}]` 重定位到当前节点的证据池。
+
+        证据按 (doc_id, chunk_id) 归一：能在当前节点证据池中找到的保留并改为本地编号，
+        找不到的标记直接去掉——否则汇总文本会出现无法解析的引用（Plan 3 引用可回溯要求）。
+        """
+        target = target_evidence or []
+        index = {
+            (str(item.doc_id), str(item.chunk_id)): position
+            for position, item in enumerate(target, start=1)
+        }
         lines = []
         for dep_id, output in dependency_outputs.items():
             if isinstance(output, dict):
                 text = str(output.get("result", "") or output.get("content", ""))
             else:
                 text = str(output)
-            lines.append(f"[{dep_id}] {text}".strip())
+            lines.append(f"[{dep_id}] {self._rebase_markers(text, dep_id, index)}".strip())
         return "\n".join(lines)
+
+    def _rebase_markers(
+        self,
+        text: str,
+        source_node_id: str,
+        index: dict[tuple[str, str], int],
+    ) -> str:
+        """按来源节点的证据清单重写 `[E{n}]`。"""
+        prepared = self.prepared_for(source_node_id) or {}
+        source = [Evidence.model_validate(item) for item in prepared.get("evidence", [])]
+
+        def replace(match: re.Match[str]) -> str:
+            number = int(match.group(1))
+            if number < 1 or number > len(source):
+                return ""
+            evidence = source[number - 1]
+            local = index.get((str(evidence.doc_id), str(evidence.chunk_id)))
+            return f"[E{local}]" if local else ""
+
+        rebased = re.sub(r"\[E(\d+)\]", replace, text)
+        return re.sub(r"[ \t]{2,}", " ", rebased).strip()
 
 
 class LiteratureNodeExecutor(BaseAgent):

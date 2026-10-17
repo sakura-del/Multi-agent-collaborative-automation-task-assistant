@@ -388,3 +388,51 @@ class TestPromptRendering:
         assert "不可信" in prompt
         assert "模型推断" in prompt
         assert "[E1] 证据片段" in prompt
+
+
+class TestDependencyMarkerRebasing:
+    """汇总/写节点的依赖文本必须重定位 `[E{n}]`，否则引用无法解析（Exit Gate 实跑发现）。"""
+
+    def _evidence(self, doc_id, chunk_id, excerpt="x"):
+        from app.orchestration.contracts import Evidence
+
+        return Evidence(
+            doc_id=doc_id,
+            chunk_id=chunk_id,
+            source_url="https://arxiv.org/abs/2401.00001v1",
+            excerpt=excerpt,
+        )
+
+    def test_rebases_markers_to_target_pool(self) -> None:
+        from app.orchestration.workflows.literature_review import LiteratureReviewWorkflow
+
+        dep_evidence = [self._evidence(uuid4(), uuid4()), self._evidence(uuid4(), uuid4())]
+        target_evidence = [dep_evidence[1], self._evidence(uuid4(), uuid4())]
+        workflow = LiteratureReviewWorkflow()
+        workflow._prepared["n2"] = {
+            "evidence": [item.model_dump(mode="json") for item in dep_evidence]
+        }
+
+        rebased = workflow._rebased_dependency_outputs(
+            {"n2": "见 [E1] 与 [E2] 及 [E9]"}, target_evidence
+        )
+
+        assert rebased["n2"] == "见 与 [E1] 及"
+        assert "[E2]" not in rebased["n2"]
+
+    def test_summarize_strips_foreign_markers(self) -> None:
+        from app.orchestration.workflows.literature_review import LiteratureReviewWorkflow
+
+        dep_evidence = [self._evidence(uuid4(), uuid4())]
+        workflow = LiteratureReviewWorkflow()
+        workflow._prepared["n3"] = {
+            "evidence": [item.model_dump(mode="json") for item in dep_evidence]
+        }
+        content = workflow._summarize_dependencies({"n3": "正文 [E1] 结束"}, [])
+        assert "[E1]" not in content
+        assert "正文" in content
+        # 带目标证据时可重定位
+        content2 = workflow._summarize_dependencies(
+            {"n3": "正文 [E1] 结束"}, target_evidence=dep_evidence
+        )
+        assert "[E1]" in content2
