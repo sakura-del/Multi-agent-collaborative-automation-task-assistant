@@ -90,3 +90,19 @@ Recorded before starting Plan 2:
 - [x] full `pytest tests -q` green — **573 passed**, `black --check` + `ruff check` clean
 - [x] `docker compose up -d --build` + readiness `database=ok redis=ok chroma=ok` — all five containers healthy; `GET /api/v1/health/ready` via Nginx returned `{"status":"ready","checks":{"database":"ok","redis":"ok","chroma":"ok"}}`; `GET /` served the in-image Vue build (HTTP 200, `id="app"`)
 - [x] two users cannot list/delete/search each other's documents — verified live via Nginx with two fresh accounts (script `scripts/gate-verify.ps1`): B list=0, B delete A doc=404, B search=0, A search=4 (own only), A delete own=200 then list=0
+
+## Plan 2 Execution Log (task-runtime)
+
+Branch: `codex/plan2-task-runtime`（从 `be66476` 拉出，TDD per task）。
+
+| Task | Commit | Summary |
+|------|--------|---------|
+| 1 | `39cac85` | 运行时 ORM 字段、共享契约 `contracts.py`、可回滚迁移 `8f1c2b3d4e5f`；服务器 PostgreSQL `upgrade → downgrade -1 → upgrade` round-trip 通过 |
+| 2 | `cc8ddcb` | owner-scoped `TaskRepository` / `EventRepository`、原子状态流转、递增事件序号、`events_after` 回放；PostgreSQL 并发序号集成测试通过 |
+
+Plan 2 notes:
+
+- 计划 2 在共享工作树内用分支 `codex/plan2-task-runtime` 开发，未再建独立 worktree（同一时间只有一个活跃计划，避免 Windows 侧 venv 与路径重复）。
+- 迁移 `8f1c2b3d4e5f` 的 `event_seq` 历史回填使用 PostgreSQL `UPDATE ... FROM` + 窗口函数；本地 SQLite 不执行迁移 round-trip，统一在服务器 PostgreSQL 验证（SQLite 本身也不支持首版迁移里的 `now()` 默认值）。
+- `EventRepository` 将 `TaskEvent.status` 存于 `ExecutionLog.context` 的保留键 `status`，不新增列；`to_event()` 回放时剥离该键，payload 原样返回。
+- 跨仓开发流：Windows 本地写代码 + 本地 pytest（`--basetemp`），每个任务结束后 bundle 同步到服务器跑完整套件、迁移 round-trip 与集成测试。

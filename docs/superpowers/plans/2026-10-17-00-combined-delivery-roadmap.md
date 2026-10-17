@@ -239,5 +239,7 @@ npm run build
 - [x] 备份：`codex/literature-review` 分支已推送 GitHub（HTTPS `backup` remote）
 - [x] Plan 2 Task 1：运行时 ORM 字段 + 共享契约 + 可回滚迁移
       （582 passed；服务器 PostgreSQL 上 `upgrade → downgrade -1 → upgrade` round-trip 通过）
-- [ ] Plan 2 Task 2：owner-scoped 任务/事件仓库（下一步）
+- [x] Plan 2 Task 2：owner-scoped 任务/事件仓库
+      （591 passed + 1 PostgreSQL 集成测试通过；本地与服务器双重验证）
+- [ ] Plan 2 Task 3：Scheduler 状态转换持久化观察者（下一步）
 
