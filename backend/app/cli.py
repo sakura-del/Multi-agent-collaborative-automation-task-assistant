@@ -61,6 +61,7 @@ async def run_literature_demo(args: argparse.Namespace) -> int:
         return 2
 
     from app.knowledge.services.factory import init_kb
+    from app.knowledge.services.search_provider import KnowledgeSearchProvider
     from app.orchestration.runtime import RuntimeContainer
     from app.orchestration.services.task_execution import TaskExecution
     from app.tools.literature.offline import ManifestLiteratureSource
@@ -96,7 +97,10 @@ async def run_literature_demo(args: argparse.Namespace) -> int:
     user_id = await _ensure_user(args.username)
     await _ingest_corpus(user_id, source, max_documents=args.max_documents)
 
-    container = RuntimeContainer(literature_source=source)
+    container = RuntimeContainer(
+        literature_source=source,
+        knowledge_query=KnowledgeSearchProvider(),
+    )
     await container.start()
     try:
         execution = TaskExecution(container)
