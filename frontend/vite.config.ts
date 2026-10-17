@@ -1,15 +1,19 @@
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import vue from "@vitejs/plugin-vue";
 import { fileURLToPath, URL } from "node:url";
 
-// Vite 配置：开发服务器 + 后端 API 代理
-// 阶段0：开发期通过 proxy 转发 /api 到后端，避免 CORS 问题
+// Vite 配置：开发服务器 + 后端 API 代理 + 单元测试
 export default defineConfig({
   plugins: [vue()],
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
     },
+  },
+  test: {
+    environment: "happy-dom",
+    setupFiles: ["./src/test/setup.ts"],
+    clearMocks: true,
   },
   server: {
     // 开发服务器端口，与后端 CORS allow_origins 保持一致

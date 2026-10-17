@@ -1,12 +1,13 @@
-/* 全局基础样式：阶段0最小化，后续按设计稿扩展 */
+/* 全局基础样式：工作台布局基元（Plan 4 各任务复用） */
 :root {
-  --color-primary: #3b82f6;
-  --color-bg: #f9fafb;
+  --color-primary: #2563eb;
+  --color-bg: #f8fafc;
   --color-card: #ffffff;
   --color-text: #1f2937;
   --color-border: #e5e7eb;
-  --color-error: #ef4444;
-  --color-success: #10b981;
+  --color-error: #dc2626;
+  --color-success: #059669;
+  --color-warning: #d97706;
 }
 
 * {
@@ -20,9 +21,81 @@ body {
   background: var(--color-bg);
   color: var(--color-text);
   line-height: 1.6;
+  font-size: 15px;
 }
 
 button {
   cursor: pointer;
   font-family: inherit;
 }
+
+.page__header {
+  margin-bottom: 1.25rem;
+}
+
+.page__header h1 {
+  font-size: 1.15rem;
+}
+
+.page__hint {
+  color: #6b7280;
+  font-size: 0.875rem;
+  margin-top: 0.25rem;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.5rem 0.875rem;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-card);
+  font-size: 0.9rem;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn--primary {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #fff;
+}
+
+.input {
+  width: 100%;
+  padding: 0.5rem 0.625rem;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-family: inherit;
+  background: var(--color-card);
+}
+
+.banner {
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  margin-bottom: 0.75rem;
+}
+
+.banner--error {
+  background: #fef2f2;
+  color: var(--color-error);
+}
+
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-card);
+  color: var(--color-text);
+}
+
