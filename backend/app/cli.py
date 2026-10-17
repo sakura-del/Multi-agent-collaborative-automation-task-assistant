@@ -128,24 +128,40 @@ async def run_literature_demo(args: argparse.Namespace) -> int:
 
 
 async def _connectivity_check() -> int:
-    """LLM 连通性验证（Plan 3 §6 前置要求）。"""
+    """LLM 连通性验证（Plan 3 §6 前置要求：普通 chat 与流式各一次）。"""
     from app.llm.factory import get_llm_manager
+    from app.llm.models import Message, MessageRole
 
     manager = get_llm_manager()
     try:
-        llm = manager.get_llm()
+        llm = manager.get_primary()
     except Exception as exc:
         print(f"LLM 初始化失败: {exc}", file=sys.stderr)
         return 3
-    from app.llm.models import Message, MessageRole
 
     try:
-        response = await llm.chat([Message(role=MessageRole.USER, content="ping")], max_tokens=8)
+        response = await manager.chat(
+            [Message(role=MessageRole.USER, content="ping")], max_tokens=8
+        )
     except Exception as exc:
         print(f"LLM 连通性验证失败: {exc}", file=sys.stderr)
         return 3
+
+    streams = 0
+    try:
+        async for _chunk in manager.stream_chat(
+            [Message(role=MessageRole.USER, content="ping")], max_tokens=8
+        ):
+            streams += 1
+    except Exception as exc:
+        print(f"LLM 流式验证失败: {exc}", file=sys.stderr)
+        return 3
+
     preview = (response.content or "").strip().replace("\n", " ")[:80]
-    print(f"LLM 连通性 OK: {getattr(llm, 'model', 'unknown')} -> {preview!r}")
+    print(
+        f"LLM 连通性 OK: {getattr(llm, 'model', 'unknown')} -> {preview!r}"
+        f"（流式分片 {streams} 个）"
+    )
     return 0
 
 
