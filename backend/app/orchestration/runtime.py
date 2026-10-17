@@ -119,6 +119,14 @@ class RuntimeContainer:
         """按类型创建 Agent 实例（reviewer 等由 TaskExecution 使用）。"""
         return self._agent_factory(agent_type)
 
+    def use_planner(self, factory: PlannerFactory) -> None:
+        """替换规划器工厂（退出验收/实验注入确定性规划器）。"""
+        self._planner_factory = factory
+
+    def use_agent_factory(self, factory: AgentFactory) -> None:
+        """替换 Agent 工厂（退出验收/实验注入确定性执行与校验器）。"""
+        self._agent_factory = factory
+
     def track(self, task_id: UUID, coroutine: Coroutine[Any, Any, None]) -> None:
         """登记并启动后台协程；同一任务已有运行中的协程时不重复启动。"""
         existing = self._tasks.get(task_id)
