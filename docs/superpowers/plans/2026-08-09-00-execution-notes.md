@@ -205,5 +205,15 @@ Plan 3 notes:
 - **NO_PROXY 陷阱**：开发机 `NO_PROXY` 含 IPv6 回环写法 `[::1]`，httpx 会把每个 NO_PROXY 条目当 URL 解析并抛 `InvalidURL: Invalid port: ':1]'`。新增开发包装器 `scripts/run_without_proxy.py`：仅剔除含方括号的非法条目、保留 HTTP(S)_PROXY，并支持 `-m 模块` 入口；`prepare_demo_corpus.py` 与 `app.cli --check` 均可用它运行。
 - 新增 Plan 3 验收脚本 `scripts/plan3_exit_gate.py`（阶段：语料哈希 → 离线真实模型演示 → 引用可回溯/产物哈希/重启恢复 → JSON 报告），含 6 个纯函数测试；与 CLI 共用 `--data-root`（默认 `backend/.runtime`）以适配宿主机运行。
 - **服务器可达性**：`10.0.10.2` 自 23:17 起 ping/SSH/HTTP(48080) 全部超时（与用户提到的另一项目 200G 占用事件同期，用户确认与本项目无关），服务器侧验证与 Exit Gate 重跑待其恢复。
+
+## Plan 4（前端工作台）执行记录
+
+| Task | commit | 交付与验证 |
+| --- | --- | --- |
+| 1 | `0cecd66` | 工作台骨架 + 鉴权状态：`api/types.ts`、`api/client.ts`（单一 Axios 实例、401 单飞刷新 `refreshPromise`、`_retry` 防环、刷新失败回调登出）、`api/auth.ts`、`stores/auth.ts`（bootstrap/login/register/refresh/logout）、`router/index.ts`（/login、/tasks、/tasks/:taskId、/knowledge + 等待 `auth.ready` 的守卫）、`layouts/AppLayout.vue`（安静左导航 + 当前用户 + 图标登出）、`views/LoginView.vue`（登录/注册 + redirect 回跳）、三个占位视图、`test/setup.ts`（每例清 localStorage）；Vitest 配置进 `vite.config.ts`。**验证：`npm run test:unit -- --run` 7 passed、`npm run type-check` 通过、`npm run build` 成功（154KB JS / 3.4KB CSS）** |
+
+Plan 4 备注：
+- 依赖版本按 Vite 5 约束固定：`vitest@^2.1.9`（vitest 5 要求 vite ≥6，会 ERESOLVE）、`@vue/test-utils@^2.4.6`、`happy-dom@^15`、`@playwright/test@^1.48.2`（e2e 浏览器安装放到 Task 8）；另新增 `@vue-flow/core`、`lucide-vue-next`。
+- 测试遵循计划：只 mock `authApi`，不 mock Axios 内部；先跑测试看失败（Step 4），再实现（Step 5–7）。
 - **配置优先级缺陷（待修，Plan 5 实验前必须解决）**：`get_settings()` 用 `Settings(**yaml_defaults)` 把 `config/default.yaml` 当作**构造参数**注入，而 pydantic-settings 中 init 参数优先级最高，导致 `.env` 与进程环境变量**无法覆盖** YAML 值（注释声称可覆盖）。本次只能通过改 `config/default.yaml` 切换模型；建议后续改为自定义 `settings_customise_sources`（YAML 作为最低优先级来源）并补一条覆盖顺序测试。
 - **模型可用性（服务器端点 `https://model.rhzy.ai/v1` 实测）**：该 group 仅支持 `gpt-6-luna`；`gpt-4o` 与 `gpt-4o-mini` 均返回 `404 model_not_found`。因此 `config/default.yaml` 的 `llm.default_model` 由 `gpt-4o-mini` 改为 `gpt-6-luna`（`6f2972d`），与正式实验模型一致；密钥仅写入 `.env`（gitignore，600 权限），不进入代码/文档/提交。
