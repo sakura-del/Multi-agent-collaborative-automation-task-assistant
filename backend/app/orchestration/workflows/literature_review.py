@@ -83,10 +83,13 @@ class LiteratureReviewWorkflow:
 
     # ===== 计划管理 =====
 
-    def use_plan(self, plan: TaskPlan) -> TaskPlan:
-        """绑定当前计划（重启恢复后由 TaskExecution 注入）。"""
+    def use_plan(self, plan: TaskPlan) -> "LiteratureReviewWorkflow":
+        """绑定当前计划并返回工作流自身（便于链式构造）。
+
+        重启恢复或执行期由 TaskExecution 注入已持久化计划。
+        """
         self._plan = plan
-        return plan
+        return self
 
     def require_node(self, node_id: str) -> PlanNode:
         """按 node_id 取计划节点；计划缺失时要求人工介入。"""
