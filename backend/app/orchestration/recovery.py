@@ -15,12 +15,21 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+from uuid import UUID
 
 from app.core.logging import get_logger
 from app.orchestration.dag_engine import TaskDAG
 
+if TYPE_CHECKING:  # 仅类型检查：运行期按需导入，避免 orchestration ↔ db 循环依赖
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.orchestration.contracts import TaskEvent
+
 logger = get_logger(__name__)
+
+# 上次进程遗留的运行态节点：恢复时统一重置为 READY，避免调度器误判
+ABANDONED_NODE_STATUSES = frozenset({"running", "validating", "retrying"})
 
 
 @dataclass
@@ -51,6 +60,22 @@ class ScheduleSnapshot:
         )
 
 
+@dataclass
+class RecoveryState:
+    """从数据库恢复出的调度上下文。
+
+    - `dag`：TaskDag.graph 还原的 DAG；
+    - `pre_completed`：已完成节点，传给 `Scheduler.run(pre_completed=...)`；
+    - `reset_nodes`：被重置为 READY 的遗留运行态节点；
+    - `event`：追加的 `task_recovery` 事件（无重置时为 None）。
+    """
+
+    dag: TaskDAG
+    pre_completed: set[str]
+    reset_nodes: list[str] = field(default_factory=list)
+    event: TaskEvent | None = None
+
+
 class RecoveryManager:
     """断点续传管理器：持久化与恢复调度状态。
 
@@ -64,7 +89,81 @@ class RecoveryManager:
         snapshot = ScheduleSnapshot.from_json(data)
         dag, completed = RecoveryManager.restore(snapshot)
         await scheduler.run(dag, task_id=task_id, pre_completed=completed)
+
+        # 生产路径（PostgreSQL 为事实来源）
+        state = await RecoveryManager.load_state(session, task_id)
+        await scheduler.run(state.dag, task_id=task_id, pre_completed=state.pre_completed)
     """
+
+    @staticmethod
+    async def load_state(
+        session: AsyncSession,
+        task_id: UUID,
+        *,
+        append_event: bool = True,
+    ) -> RecoveryState | None:
+        """从数据库恢复调度上下文：TaskDag.graph + Subtask 状态。
+
+        - 已完成子任务 → `pre_completed`（Scheduler 直接跳过，不重复执行）；
+        - 遗留 RUNNING / VALIDATING / RETRYING 节点 → 重置为 READY；
+        - 发生重置时追加一条 `task_recovery` 事件（由调用方提交后发布）。
+
+        返回 None 表示任务或 DAG 缺失，调用方应转入人工处理。
+        """
+        from sqlalchemy import select
+
+        from app.db.models.task import Subtask, Task, TaskDag
+        from app.db.repositories.event import EventRepository
+        from app.db.repositories.task import TaskRepository
+        from app.orchestration.task_state import SubtaskStatus
+
+        task = await session.get(Task, task_id)
+        if task is None:
+            return None
+        dag_row = await session.get(TaskDag, task_id)
+        if dag_row is None or not dag_row.graph:
+            return None
+
+        dag = TaskDAG.from_dict(dag_row.graph)
+        repo = TaskRepository(session)
+        completed = await repo.completed_node_ids(task_id)
+
+        rows = (
+            (await session.execute(select(Subtask).where(Subtask.task_id == task_id)))
+            .scalars()
+            .all()
+        )
+        reset_nodes: list[str] = []
+        for row in rows:
+            if row.status in ABANDONED_NODE_STATUSES:
+                row.status = SubtaskStatus.READY.value
+                reset_nodes.append(row.node_id)
+        reset_nodes.sort()
+
+        event: TaskEvent | None = None
+        if append_event and reset_nodes:
+            event = await EventRepository(session).append(
+                task_id,
+                event_type="task_recovery",
+                status=task.status,
+                payload={
+                    "reset_nodes": reset_nodes,
+                    "completed": sorted(completed),
+                },
+            )
+
+        logger.info(
+            "recovery_state_loaded",
+            task_id=str(task_id),
+            completed=len(completed),
+            reset=len(reset_nodes),
+        )
+        return RecoveryState(
+            dag=dag,
+            pre_completed=completed,
+            reset_nodes=reset_nodes,
+            event=event,
+        )
 
     @staticmethod
     def create_snapshot(

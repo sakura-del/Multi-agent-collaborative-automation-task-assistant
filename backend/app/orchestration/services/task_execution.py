@@ -22,7 +22,7 @@ from sqlalchemy import select
 
 from app.core.exceptions import NotFoundException, ValidationException
 from app.core.logging import get_logger
-from app.db.models.task import Subtask, Task, TaskDag
+from app.db.models.task import Subtask, Task
 from app.db.repositories.event import EventRepository
 from app.db.repositories.task import TaskRepository
 from app.orchestration.contracts import (
@@ -36,6 +36,7 @@ from app.orchestration.contracts import (
     TaskStatus,
 )
 from app.orchestration.dag_engine import TaskDAG
+from app.orchestration.recovery import RecoveryManager
 from app.orchestration.runtime import RuntimeContainer
 
 logger = get_logger(__name__)
@@ -348,9 +349,16 @@ class TaskExecution:
     async def _execute(self, task_id: UUID) -> None:
         """后台执行：调度未完成节点 → 复盘 → 完成；支持重启后续跑。"""
         try:
-            dag, completed, subtask_ids, trace_id, block_reason = await self._load_execution_state(
-                task_id
-            )
+            (
+                dag,
+                completed,
+                subtask_ids,
+                trace_id,
+                block_reason,
+                recovery_event,
+            ) = await self._load_execution_state(task_id)
+            if recovery_event is not None:
+                await self._publish(recovery_event)
             if dag is None:
                 if block_reason:
                     await self._mark_waiting_human(task_id, block_reason)
@@ -382,34 +390,42 @@ class TaskExecution:
     async def _load_execution_state(
         self,
         task_id: UUID,
-    ) -> tuple[TaskDAG | None, set[str], dict[str, str], str, str | None]:
-        """读取 DAG、已完成节点、子任务 ID 映射与 trace ID。
+    ) -> tuple[TaskDAG | None, set[str], dict[str, str], str, str | None, TaskEvent | None]:
+        """读取 DAG、已完成节点、子任务 ID 映射、trace ID 与恢复事件。
 
-        返回 (dag, completed, subtask_ids, trace_id, block_reason)；
+        返回 (dag, completed, subtask_ids, trace_id, block_reason, recovery_event)；
         dag 为 None 且 block_reason 非空时表示任务数据不完整，需要转入人工处理。
+        已完成节点与遗留运行态节点的恢复统一委托 `RecoveryManager.load_state()`。
         """
         async with self._session_factory() as session:
             repo = TaskRepository(session)
             try:
                 task = await repo.lock_for_update(task_id)
             except LookupError:
-                return None, set(), {}, "task", None
+                return None, set(), {}, "task", None, None
             if task.status not in {status.value for status in _RECOVERABLE_STATUSES}:
-                return None, set(), {}, "task", None
+                return None, set(), {}, "task", None, None
             if not task.plan:
-                return None, set(), {}, "task", "任务缺少规划数据"
+                return None, set(), {}, "task", "任务缺少规划数据", None
 
-            dag_row = await session.get(TaskDag, task_id)
-            if dag_row is None:
-                return None, set(), {}, "task", "任务缺少 DAG 数据"
+            state = await RecoveryManager.load_state(session, task_id)
+            if state is None:
+                return None, set(), {}, "task", "任务缺少 DAG 数据", None
 
-            dag = TaskDAG.from_dict(dag_row.graph)
-            completed = await repo.completed_node_ids(task_id)
             subtask_rows = (
                 await session.execute(select(Subtask).where(Subtask.task_id == task_id))
             ).scalars()
             subtask_ids = {row.node_id: str(row.id) for row in subtask_rows}
-            return dag, completed, subtask_ids, self._trace_id(task), None
+            # 重置遗留运行态节点需要落库，恢复事件在提交后由调用方发布
+            await session.commit()
+            return (
+                state.dag,
+                state.pre_completed,
+                subtask_ids,
+                self._trace_id(task),
+                None,
+                state.event,
+            )
 
     async def _finish_waiting_human(self, task_id: UUID, result: Any) -> None:
         """调度未全部完成：任务转入 WAITING_HUMAN 并记录事件。"""
