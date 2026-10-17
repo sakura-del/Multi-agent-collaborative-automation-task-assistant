@@ -20,13 +20,15 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
-from app.orchestration.contracts import (
-    Evidence,
-    ExecutionResult,
-    ValidationCheck,
-    ValidationReport,
-)
+if TYPE_CHECKING:  # 运行期按需导入：避免 knowledge → orchestration 包初始化时的循环依赖
+    from app.orchestration.contracts import (
+        Evidence,
+        ExecutionResult,
+        ValidationCheck,
+        ValidationReport,
+    )
 
 #: 计划要求的固定检查名（顺序即报告顺序）
 REQUIREMENT_CHECKS: tuple[str, ...] = (
@@ -55,11 +57,15 @@ DEFAULT_DUPLICATE_RATIO_THRESHOLD = 0.20
 
 
 def _ok(name: str, message: str) -> ValidationCheck:
-    return ValidationCheck(name=name, passed=True, message=message)
+    from app.orchestration.contracts import ValidationCheck as Check
+
+    return Check(name=name, passed=True, message=message)
 
 
 def _fail(name: str, message: str) -> ValidationCheck:
-    return ValidationCheck(name=name, passed=False, message=message)
+    from app.orchestration.contracts import ValidationCheck as Check
+
+    return Check(name=name, passed=False, message=message)
 
 
 class CitationValidator:
@@ -172,7 +178,9 @@ class CitationValidator:
         passed = all(check.passed for check in checks)
         score = round(100.0 * sum(1 for check in checks if check.passed) / len(checks), 2)
         feedback = "; ".join(check.message for check in checks if not check.passed)
-        return ValidationReport(
+        from app.orchestration.contracts import ValidationReport as Report
+
+        return Report(
             passed=passed,
             score=score,
             checks=checks,
