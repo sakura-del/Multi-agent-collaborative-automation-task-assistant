@@ -160,6 +160,7 @@ Branch: `codex/plan3-literature-workflow`（从 `9609130` 拉出，TDD per task�
 |------|--------|---------|
 | 1 | `fbac430` | `app/tools/literature/`（严格模型 + arXiv Atom 适配器 + 受限 PDF 下载 + 离线清单回退）；`core/exceptions.py` 新增 `UpstreamError` / `UpstreamTemporaryError`；16 个 MockTransport 测试 |
 | 2 | `3efa83a` | `LiteratureContextBuilder` + `EvidenceContext` 契约；`KnowledgeDocumentService.search_for_context()` owner-scoped 检索入口；8 个测试（标记/截断/隔离/非法标识/owner 过滤） |
+| 3 | `484a1cf` | `LiteratureReviewWorkflow` 五个缝（plan/prepare_node/execute_node/validate_node/review）+ 文献契约校验（五类节点/终端 review/write 依赖 extract/3–10 研究问题，一次修复）；`PlannerAgent` 文献契约规划与五节点降级计划；`ExecutorAgent.execute_result()` 类型化 `ExecutionResult` + 引用越界拒绝；Prompt 经 PromptManager 渲染；逻辑测试 15 个 |
 
 Plan 3 notes:
 
@@ -170,3 +171,8 @@ Plan 3 notes:
 - Task 2 额外修改了 `document_service.py`（原计划文件清单未列）：新增 `search_for_context(user_id, query, top_k)`，作为证据检索的命名缝，内部复用 `search()` 的 `where={"user_id": ...}` + 独立 namespace 语义，便于 Task 3 工作流注入假实现。
 - 证据映射规则：空白片段跳过；doc_id/chunk_id 非 UUID 或 source_url 非法 → `ValidationException`（不静默丢弃）；excerpt 截断 2000 字符（与 `Evidence` 契约一致）；证据少于 2 条 `insufficient=True`。
 - `EvidenceContext.text` 使用稳定标记 `[E{n}] doc=... chunk=...`，Task 4 的引用校验按该标记解析。
+- Task 3 新增 `HumanActionRequiredError`（409）与 `EvidenceCitationError`（422）；工作流对计划契约/schema 失败只做一次修复请求，二次失败转 WAITING_HUMAN（由 TaskExecution 既有失败路径承接）。
+- `PlannerAgent` 保持通用三节点降级计划不变；仅当输入带 `plan_contract="literature_review"` 时走五类节点文献契约（含 `_degraded_literature_plan` 五节点确定性计划），因此 Plan 2 的通用路径与历史退出验收语义不受影响。
+- `ExecutorAgent.execute_result()` 面向文献工作流：证据约束 Prompt（检索文本不可信、形式化结论需 `[E{n}]`、无证据标注「模型推断」），解析标记后只回填被引用的证据；出现越界编号（如 `[E9]`）直接抛 `EvidenceCitationError`，不落库。
+- TaskExecution 接线：`literature_review` 任务由工作流承担规划；执行时若容器提供 `knowledge_query`（KnowledgeDocumentService）则以 `LiteratureNodeExecutor`/`LiteratureNodeValidator` 替换通用 Agent，搜索节点使用容器新增的 `literature_source`（离线清单源在 Task 6 接入）。
+- 由于文献任务改为五节点契约，Plan 2 的确定性计划夹具（`tests/llm/deterministic_llm.py`、`test_task_api.py`、`test_task_execution.py`）与 `scripts/plan2_exit_gate.py` 断言同步升级为 n1..n5；升级后在服务器 PostgreSQL+Redis 重跑验收脚本：`ok=true`、30 个事件、崩溃恢复 `reset_nodes=[n2]`；任务 `368a4734-1022-466e-84a8-492384c7a8d9`（完整链路）与 `80660bb3-e44c-4de2-b2d6-3c59efa5cda8`（恢复）均 completed。

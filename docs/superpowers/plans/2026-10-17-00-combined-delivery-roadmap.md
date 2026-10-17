@@ -257,7 +257,8 @@ npm run build
 - [ ] Plan 3：文献综述工作流闭环（分支 `codex/plan3-literature-workflow`，从 `9609130` 拉出）
   - [x] Task 1：确定性 arXiv 适配器 + 离线回退（679 passed；主机白名单/重定向逐跳校验/签名与 30MB 上限）
   - [x] Task 2：owner-scoped 证据上下文（687 passed；`[E{n}]` 稳定标记、excerpt≤2000、跨用户隔离）
-  - [ ] Task 3：文献规划与证据约束执行（下一步）
+  - [x] Task 3：文献规划与证据约束执行（702 passed；五类节点契约 + `[E{n}]` 越界拒绝 + 一次修复后转人工）
+  - [ ] Task 4：确定性引用校验与定向重做（下一步）
   - [ ] Task 3：文献规划与证据约束执行
   - [ ] Task 4：确定性引用校验与定向重做
   - [ ] Task 5：复盘汇总与 Markdown/DOCX 导出
