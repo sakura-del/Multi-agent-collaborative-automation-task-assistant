@@ -56,6 +56,17 @@ class Evidence(BaseModel):
     excerpt: str = Field(min_length=1, max_length=2000)
 
 
+class EvidenceContext(BaseModel):
+    """owner-scoped 证据上下文：稳定标记文本 + 结构化证据列表（Plan 3 Task 2）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: str
+    evidence: list[Evidence]
+    insufficient: bool
+    query: str
+
+
 class PlanNode(BaseModel):
     """规划出的 DAG 节点。"""
 

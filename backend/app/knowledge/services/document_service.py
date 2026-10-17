@@ -206,6 +206,19 @@ class KnowledgeDocumentService:
             skip_rerank=request.skip_rerank,
         )
 
+    async def search_for_context(
+        self,
+        user_id: UUID,
+        query: str,
+        *,
+        top_k: int = 8,
+    ) -> list[RetrievalResult]:
+        """证据上下文检索入口（Plan 3 Task 2）：与 search 同一 owner 隔离语义。"""
+        return await self.search(
+            user_id,
+            KnowledgeSearchIn(query=query, top_k=top_k),
+        )
+
     async def rebuild_bm25(self) -> int:
         """从持久化的 ready 分块重建 BM25 内存索引（启动恢复场景）。"""
         rows = (
