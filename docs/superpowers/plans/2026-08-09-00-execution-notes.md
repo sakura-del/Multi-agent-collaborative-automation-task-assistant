@@ -100,6 +100,7 @@ Branch: `codex/plan2-task-runtime`（从 `be66476` 拉出，TDD per task）。
 | 1 | `39cac85` | 运行时 ORM 字段、共享契约 `contracts.py`、可回滚迁移 `8f1c2b3d4e5f`；服务器 PostgreSQL `upgrade → downgrade -1 → upgrade` round-trip 通过 |
 | 2 | `cc8ddcb` | owner-scoped `TaskRepository` / `EventRepository`、原子状态流转、递增事件序号、`events_after` 回放；PostgreSQL 并发序号集成测试通过 |
 | 3 | `dd15c21` | `SubtaskStatus` 增加 `READY` / `CANCELLED`；`TaskScheduler` 引入 `ScheduleObserver`（默认 `NullScheduleObserver`）与节点上下文（task_id/trace_id/subtask_id/依赖输出）；新增 `DatabaseScheduleObserver`（独立 session 锁行 → 更新子任务/重试/输出 → 追加事件 → commit → publish）；`events.py` 提供 `EventPublisher` 协议 + `NullEventPublisher` |
+| 4 | `2c7189f` | 新增 `RuntimeContainer`（LLM/Agent/Planner/事件/后台任务注册）与 `TaskExecution` 深模块（submit / approve_plan / control / get_snapshot / events_after / recover）；`contracts.py` 增加 `LiteratureReviewRequest`、`TaskControlRequest`、`SubtaskSnapshot`、`TaskSnapshot`；Planner 改为输出 `TaskPlan` + `TaskDAG`；`main.py` lifespan 接线并调用 `recover()` |
 
 Plan 2 notes:
 
@@ -110,4 +111,10 @@ Plan 2 notes:
   `PENDING → READY → RUNNING → FAILED → RETRYING → READY → RUNNING`，并新增可注入的异步转换回调，
   保证 `ScheduleObserver` 收到的转换顺序与真实顺序一致（含重试内部转换）。
 - `events.py` 由 Task 3 创建（本文件 §2 的要求），Task 6 在其上扩展 Redis 发布/订阅、ticket 与 WebSocket hub。
+- Task 4 按本文件 §2 在 `contracts.py` 定义 transport-independent 契约（`LiteratureReviewRequest` / `TaskControlRequest` / `SubtaskSnapshot` / `TaskSnapshot`），HTTP Schema 留到 Task 5 做映射；编排层不导入 `app.schemas`。
+- Task 4 把 `PlannerAgent` 的输出改为 `TaskPlan`（一次 LLM 调用 + schema 校验），DAG 由 `TaskPlan.nodes` 构建并在成环时报 `DAGCycleError`；无 LLM 时降级为确定性三节点计划。`tests/test_planner_agent.py` 已同步重写。
+- `TaskRepository.transition()` 改为对 `Task.__table__` 的 Core UPDATE：ORM-enabled UPDATE 会让 `updated_at`（onupdate 列）在会话中过期，随后构建快照时触发 `MissingGreenlet`。
+- TaskExecution 测试使用文件型 SQLite（WAL）：内存库 + `StaticPool` 是单连接，后台 session 与轮询 session 会互相回滚事务，不能用来验证真实的多 session 行为。
+- `main.py` lifespan 现在创建 `RuntimeContainer` + `TaskExecution`，挂到 `app.state.container` / `app.state.runtime`，启动时调用 `recover()`（表未建时只告警不阻塞），关闭时先取消后台任务再释放 engine/Redis。
+- `TaskExecution` 的规划失败路径严格只执行一次 schema 修复调用；`recover()` 只调度 `RUNNING` / `REVIEWING` 状态任务，已完成节点由 `pre_completed` 跳过。
 - 跨仓开发流：Windows 本地写代码 + 本地 pytest（`--basetemp`），每个任务结束后 bundle 同步到服务器跑完整套件、迁移 round-trip 与集成测试。

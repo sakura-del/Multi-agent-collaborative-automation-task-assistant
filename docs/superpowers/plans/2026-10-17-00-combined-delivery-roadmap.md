@@ -243,5 +243,7 @@ npm run build
       （591 passed + 1 PostgreSQL 集成测试通过；本地与服务器双重验证）
 - [x] Plan 2 Task 3：Scheduler 状态转换持久化观察者
       （628 passed；READY/CANCELLED 状态、DatabaseScheduleObserver、事件发布协议）
-- [ ] Plan 2 Task 4：运行时容器与 TaskExecution 深模块（下一步）
+- [x] Plan 2 Task 4：运行时容器与 TaskExecution 深模块
+      （638 passed；submit/approve/control/快照/事件/恢复 六个接口，服务器 PG 集成通过）
+- [ ] Plan 2 Task 5：任务 HTTP 命令与查询接口（下一步）
 
