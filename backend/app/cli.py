@@ -43,6 +43,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=True,
         help="知识库使用确定性 Mock 向量（默认开启，保证离线可复现）",
     )
+    demo.add_argument(
+        "--data-root",
+        default=str(Path(__file__).resolve().parents[1] / ".runtime"),
+        help="宿主机可写的数据根目录（上传与产物），默认 backend/.runtime",
+    )
     return parser
 
 
@@ -66,6 +71,16 @@ async def run_literature_demo(args: argparse.Namespace) -> int:
     source = ManifestLiteratureSource(MANIFEST_PATH)
     source.corpus.verify_hashes()
     print(f"离线语料: {len(source.records)} 篇（哈希校验通过，主题: {topic}）")
+
+    # 容器内默认 /app/data/*；宿主机运行时统一落到可写的数据根目录
+    from app.core.config import get_settings
+
+    data_root = Path(args.data_root).resolve()
+    settings = get_settings()
+    settings.app.upload_root = str(data_root / "uploads")
+    settings.app.artifact_root = str(data_root / "artifacts")
+    data_root.mkdir(parents=True, exist_ok=True)
+    print(f"数据根目录: {data_root}")
 
     init_kb(
         force_mock_embedding=args.mock_embedding,

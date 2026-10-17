@@ -125,3 +125,7 @@ tmp/
 # 只提交 query.json 与 manifest.json；PDF 与临时 staging 目录不入库
 backend/demo_data/literature_review/files/
 backend/demo_data/literature_review/files.tmp-*/
+
+# CLI 运行时数据（上传/产物）
+backend/.runtime/
+
