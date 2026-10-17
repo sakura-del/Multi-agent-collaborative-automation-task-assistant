@@ -198,6 +198,7 @@ async def _ingest_corpus(user_id: uuid.UUID, source, *, max_documents: int) -> N
 
     from app.db.models.knowledge import KnowledgeDoc
     from app.db.session import AsyncSessionLocal
+    from app.knowledge.models.document import ChunkStrategy
     from app.knowledge.services.document_service import KnowledgeDocumentService
     from app.knowledge.services.factory import get_index_manager, get_kb, get_storage
 
@@ -229,7 +230,12 @@ async def _ingest_corpus(user_id: uuid.UUID, source, *, max_documents: int) -> N
             )
             with path.open("rb") as handle:
                 upload = UploadFile(file=handle, filename=f"{record.source_id}.pdf")
-                await service.ingest(user_id, upload, title=record.title)
+                await service.ingest(
+                    user_id,
+                    upload,
+                    title=record.title,
+                    strategy=ChunkStrategy.RECURSIVE,
+                )
         print(f"入库 {record.source_id}")
 
 
