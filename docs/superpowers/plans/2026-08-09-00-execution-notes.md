@@ -159,6 +159,7 @@ Branch: `codex/plan3-literature-workflow`（从 `9609130` 拉出，TDD per task�
 | Task | Commit | Summary |
 |------|--------|---------|
 | 1 | `fbac430` | `app/tools/literature/`（严格模型 + arXiv Atom 适配器 + 受限 PDF 下载 + 离线清单回退）；`core/exceptions.py` 新增 `UpstreamError` / `UpstreamTemporaryError`；16 个 MockTransport 测试 |
+| 2 | `3efa83a` | `LiteratureContextBuilder` + `EvidenceContext` 契约；`KnowledgeDocumentService.search_for_context()` owner-scoped 检索入口；8 个测试（标记/截断/隔离/非法标识/owner 过滤） |
 
 Plan 3 notes:
 
@@ -166,3 +167,6 @@ Plan 3 notes:
 - `UpstreamTemporaryError`（超时/连接失败/5xx）才允许离线清单回退；4xx、非法 XML、schema 错误一律上抛，避免静默降级（Task 3 工作流复用同一语义）。
 - `load_offline_manifest()` 只校验 `LiteratureRecord` 字段，清单里的 `local_path` / `sha256` 等附加元数据被忽略，供 Task 6 的冻结语料清单使用。
 - Atom 字段统一空白折叠；`published_at` 统一转 UTC（naive 按 UTC 解释）；`source_id` 从 `/abs/<id>` 提取（含版本号如 `2401.12345v1`）。
+- Task 2 额外修改了 `document_service.py`（原计划文件清单未列）：新增 `search_for_context(user_id, query, top_k)`，作为证据检索的命名缝，内部复用 `search()` 的 `where={"user_id": ...}` + 独立 namespace 语义，便于 Task 3 工作流注入假实现。
+- 证据映射规则：空白片段跳过；doc_id/chunk_id 非 UUID 或 source_url 非法 → `ValidationException`（不静默丢弃）；excerpt 截断 2000 字符（与 `Evidence` 契约一致）；证据少于 2 条 `insufficient=True`。
+- `EvidenceContext.text` 使用稳定标记 `[E{n}] doc=... chunk=...`，Task 4 的引用校验按该标记解析。
