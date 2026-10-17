@@ -164,10 +164,16 @@ class TestPreparedCorpus:
 
     def test_prepared_corpus_has_ten_verified_records(self) -> None:
         manifest = DEMO_DIR / MANIFEST_FILENAME
-        if not manifest.is_file():
+        files_dir = DEMO_DIR / FILES_DIRNAME
+        if not manifest.is_file() or not files_dir.is_dir():
             pytest.skip(
-                "离线语料未准备：请先运行 `python scripts/prepare_demo_corpus.py`（唯一需要网络的步骤）"
+                "离线语料文件未准备：请先运行 `python scripts/prepare_demo_corpus.py`（唯一需要网络的步骤）"
             )
         corpus = load_offline_corpus(manifest)
         assert len(corpus.records) == 10
+        if not all((files_dir / f"{record.source_id}.pdf").is_file() for record in corpus.records):
+            pytest.skip(
+                "离线语料 PDF 缺失（可能只在服务器准备）：请在语料所在环境运行 "
+                "`python scripts/prepare_demo_corpus.py`"
+            )
         corpus.verify_hashes()

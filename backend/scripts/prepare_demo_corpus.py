@@ -123,6 +123,8 @@ async def prepare(
         if files_dir.exists():
             shutil.rmtree(files_dir)
         staging.replace(files_dir)
+        # 清掉 DocumentStorage 的伪用户子目录，files/ 只保留 <source_id>.pdf
+        shutil.rmtree(files_dir / str(_storage_user_id()), ignore_errors=True)
 
         manifest = build_manifest(query=query, entries=entries)
         manifest["generated_at"] = datetime.now(UTC).isoformat()
