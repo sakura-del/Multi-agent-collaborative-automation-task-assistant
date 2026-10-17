@@ -163,6 +163,7 @@ Branch: `codex/plan3-literature-workflow`（从 `9609130` 拉出，TDD per task�
 | 3 | `484a1cf` | `LiteratureReviewWorkflow` 五个缝（plan/prepare_node/execute_node/validate_node/review）+ 文献契约校验（五类节点/终端 review/write 依赖 extract/3–10 研究问题，一次修复）；`PlannerAgent` 文献契约规划与五节点降级计划；`ExecutorAgent.execute_result()` 类型化 `ExecutionResult` + 引用越界拒绝；Prompt 经 PromptManager 渲染；逻辑测试 15 个 |
 | 4 | `6a1bd8b` + `5d9b007` | `CitationValidator` 五项确定性检查（标记可解析/证据被引用/断言带证据/必需章节/重复段落比例）+ 两项不可重试完整性检查；`ValidatorAgent` 确定性优先、语义补充；`TaskScheduler` 定向重生成（同节点同证据 + `validation_feedback`，最多 2 次，耗尽转 WAITING_HUMAN）；重生成复用证据缓存（`prepared_for`）；11 + 3 + 2 个新测试 |
 | 5 | `93a0114` + `59346a6` + `0e33760` | `LiteratureExporter`（Markdown/DOCX + 服务端 artifact_id + 受控目录 + HTML 转义/链接校验）；`Artifact` 契约；`ReviewerAgent` 只消费已持久化结果组装 `ReviewReport`；`TaskExecution` 同事务写入 `final_output`/`review_report`/`artifacts` 并置 COMPLETED；`GET /tasks/{id}/artifacts/{artifact_id}` owner-scoped 下载；14 + 2 个新测试 |
+| 6 | `0d59d23` + `e78f7bc` + `36bbfc8` + `22c95a9` | 冻结查询 `query.json` + `prepare_demo_corpus.py`（暂存目录 + 原子替换 + sha256 清单）+ `ManifestLiteratureSource`（离线检索源）+ `tests/test_demo_corpus.py`（11 个：schema/重复 ID/哈希/穿越/日期过滤/真实语料）+ `app/cli.py`（`run-literature-demo --offline [--check]` 薄封装 TaskExecution）+ `.gitignore`/`README` |
 
 Plan 3 notes:
 
@@ -188,3 +189,6 @@ Plan 3 notes:
 - 复盘报告可能带 `summary` 等附加键：导出前只取 `ReviewReport` 字段再校验；`TaskExecution._ordered_execution_results()` 在缺少类型化 `execution_result` 时退化为正文结果，保证 Plan 2 的通用执行路径仍能完成。
 - 测试与验收脚本统一覆盖 `app.artifact_root`（conftest autouse 夹具 + 脚本内 temp 目录），避免写入容器默认 `/app/data/artifacts`。
 - 两个由服务器验收脚本暴露的真实缺陷（`59346a6` 修复）：`ValidatorAgent._legacy_report()` 的 `checks` 曾放入 `ValidationCheck` 对象导致持久化 JSON 序列化失败；`ReviewerAgent` 曾用 `ValidationReport.model_validate` 直接校验通用校验器输出（含 `rule_check` 等额外键）而失败，现改为按字段白名单规范化并跳过异常条目。
+- Task 6 语料准备已在服务器实测（唯一需要网络的步骤）：冻结查询命中 18 篇（需先取 3× 候选窗口再本地日期过滤，`e78f7bc`），下载 10 篇 PDF（36MB）并写入 `manifest.json`（含 sha256）；`files/` 与 staging 目录已 gitignore，只提交 `query.json` + `manifest.json`。服务器语料测试 **11 passed**（本地因 PDF 不随 git 分发而以明确提示 SKIP）。
+- 语料下载复用 `DocumentStorage`（伪用户 `UUID(int=0)`），重命名后清理该子目录，保证 `files/` 只含 `<source_id>.pdf`。
+- **Plan 3 Exit Gate 阻塞点（环境）**：服务器 `.env` 只有 `LLM__DEFAULT_MODEL/PROVIDER/MAX_RETRIES/REQUEST_TIMEOUT`，缺 `LLM__API_KEY`，`--check` 报 `Missing credentials`，因此 Task 6 Step 6 的真实模型离线验收尚未执行；代码与语料均已就绪，补上密钥后运行 `python -m app.cli run-literature-demo --offline --max-documents 10` 即可。
