@@ -162,6 +162,7 @@ Branch: `codex/plan3-literature-workflow`（从 `9609130` 拉出，TDD per task�
 | 2 | `3efa83a` | `LiteratureContextBuilder` + `EvidenceContext` 契约；`KnowledgeDocumentService.search_for_context()` owner-scoped 检索入口；8 个测试（标记/截断/隔离/非法标识/owner 过滤） |
 | 3 | `484a1cf` | `LiteratureReviewWorkflow` 五个缝（plan/prepare_node/execute_node/validate_node/review）+ 文献契约校验（五类节点/终端 review/write 依赖 extract/3–10 研究问题，一次修复）；`PlannerAgent` 文献契约规划与五节点降级计划；`ExecutorAgent.execute_result()` 类型化 `ExecutionResult` + 引用越界拒绝；Prompt 经 PromptManager 渲染；逻辑测试 15 个 |
 | 4 | `6a1bd8b` + `5d9b007` | `CitationValidator` 五项确定性检查（标记可解析/证据被引用/断言带证据/必需章节/重复段落比例）+ 两项不可重试完整性检查；`ValidatorAgent` 确定性优先、语义补充；`TaskScheduler` 定向重生成（同节点同证据 + `validation_feedback`，最多 2 次，耗尽转 WAITING_HUMAN）；重生成复用证据缓存（`prepared_for`）；11 + 3 + 2 个新测试 |
+| 5 | `93a0114` + `59346a6` + `0e33760` | `LiteratureExporter`（Markdown/DOCX + 服务端 artifact_id + 受控目录 + HTML 转义/链接校验）；`Artifact` 契约；`ReviewerAgent` 只消费已持久化结果组装 `ReviewReport`；`TaskExecution` 同事务写入 `final_output`/`review_report`/`artifacts` 并置 COMPLETED；`GET /tasks/{id}/artifacts/{artifact_id}` owner-scoped 下载；14 + 2 个新测试 |
 
 Plan 3 notes:
 
@@ -182,3 +183,8 @@ Plan 3 notes:
 - 定向重生成复用同一证据集：`LiteratureReviewWorkflow` 缓存节点 `prepare_node` 结果，`LiteratureNodeExecutor` 重生成时传入缓存与 `validation_feedback`；`TaskScheduler` 用 `FAILED → RETRYING → READY → RUNNING` 复用既有状态机，未提高温度（执行路径固定 temperature=0.2）。
 - 服务器复核（Task 4 后）：focused `test_citation_validator + test_scheduler + test_validator_agent` 41 passed；全量 718 passed；PG 集成 1 passed；退出验收脚本重跑 `ok=true`（任务 `616c52b6-45f6-487c-857f-fc6c00567ea0` / `f5b3a2e2-1caf-4c5e-8732-38d4022638f8`）。
 - `citation_validator` 对 `app.orchestration.contracts` 采用 `TYPE_CHECKING` + 函数内导入，避免在 `app.orchestration` 包初始化前导入它时形成 knowledge → orchestration → agents → knowledge 循环（`5d9b007`）。
+- Task 5 关键决定：产物路径固定 `<artifact_root>/<user_id>/<task_id>/<artifact_id><suffix>`，artifact_id 由服务端 `uuid4().hex` 生成；`resolve_for_user()` 只接受 32 位十六进制 ID，跨用户/跨任务/穿越一律 404；Markdown 对原始 HTML 做转义、只拒绝 `javascript:`/`data:`/`file:` 等非 HTTP(S) 链接。
+- Task 5 需 `python-docx`（pyproject 已声明）；本地 venv 与服务器 uv venv 均已安装（服务器 uv venv 无 pip，改用 `uv pip install --python .venv/bin/python`）。
+- 复盘报告可能带 `summary` 等附加键：导出前只取 `ReviewReport` 字段再校验；`TaskExecution._ordered_execution_results()` 在缺少类型化 `execution_result` 时退化为正文结果，保证 Plan 2 的通用执行路径仍能完成。
+- 测试与验收脚本统一覆盖 `app.artifact_root`（conftest autouse 夹具 + 脚本内 temp 目录），避免写入容器默认 `/app/data/artifacts`。
+- 两个由服务器验收脚本暴露的真实缺陷（`59346a6` 修复）：`ValidatorAgent._legacy_report()` 的 `checks` 曾放入 `ValidationCheck` 对象导致持久化 JSON 序列化失败；`ReviewerAgent` 曾用 `ValidationReport.model_validate` 直接校验通用校验器输出（含 `rule_check` 等额外键）而失败，现改为按字段白名单规范化并跳过异常条目。
