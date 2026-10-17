@@ -161,6 +161,7 @@ Branch: `codex/plan3-literature-workflow`（从 `9609130` 拉出，TDD per task�
 | 1 | `fbac430` | `app/tools/literature/`（严格模型 + arXiv Atom 适配器 + 受限 PDF 下载 + 离线清单回退）；`core/exceptions.py` 新增 `UpstreamError` / `UpstreamTemporaryError`；16 个 MockTransport 测试 |
 | 2 | `3efa83a` | `LiteratureContextBuilder` + `EvidenceContext` 契约；`KnowledgeDocumentService.search_for_context()` owner-scoped 检索入口；8 个测试（标记/截断/隔离/非法标识/owner 过滤） |
 | 3 | `484a1cf` | `LiteratureReviewWorkflow` 五个缝（plan/prepare_node/execute_node/validate_node/review）+ 文献契约校验（五类节点/终端 review/write 依赖 extract/3–10 研究问题，一次修复）；`PlannerAgent` 文献契约规划与五节点降级计划；`ExecutorAgent.execute_result()` 类型化 `ExecutionResult` + 引用越界拒绝；Prompt 经 PromptManager 渲染；逻辑测试 15 个 |
+| 4 | `6a1bd8b` + `5d9b007` | `CitationValidator` 五项确定性检查（标记可解析/证据被引用/断言带证据/必需章节/重复段落比例）+ 两项不可重试完整性检查；`ValidatorAgent` 确定性优先、语义补充；`TaskScheduler` 定向重生成（同节点同证据 + `validation_feedback`，最多 2 次，耗尽转 WAITING_HUMAN）；重生成复用证据缓存（`prepared_for`）；11 + 3 + 2 个新测试 |
 
 Plan 3 notes:
 
@@ -176,3 +177,8 @@ Plan 3 notes:
 - `ExecutorAgent.execute_result()` 面向文献工作流：证据约束 Prompt（检索文本不可信、形式化结论需 `[E{n}]`、无证据标注「模型推断」），解析标记后只回填被引用的证据；出现越界编号（如 `[E9]`）直接抛 `EvidenceCitationError`，不落库。
 - TaskExecution 接线：`literature_review` 任务由工作流承担规划；执行时若容器提供 `knowledge_query`（KnowledgeDocumentService）则以 `LiteratureNodeExecutor`/`LiteratureNodeValidator` 替换通用 Agent，搜索节点使用容器新增的 `literature_source`（离线清单源在 Task 6 接入）。
 - 由于文献任务改为五节点契约，Plan 2 的确定性计划夹具（`tests/llm/deterministic_llm.py`、`test_task_api.py`、`test_task_execution.py`）与 `scripts/plan2_exit_gate.py` 断言同步升级为 n1..n5；升级后在服务器 PostgreSQL+Redis 重跑验收脚本：`ok=true`、30 个事件、崩溃恢复 `reset_nodes=[n2]`；任务 `368a4734-1022-466e-84a8-492384c7a8d9`（完整链路）与 `80660bb3-e44c-4de2-b2d6-3c59efa5cda8`（恢复）均 completed。
+- Task 4 的检查名固定为 `citation_markers_resolve` / `evidence_is_cited` / `formal_claims_have_evidence` / `required_sections_present` / `duplicate_paragraph_ratio`；另有 `evidence_ids_valid` 与 `evidence_ownership` 两项完整性检查，任一失败时整体 `retryable=False`（重生成无法修复标识缺失/归属越权）。
+- `ValidationReport.score` 保持 0–100；`ValidationResult.score`（0–1）的归一化留给持久化层（Task 5 写 artifact 时一并落库）。
+- 定向重生成复用同一证据集：`LiteratureReviewWorkflow` 缓存节点 `prepare_node` 结果，`LiteratureNodeExecutor` 重生成时传入缓存与 `validation_feedback`；`TaskScheduler` 用 `FAILED → RETRYING → READY → RUNNING` 复用既有状态机，未提高温度（执行路径固定 temperature=0.2）。
+- 服务器复核（Task 4 后）：focused `test_citation_validator + test_scheduler + test_validator_agent` 41 passed；全量 718 passed；PG 集成 1 passed；退出验收脚本重跑 `ok=true`（任务 `616c52b6-45f6-487c-857f-fc6c00567ea0` / `f5b3a2e2-1caf-4c5e-8732-38d4022638f8`）。
+- `citation_validator` 对 `app.orchestration.contracts` 采用 `TYPE_CHECKING` + 函数内导入，避免在 `app.orchestration` 包初始化前导入它时形成 knowledge → orchestration → agents → knowledge 循环（`5d9b007`）。

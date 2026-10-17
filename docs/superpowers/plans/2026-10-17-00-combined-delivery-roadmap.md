@@ -258,7 +258,8 @@ npm run build
   - [x] Task 1：确定性 arXiv 适配器 + 离线回退（679 passed；主机白名单/重定向逐跳校验/签名与 30MB 上限）
   - [x] Task 2：owner-scoped 证据上下文（687 passed；`[E{n}]` 稳定标记、excerpt≤2000、跨用户隔离）
   - [x] Task 3：文献规划与证据约束执行（702 passed；五类节点契约 + `[E{n}]` 越界拒绝 + 一次修复后转人工）
-  - [ ] Task 4：确定性引用校验与定向重做（下一步）
+  - [x] Task 4：确定性引用校验与定向重做（718 passed；五项固定检查 + 两次重生成后转人工）
+  - [ ] Task 5：复盘汇总与 Markdown/DOCX 导出（下一步）
   - [ ] Task 3：文献规划与证据约束执行
   - [ ] Task 4：确定性引用校验与定向重做
   - [ ] Task 5：复盘汇总与 Markdown/DOCX 导出
