@@ -214,6 +214,18 @@ class TaskExecution:
                 raise NotFoundException("任务不存在")
             return await self._build_snapshot(session, task)
 
+    async def list_tasks(
+        self,
+        user_id: UUID,
+        *,
+        skip: int = 0,
+        limit: int = 20,
+    ) -> list[TaskSnapshot]:
+        """分页列出当前用户的任务快照（HTTP 列表接口使用）。"""
+        async with self._session_factory() as session:
+            tasks = await TaskRepository(session).list_for_user(user_id, skip=skip, limit=limit)
+            return [await self._build_snapshot(session, task) for task in tasks]
+
     async def events_after(
         self,
         user_id: UUID,
