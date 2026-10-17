@@ -254,5 +254,12 @@ npm run build
 - [x] Plan 2 Exit Gate：PASSED（2026-10-17，commit `0751819`）
       （服务器 PostgreSQL+Redis 验收 `ok=true`；完整链路任务 `529b57ec`、恢复任务 `ab823084`；
       证据见 `2026-08-09-00-execution-notes.md` §Plan 2 Exit Gate）
-- [ ] Plan 3：文献综述工作流闭环（下一步，从合并后的 `codex/literature-review` 拉分支）
+- [ ] Plan 3：文献综述工作流闭环（分支 `codex/plan3-literature-workflow`，从 `9609130` 拉出）
+  - [x] Task 1：确定性 arXiv 适配器 + 离线回退（679 passed；主机白名单/重定向逐跳校验/签名与 30MB 上限）
+  - [ ] Task 2：owner-scoped 证据上下文（下一步）
+  - [ ] Task 3：文献规划与证据约束执行
+  - [ ] Task 4：确定性引用校验与定向重做
+  - [ ] Task 5：复盘汇总与 Markdown/DOCX 导出
+  - [ ] Task 6：冻结离线演示语料 + CLI 验收
+  - [ ] Plan 3 Exit Gate：离线真实模型任务，引用全部可回溯
 

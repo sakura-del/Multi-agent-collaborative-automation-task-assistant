@@ -151,3 +151,18 @@ Plan 2 notes:
 | 崩溃恢复 | `ab823084-1a36-48ac-a99d-1d30a5a9c367` | 崩溃前 `{n1: completed, n2: running, n3: pending}`（已持久化，非仅内存）；崩溃后同库重建 runtime → `recover()`：`task_recovery` 事件 `event_id=11`，`reset_nodes=[n2]`、`completed=[n1]`；恢复后执行器只调用 `[n2, n3]`（n1 未重跑）；最终 `completed`，尝试次数 `{n1:0, n2:0, n3:0}`，事件总数 23 |
 
 结论：认证 HTTP、规划确认、持久化 Scheduler 执行、事件回放与重启恢复全部在 PostgreSQL 上闭环；不存在只保存在内存中的执行状态。按路线图 §5，Exit Gate 通过后 `merge --no-ff` 回 `codex/literature-review` 再开 Plan 3。
+
+## Plan 3 Execution Log (literature-workflow)
+
+Branch: `codex/plan3-literature-workflow`（从 `9609130` 拉出，TDD per task）。
+
+| Task | Commit | Summary |
+|------|--------|---------|
+| 1 | `fbac430` | `app/tools/literature/`（严格模型 + arXiv Atom 适配器 + 受限 PDF 下载 + 离线清单回退）；`core/exceptions.py` 新增 `UpstreamError` / `UpstreamTemporaryError`；16 个 MockTransport 测试 |
+
+Plan 3 notes:
+
+- arXiv 下载只允许 HTTPS + host ∈ {`arxiv.org`, `export.arxiv.org`}，手动跟随 ≤3 跳重定向且每跳重新校验 host；大小上限与 `%PDF-` 签名复用 `DocumentStorage`（未改存储层，用 `_StreamingUpload` 适配 httpx 字节流）。
+- `UpstreamTemporaryError`（超时/连接失败/5xx）才允许离线清单回退；4xx、非法 XML、schema 错误一律上抛，避免静默降级（Task 3 工作流复用同一语义）。
+- `load_offline_manifest()` 只校验 `LiteratureRecord` 字段，清单里的 `local_path` / `sha256` 等附加元数据被忽略，供 Task 6 的冻结语料清单使用。
+- Atom 字段统一空白折叠；`published_at` 统一转 UTC（naive 按 UTC 解释）；`source_id` 从 `/abs/<id>` 提取（含版本号如 `2401.12345v1`）。
