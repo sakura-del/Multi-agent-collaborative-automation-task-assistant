@@ -25,9 +25,10 @@ redis:
   default_ttl: 3600
 
 llm:
-  # 默认模型（开发期优先国产模型降本）
+  # 默认模型：正式实验模型（gpt-6-luna，经 model.rhzy.ai 兼容端点提供；
+  # 该端点 group 不支持 gpt-4o / gpt-4o-mini，详见执行注释）
   default_provider: "openai"
-  default_model: "gpt-4o-mini"
+  default_model: "gpt-6-luna"
   request_timeout: 30
   max_retries: 3
   # 分级使用策略（阶段0任务4）
