@@ -83,13 +83,22 @@ class LiteratureReviewWorkflow:
 
     # ===== 计划管理 =====
 
-    def use_plan(self, plan: TaskPlan) -> "LiteratureReviewWorkflow":
+    def use_plan(self, plan: TaskPlan) -> LiteratureReviewWorkflow:
         """绑定当前计划并返回工作流自身（便于链式构造）。
 
         重启恢复或执行期由 TaskExecution 注入已持久化计划。
         """
         self._plan = plan
         return self
+
+    def _node_title(self, node_id: str) -> str:
+        """取节点标题；计划未绑定时退回 node_id（校验器只用于日志/提示）。"""
+        if self._plan is None:
+            return node_id
+        for node in self._plan.nodes:
+            if node.id == node_id:
+                return node.title
+        return node_id
 
     def require_node(self, node_id: str) -> PlanNode:
         """按 node_id 取计划节点；计划缺失时要求人工介入。"""
@@ -342,6 +351,7 @@ class LiteratureReviewWorkflow:
         payload = await self._validator.execute(
             {
                 "node_id": result.node_id,
+                "title": self._node_title(result.node_id),
                 "result": result.content,
                 "evidence": [item.model_dump(mode="json") for item in result.evidence],
                 "evidence_pool": prepared.get("evidence", []),

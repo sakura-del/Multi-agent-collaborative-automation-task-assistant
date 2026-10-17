@@ -82,7 +82,7 @@ class ValidatorAgent(BaseAgent):
         文献场景（配置了 citation_validator 且带 execution_result）先跑确定性检查：
         安全/完整性失败直接返回，只有确定性检查通过才调用 LLM。
         """
-        title = input_data["title"]
+        title = input_data.get("title", "")
         result = input_data.get("result", "")
         trace_id = input_data.get("trace_id", "")
 
