@@ -140,3 +140,115 @@ class TestValidatorIntegration:
         agent = ValidatorAgent(llm=mock, rules={"min_length": 1, "required_keywords": []})
         report = await agent.execute({"title": "任务", "result": "有效结果", "trace_id": "t1"})
         assert report["score"] == 40  # 100*0.4 + 0*0.6
+
+
+@pytest.mark.asyncio
+class TestValidatorCitationMode:
+    """Plan 3 Task 4：确定性引用校验优先，LLM 语义校验只作补充。"""
+
+    @staticmethod
+    def _semantic_response(payload: dict) -> LLMResponse:
+        return LLMResponse(
+            content=json.dumps(payload),
+            finish_reason="stop",
+            usage=Usage(),
+            role=MessageRole.ASSISTANT,
+        )
+
+    @staticmethod
+    def _journal(name: str, content: str) -> dict:
+        return {"node_id": name, "content": content, "duration_ms": 1}
+
+    async def test_integrity_failure_skips_llm(self) -> None:
+        from uuid import uuid4
+
+        from app.knowledge.services.citation_validator import CitationValidator
+
+        llm = MockLLM(responses=[self._semantic_response({"logic_consistent": True})])
+        agent = ValidatorAgent(
+            rules={"min_length": 1},
+            citation_validator=CitationValidator(ownership_violation=True),
+            llm=llm,
+        )
+        payload = {
+            "node_id": "n3",
+            "title": "撰写",
+            "result": "摘要\n结论 [E1]。",
+            "execution_result": {
+                "node_id": "n3",
+                "content": "摘要\n结论 [E1]。",
+                "evidence": [
+                    {
+                        "doc_id": str(uuid4()),
+                        "chunk_id": str(uuid4()),
+                        "excerpt": "证据",
+                    }
+                ],
+                "duration_ms": 1,
+            },
+            "trace_id": "t1",
+        }
+        report = await agent.execute(payload)
+
+        assert report["passed"] is False
+        assert report["retryable"] is False
+        assert llm.call_count == 0
+        assert any(check["name"] == "evidence_ownership" for check in report["checks"])
+
+    async def test_deterministic_pass_then_semantic_supplement(self) -> None:
+        from uuid import uuid4
+
+        from app.knowledge.services.citation_validator import CitationValidator
+
+        llm = MockLLM(
+            responses=[
+                self._semantic_response(
+                    {
+                        "logic_consistent": True,
+                        "factual_accurate": True,
+                        "issues": [],
+                        "suggestions": [],
+                    }
+                )
+            ]
+        )
+        agent = ValidatorAgent(
+            rules={"min_length": 1, "required_keywords": []},
+            citation_validator=CitationValidator(),
+            required_sections=["摘要", "方法", "结论"],
+            llm=llm,
+        )
+        content = "摘要\n综述 [E1]。\n\n方法\n比较 [E2]。\n\n结论\n证据绑定 [E1][E2]。"
+        evidence = [
+            {
+                "doc_id": str(uuid4()),
+                "chunk_id": str(uuid4()),
+                "excerpt": "证据一",
+            },
+            {
+                "doc_id": str(uuid4()),
+                "chunk_id": str(uuid4()),
+                "excerpt": "证据二",
+            },
+        ]
+        payload = {
+            "node_id": "n3",
+            "title": "撰写",
+            "result": content,
+            "execution_result": {
+                "node_id": "n3",
+                "content": content,
+                "evidence": evidence,
+                "duration_ms": 1,
+            },
+            "evidence_pool": evidence,
+            "trace_id": "t1",
+        }
+        report = await agent.execute(payload)
+
+        assert report["passed"] is True
+        assert report["score"] > 0
+        assert llm.call_count == 1
+        names = {check["name"] for check in report["checks"]}
+        assert {"citation_markers_resolve", "evidence_is_cited"} <= names
+        assert "semantic_consistency" in names

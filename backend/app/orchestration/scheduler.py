@@ -118,10 +118,13 @@ class TaskScheduler:
         retry_policy: RetryPolicy | None = None,
         max_concurrency: int = 5,
         observer: ScheduleObserver | None = None,
+        max_regenerations: int = 2,
     ) -> None:
         self.agent_factory = agent_factory
         self.retry_executor = RetryExecutor(retry_policy or RetryPolicy())
         self.max_concurrency = max_concurrency
+        # 校验不通过时允许的定向重做次数（同一节点、同一证据、带 feedback）
+        self.max_regenerations = max_regenerations
         self._observer: ScheduleObserver = observer or NullScheduleObserver()
         # 节点状态机注册表：node_id → TaskStateMachine
         self._state_machines: dict[str, TaskStateMachine] = {}
@@ -289,81 +292,109 @@ class TaskScheduler:
         if sm.status is SubtaskStatus.READY:
             await self._transition(task_id, node_id, sm, SubtaskStatus.RUNNING)
 
-        # 执行阶段（含重试）；重试内部的状态转换通过 notifier 同步给 observer
+        # 执行 + 校验；校验可重试失败时只重做当前节点（最多 max_regenerations 次）
         executor_agent = self.agent_factory("executor")
-        retry_result: RetryResult = await self.retry_executor.execute(
-            executor_agent.execute,
-            kwargs={"input_data": input_data},
-            state_machine=sm,
-            on_transition=self._transition_notifier(task_id, node_id),
-        )
-
-        if not retry_result.success:
-            node_result = NodeResult(
-                node_id=node_id,
-                status=SubtaskStatus.WAITING_HUMAN,
-                error=retry_result.error,
-                attempts=retry_result.attempts,
-            )
-            await self._observer.on_result(task_id, node_result)
-            return node_result
-
-        # 校验阶段
-        exec_output = retry_result.result or {}
-        await self._transition(task_id, node_id, sm, SubtaskStatus.VALIDATING)
-
         validator_agent = self.agent_factory("validator")
-        try:
-            validation = await validator_agent.execute(
-                {
-                    "node_id": node_id,
-                    "title": title,
-                    "result": exec_output.get("result", ""),
-                    "task_id": task_id,
-                    "trace_id": trace_id,
-                }
+
+        regeneration = 0
+        validation_feedback = ""
+        while True:
+            exec_input = dict(input_data)
+            exec_input["attempt"] = regeneration
+            if validation_feedback:
+                exec_input["regeneration"] = regeneration
+                exec_input["validation_feedback"] = validation_feedback
+
+            retry_result: RetryResult = await self.retry_executor.execute(
+                executor_agent.execute,
+                kwargs={"input_data": exec_input},
+                state_machine=sm,
+                on_transition=self._transition_notifier(task_id, node_id),
             )
-        except Exception as exc:
-            logger.error("validation_failed", node_id=node_id, error=str(exc))
+
+            if not retry_result.success:
+                node_result = NodeResult(
+                    node_id=node_id,
+                    status=SubtaskStatus.WAITING_HUMAN,
+                    error=retry_result.error,
+                    attempts=retry_result.attempts + regeneration,
+                )
+                await self._observer.on_result(task_id, node_result)
+                return node_result
+
+            # 校验阶段
+            exec_output = retry_result.result or {}
+            await self._transition(task_id, node_id, sm, SubtaskStatus.VALIDATING)
+            attempts = retry_result.attempts + regeneration
+
+            validation_input: dict[str, Any] = {
+                "node_id": node_id,
+                "title": title,
+                "result": exec_output.get("result", ""),
+                "task_id": task_id,
+                "trace_id": trace_id,
+            }
+            # 文献场景：把类型化执行结果与证据池一并交给校验器
+            if isinstance(exec_output.get("execution_result"), dict):
+                validation_input["execution_result"] = exec_output["execution_result"]
+            if isinstance(exec_output.get("evidence_pool"), list):
+                validation_input["evidence_pool"] = exec_output["evidence_pool"]
+
+            try:
+                validation = await validator_agent.execute(validation_input)
+            except Exception as exc:
+                logger.error("validation_failed", node_id=node_id, error=str(exc))
+                await self._transition(task_id, node_id, sm, SubtaskStatus.FAILED)
+                await self._transition(task_id, node_id, sm, SubtaskStatus.WAITING_HUMAN)
+                node_result = NodeResult(
+                    node_id=node_id,
+                    status=SubtaskStatus.WAITING_HUMAN,
+                    error=f"校验异常: {exc}",
+                    output=exec_output,
+                    attempts=attempts,
+                )
+                await self._observer.on_result(task_id, node_result)
+                return node_result
+
+            if validation.get("passed", False):
+                await self._transition(task_id, node_id, sm, SubtaskStatus.COMPLETED)
+                node_result = NodeResult(
+                    node_id=node_id,
+                    status=SubtaskStatus.COMPLETED,
+                    output=exec_output,
+                    validation=validation,
+                    attempts=attempts,
+                )
+                await self._observer.on_result(task_id, node_result)
+                return node_result
+
+            retryable = bool(validation.get("retryable", False))
+            if not retryable or regeneration >= self.max_regenerations:
+                await self._transition(task_id, node_id, sm, SubtaskStatus.FAILED)
+                await self._transition(task_id, node_id, sm, SubtaskStatus.WAITING_HUMAN)
+                node_result = NodeResult(
+                    node_id=node_id,
+                    status=SubtaskStatus.WAITING_HUMAN,
+                    output=exec_output,
+                    validation=validation,
+                    error="校验未通过",
+                    attempts=attempts,
+                )
+                await self._observer.on_result(task_id, node_result)
+                return node_result
+
+            # 定向重做：同一节点、同一证据集、带 validation_feedback；不提高温度
+            regeneration += 1
+            validation_feedback = str(validation.get("feedback") or "校验未通过，请按问题修订")
+            logger.info(
+                "node_regeneration_scheduled",
+                node_id=node_id,
+                task_id=task_id,
+                regeneration=regeneration,
+            )
             await self._transition(task_id, node_id, sm, SubtaskStatus.FAILED)
-            await self._transition(task_id, node_id, sm, SubtaskStatus.WAITING_HUMAN)
-            node_result = NodeResult(
-                node_id=node_id,
-                status=SubtaskStatus.WAITING_HUMAN,
-                error=f"校验异常: {exc}",
-                output=exec_output,
-                attempts=retry_result.attempts,
-            )
-            await self._observer.on_result(task_id, node_result)
-            return node_result
-
-        # 根据校验结果决定最终状态
-        passed = validation.get("passed", False)
-        if passed:
-            await self._transition(task_id, node_id, sm, SubtaskStatus.COMPLETED)
-            node_result = NodeResult(
-                node_id=node_id,
-                status=SubtaskStatus.COMPLETED,
-                output=exec_output,
-                validation=validation,
-                attempts=retry_result.attempts,
-            )
-            await self._observer.on_result(task_id, node_result)
-            return node_result
-
-        # 校验不通过 → 重试耗尽 → 人工干预
-        await self._transition(task_id, node_id, sm, SubtaskStatus.FAILED)
-        await self._transition(task_id, node_id, sm, SubtaskStatus.WAITING_HUMAN)
-        node_result = NodeResult(
-            node_id=node_id,
-            status=SubtaskStatus.WAITING_HUMAN,
-            output=exec_output,
-            validation=validation,
-            error="校验未通过",
-            attempts=retry_result.attempts,
-        )
-        await self._observer.on_result(task_id, node_result)
-        return node_result
+            await self._transition(task_id, node_id, sm, SubtaskStatus.RETRYING)
+            await self._transition(task_id, node_id, sm, SubtaskStatus.READY)
 
     def get_completed_nodes(self) -> set[str]:
         """返回已完成节点集合（供断点续传持久化）。"""

@@ -26,8 +26,10 @@ from app.core.logging import get_logger
 from app.db.models.task import Subtask, Task
 from app.db.repositories.event import EventRepository
 from app.db.repositories.task import TaskRepository
+from app.knowledge.services.citation_validator import CitationValidator
 from app.knowledge.services.context_builder import LiteratureContextBuilder
 from app.orchestration.agents.planner import PlannerAgent
+from app.orchestration.agents.validator import ValidatorAgent
 from app.orchestration.contracts import (
     LiteratureReviewRequest,
     SubtaskSnapshot,
@@ -479,7 +481,10 @@ class TaskExecution:
             return None
         workflow = LiteratureReviewWorkflow(
             executor=self.container.create_agent("executor"),
-            validator=self.container.create_agent("validator"),
+            validator=ValidatorAgent(
+                rules={"min_length": 1, "required_keywords": []},
+                citation_validator=CitationValidator(),
+            ),
             context_builder=LiteratureContextBuilder(knowledge),
             source=self.container.literature_source,
         )

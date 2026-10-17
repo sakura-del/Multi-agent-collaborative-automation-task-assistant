@@ -439,3 +439,140 @@ class TestDatabaseScheduleObserver:
                 assert subtask.status == "ready"
         finally:
             await engine.dispose()
+
+
+class _RegeneratingExecutor(BaseAgent):
+    """记录每次调用；带 validation_feedback 时返回修订后的正文。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls: list[dict] = []
+
+    @property
+    def agent_type(self) -> str:
+        return "executor"
+
+    async def _run(self, input_data: dict) -> dict:
+        self.calls.append(dict(input_data))
+        suffix = "revised" if input_data.get("validation_feedback") else "draft"
+        return {"result": f"{input_data['node_id']}-{suffix}"}
+
+
+class _RegeneratingValidator(BaseAgent):
+    """仅对目标节点先返回一次可重试失败，之后通过；记录收到的 feedback。"""
+
+    def __init__(self, *, target_node: str = "n2", always_fail: bool = False) -> None:
+        super().__init__()
+        self.calls = 0
+        self.feedback_seen: list[str] = []
+        self._target = target_node
+        self._always_fail = always_fail
+
+    @property
+    def agent_type(self) -> str:
+        return "validator"
+
+    async def _run(self, input_data: dict) -> dict:
+        if input_data.get("node_id") != self._target:
+            return {
+                "passed": True,
+                "score": 95.0,
+                "checks": [],
+                "retryable": False,
+                "feedback": "",
+            }
+        self.calls += 1
+        self.feedback_seen.append(str(input_data.get("validation_feedback", "")))
+        if self._always_fail or self.calls == 1:
+            return {
+                "passed": False,
+                "score": 40.0,
+                "checks": [],
+                "retryable": True,
+                "feedback": "缺少引用标记",
+            }
+        return {"passed": True, "score": 95.0, "checks": [], "retryable": False, "feedback": ""}
+
+
+@pytest.mark.asyncio
+class TestTargetedRegeneration:
+    """Plan 3 Task 4：校验可重试失败只重做当前节点，最多两次。"""
+
+    @staticmethod
+    def _dag() -> TaskDAG:
+        dag = TaskDAG()
+        dag.add_node("n1", title="检索", description="search")
+        dag.add_node("n2", title="撰写", description="write")
+        dag.add_edge("n1", "n2")
+        return dag
+
+    def _factory(self, executor: _RegeneratingExecutor, validator: _RegeneratingValidator):
+        def factory(agent_type: str):
+            return executor if agent_type == "executor" else validator
+
+        return factory
+
+    async def test_retryable_validation_regenerates_only_failed_node(self) -> None:
+        executor = _RegeneratingExecutor()
+        validator = _RegeneratingValidator()
+        scheduler = TaskScheduler(agent_factory=self._factory(executor, validator))
+
+        result = await scheduler.run(self._dag(), task_id=str(uuid.uuid4()))
+
+        assert result.success
+        assert result.node_results["n2"].attempts == 2
+        assert result.node_results["n1"].attempts == 1
+        n2_calls = [call for call in executor.calls if call["node_id"] == "n2"]
+        assert len(n2_calls) == 2
+        assert n2_calls[0].get("validation_feedback") in (None, "")
+        assert n2_calls[1]["validation_feedback"] == "缺少引用标记"
+        assert n2_calls[1]["regeneration"] == 1
+        assert executor.calls[0]["node_id"] == "n1"
+
+    async def test_regeneration_exhaustion_moves_node_to_waiting_human(self) -> None:
+        executor = _RegeneratingExecutor()
+        validator = _RegeneratingValidator(always_fail=True)
+        scheduler = TaskScheduler(
+            agent_factory=self._factory(executor, validator), max_regenerations=2
+        )
+
+        result = await scheduler.run(self._dag(), task_id=str(uuid.uuid4()))
+
+        assert not result.success
+        n2_calls = [call for call in executor.calls if call["node_id"] == "n2"]
+        assert len(n2_calls) == 3  # 首次 + 两次重生成
+        assert result.node_results["n2"].status is SubtaskStatus.WAITING_HUMAN
+        assert result.node_results["n2"].attempts == 3
+
+    async def test_non_retryable_validation_skips_regeneration(self) -> None:
+        executor = _RegeneratingExecutor()
+
+        class _IntegrityValidator(BaseAgent):
+            @property
+            def agent_type(self) -> str:
+                return "validator"
+
+            async def _run(self, input_data: dict) -> dict:
+                if input_data.get("node_id") != "n2":
+                    return {
+                        "passed": True,
+                        "score": 95.0,
+                        "checks": [],
+                        "retryable": False,
+                        "feedback": "",
+                    }
+                return {
+                    "passed": False,
+                    "score": 10.0,
+                    "checks": [],
+                    "retryable": False,
+                    "feedback": "证据归属校验失败",
+                }
+
+        scheduler = TaskScheduler(agent_factory=self._factory(executor, _IntegrityValidator()))
+        result = await scheduler.run(self._dag(), task_id=str(uuid.uuid4()))
+
+        assert not result.success
+        n2_calls = [call for call in executor.calls if call["node_id"] == "n2"]
+        assert len(n2_calls) == 1  # 不可重试：不重生成
+        assert result.node_results["n2"].status is SubtaskStatus.WAITING_HUMAN

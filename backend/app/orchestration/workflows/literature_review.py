@@ -78,6 +78,8 @@ class LiteratureReviewWorkflow:
         self._source = source
         self._top_k = top_k
         self._plan: TaskPlan | None = None
+        # 节点证据缓存：重生成时复用同一证据集（Plan 3 Task 4）
+        self._prepared: dict[str, dict[str, Any]] = {}
 
     # ===== 计划管理 =====
 
@@ -238,7 +240,12 @@ class LiteratureReviewWorkflow:
             prepared["insufficient_evidence"] = context.insufficient
             if context.insufficient:
                 prepared["warnings"].append("insufficient_evidence")
+        self._prepared[plan_node.id] = prepared
         return prepared
+
+    def prepared_for(self, node_id: str) -> dict[str, Any] | None:
+        """返回节点上次准备的上下文（重生成时复用同一证据集）。"""
+        return self._prepared.get(node_id)
 
     async def _build_context(self, task: Any, query: str) -> Any:
         if self._context_builder is None:
@@ -258,26 +265,34 @@ class LiteratureReviewWorkflow:
         dependency_outputs: dict[str, Any] | None = None,
         plan: TaskPlan | None = None,
         validation_feedback: str = "",
+        prepared: dict[str, Any] | None = None,
     ) -> ExecutionResult:
-        """执行单个节点：search 走文献源；extract/write 走证据约束执行；其余只汇总。"""
+        """执行单个节点：search 走文献源；extract/write 走证据约束执行；其余只汇总。
+
+        传 `prepared`（或工作流内已有缓存）时复用同一证据集，满足定向重做要求。
+        """
         plan_node = self._as_node(node)
 
         if plan_node.type == "search":
             return await self._execute_search(task, plan_node, plan)
 
         if plan_node.type in EVIDENCE_NODE_TYPES:
-            prepared = await self.prepare_node(
-                task, plan_node, dependency_outputs=dependency_outputs, plan=plan
+            prepared_node = (
+                prepared
+                or self.prepared_for(plan_node.id)
+                or await self.prepare_node(
+                    task, plan_node, dependency_outputs=dependency_outputs, plan=plan
+                )
             )
             if self._executor is None:
                 raise HumanActionRequiredError("缺少执行 Agent")
-            evidence = [Evidence.model_validate(item) for item in prepared["evidence"]]
+            evidence = [Evidence.model_validate(item) for item in prepared_node["evidence"]]
             return await self._executor.execute_result(
                 node_id=plan_node.id,
                 title=plan_node.title,
-                description=prepared["description"],
+                description=prepared_node["description"],
                 evidence=evidence,
-                evidence_text=prepared["evidence_context"],
+                evidence_text=prepared_node["evidence_context"],
                 dependency_outputs=dependency_outputs or {},
                 validation_feedback=validation_feedback,
                 trace_id=self._trace_id(task),
@@ -320,18 +335,24 @@ class LiteratureReviewWorkflow:
         """委托校验 Agent；返回类型化 `ValidationReport`。"""
         if self._validator is None:
             raise HumanActionRequiredError("缺少校验 Agent")
+        prepared = self.prepared_for(result.node_id) or {}
         payload = await self._validator.execute(
             {
                 "node_id": result.node_id,
                 "result": result.content,
                 "evidence": [item.model_dump(mode="json") for item in result.evidence],
+                "evidence_pool": prepared.get("evidence", []),
+                "execution_result": result.model_dump(mode="json"),
                 "task_id": str(getattr(task, "id", "")),
                 "trace_id": self._trace_id(task),
             }
         )
         if isinstance(payload, ValidationReport):
             return payload
-        return ValidationReport.model_validate(payload)
+        known_fields = set(ValidationReport.model_fields)
+        return ValidationReport.model_validate(
+            {key: value for key, value in payload.items() if key in known_fields}
+        )
 
     async def review(self, task: Any, results: list[ExecutionResult]) -> ReviewReport:
         """只基于已持久化结果组装复盘报告；不调用外部工具。"""
@@ -414,11 +435,16 @@ class LiteratureNodeExecutor(BaseAgent):
 
     async def _run(self, input_data: dict[str, Any]) -> dict[str, Any]:
         node = self._workflow.require_node(str(input_data.get("node_id", "")))
+        # 重生成：复用首次准备好的证据集，并把校验反馈传给执行器
+        prepared = self._workflow.prepared_for(node.id)
         execution = await self._workflow.execute_node(
             self._task,
             node,
             dependency_outputs=input_data.get("dependency_outputs"),
+            validation_feedback=str(input_data.get("validation_feedback", "")),
+            prepared=prepared,
         )
+        prepared_after = self._workflow.prepared_for(node.id) or {}
         return {
             "node_id": node.id,
             "result": execution.content,
@@ -426,6 +452,7 @@ class LiteratureNodeExecutor(BaseAgent):
             "used_tools": [],
             "warnings": execution.warnings,
             "execution_result": execution.model_dump(mode="json"),
+            "evidence_pool": prepared_after.get("evidence", []),
         }
 
 
@@ -442,11 +469,20 @@ class LiteratureNodeValidator(BaseAgent):
         return "validator"
 
     async def _run(self, input_data: dict[str, Any]) -> dict[str, Any]:
-        result = ExecutionResult(
-            node_id=str(input_data.get("node_id", "")),
-            content=str(input_data.get("result", "")),
-            duration_ms=0,
-        )
+        payload = input_data.get("execution_result")
+        if isinstance(payload, dict):
+            try:
+                result = ExecutionResult.model_validate(payload)
+            except PydanticValidationError:
+                result = None
+        else:
+            result = None
+        if result is None:
+            result = ExecutionResult(
+                node_id=str(input_data.get("node_id", "")),
+                content=str(input_data.get("result", "")),
+                duration_ms=0,
+            )
         report = await self._workflow.validate_node(self._task, result)
         return report.model_dump(mode="json")
 
