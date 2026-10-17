@@ -38,13 +38,19 @@ def _plan_payload() -> dict[str, Any]:
     return {
         "version": 1,
         "topic": "检索增强生成证据核验",
-        "research_questions": ["RAG 如何提升证据可靠性？"],
+        "research_questions": [
+            "RAG 如何提升证据可靠性？",
+            "如何度量证据可追溯性？",
+            "多智能体协作如何影响综述质量？",
+        ],
         "search_queries": ["RAG evidence verification"],
         "acceptance_criteria": ["引用可回溯"],
         "nodes": [
             {"id": "n1", "type": "search", "title": "检索文献", "dependencies": []},
             {"id": "n2", "type": "extract", "title": "提取证据", "dependencies": ["n1"]},
             {"id": "n3", "type": "write", "title": "撰写综述", "dependencies": ["n2"]},
+            {"id": "n4", "type": "validate", "title": "校验引用", "dependencies": ["n3"]},
+            {"id": "n5", "type": "review", "title": "汇总复盘", "dependencies": ["n4"]},
         ],
     }
 
@@ -235,7 +241,7 @@ class TestSubmitAndPlan:
             )
             assert snapshot.plan_version == 1
             assert snapshot.plan is not None
-            assert len(snapshot.subtasks) == 3
+            assert len(snapshot.subtasks) == 5
             assert snapshot.revision == 1
         finally:
             gate.set()
@@ -252,8 +258,7 @@ class TestSubmitAndPlan:
             task_id = await execution.submit(user_id, _request())
             await _wait_for_status(execution, user_id, task_id, {TaskStatus.WAITING_HUMAN.value})
             assert len(planner.calls) == 2
-            assert "repair" not in planner.calls[0]
-            assert "repair" in planner.calls[1]
+            assert planner.calls[0].get("repair") is None
             assert planner.calls[1]["repair"]["error"]
         finally:
             await container.close()
@@ -308,7 +313,13 @@ class TestApprovalAndExecution:
             assert completed.review_report is not None
             assert completed.review_report["summary"]
             assert all(subtask.status == "completed" for subtask in completed.subtasks)
-            assert sorted(call["node_id"] for call in executor_calls) == ["n1", "n2", "n3"]
+            assert sorted(call["node_id"] for call in executor_calls) == [
+                "n1",
+                "n2",
+                "n3",
+                "n4",
+                "n5",
+            ]
             assert len(reviewer_calls) == 1
             assert publisher.events
         finally:
@@ -433,7 +444,7 @@ class TestRecovery:
                 factory,
                 user_id=user_id,
                 status=TaskStatus.COMPLETED,
-                completed_nodes={"n1", "n2", "n3"},
+                completed_nodes={"n1", "n2", "n3", "n4", "n5"},
                 title="已完成任务",
             )
 
@@ -447,8 +458,13 @@ class TestRecovery:
                 )
                 assert snapshot.status == TaskStatus.COMPLETED.value
 
-                # n1 已完成，只执行 n2/n3
-                assert sorted(call["node_id"] for call in executor_calls) == ["n2", "n3"]
+                # n1 已完成，只执行 n2/n3/n4/n5
+                assert sorted(call["node_id"] for call in executor_calls) == [
+                    "n2",
+                    "n3",
+                    "n4",
+                    "n5",
+                ]
 
                 finished = await execution.get_snapshot(user_id, finished_task_id)
                 assert finished.status == TaskStatus.COMPLETED.value

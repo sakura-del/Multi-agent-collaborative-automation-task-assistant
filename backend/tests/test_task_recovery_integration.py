@@ -172,7 +172,13 @@ class TestHttpEndToEnd:
 
         waiting = _wait_status(client, token, task_id, {"waiting_approval"})
         assert waiting["plan_version"] == 1
-        assert [subtask["node_id"] for subtask in waiting["subtasks"]] == ["n1", "n2", "n3"]
+        assert [subtask["node_id"] for subtask in waiting["subtasks"]] == [
+            "n1",
+            "n2",
+            "n3",
+            "n4",
+            "n5",
+        ]
 
         approved = client.post(
             f"/api/v1/tasks/{task_id}/plan/approve",
@@ -183,7 +189,13 @@ class TestHttpEndToEnd:
 
         completed = _wait_status(client, token, task_id, {"completed"})
         assert all(subtask["status"] == "completed" for subtask in completed["subtasks"])
-        assert sorted(call["node_id"] for call in executor.calls) == ["n1", "n2", "n3"]
+        assert sorted(call["node_id"] for call in executor.calls) == [
+            "n1",
+            "n2",
+            "n3",
+            "n4",
+            "n5",
+        ]
         assert planner_llm.call_count == 1  # 计划来自 LLM，而非手工 DAG
 
 
@@ -222,7 +234,12 @@ class TestCrashRecovery:
         client.portal.call(execution2.recover)
 
         recovered = _wait_status(client, token, task_id, {"completed"})
-        assert sorted(call["node_id"] for call in second_executor.calls) == ["n2", "n3"]
+        assert sorted(call["node_id"] for call in second_executor.calls) == [
+            "n2",
+            "n3",
+            "n4",
+            "n5",
+        ]
 
         by_node = {subtask["node_id"]: subtask for subtask in recovered["subtasks"]}
         assert by_node["n1"]["status"] == "completed"
@@ -287,7 +304,13 @@ class TestRecoveryStateLoading:
         assert state.event.payload["reset_nodes"] == ["n2", "n3"]
 
         statuses = client.portal.call(read_statuses, task_id)
-        assert statuses == {"n1": "completed", "n2": "ready", "n3": "ready"}
+        assert statuses == {
+            "n1": "completed",
+            "n2": "ready",
+            "n3": "ready",
+            "n4": "pending",
+            "n5": "pending",
+        }
 
 
 def _wait_subtask_status(

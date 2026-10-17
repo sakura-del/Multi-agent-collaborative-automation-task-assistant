@@ -91,7 +91,10 @@ class PlannerAgent(BaseAgent):
         trace_id = input_data.get("trace_id", "")
 
         analysis = self._analyze_requirement(requirement)
-        plan = await self._generate_plan(requirement, input_data.get("repair"))
+        if input_data.get("plan_contract") == "literature_review":
+            plan = await self._generate_literature_plan(requirement, input_data.get("repair"))
+        else:
+            plan = await self._generate_plan(requirement, input_data.get("repair"))
         logger.info(
             "planner_planned",
             trace_id=trace_id,
@@ -163,6 +166,73 @@ class PlannerAgent(BaseAgent):
                 f"规划未通过 TaskPlan schema 校验: {exc.errors()[:3]}",
                 raw_output=content,
             ) from exc
+
+    async def _generate_literature_plan(
+        self,
+        requirement: str,
+        repair: dict[str, Any] | None,
+    ) -> TaskPlan:
+        """文献场景规划：受约束 Prompt（五类节点 + write 依赖 extract + 无环）。"""
+        if self.llm is None:
+            return self._degraded_literature_plan(requirement)
+
+        # 方法内导入：workflows 包 __init__ 反向依赖 planner，避免导入环
+        from app.orchestration.workflows.prompts import render_planner_prompt
+
+        prompt = render_planner_prompt(
+            requirement,
+            repair_section=self._repair_section(repair),
+        )
+        response = await self.llm.chat(
+            [
+                Message(
+                    role=MessageRole.SYSTEM,
+                    content="你是文献综述规划专家，只输出满足约束的 JSON。",
+                ),
+                Message(role=MessageRole.USER, content=prompt),
+            ],
+            temperature=0.2,
+        )
+        content = response.content or ""
+        payload = self._safe_parse_json(content)
+        if not payload:
+            raise PlannerPlanInvalidError("规划输出不是合法 JSON", raw_output=content)
+        try:
+            return TaskPlan.model_validate(payload)
+        except ValidationError as exc:
+            raise PlannerPlanInvalidError(
+                f"规划未通过 TaskPlan schema 校验: {exc.errors()[:3]}",
+                raw_output=content,
+            ) from exc
+
+    @staticmethod
+    def _degraded_literature_plan(requirement: str) -> TaskPlan:
+        """无 LLM 的确定性文献计划：search → extract → write → validate → review。"""
+        topic = requirement if len(requirement) >= 5 else f"{requirement} 文献综述"
+        query = requirement[:200]
+        return TaskPlan(
+            version=1,
+            topic=topic[:200],
+            research_questions=[
+                f"{query} 的核心方法有哪些？",
+                f"{query} 的评估指标是什么？",
+                f"{query} 的证据可追溯性如何保证？",
+            ],
+            search_queries=[query],
+            acceptance_criteria=["生成带可回溯引用的综述", "全部引用标记可解析到证据"],
+            nodes=[
+                PlanNode(
+                    id="n1",
+                    type="search",
+                    title="检索文献",
+                    input={"query": query},
+                ),
+                PlanNode(id="n2", type="extract", title="提取证据", dependencies=["n1"]),
+                PlanNode(id="n3", type="write", title="撰写综述", dependencies=["n2"]),
+                PlanNode(id="n4", type="validate", title="校验引用", dependencies=["n3"]),
+                PlanNode(id="n5", type="review", title="汇总复盘", dependencies=["n4"]),
+            ],
+        )
 
     @staticmethod
     def _repair_section(repair: dict[str, Any] | None) -> str:

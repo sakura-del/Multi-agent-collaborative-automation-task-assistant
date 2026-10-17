@@ -275,7 +275,7 @@ async def run(init_schema: bool) -> dict[str, Any]:
             report["phases"].append(phase1)
             if completed["status"] != "completed":
                 report["failures"].append("Phase 1 未完成")
-            if sorted(executor.calls) != ["n1", "n2", "n3"]:
+            if sorted(executor.calls) != ["n1", "n2", "n3", "n4", "n5"]:
                 report["failures"].append(f"Phase 1 执行节点异常: {executor.calls}")
             if not any(e["event_type"] == "task_completed" for e in events):
                 report["failures"].append("Phase 1 缺少 task_completed 事件")
@@ -341,8 +341,11 @@ async def run(init_schema: bool) -> dict[str, Any]:
                 report["failures"].append("Phase 2 恢复后未完成")
             if "n1" in recovered_executor.calls:
                 report["failures"].append("Phase 2 重复执行了已完成的 n1")
-            if "n2" not in recovered_executor.calls or "n3" not in recovered_executor.calls:
-                report["failures"].append("Phase 2 未执行剩余节点 n2/n3")
+            remaining = {"n2", "n3", "n4", "n5"}
+            if not remaining <= set(recovered_executor.calls):
+                report["failures"].append(
+                    f"Phase 2 未执行剩余节点 {sorted(remaining)}: {recovered_executor.calls}"
+                )
             if _attempts(recovered)["n1"] != 0:
                 report["failures"].append("Phase 2 n1 尝试次数不为 1")
             if not recovery_events:

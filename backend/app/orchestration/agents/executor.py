@@ -13,14 +13,21 @@
 
 from __future__ import annotations
 
+import re
+import time
 from typing import Any
 
+from app.core.exceptions import EvidenceCitationError
 from app.core.logging import get_logger
 from app.llm.models import Message, MessageRole, ToolSchema
 from app.orchestration.base_agent import BaseAgent
+from app.orchestration.contracts import Evidence, ExecutionResult
 from app.orchestration.messages import MessageType
 
 logger = get_logger(__name__)
+
+# 证据引用标记：[E1]、[E12]
+_CITATION_MARKER = re.compile(r"\[E(\d+)\]")
 
 # 执行推理 Prompt：约束 LLM 按子任务描述产出结果
 _EXECUTE_PROMPT = """请执行以下子任务并输出结果。
@@ -95,6 +102,101 @@ class ExecutorAgent(BaseAgent):
             "status": "completed",
             "used_tools": [tc.get("name", "") for tc in tool_calls],
         }
+
+    async def execute_result(
+        self,
+        *,
+        node_id: str,
+        title: str,
+        description: str,
+        evidence: list[Evidence] | None = None,
+        evidence_text: str = "",
+        dependency_outputs: dict[str, Any] | None = None,
+        validation_feedback: str = "",
+        trace_id: str = "",
+    ) -> ExecutionResult:
+        """证据约束执行：返回类型化 `ExecutionResult`，引用越界直接拒绝。
+
+        与 `_run` 的差异：本路径面向文献工作流，输出带 `[E{n}]` 标记的正文，
+        并在持久化前校验标记是否落在传入证据范围内。
+        """
+        evidence_list = list(evidence or [])
+        start = time.perf_counter()
+        prompt_tokens = completion_tokens = 0
+
+        if self.llm is None:
+            content = f"[降级输出] {title}（无 LLM，未引用证据）"
+        else:
+            # 方法内导入：workflows 包 __init__ 反向依赖 agents，避免导入环
+            from app.orchestration.workflows.prompts import render_executor_prompt
+
+            prompt = render_executor_prompt(
+                title=title,
+                description=description,
+                evidence_text=evidence_text,
+                dependency_section=self._dependency_section(dependency_outputs or {}),
+                validation_feedback_section=(
+                    f"\n修订要求：{validation_feedback}" if validation_feedback else ""
+                ),
+            )
+            response = await self.llm.chat(
+                [
+                    Message(
+                        role=MessageRole.SYSTEM,
+                        content="你是文献综述执行 Agent，只输出正文内容。",
+                    ),
+                    Message(role=MessageRole.USER, content=prompt),
+                ],
+                temperature=0.2,
+            )
+            content = response.content or ""
+            prompt_tokens = response.usage.prompt_tokens
+            completion_tokens = response.usage.completion_tokens
+
+        cited = self._resolve_citations(content, len(evidence_list))
+        warnings: list[str] = []
+        if evidence_list and not cited:
+            warnings.append("no_evidence_marker")
+
+        logger.info(
+            "executor_literature_done",
+            node_id=node_id,
+            trace_id=trace_id,
+            cited=sorted(cited),
+            warnings=warnings,
+        )
+        return ExecutionResult(
+            node_id=node_id,
+            content=content,
+            evidence=[item for index, item in enumerate(evidence_list, start=1) if index in cited],
+            artifacts=[],
+            warnings=warnings,
+            duration_ms=int((time.perf_counter() - start) * 1000),
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+        )
+
+    @staticmethod
+    def _resolve_citations(content: str, evidence_count: int) -> set[int]:
+        """解析引用标记；编号超出证据范围时抛 `EvidenceCitationError`。"""
+        cited = {int(match) for match in _CITATION_MARKER.findall(content)}
+        invalid = sorted(index for index in cited if index < 1 or index > evidence_count)
+        if invalid:
+            raise EvidenceCitationError(
+                f"引用标记超出可用证据范围: {invalid}",
+                details={"invalid_markers": invalid, "evidence_count": evidence_count},
+            )
+        return cited
+
+    @staticmethod
+    def _dependency_section(dependency_outputs: dict[str, Any]) -> str:
+        if not dependency_outputs:
+            return ""
+        lines = []
+        for dep_id, output in dependency_outputs.items():
+            text = output.get("result", "") if isinstance(output, dict) else str(output)
+            lines.append(f"[{dep_id}] {text}")
+        return "\n依赖节点输出：\n" + "\n".join(lines) + "\n"
 
     async def _infer(
         self, title: str, description: str, context: str

@@ -13,17 +13,23 @@ from typing import Any
 from app.llm.base import BaseLLM
 from app.llm.models import LLMResponse, Message, Usage
 
-# 合法三节点 TaskPlan（search → extract → write）
+# 合法文献契约 TaskPlan（search → extract → write → validate → review）
 PLAN_PAYLOAD: dict[str, Any] = {
     "version": 1,
     "topic": "检索增强生成证据核验",
-    "research_questions": ["RAG 如何提升证据可靠性？"],
+    "research_questions": [
+        "RAG 如何提升证据可靠性？",
+        "如何度量证据可追溯性？",
+        "多智能体协作如何影响综述质量？",
+    ],
     "search_queries": ["RAG evidence verification"],
     "acceptance_criteria": ["引用可回溯"],
     "nodes": [
         {"id": "n1", "type": "search", "title": "检索文献", "dependencies": []},
         {"id": "n2", "type": "extract", "title": "提取证据", "dependencies": ["n1"]},
         {"id": "n3", "type": "write", "title": "撰写综述", "dependencies": ["n2"]},
+        {"id": "n4", "type": "validate", "title": "校验引用", "dependencies": ["n3"]},
+        {"id": "n5", "type": "review", "title": "汇总复盘", "dependencies": ["n4"]},
     ],
 }
 

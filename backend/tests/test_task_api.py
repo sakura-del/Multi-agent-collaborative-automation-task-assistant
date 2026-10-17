@@ -40,13 +40,19 @@ def _plan_payload() -> dict[str, Any]:
     return {
         "version": 1,
         "topic": "检索增强生成证据核验",
-        "research_questions": ["RAG 如何提升证据可靠性？"],
+        "research_questions": [
+            "RAG 如何提升证据可靠性？",
+            "如何度量证据可追溯性？",
+            "多智能体协作如何影响综述质量？",
+        ],
         "search_queries": ["RAG evidence verification"],
         "acceptance_criteria": ["引用可回溯"],
         "nodes": [
             {"id": "n1", "type": "search", "title": "检索文献", "dependencies": []},
             {"id": "n2", "type": "extract", "title": "提取证据", "dependencies": ["n1"]},
             {"id": "n3", "type": "write", "title": "撰写综述", "dependencies": ["n2"]},
+            {"id": "n4", "type": "validate", "title": "校验引用", "dependencies": ["n3"]},
+            {"id": "n5", "type": "review", "title": "汇总复盘", "dependencies": ["n4"]},
         ],
     }
 
@@ -279,7 +285,7 @@ class TestCreateAndQuery:
         detail = _wait_status(client, token, task_id, {TaskStatus.WAITING_APPROVAL.value})
         assert detail["plan_version"] == 1
         assert detail["revision"] == 1
-        assert len(detail["subtasks"]) == 3
+        assert len(detail["subtasks"]) == 5
         assert detail["plan"]["topic"] == "检索增强生成证据核验"
 
         listing = client.get("/api/v1/tasks", headers=_auth(token))

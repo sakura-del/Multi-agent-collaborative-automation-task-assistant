@@ -48,11 +48,13 @@ class RuntimeContainer:
         planner_factory: PlannerFactory | None = None,
         agent_factory: AgentFactory | None = None,
         knowledge_query: Any | None = None,
+        literature_source: Any | None = None,
     ) -> None:
         self.session_factory = session_factory
         self.event_publisher: EventPublisher = event_publisher or InMemoryEventPublisher()
         self.ticket_service: Any = ticket_service or InMemoryTicketService()
         self.knowledge_query = knowledge_query
+        self.literature_source = literature_source
         self.llm_manager: Any | None = None
         self._planner_factory: PlannerFactory = planner_factory or PlannerAgent
         self._agent_factory: AgentFactory = agent_factory or self._default_agent

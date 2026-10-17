@@ -18,6 +18,7 @@ import uuid
 from typing import Any
 from uuid import UUID
 
+from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy import select
 
 from app.core.exceptions import NotFoundException, ValidationException
@@ -25,6 +26,8 @@ from app.core.logging import get_logger
 from app.db.models.task import Subtask, Task
 from app.db.repositories.event import EventRepository
 from app.db.repositories.task import TaskRepository
+from app.knowledge.services.context_builder import LiteratureContextBuilder
+from app.orchestration.agents.planner import PlannerAgent
 from app.orchestration.contracts import (
     LiteratureReviewRequest,
     SubtaskSnapshot,
@@ -38,6 +41,12 @@ from app.orchestration.contracts import (
 from app.orchestration.dag_engine import TaskDAG
 from app.orchestration.recovery import RecoveryManager
 from app.orchestration.runtime import RuntimeContainer
+from app.orchestration.scheduler import TaskScheduler
+from app.orchestration.workflows.literature_review import (
+    LiteratureNodeExecutor,
+    LiteratureNodeValidator,
+    LiteratureReviewWorkflow,
+)
 
 logger = get_logger(__name__)
 
@@ -269,9 +278,16 @@ class TaskExecution:
                     return
                 requirement = self._requirement(task)
                 trace_id = self._trace_id(task)
+                task_type = task.task_type
 
-            planner = self.container.create_planner()
-            plan, dag = await self._generate_plan(planner, requirement, trace_id)
+            if task_type == "literature_review":
+                # 文献场景：由工作流承担规划 + 一次契约修复；失败抛 HumanActionRequiredError
+                workflow = self._literature_workflow(task)
+                plan = await workflow.plan(task)
+                dag = PlannerAgent.build_dag(plan)
+            else:
+                planner = self.container.create_planner()
+                plan, dag = await self._generate_plan(planner, requirement, trace_id)
 
             async with self._session_factory() as session:
                 repo = TaskRepository(session)
@@ -356,6 +372,7 @@ class TaskExecution:
                 trace_id,
                 block_reason,
                 recovery_event,
+                task,
             ) = await self._load_execution_state(task_id)
             if recovery_event is not None:
                 await self._publish(recovery_event)
@@ -366,6 +383,12 @@ class TaskExecution:
 
             observer = self.container.create_observer()
             scheduler = self.container.create_scheduler(observer)
+            workflow = self._literature_execution_workflow(task)
+            if workflow is not None:
+                scheduler = TaskScheduler(
+                    agent_factory=self._literature_agent_factory(workflow, task),
+                    observer=observer,
+                )
             result = await scheduler.run(
                 dag,
                 task_id=str(task_id),
@@ -390,10 +413,18 @@ class TaskExecution:
     async def _load_execution_state(
         self,
         task_id: UUID,
-    ) -> tuple[TaskDAG | None, set[str], dict[str, str], str, str | None, TaskEvent | None]:
-        """读取 DAG、已完成节点、子任务 ID 映射、trace ID 与恢复事件。
+    ) -> tuple[
+        TaskDAG | None,
+        set[str],
+        dict[str, str],
+        str,
+        str | None,
+        TaskEvent | None,
+        Any | None,
+    ]:
+        """读取 DAG、已完成节点、子任务 ID 映射、trace ID、恢复事件与任务对象。
 
-        返回 (dag, completed, subtask_ids, trace_id, block_reason, recovery_event)；
+        返回 (dag, completed, subtask_ids, trace_id, block_reason, recovery_event, task)；
         dag 为 None 且 block_reason 非空时表示任务数据不完整，需要转入人工处理。
         已完成节点与遗留运行态节点的恢复统一委托 `RecoveryManager.load_state()`。
         """
@@ -402,15 +433,15 @@ class TaskExecution:
             try:
                 task = await repo.lock_for_update(task_id)
             except LookupError:
-                return None, set(), {}, "task", None, None
+                return None, set(), {}, "task", None, None, None
             if task.status not in {status.value for status in _RECOVERABLE_STATUSES}:
-                return None, set(), {}, "task", None, None
+                return None, set(), {}, "task", None, None, None
             if not task.plan:
-                return None, set(), {}, "task", "任务缺少规划数据", None
+                return None, set(), {}, "task", "任务缺少规划数据", None, task
 
             state = await RecoveryManager.load_state(session, task_id)
             if state is None:
-                return None, set(), {}, "task", "任务缺少 DAG 数据", None
+                return None, set(), {}, "task", "任务缺少 DAG 数据", None, task
 
             subtask_rows = (
                 await session.execute(select(Subtask).where(Subtask.task_id == task_id))
@@ -425,7 +456,50 @@ class TaskExecution:
                 self._trace_id(task),
                 None,
                 state.event,
+                task,
             )
+
+    # ===== 文献场景接线 =====
+
+    def _literature_workflow(self, task: Any) -> LiteratureReviewWorkflow:
+        """构造规划用工作流（Task 3 只接规划；执行接线见 `_literature_execution_workflow`）。"""
+        return LiteratureReviewWorkflow(planner=self.container.create_planner())
+
+    def _literature_execution_workflow(self, task: Any | None) -> LiteratureReviewWorkflow | None:
+        """文献任务且容器提供知识库时，返回证据约束执行工作流；否则 None（走通用 Agent）。"""
+        if task is None or getattr(task, "task_type", "") != "literature_review":
+            return None
+        knowledge = self.container.knowledge_query
+        if knowledge is None:
+            return None
+        try:
+            plan = TaskPlan.model_validate(task.plan or {})
+        except PydanticValidationError:
+            logger.warning("literature_plan_invalid_for_execution", task_id=str(task.id))
+            return None
+        workflow = LiteratureReviewWorkflow(
+            executor=self.container.create_agent("executor"),
+            validator=self.container.create_agent("validator"),
+            context_builder=LiteratureContextBuilder(knowledge),
+            source=self.container.literature_source,
+        )
+        return workflow.use_plan(plan)
+
+    def _literature_agent_factory(
+        self,
+        workflow: LiteratureReviewWorkflow,
+        task: Any,
+    ) -> Any:
+        """按类型返回文献场景 Agent（executor 走证据约束，validator 走工作流校验）。"""
+
+        def factory(agent_type: str) -> Any:
+            if agent_type == "executor":
+                return LiteratureNodeExecutor(workflow, task)
+            if agent_type == "validator":
+                return LiteratureNodeValidator(workflow, task)
+            return self.container.create_agent(agent_type)
+
+        return factory
 
     async def _finish_waiting_human(self, task_id: UUID, result: Any) -> None:
         """调度未全部完成：任务转入 WAITING_HUMAN 并记录事件。"""

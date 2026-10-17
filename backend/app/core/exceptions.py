@@ -80,3 +80,19 @@ class UpstreamTemporaryError(UpstreamError):
     status_code = 503
     default_message = "上游服务暂时不可用"
     error_code = "UPSTREAM_TEMPORARY"
+
+
+class EvidenceCitationError(AppException):
+    """引用标记无法解析到提供的证据（臆造 [E9] 等），持久化前必须拒绝。"""
+
+    status_code = 422
+    default_message = "引用标记超出可用证据范围"
+    error_code = "EVIDENCE_CITATION"
+
+
+class HumanActionRequiredError(AppException):
+    """自动修复耗尽，需要人工介入（任务转入 WAITING_HUMAN）。"""
+
+    status_code = 409
+    default_message = "需要人工介入"
+    error_code = "HUMAN_ACTION_REQUIRED"
