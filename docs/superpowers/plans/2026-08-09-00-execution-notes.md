@@ -191,6 +191,12 @@ Plan 3 notes:
 - 两个由服务器验收脚本暴露的真实缺陷（`59346a6` 修复）：`ValidatorAgent._legacy_report()` 的 `checks` 曾放入 `ValidationCheck` 对象导致持久化 JSON 序列化失败；`ReviewerAgent` 曾用 `ValidationReport.model_validate` 直接校验通用校验器输出（含 `rule_check` 等额外键）而失败，现改为按字段白名单规范化并跳过异常条目。
 - Task 6 语料准备已在服务器实测（唯一需要网络的步骤）：冻结查询命中 18 篇（需先取 3× 候选窗口再本地日期过滤，`e78f7bc`），下载 10 篇 PDF（36MB）并写入 `manifest.json`（含 sha256）；`files/` 与 staging 目录已 gitignore，只提交 `query.json` + `manifest.json`。服务器语料测试 **11 passed**（本地因 PDF 不随 git 分发而以明确提示 SKIP）。
 - 语料下载复用 `DocumentStorage`（伪用户 `UUID(int=0)`），重命名后清理该子目录，保证 `files/` 只含 `<source_id>.pdf`。
-- **Plan 3 Exit Gate 阻塞点（环境）**：服务器 `.env` 只有 `LLM__DEFAULT_MODEL/PROVIDER/MAX_RETRIES/REQUEST_TIMEOUT`，缺 `LLM__API_KEY`，`--check` 报 `Missing credentials`，因此 Task 6 Step 6 的真实模型离线验收尚未执行；代码与语料均已就绪，补上密钥后运行 `python -m app.cli run-literature-demo --offline --max-documents 10` 即可。
+- **Plan 3 Exit Gate 实跑记录（尝试 1–5，2026-10-17 22:48–23:00）**：
+  - 尝试 1：任务 completed（gpt-6-luna，5 节点 / 30 事件 / md+docx 产物）但 `documents=0`、`citations=0` —— CLI 未注入 `knowledge_query`，走的是通用执行路径；新增 `KnowledgeSearchProvider`（按调用开 session）接线（`f64a7029`）。
+  - 尝试 2：`'TaskPlan' object has no attribute 'require_node'` —— `use_plan()` 返回计划而非工作流；改为返回自身（`34bd7b41`）。
+  - 尝试 3：校验器 `KeyError: 'title'` —— 工作流未传 `title`；`validate_node` 补 `_node_title()` 且校验器改为 `.get`（`d6039064`）。
+  - 尝试 4：n1 检索节点**确定性校验通过（96.0）**，n2 抽取节点报 `检索结果缺少合法的文档/分块标识` —— 索引侧 chunk_id 是 16 位合成 id（如 `0b5ddd99f22604d6`），与 `DocChunk.id`（UUID）不同；新增 `resolve_retrieval_ids()`：已是 UUID 的原样保留、合成 id 经 `VectorIndex.chroma_id → (chunk_id, doc_id)` 映射替换、无映射直接丢弃（`5aaa5149`），并补单测。
+  - 尝试 5（当前阻塞）：n1 通过（96.0）；n2 检索到 8 条可回溯证据，但 LLM 抽取输出**未引用任何 `[E{n}]`** → `evidence_is_cited` 失败（87.43，retryable），两次重生成后仍同样得分（三次 87.43、executor duration≈0.0s）→ 转 WAITING_HUMAN（任务 `2fe4579b-225d-4b4c-ba2f-7a103ee60f37`）。
+  - 下一步定位方向：① 确认 `validation_feedback` 是否真正进入 `literature_executor_system.j2` 的 `validation_feedback_section`（否则提示词完全相同）；② 检查执行路径是否存在 LLM 响应缓存导致重生成返回同一输出；③ 抽取节点提示词可要求"每条发现至少一处 `[E{n}]`"。 Exit Gate 尚未通过，Task 6 代码/语料已完成。
 - **配置优先级缺陷（待修，Plan 5 实验前必须解决）**：`get_settings()` 用 `Settings(**yaml_defaults)` 把 `config/default.yaml` 当作**构造参数**注入，而 pydantic-settings 中 init 参数优先级最高，导致 `.env` 与进程环境变量**无法覆盖** YAML 值（注释声称可覆盖）。本次只能通过改 `config/default.yaml` 切换模型；建议后续改为自定义 `settings_customise_sources`（YAML 作为最低优先级来源）并补一条覆盖顺序测试。
 - **模型可用性（服务器端点 `https://model.rhzy.ai/v1` 实测）**：该 group 仅支持 `gpt-6-luna`；`gpt-4o` 与 `gpt-4o-mini` 均返回 `404 model_not_found`。因此 `config/default.yaml` 的 `llm.default_model` 由 `gpt-4o-mini` 改为 `gpt-6-luna`（`6f2972d`），与正式实验模型一致；密钥仅写入 `.env`（gitignore，600 权限），不进入代码/文档/提交。
