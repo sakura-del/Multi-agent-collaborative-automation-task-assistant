@@ -11,12 +11,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
 
 class TaskStatus(StrEnum):
@@ -143,3 +143,73 @@ class TaskEvent(BaseModel):
     status: str
     occurred_at: datetime
     payload: dict[str, Any] = Field(default_factory=dict)
+
+
+# ===== 任务调用契约（HTTP 层映射，编排层不依赖 app.schemas）=====
+
+
+class LiteratureReviewRequest(BaseModel):
+    """文献综述任务提交请求（HTTP TaskCreate 映射到此）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    topic: str = Field(min_length=5, max_length=200)
+    keywords: list[str] = Field(min_length=1, max_length=10)
+    date_from: date | None = None
+    date_to: date | None = None
+    max_documents: int = Field(default=20, ge=1, le=50)
+    output_language: Literal["zh", "en"] = "zh"
+    citation_style: Literal["gbt7714", "apa"] = "gbt7714"
+    document_ids: list[UUID] = Field(default_factory=list, max_length=50)
+    offline_dataset: bool = False
+
+
+class TaskControlRequest(BaseModel):
+    """人工控制命令（HTTP TaskControl 映射到此）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    command: TaskCommand
+    node_id: str | None = None
+    input: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def _validate_command_payload(self) -> TaskControlRequest:
+        if self.command is TaskCommand.RETRY_NODE and not self.node_id:
+            raise ValueError("retry_node 需要 node_id")
+        if self.command is TaskCommand.SUPPLY_INPUT and not self.input:
+            raise ValueError("supply_input 需要非空 input")
+        return self
+
+
+class SubtaskSnapshot(BaseModel):
+    """任务快照中的子任务条目。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    node_id: str
+    title: str
+    status: str
+    retry_count: int = 0
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    output: dict[str, Any] | None = None
+    error: str | None = None
+
+
+class TaskSnapshot(BaseModel):
+    """任务状态快照：供查询、断线重连与前端轮询使用。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    task_id: UUID
+    status: str
+    title: str
+    plan_version: int = 0
+    revision: int = 0
+    plan: dict[str, Any] | None = None
+    subtasks: list[SubtaskSnapshot] = Field(default_factory=list)
+    artifacts: list[dict[str, Any]] = Field(default_factory=list)
+    review_report: dict[str, Any] | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None

@@ -114,9 +114,11 @@ class TaskRepository(BaseRepository[Task]):
         if target in _TERMINAL_STATUSES and task.completed_at is None:
             values["completed_at"] = now
 
+        # 用 Core UPDATE 直接操作表，避免 ORM-enabled update 使 onupdate 列过期
+        table = Task.__table__
         result = await self.db.execute(
-            update(Task)
-            .where(Task.id == task.id, Task.status.in_(expected_values))
+            update(table)
+            .where(table.c.id == task.id, table.c.status.in_(expected_values))
             .values(**values)
         )
         if result.rowcount != 1:
