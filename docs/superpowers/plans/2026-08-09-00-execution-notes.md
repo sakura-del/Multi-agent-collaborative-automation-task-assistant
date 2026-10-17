@@ -101,6 +101,7 @@ Branch: `codex/plan2-task-runtime`（从 `be66476` 拉出，TDD per task）。
 | 2 | `cc8ddcb` | owner-scoped `TaskRepository` / `EventRepository`、原子状态流转、递增事件序号、`events_after` 回放；PostgreSQL 并发序号集成测试通过 |
 | 3 | `dd15c21` | `SubtaskStatus` 增加 `READY` / `CANCELLED`；`TaskScheduler` 引入 `ScheduleObserver`（默认 `NullScheduleObserver`）与节点上下文（task_id/trace_id/subtask_id/依赖输出）；新增 `DatabaseScheduleObserver`（独立 session 锁行 → 更新子任务/重试/输出 → 追加事件 → commit → publish）；`events.py` 提供 `EventPublisher` 协议 + `NullEventPublisher` |
 | 4 | `2c7189f` | 新增 `RuntimeContainer`（LLM/Agent/Planner/事件/后台任务注册）与 `TaskExecution` 深模块（submit / approve_plan / control / get_snapshot / events_after / recover）；`contracts.py` 增加 `LiteratureReviewRequest`、`TaskControlRequest`、`SubtaskSnapshot`、`TaskSnapshot`；Planner 改为输出 `TaskPlan` + `TaskDAG`；`main.py` lifespan 接线并调用 `recover()` |
+| 5 | `e972324` | 新增 `app/schemas/task.py`（严格 HTTP 模型 + 契约映射）与 `/api/v1/tasks` 六条路由（创建/列表/详情/确认规划/控制/事件回放），全部鉴权 + owner 404；`TaskExecution.list_tasks` 支撑列表接口；OpenAPI 生成 15 条路径 |
 
 Plan 2 notes:
 
@@ -117,4 +118,8 @@ Plan 2 notes:
 - TaskExecution 测试使用文件型 SQLite（WAL）：内存库 + `StaticPool` 是单连接，后台 session 与轮询 session 会互相回滚事务，不能用来验证真实的多 session 行为。
 - `main.py` lifespan 现在创建 `RuntimeContainer` + `TaskExecution`，挂到 `app.state.container` / `app.state.runtime`，启动时调用 `recover()`（表未建时只告警不阻塞），关闭时先取消后台任务再释放 engine/Redis。
 - `TaskExecution` 的规划失败路径严格只执行一次 schema 修复调用；`recover()` 只调度 `RUNNING` / `REVIEWING` 状态任务，已完成节点由 `pre_completed` 跳过。
+- Task 5 的响应模型直接复用编排层契约（`TaskSnapshot` / `TaskEvent`），只在 `app/schemas/task.py` 定义请求模型与列表/事件页模型；路由函数不含业务分支，逐条调用 `TaskExecution` 的一个方法。
+- `TaskControl` 同时接受 `node_id` 与 `subtask_id`（计划原文用 subtask_id，引擎内部用 node_id），二者至少提供一个；`supply_input` 要求非空 input，均由 Pydantic 校验返回 422。
+- 为支撑 `GET /tasks` 列表，`TaskExecution` 增加 `list_tasks()` 查询方法（六个核心接口之外的只读扩展）。
+- Task 5 的 API 测试用 TestClient 的 portal 事件循环承载后台规划/执行任务，配合文件型 SQLite；`api_env` fixture 在每个测试内替换 `app.state.runtime` 为注入确定性 Planner/Agent 的 `TaskExecution`，并在退出前通过 portal 关闭容器。
 - 跨仓开发流：Windows 本地写代码 + 本地 pytest（`--basetemp`），每个任务结束后 bundle 同步到服务器跑完整套件、迁移 round-trip 与集成测试。

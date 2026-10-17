@@ -245,5 +245,7 @@ npm run build
       （628 passed；READY/CANCELLED 状态、DatabaseScheduleObserver、事件发布协议）
 - [x] Plan 2 Task 4：运行时容器与 TaskExecution 深模块
       （638 passed；submit/approve/control/快照/事件/恢复 六个接口，服务器 PG 集成通过）
-- [ ] Plan 2 Task 5：任务 HTTP 命令与查询接口（下一步）
+- [x] Plan 2 Task 5：任务 HTTP 命令与查询接口
+      （651 passed；`/api/v1/tasks` 六条路由 + OpenAPI 15 条路径，401/404/422 契约测试齐全）
+- [ ] Plan 2 Task 6：鉴权事件回放与 WebSocket 流式推送（下一步）
 
