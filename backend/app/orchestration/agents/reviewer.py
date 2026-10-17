@@ -127,7 +127,7 @@ class ReviewerAgent(BaseAgent):
                         {key: value for key, value in item.items() if key in known_fields}
                     )
                 )
-            except Exception:  # noqa: BLE001 - 单条校验报告异常不影响复盘
+            except Exception:
                 logger.warning("reviewer_validation_skipped")
         return normalized
 
@@ -140,7 +140,7 @@ class ReviewerAgent(BaseAgent):
         results_payload = input_data.get("results") or []
         if not results_payload:
             raise ValueError("复盘缺少节点结果")
-        from app.orchestration.contracts import ExecutionResult, ValidationReport
+        from app.orchestration.contracts import ExecutionResult
 
         results = [ExecutionResult.model_validate(item) for item in results_payload]
         validations = self._normalize_validations(input_data.get("validations") or [])
