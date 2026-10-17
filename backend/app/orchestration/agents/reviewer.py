@@ -104,6 +104,33 @@ class ReviewerAgent(BaseAgent):
         )
         return report
 
+    @staticmethod
+    def _normalize_validations(payloads: list[Any]) -> list[Any]:
+        """把已持久化的校验结果规范为 `ValidationReport`。
+
+        通用（非文献）校验器会额外返回 rule_check / semantic_check / issues 等键，
+        这里只取 ValidationReport 字段；无法解析的条目直接跳过，避免复盘整体失败。
+        """
+        from app.orchestration.contracts import ValidationReport
+
+        known_fields = set(ValidationReport.model_fields)
+        normalized: list[Any] = []
+        for item in payloads:
+            if isinstance(item, ValidationReport):
+                normalized.append(item)
+                continue
+            if not isinstance(item, dict):
+                continue
+            try:
+                normalized.append(
+                    ValidationReport.model_validate(
+                        {key: value for key, value in item.items() if key in known_fields}
+                    )
+                )
+            except Exception:  # noqa: BLE001 - 单条校验报告异常不影响复盘
+                logger.warning("reviewer_validation_skipped")
+        return normalized
+
     async def _build_literature_review(self, input_data: dict[str, Any]) -> dict[str, Any]:
         """文献场景复盘：只消费已持久化的 ExecutionResult / ValidationReport / 事件统计。
 
@@ -116,9 +143,7 @@ class ReviewerAgent(BaseAgent):
         from app.orchestration.contracts import ExecutionResult, ValidationReport
 
         results = [ExecutionResult.model_validate(item) for item in results_payload]
-        validations = [
-            ValidationReport.model_validate(item) for item in (input_data.get("validations") or [])
-        ]
+        validations = self._normalize_validations(input_data.get("validations") or [])
         topic = str(input_data.get("topic") or "文献综述")
         event_stats = dict(input_data.get("event_stats") or {})
 

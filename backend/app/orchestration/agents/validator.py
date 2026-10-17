@@ -171,7 +171,7 @@ class ValidatorAgent(BaseAgent):
                     name="rules",
                     passed=rule_report["passed"],
                     message="; ".join(rule_report["issues"]) or "规则校验通过",
-                )
+                ).model_dump()
             ],
             "retryable": not rule_report["passed"],
             "feedback": "; ".join(issues),
