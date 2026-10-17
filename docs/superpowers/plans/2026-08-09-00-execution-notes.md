@@ -103,6 +103,7 @@ Branch: `codex/plan2-task-runtime`（从 `be66476` 拉出，TDD per task）。
 | 4 | `2c7189f` | 新增 `RuntimeContainer`（LLM/Agent/Planner/事件/后台任务注册）与 `TaskExecution` 深模块（submit / approve_plan / control / get_snapshot / events_after / recover）；`contracts.py` 增加 `LiteratureReviewRequest`、`TaskControlRequest`、`SubtaskSnapshot`、`TaskSnapshot`；Planner 改为输出 `TaskPlan` + `TaskDAG`；`main.py` lifespan 接线并调用 `recover()` |
 | 5 | `e972324` | 新增 `app/schemas/task.py`（严格 HTTP 模型 + 契约映射）与 `/api/v1/tasks` 六条路由（创建/列表/详情/确认规划/控制/事件回放），全部鉴权 + owner 404；`TaskExecution.list_tasks` 支撑列表接口；OpenAPI 生成 15 条路径 |
 | 6 | `abbed05` | `events.py` 扩展 `subscribe` + `InMemoryEventPublisher` + `RedisEventPublisher` 与票据服务（内存/Redis GETDEL）；新增 `/api/v1/ws-ticket` 与 `WS /api/v1/tasks/{task_id}/ws`（消费票据 → 快照 → 补拉 → 实时转发）；`RuntimeContainer.start()` Redis 可用时自动升级实时后端；OpenAPI 16 条路径 |
+| 7 | `81bee64` + `0751819` | 端到端与恢复：`tests/llm/deterministic_llm.py::DeterministicPlanLLM`（BaseLLM 子类）驱动 Planner；`RecoveryManager.load_state()` 从 `TaskDag.graph` + `Subtask` 恢复并重置遗留运行态节点、追加 `task_recovery` 事件；`test_task_recovery_integration.py`（HTTP E2E + 崩溃恢复 + 恢复状态单测）；`scripts/plan2_exit_gate.py` 退出验收脚本 |
 
 Plan 2 notes:
 
@@ -126,4 +127,27 @@ Plan 2 notes:
 - Task 6 的 WebSocket 顺序为：消费票据（未通过不 accept）→ owner 快照 → **先建立订阅** → accept 并发送 snapshot → 补拉 `after_event_id` → 按 event_id 去重转发实时事件 → 断开时 `aclose()` 订阅。
 - `RuntimeContainer` 默认使用内存事件/票据实现（测试与无 Redis 环境）；`start()` 用 0.5s 超时探测 Redis，可用时升级为 Redis Pub/Sub 与 `SET NX EX` + `GETDEL` 票据，不可用则保持内存实现，不阻塞启动。
 - `tests/test_task_api.py` 的运行时夹具改用 `InMemoryEventPublisher`（原 `_NullPublisher` 无 `subscribe`，无法支撑 WS 测试）。
+- Task 7 的端到端测试不再手工构造 DAG：`DeterministicPlanLLM`（`BaseLLM` 子类）返回合法三节点 `TaskPlan`，走 `PlannerAgent` 的真实 LLM 解析/schema 校验路径。
+- `RecoveryManager.load_state()` 以 PostgreSQL 为事实来源：读取 `TaskDag.graph` + 已完成子任务，把遗留 `RUNNING`/`VALIDATING`/`RETRYING` 节点重置为 `READY`，并追加 `task_recovery` 事件；`TaskExecution._load_execution_state()` 委托它，提交后再发布恢复事件。
+- `RuntimeContainer` 新增公开注入缝 `use_planner()` / `use_agent_factory()`，供退出验收与后续实验注入确定性 Planner/Agent（不再访问私有属性）。
+- 退出验收脚本 `backend/scripts/plan2_exit_gate.py` 覆盖两条链路：完整 HTTP 链路（注册/登录 → 建任务 → 确认 → 完成 → 事件回放）与崩溃恢复（n2 运行中取消后台执行 → 重建 runtime → `recover()`）。
+- 本地 SQLite 冒烟时脚本会把全局引擎的 `StaticPool` 换成 `NullPool`：`StaticPool` 单连接会让 HTTP 请求与后台任务的事务互相回滚（生产 PostgreSQL 无此问题，服务器验收未启用该补丁）。
 - 跨仓开发流：Windows 本地写代码 + 本地 pytest（`--basetemp`），每个任务结束后 bundle 同步到服务器跑完整套件、迁移 round-trip 与集成测试。
+
+### Plan 2 Exit Gate — PASSED (2026-10-17, commit `0751819`)
+
+服务器（PostgreSQL 16 + Redis 7，真实连接池）逐条执行并记录：
+
+- [x] `APP_ENV=test .venv/bin/python -m pytest tests -q --cov-fail-under=70` — **663 passed, 1 skipped**（覆盖率 ≥70）
+- [x] `pytest tests/test_task_recovery_integration.py tests/test_scheduler_integration.py tests/test_task_execution.py -q --no-cov` — **15 passed**
+- [x] PostgreSQL 集成：`pytest tests/test_task_repository.py -m integration -q --no-cov` — **1 passed**
+- [x] 退出验收脚本：`.venv/bin/python scripts/plan2_exit_gate.py`（`DATABASE__URL` 指向 PostgreSQL，`REDIS__URL=redis://localhost:6379/0`）— **exit 0，`ok=true`，`failures=[]`**
+
+记录结果（真实 HTTP + PostgreSQL + Redis）：
+
+| 阶段 | 任务 ID | 结果 |
+|------|---------|------|
+| 完整链路 | `529b57ec-c7b9-404b-80f3-262b32043ad2` | plan_version=1；事件序列 1→20（`task_status(planning)` → `plan_ready` → `plan_approved` → 3×(ready/running/validating/completed/node_result) → `task_status(reviewing)` → `task_completed`）；节点尝试次数 `{n1:0, n2:0, n3:0}`（均一次成功）；执行器调用 `[n1, n2, n3]` |
+| 崩溃恢复 | `ab823084-1a36-48ac-a99d-1d30a5a9c367` | 崩溃前 `{n1: completed, n2: running, n3: pending}`（已持久化，非仅内存）；崩溃后同库重建 runtime → `recover()`：`task_recovery` 事件 `event_id=11`，`reset_nodes=[n2]`、`completed=[n1]`；恢复后执行器只调用 `[n2, n3]`（n1 未重跑）；最终 `completed`，尝试次数 `{n1:0, n2:0, n3:0}`，事件总数 23 |
+
+结论：认证 HTTP、规划确认、持久化 Scheduler 执行、事件回放与重启恢复全部在 PostgreSQL 上闭环；不存在只保存在内存中的执行状态。按路线图 §5，Exit Gate 通过后 `merge --no-ff` 回 `codex/literature-review` 再开 Plan 3。

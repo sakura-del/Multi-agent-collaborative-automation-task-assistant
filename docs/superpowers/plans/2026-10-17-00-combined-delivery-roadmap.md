@@ -249,5 +249,10 @@ npm run build
       （651 passed；`/api/v1/tasks` 六条路由 + OpenAPI 15 条路径，401/404/422 契约测试齐全）
 - [x] Plan 2 Task 6：鉴权事件回放与 WebSocket 流式推送
       （660 passed；ws-ticket + 快照/补拉/实时事件、Redis 与内存双实现、16 条 OpenAPI 路径）
-- [ ] Plan 2 Task 7：可重启端到端任务执行验证（下一步，Plan 2 收官）
+- [x] Plan 2 Task 7：可重启端到端任务执行验证
+      （663 passed；确定性 BaseLLM 驱动 Planner，HTTP E2E + 崩溃恢复 + task_recovery 事件）
+- [x] Plan 2 Exit Gate：PASSED（2026-10-17，commit `0751819`）
+      （服务器 PostgreSQL+Redis 验收 `ok=true`；完整链路任务 `529b57ec`、恢复任务 `ab823084`；
+      证据见 `2026-08-09-00-execution-notes.md` §Plan 2 Exit Gate）
+- [ ] Plan 3：文献综述工作流闭环（下一步，从合并后的 `codex/literature-review` 拉分支）
 
