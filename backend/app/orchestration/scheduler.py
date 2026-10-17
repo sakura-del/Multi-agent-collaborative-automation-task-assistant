@@ -6,12 +6,13 @@
 - 优先级排序：紧急度 × 依赖深度，关键路径优先
 - 与四大 Agent 集成：执行 Agent 推理 → 校验 Agent 质检 → 失败重试
 - 断点续传：从已完成集合继续执行剩余子图
+- 状态转换观察者：每次子任务状态变更与最终结果都通知 ScheduleObserver
 
 设计要点：
 - 调度器不持有 Agent 实例，通过 agent_factory 按需创建（内存优化）
-- 每个节点执行流程：RUNNING → ExecutorAgent → VALIDATING → ValidatorAgent → COMPLETED/FAILED
+- 每个节点执行流程：PENDING → READY → RUNNING → VALIDATING → COMPLETED/FAILED
 - 失败自动重试（RetryExecutor），耗尽触发 WAITING_HUMAN
-- 状态变更通过 TaskStateMachine 管理，可持久化供断点续传
+- 状态变更通过 TaskStateMachine 管理，observer 负责外部持久化
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol
 
 from app.core.logging import get_logger
 from app.orchestration.dag_engine import TaskDAG
@@ -64,12 +65,50 @@ class ScheduleResult:
         return len(self.completed) / self.total_nodes
 
 
+class ScheduleObserver(Protocol):
+    """调度观察者：接收每次状态转换与节点最终结果。
+
+    生产实现是 DatabaseScheduleObserver（锁行 → 更新子任务 → 追加事件 → commit
+    → 发布事件）；测试可注入内存实现。
+    """
+
+    async def on_transition(
+        self,
+        task_id: str,
+        node_id: str,
+        old: SubtaskStatus,
+        new: SubtaskStatus,
+    ) -> None: ...
+
+    async def on_result(self, task_id: str, result: NodeResult) -> None: ...
+
+
+class NullScheduleObserver:
+    """默认空观察者：兼容旧的无持久化调用路径。"""
+
+    async def on_transition(
+        self,
+        task_id: str,
+        node_id: str,
+        old: SubtaskStatus,
+        new: SubtaskStatus,
+    ) -> None:
+        return None
+
+    async def on_result(self, task_id: str, result: NodeResult) -> None:
+        return None
+
+
 class TaskScheduler:
     """任务调度器：驱动 DAG 执行的核心引擎。
 
     用法：
-        scheduler = TaskScheduler(agent_factory=create_agent, retry_policy=...)
-        result = await scheduler.run(dag, task_id="t1")
+        scheduler = TaskScheduler(
+            agent_factory=create_agent,
+            retry_policy=...,
+            observer=DatabaseScheduleObserver(session_factory),
+        )
+        result = await scheduler.run(dag, task_id=str(task.id))
     """
 
     def __init__(
@@ -78,14 +117,18 @@ class TaskScheduler:
         *,
         retry_policy: RetryPolicy | None = None,
         max_concurrency: int = 5,
+        observer: ScheduleObserver | None = None,
     ) -> None:
         self.agent_factory = agent_factory
         self.retry_executor = RetryExecutor(retry_policy or RetryPolicy())
         self.max_concurrency = max_concurrency
+        self._observer: ScheduleObserver = observer or NullScheduleObserver()
         # 节点状态机注册表：node_id → TaskStateMachine
         self._state_machines: dict[str, TaskStateMachine] = {}
         # 已完成节点集合（断点续传时可预填充）
         self._completed: set[str] = set()
+        # 已完成节点输出：供后继节点作为 dependency_outputs
+        self._completed_outputs: dict[str, dict[str, Any]] = {}
 
     def get_state_machine(self, node_id: str) -> TaskStateMachine:
         """获取或创建节点的状态机。"""
@@ -100,12 +143,19 @@ class TaskScheduler:
         *,
         task_id: str = "",
         pre_completed: set[str] | None = None,
+        trace_id: str | None = None,
+        subtask_ids: dict[str, str] | None = None,
     ) -> ScheduleResult:
         """执行整个 DAG：逐层并行调度。
 
-        参数 pre_completed 用于断点续传：跳过已完成节点，从断点继续。
+        参数：
+        - pre_completed：断点续传时已完成节点集合；
+        - trace_id：任务持久化 trace ID（默认由 task_id 派生，不按节点生成）；
+        - subtask_ids：node_id → 数据库 Subtask UUID 字符串，供节点上下文与 observer 使用。
         """
         self._completed = set(pre_completed or [])
+        self._completed_outputs = {}
+        resolved_trace_id = trace_id or (f"task-{task_id}" if task_id else "task")
         result = ScheduleResult(task_id=task_id, total_nodes=dag.node_count)
         # 已处理节点集合：含成功与失败，避免失败节点被无限重调度
         processed: set[str] = set(self._completed)
@@ -129,7 +179,16 @@ class TaskScheduler:
             # 限制并发数，避免资源耗尽
             batch = ready[: self.max_concurrency]
             node_results = await asyncio.gather(
-                *(self._execute_node(dag, nid) for nid in batch),
+                *(
+                    self._execute_node(
+                        dag,
+                        nid,
+                        task_id=task_id,
+                        trace_id=resolved_trace_id,
+                        subtask_ids=subtask_ids or {},
+                    )
+                    for nid in batch
+                ),
                 return_exceptions=True,
             )
 
@@ -138,15 +197,19 @@ class TaskScheduler:
                 processed.add(nid)
                 if isinstance(nr, Exception):
                     # gather 返回的异常（_execute_node 内部未捕获的意外错误）
-                    result.node_results[nid] = NodeResult(
+                    unexpected = NodeResult(
                         node_id=nid,
                         status=SubtaskStatus.WAITING_HUMAN,
                         error=str(nr),
                     )
+                    result.node_results[nid] = unexpected
                     result.waiting_human.append(nid)
+                    await self._observer.on_result(task_id, unexpected)
                 elif nr.status is SubtaskStatus.COMPLETED:
                     result.completed.append(nid)
                     self._completed.add(nid)
+                    if nr.output is not None:
+                        self._completed_outputs[nid] = nr.output
                     result.node_results[nid] = nr
                 else:
                     result.waiting_human.append(nid)
@@ -163,43 +226,91 @@ class TaskScheduler:
         )
         return result
 
-    async def _execute_node(self, dag: TaskDAG, node_id: str) -> NodeResult:
+    async def _transition(
+        self,
+        task_id: str,
+        node_id: str,
+        state_machine: TaskStateMachine,
+        target: SubtaskStatus,
+    ) -> None:
+        """调度器驱动的状态转换：先改状态，再等待 observer 持久化完成。"""
+        old = state_machine.status
+        state_machine.transition(target)
+        await self._observer.on_transition(task_id, node_id, old, target)
+
+    def _transition_notifier(self, task_id: str, node_id: str):
+        """构造 RetryExecutor 使用的异步转换回调（保证观察者顺序一致）。"""
+
+        async def notify(old: SubtaskStatus, new: SubtaskStatus) -> None:
+            await self._observer.on_transition(task_id, node_id, old, new)
+
+        return notify
+
+    async def _execute_node(
+        self,
+        dag: TaskDAG,
+        node_id: str,
+        *,
+        task_id: str,
+        trace_id: str,
+        subtask_ids: dict[str, str],
+    ) -> NodeResult:
         """执行单个节点：ExecutorAgent 推理 → ValidatorAgent 校验 → 重试。
 
-        完整闭环：RUNNING → 执行 → VALIDATING → 校验 → COMPLETED/FAILED。
+        完整闭环：PENDING → READY → RUNNING → 执行 → VALIDATING → 校验 → COMPLETED/FAILED。
+        每个节点的状态转换与最终结果都通知 ScheduleObserver。
         """
         sm = self.get_state_machine(node_id)
         node_attrs = dag.get_node(node_id)
         title = node_attrs.get("title", node_id)
         description = node_attrs.get("description", "")
-        trace_id = f"task-{node_id}"
 
-        # 执行阶段（含重试）
+        # 节点执行上下文：任务身份、trace、依赖输出（供 Agent 与持久化使用）
+        dependency_outputs = {
+            dep: self._completed_outputs[dep]
+            for dep in dag.get_predecessors(node_id)
+            if dep in self._completed_outputs
+        }
+        input_data: dict[str, Any] = {
+            "node_id": node_id,
+            "title": title,
+            "description": description,
+            "task_id": task_id,
+            "attempt": 0,
+            "trace_id": trace_id,
+            "dependency_outputs": dependency_outputs,
+        }
+        subtask_id = subtask_ids.get(node_id)
+        if subtask_id is not None:
+            input_data["subtask_id"] = subtask_id
+
+        if sm.status is SubtaskStatus.PENDING:
+            await self._transition(task_id, node_id, sm, SubtaskStatus.READY)
+        if sm.status is SubtaskStatus.READY:
+            await self._transition(task_id, node_id, sm, SubtaskStatus.RUNNING)
+
+        # 执行阶段（含重试）；重试内部的状态转换通过 notifier 同步给 observer
         executor_agent = self.agent_factory("executor")
         retry_result: RetryResult = await self.retry_executor.execute(
             executor_agent.execute,
-            kwargs={
-                "input_data": {
-                    "node_id": node_id,
-                    "title": title,
-                    "description": description,
-                    "trace_id": trace_id,
-                }
-            },
+            kwargs={"input_data": input_data},
             state_machine=sm,
+            on_transition=self._transition_notifier(task_id, node_id),
         )
 
         if not retry_result.success:
-            return NodeResult(
+            node_result = NodeResult(
                 node_id=node_id,
                 status=SubtaskStatus.WAITING_HUMAN,
                 error=retry_result.error,
                 attempts=retry_result.attempts,
             )
+            await self._observer.on_result(task_id, node_result)
+            return node_result
 
         # 校验阶段
         exec_output = retry_result.result or {}
-        sm.transition(SubtaskStatus.VALIDATING)
+        await self._transition(task_id, node_id, sm, SubtaskStatus.VALIDATING)
 
         validator_agent = self.agent_factory("validator")
         try:
@@ -208,36 +319,42 @@ class TaskScheduler:
                     "node_id": node_id,
                     "title": title,
                     "result": exec_output.get("result", ""),
+                    "task_id": task_id,
                     "trace_id": trace_id,
                 }
             )
         except Exception as exc:
             logger.error("validation_failed", node_id=node_id, error=str(exc))
-            sm.transition(SubtaskStatus.FAILED)
-            sm.transition(SubtaskStatus.WAITING_HUMAN)
-            return NodeResult(
+            await self._transition(task_id, node_id, sm, SubtaskStatus.FAILED)
+            await self._transition(task_id, node_id, sm, SubtaskStatus.WAITING_HUMAN)
+            node_result = NodeResult(
                 node_id=node_id,
                 status=SubtaskStatus.WAITING_HUMAN,
                 error=f"校验异常: {exc}",
                 output=exec_output,
                 attempts=retry_result.attempts,
             )
+            await self._observer.on_result(task_id, node_result)
+            return node_result
 
         # 根据校验结果决定最终状态
         passed = validation.get("passed", False)
         if passed:
-            sm.transition(SubtaskStatus.COMPLETED)
-            return NodeResult(
+            await self._transition(task_id, node_id, sm, SubtaskStatus.COMPLETED)
+            node_result = NodeResult(
                 node_id=node_id,
                 status=SubtaskStatus.COMPLETED,
                 output=exec_output,
                 validation=validation,
                 attempts=retry_result.attempts,
             )
+            await self._observer.on_result(task_id, node_result)
+            return node_result
+
         # 校验不通过 → 重试耗尽 → 人工干预
-        sm.transition(SubtaskStatus.FAILED)
-        sm.transition(SubtaskStatus.WAITING_HUMAN)
-        return NodeResult(
+        await self._transition(task_id, node_id, sm, SubtaskStatus.FAILED)
+        await self._transition(task_id, node_id, sm, SubtaskStatus.WAITING_HUMAN)
+        node_result = NodeResult(
             node_id=node_id,
             status=SubtaskStatus.WAITING_HUMAN,
             output=exec_output,
@@ -245,6 +362,8 @@ class TaskScheduler:
             error="校验未通过",
             attempts=retry_result.attempts,
         )
+        await self._observer.on_result(task_id, node_result)
+        return node_result
 
     def get_completed_nodes(self) -> set[str]:
         """返回已完成节点集合（供断点续传持久化）。"""

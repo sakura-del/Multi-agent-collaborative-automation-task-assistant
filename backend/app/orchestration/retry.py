@@ -9,6 +9,7 @@
 - 策略切换表：按重试次数递进调整参数，避免相同输入导致相同失败
 - 退避时间可配置，默认 3^n 秒（1/3/9）
 - 重试逻辑与业务解耦：RetryExecutor 接受可调用对象，不关心具体任务
+- 每次状态转换可注入异步回调（调度器用它把转换持久化到数据库）
 """
 
 from __future__ import annotations
@@ -23,6 +24,9 @@ from app.core.logging import get_logger
 from app.orchestration.task_state import SubtaskStatus, TaskStateMachine
 
 logger = get_logger(__name__)
+
+# 状态转换异步通知：调度器可注入 observer 持久化每次转换
+AsyncTransitionCallback = Callable[[SubtaskStatus, SubtaskStatus], Awaitable[None]]
 
 # 默认退避序列：1s → 3s → 9s（3^0, 3^1, 3^2）
 _DEFAULT_BACKOFF: list[float] = [1.0, 3.0, 9.0]
@@ -103,11 +107,26 @@ class RetryExecutor:
             func=agent.execute,
             input_data={...},
             state_machine=subtask_sm,
+            on_transition=observer_callback,
         )
     """
 
     def __init__(self, policy: RetryPolicy | None = None) -> None:
         self.policy = policy or RetryPolicy()
+
+    async def _advance(
+        self,
+        state_machine: TaskStateMachine | None,
+        target: SubtaskStatus,
+        on_transition: AsyncTransitionCallback | None,
+    ) -> None:
+        """执行一次状态转换，并等待可选的异步通知完成。"""
+        if state_machine is None:
+            return
+        old = state_machine.status
+        state_machine.transition(target)
+        if on_transition is not None:
+            await on_transition(old, target)
 
     async def execute(
         self,
@@ -116,6 +135,7 @@ class RetryExecutor:
         args: tuple = (),
         kwargs: dict[str, Any] | None = None,
         state_machine: TaskStateMachine | None = None,
+        on_transition: AsyncTransitionCallback | None = None,
     ) -> RetryResult:
         """执行带重试的任务。
 
@@ -123,8 +143,9 @@ class RetryExecutor:
         每次重试按策略参数调整输入（仅注入 func 实际接受的参数）。
         重试耗尽后更新状态机为 WAITING_HUMAN。
 
-        状态流转（需 state_machine 配合）：
-            PENDING → RUNNING → (失败) → FAILED → RETRYING → RUNNING → ... → WAITING_HUMAN
+        状态流转（需 state_machine 配合，对齐设计规格 §6.3）：
+            PENDING → READY → RUNNING → (失败) → FAILED
+            → RETRYING → READY → RUNNING → ... → 重试耗尽 → WAITING_HUMAN
         成功时保持 RUNNING，由调用方推进到 VALIDATING/COMPLETED。
         """
         kwargs = dict(kwargs or {})
@@ -133,16 +154,17 @@ class RetryExecutor:
 
         for attempt in range(max_retries + 1):  # 首次 + 重试次数
             if attempt == 0:
-                # 首次调用前：PENDING → RUNNING（确保后续 FAILED 合法）
+                # 首次调用：若调度器尚未推进，则补齐 PENDING → READY → RUNNING
                 if state_machine is not None and state_machine.status is SubtaskStatus.PENDING:
-                    state_machine.transition(SubtaskStatus.RUNNING)
+                    await self._advance(state_machine, SubtaskStatus.READY, on_transition)
+                if state_machine is not None and state_machine.status is SubtaskStatus.READY:
+                    await self._advance(state_machine, SubtaskStatus.RUNNING, on_transition)
             else:
-                # 重试前：FAILED → RETRYING → RUNNING，并注入策略参数
+                # 重试前：上一轮已 FAILED → RETRYING → READY，这里 READY → RUNNING
                 strategy = self.policy.get_strategy(attempt - 1)
                 kwargs.update(_filter_strategy_params(func, strategy))
-                if state_machine is not None:
-                    state_machine.transition(SubtaskStatus.RETRYING)
-                    state_machine.transition(SubtaskStatus.RUNNING)
+                if state_machine is not None and state_machine.status is SubtaskStatus.READY:
+                    await self._advance(state_machine, SubtaskStatus.RUNNING, on_transition)
                 logger.info(
                     "retry_attempt",
                     attempt=attempt,
@@ -165,17 +187,17 @@ class RetryExecutor:
                     max_attempts=max_retries + 1,
                     error=last_error,
                 )
-                # 失败后：RUNNING → FAILED（合法转换）
-                if state_machine is not None:
-                    state_machine.transition(SubtaskStatus.FAILED)
+                # 失败后：RUNNING → FAILED
+                await self._advance(state_machine, SubtaskStatus.FAILED, on_transition)
                 if attempt < max_retries:
-                    # 等待退避时间后重试
+                    # 准备重试：FAILED → RETRYING → READY，等待退避后下一轮 → RUNNING
+                    await self._advance(state_machine, SubtaskStatus.RETRYING, on_transition)
+                    await self._advance(state_machine, SubtaskStatus.READY, on_transition)
                     backoff = self.policy.get_backoff(attempt)
                     await asyncio.sleep(backoff)
                 else:
                     # 重试耗尽：FAILED → WAITING_HUMAN
-                    if state_machine is not None:
-                        state_machine.transition(SubtaskStatus.WAITING_HUMAN)
+                    await self._advance(state_machine, SubtaskStatus.WAITING_HUMAN, on_transition)
                     logger.error(
                         "retry_exhausted",
                         attempts=attempt + 1,

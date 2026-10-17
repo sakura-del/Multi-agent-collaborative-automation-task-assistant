@@ -1,15 +1,16 @@
 """子任务状态机：管理 Subtask 生命周期状态流转。
 
-状态流转图（对齐数据库 SUBTASK.status）：
-    pending → running → validating → completed
-                   ↘          ↘
-                    failed ←───── (校验不通过)
-                      ↓
-                  retrying → running (重试)
-                      ↓ (重试耗尽)
-                waiting_human → running (人工恢复)
-    任意状态 → terminated / paused
-    paused → running
+状态流转图（对齐数据库 SUBTASK.status 与设计规格 §6.3）：
+    pending → ready → running → validating → completed
+                 ↑        ↘          ↘
+                 │         failed ←─── (校验不通过)
+                 │           ↓
+                 │       retrying → ready（重试）
+                 │           ↓ (重试耗尽)
+                 │     waiting_human → ready/running（人工恢复）
+    paused → ready / running
+    任意活动状态 → cancelled / terminated
+    completed / cancelled / terminated 为终态
 
 设计要点：
 - 合法转换显式声明，非法抛异常避免静默错误
@@ -29,52 +30,93 @@ logger = get_logger(__name__)
 
 
 class SubtaskStatus(StrEnum):
-    """子任务生命周期状态，对齐 SUBTASK 表。"""
+    """子任务生命周期状态，对齐 SUBTASK 表与设计规格 §6.3。"""
 
-    PENDING = "pending"  # 待执行
+    PENDING = "pending"  # 待调度
+    READY = "ready"  # 依赖已满足，等待执行
     RUNNING = "running"  # 执行中
     VALIDATING = "validating"  # 校验中
     COMPLETED = "completed"  # 已完成
     FAILED = "failed"  # 失败
     RETRYING = "retrying"  # 重试中
+    WAITING_HUMAN = "waiting_human"  # 等待人工干预
     PAUSED = "paused"  # 暂停
     TERMINATED = "terminated"  # 终止
-    WAITING_HUMAN = "waiting_human"  # 等待人工干预
+    CANCELLED = "cancelled"  # 取消
 
 
-# 合法状态转换路径
+# 合法状态转换路径（设计规格 §6.3 + 人工控制分支）
 _TRANSITIONS: dict[SubtaskStatus, frozenset[SubtaskStatus]] = {
     SubtaskStatus.PENDING: frozenset(
-        {SubtaskStatus.RUNNING, SubtaskStatus.TERMINATED, SubtaskStatus.PAUSED}
+        {
+            SubtaskStatus.READY,
+            SubtaskStatus.PAUSED,
+            SubtaskStatus.TERMINATED,
+            SubtaskStatus.CANCELLED,
+        }
+    ),
+    SubtaskStatus.READY: frozenset(
+        {
+            SubtaskStatus.RUNNING,
+            SubtaskStatus.PAUSED,
+            SubtaskStatus.TERMINATED,
+            SubtaskStatus.CANCELLED,
+        }
     ),
     SubtaskStatus.RUNNING: frozenset(
         {
             SubtaskStatus.VALIDATING,
             SubtaskStatus.FAILED,
-            SubtaskStatus.TERMINATED,
             SubtaskStatus.PAUSED,
+            SubtaskStatus.TERMINATED,
+            SubtaskStatus.CANCELLED,
         }
     ),
     SubtaskStatus.VALIDATING: frozenset(
         {
             SubtaskStatus.COMPLETED,
             SubtaskStatus.FAILED,
-            SubtaskStatus.TERMINATED,
             SubtaskStatus.PAUSED,
+            SubtaskStatus.TERMINATED,
+            SubtaskStatus.CANCELLED,
         }
     ),
     SubtaskStatus.COMPLETED: frozenset(),  # 终态
     SubtaskStatus.FAILED: frozenset(
-        {SubtaskStatus.RETRYING, SubtaskStatus.WAITING_HUMAN, SubtaskStatus.TERMINATED}
+        {
+            SubtaskStatus.RETRYING,
+            SubtaskStatus.WAITING_HUMAN,
+            SubtaskStatus.TERMINATED,
+            SubtaskStatus.CANCELLED,
+        }
     ),
-    SubtaskStatus.RETRYING: frozenset({SubtaskStatus.RUNNING, SubtaskStatus.TERMINATED}),
-    SubtaskStatus.WAITING_HUMAN: frozenset({SubtaskStatus.RUNNING, SubtaskStatus.TERMINATED}),
-    SubtaskStatus.PAUSED: frozenset({SubtaskStatus.RUNNING, SubtaskStatus.TERMINATED}),
+    SubtaskStatus.RETRYING: frozenset(
+        {SubtaskStatus.READY, SubtaskStatus.TERMINATED, SubtaskStatus.CANCELLED}
+    ),
+    SubtaskStatus.WAITING_HUMAN: frozenset(
+        {
+            SubtaskStatus.READY,
+            SubtaskStatus.RUNNING,
+            SubtaskStatus.TERMINATED,
+            SubtaskStatus.CANCELLED,
+        }
+    ),
+    SubtaskStatus.PAUSED: frozenset(
+        {
+            SubtaskStatus.READY,
+            SubtaskStatus.RUNNING,
+            SubtaskStatus.TERMINATED,
+            SubtaskStatus.CANCELLED,
+        }
+    ),
     SubtaskStatus.TERMINATED: frozenset(),  # 终态
+    SubtaskStatus.CANCELLED: frozenset(),  # 终态
 }
 
 # 绝对终态：不可再转换
-_TERMINAL: frozenset[SubtaskStatus] = frozenset({SubtaskStatus.COMPLETED, SubtaskStatus.TERMINATED})
+_TERMINAL: frozenset[SubtaskStatus] = frozenset(
+    {SubtaskStatus.COMPLETED, SubtaskStatus.TERMINATED, SubtaskStatus.CANCELLED}
+)
 
 
 class IllegalTaskStateError(Exception):
