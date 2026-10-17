@@ -29,6 +29,7 @@ from app.db.session import get_db
 from app.orchestration.agents.planner import PlannerAgent
 from app.orchestration.base_agent import BaseAgent
 from app.orchestration.contracts import TaskStatus
+from app.orchestration.events import InMemoryEventPublisher
 from app.orchestration.runtime import RuntimeContainer
 from app.orchestration.services.task_execution import TaskExecution
 
@@ -113,11 +114,6 @@ class _StaticReviewer(BaseAgent):
         return {"summary": "任务执行成功。", "stats": {"error_count": 0}, "root_cause": {}}
 
 
-class _NullPublisher:
-    async def publish(self, event: Any) -> None:
-        return None
-
-
 # ===== 夹具 =====
 
 
@@ -169,7 +165,7 @@ def api_env(tmp_path: Path) -> Iterator[Any]:
             session_factory=session_factory,
             planner_factory=lambda: planner or _DeterministicPlanner(),
             agent_factory=agent_factory,
-            event_publisher=_NullPublisher(),
+            event_publisher=InMemoryEventPublisher(),
         )
         execution = TaskExecution(container)
         app.state.container = container

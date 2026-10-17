@@ -32,6 +32,8 @@ __all__ = [
     "TaskEventPage",
     "TaskSnapshot",
     "TaskSummaryOut",
+    "WebSocketTicketOut",
+    "WebSocketTicketRequest",
 ]
 
 
@@ -120,3 +122,20 @@ class TaskEventPage(BaseModel):
 
     events: list[TaskEvent]
     next_event_id: int
+
+
+class WebSocketTicketRequest(BaseModel):
+    """申请 WebSocket 连接票据（要求任务归属当前用户）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    task_id: UUID
+
+
+class WebSocketTicketOut(BaseModel):
+    """一次性连接票据；expires_in 为剩余有效秒数。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ticket: str
+    expires_in: int

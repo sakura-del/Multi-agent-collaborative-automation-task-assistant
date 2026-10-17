@@ -19,7 +19,13 @@ from uuid import UUID
 from app.core.logging import get_logger
 from app.db.session import AsyncSessionLocal
 from app.orchestration.agents import ExecutorAgent, PlannerAgent, ReviewerAgent, ValidatorAgent
-from app.orchestration.events import EventPublisher, NullEventPublisher
+from app.orchestration.events import (
+    EventPublisher,
+    InMemoryEventPublisher,
+    InMemoryTicketService,
+    RedisEventPublisher,
+    RedisTicketService,
+)
 from app.orchestration.persistence import DatabaseScheduleObserver
 from app.orchestration.scheduler import ScheduleObserver, TaskScheduler
 
@@ -38,26 +44,48 @@ class RuntimeContainer:
         *,
         session_factory: Any = AsyncSessionLocal,
         event_publisher: EventPublisher | None = None,
+        ticket_service: Any | None = None,
         planner_factory: PlannerFactory | None = None,
         agent_factory: AgentFactory | None = None,
         knowledge_query: Any | None = None,
     ) -> None:
         self.session_factory = session_factory
-        self.event_publisher: EventPublisher = event_publisher or NullEventPublisher()
+        self.event_publisher: EventPublisher = event_publisher or InMemoryEventPublisher()
+        self.ticket_service: Any = ticket_service or InMemoryTicketService()
         self.knowledge_query = knowledge_query
         self.llm_manager: Any | None = None
         self._planner_factory: PlannerFactory = planner_factory or PlannerAgent
         self._agent_factory: AgentFactory = agent_factory or self._default_agent
         self._tasks: dict[UUID, asyncio.Task[None]] = {}
         self._started = False
+        self._explicit_publisher = event_publisher is not None
+        self._explicit_ticket_service = ticket_service is not None
 
     async def start(self) -> None:
-        """初始化运行时依赖（LLM 管理器延迟到首次使用时才建立连接）。"""
+        """初始化运行时依赖；Redis 可用时把事件/票据升级为 Redis 实现。"""
         if self._started:
             return
         from app.llm.factory import get_llm_manager
 
         self.llm_manager = get_llm_manager()
+
+        if not (self._explicit_publisher and self._explicit_ticket_service):
+            try:
+                from app.core.redis import RedisManager
+
+                # 短超时探测：Redis 不可用时立即回退内存实现，不拖慢启动
+                if await asyncio.wait_for(RedisManager.ping(), timeout=0.5):
+                    client = RedisManager.get_client()
+                    if not self._explicit_publisher:
+                        self.event_publisher = RedisEventPublisher(client)
+                    if not self._explicit_ticket_service:
+                        self.ticket_service = RedisTicketService(client)
+                    logger.info("runtime_realtime_backend", backend="redis")
+                else:
+                    logger.info("runtime_realtime_backend", backend="in_memory")
+            except Exception:  # Redis 不可用时保持内存实现，不阻塞启动
+                logger.warning("runtime_realtime_backend_fallback", backend="in_memory")
+
         self._started = True
         logger.info("runtime_container_started")
 
