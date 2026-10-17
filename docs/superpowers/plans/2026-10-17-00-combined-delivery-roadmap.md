@@ -261,10 +261,5 @@ npm run build
   - [x] Task 4：确定性引用校验与定向重做（718 passed；五项固定检查 + 两次重生成后转人工）
   - [x] Task 5：复盘汇总与 Markdown/DOCX 导出（734 passed；产物哈希 + owner-scoped 下载 + 服务器实测落盘）
   - [x] Task 6：冻结离线演示语料 + CLI（744 passed；服务器已下载 10 篇/36MB + sha256 清单，语料测试 11 passed）
-  - [ ] Plan 3 Exit Gate：离线真实模型任务（**阻塞：服务器 `.env` 缺 `LLM__API_KEY`**；代码/语料就绪，补密钥后执行 `python -m app.cli run-literature-demo --offline --max-documents 10`）
-  - [ ] Task 3：文献规划与证据约束执行
-  - [ ] Task 4：确定性引用校验与定向重做
-  - [ ] Task 5：复盘汇总与 Markdown/DOCX 导出
-  - [ ] Task 6：冻结离线演示语料 + CLI 验收
-  - [ ] Plan 3 Exit Gate：离线真实模型任务，引用全部可回溯
+  - [ ] Plan 3 Exit Gate：离线真实模型任务（引用全可回溯 + 重启恢复保留已完成节点 + Markdown/DOCX 哈希记录）——**阻塞：服务器 `.env` 缺 `LLM__API_KEY`**；代码/语料就绪，补密钥后执行 `python -m app.cli run-literature-demo --offline --max-documents 10`
 
