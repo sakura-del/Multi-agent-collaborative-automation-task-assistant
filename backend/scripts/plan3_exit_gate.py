@@ -85,7 +85,7 @@ def run_demo_cli(args: argparse.Namespace) -> tuple[int, dict[str, Any] | None, 
         "--timeout",
         str(args.timeout),
     ]
-    completed = subprocess.run(  # noqa: S603 - 固定命令与参数，无 shell
+    completed = subprocess.run(
         command,
         cwd=str(BACKEND_DIR),
         capture_output=True,
@@ -109,26 +109,26 @@ async def verify_task(task_id: str) -> dict[str, Any]:
     report: dict[str, Any] = {"task_id": task_id, "citations": [], "artifacts": []}
 
     async with AsyncSessionLocal() as session:
-        task = (
-            await session.execute(select(Task).where(Task.id == task_id))
-        ).scalar_one_or_none()
+        task = (await session.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
         if task is None:
             raise AssertionError(f"任务不存在: {task_id}")
         report["status"] = task.status
         report["artifact_count"] = len(task.artifacts or [])
 
         subtasks = (
-            await session.execute(select(Subtask).where(Subtask.task_id == task.id))
-        ).scalars().all()
+            (await session.execute(select(Subtask).where(Subtask.task_id == task.id)))
+            .scalars()
+            .all()
+        )
         attempts_before = {sub.node_id: sub.retry_count for sub in subtasks}
 
         # 1) 引用可回溯
         stored_chunks = set(
             (
                 await session.execute(
-                    select(DocChunk.id).join(
-                        KnowledgeDoc, KnowledgeDoc.id == DocChunk.doc_id
-                    ).where(KnowledgeDoc.user_id == task.user_id)
+                    select(DocChunk.id)
+                    .join(KnowledgeDoc, KnowledgeDoc.id == DocChunk.doc_id)
+                    .where(KnowledgeDoc.user_id == task.user_id)
                 )
             )
             .scalars()
@@ -168,10 +168,8 @@ async def verify_task(task_id: str) -> dict[str, Any]:
         for item in task.artifacts or []:
             artifact_id = str(item.get("artifact_id"))
             try:
-                path, download_name = exporter.resolve_for_user(
-                    task.user_id, task.id, artifact_id
-                )
-            except Exception as exc:  # noqa: BLE001 - 记录失败原因
+                path, download_name = exporter.resolve_for_user(task.user_id, task.id, artifact_id)
+            except Exception as exc:
                 raise AssertionError(f"产物 {artifact_id} 无法解析: {exc}") from exc
             digest = sha256_file(path)
             report["artifacts"].append(
@@ -205,12 +203,12 @@ async def verify_task(task_id: str) -> dict[str, Any]:
     await asyncio.sleep(1.0)
 
     async with AsyncSessionLocal() as session:
-        task_after = (
-            await session.execute(select(Task).where(Task.id == task_id))
-        ).scalar_one()
+        task_after = (await session.execute(select(Task).where(Task.id == task_id))).scalar_one()
         subtasks_after = (
-            await session.execute(select(Subtask).where(Subtask.task_id == task_id))
-        ).scalars().all()
+            (await session.execute(select(Subtask).where(Subtask.task_id == task_id)))
+            .scalars()
+            .all()
+        )
         attempts_after = {sub.node_id: sub.retry_count for sub in subtasks_after}
         events_after = await _event_count(task_id)
 
@@ -268,7 +266,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
     try:
         entry.update(verify_corpus(Path(args.manifest)))
         entry["ok"] = True
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         entry["ok"] = False
         entry["error"] = str(exc)
         report["failures"].append(f"corpus: {exc}")
@@ -297,7 +295,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
     try:
         entry.update(await verify_task(task_id))
         entry["ok"] = True
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         entry["ok"] = False
         entry["error"] = str(exc)
         report["failures"].append(f"verify_task: {exc}")
