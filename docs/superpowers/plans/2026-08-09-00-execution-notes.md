@@ -102,6 +102,7 @@ Branch: `codex/plan2-task-runtime`（从 `be66476` 拉出，TDD per task）。
 | 3 | `dd15c21` | `SubtaskStatus` 增加 `READY` / `CANCELLED`；`TaskScheduler` 引入 `ScheduleObserver`（默认 `NullScheduleObserver`）与节点上下文（task_id/trace_id/subtask_id/依赖输出）；新增 `DatabaseScheduleObserver`（独立 session 锁行 → 更新子任务/重试/输出 → 追加事件 → commit → publish）；`events.py` 提供 `EventPublisher` 协议 + `NullEventPublisher` |
 | 4 | `2c7189f` | 新增 `RuntimeContainer`（LLM/Agent/Planner/事件/后台任务注册）与 `TaskExecution` 深模块（submit / approve_plan / control / get_snapshot / events_after / recover）；`contracts.py` 增加 `LiteratureReviewRequest`、`TaskControlRequest`、`SubtaskSnapshot`、`TaskSnapshot`；Planner 改为输出 `TaskPlan` + `TaskDAG`；`main.py` lifespan 接线并调用 `recover()` |
 | 5 | `e972324` | 新增 `app/schemas/task.py`（严格 HTTP 模型 + 契约映射）与 `/api/v1/tasks` 六条路由（创建/列表/详情/确认规划/控制/事件回放），全部鉴权 + owner 404；`TaskExecution.list_tasks` 支撑列表接口；OpenAPI 生成 15 条路径 |
+| 6 | `abbed05` | `events.py` 扩展 `subscribe` + `InMemoryEventPublisher` + `RedisEventPublisher` 与票据服务（内存/Redis GETDEL）；新增 `/api/v1/ws-ticket` 与 `WS /api/v1/tasks/{task_id}/ws`（消费票据 → 快照 → 补拉 → 实时转发）；`RuntimeContainer.start()` Redis 可用时自动升级实时后端；OpenAPI 16 条路径 |
 
 Plan 2 notes:
 
@@ -122,4 +123,7 @@ Plan 2 notes:
 - `TaskControl` 同时接受 `node_id` 与 `subtask_id`（计划原文用 subtask_id，引擎内部用 node_id），二者至少提供一个；`supply_input` 要求非空 input，均由 Pydantic 校验返回 422。
 - 为支撑 `GET /tasks` 列表，`TaskExecution` 增加 `list_tasks()` 查询方法（六个核心接口之外的只读扩展）。
 - Task 5 的 API 测试用 TestClient 的 portal 事件循环承载后台规划/执行任务，配合文件型 SQLite；`api_env` fixture 在每个测试内替换 `app.state.runtime` 为注入确定性 Planner/Agent 的 `TaskExecution`，并在退出前通过 portal 关闭容器。
+- Task 6 的 WebSocket 顺序为：消费票据（未通过不 accept）→ owner 快照 → **先建立订阅** → accept 并发送 snapshot → 补拉 `after_event_id` → 按 event_id 去重转发实时事件 → 断开时 `aclose()` 订阅。
+- `RuntimeContainer` 默认使用内存事件/票据实现（测试与无 Redis 环境）；`start()` 用 0.5s 超时探测 Redis，可用时升级为 Redis Pub/Sub 与 `SET NX EX` + `GETDEL` 票据，不可用则保持内存实现，不阻塞启动。
+- `tests/test_task_api.py` 的运行时夹具改用 `InMemoryEventPublisher`（原 `_NullPublisher` 无 `subscribe`，无法支撑 WS 测试）。
 - 跨仓开发流：Windows 本地写代码 + 本地 pytest（`--basetemp`），每个任务结束后 bundle 同步到服务器跑完整套件、迁移 round-trip 与集成测试。

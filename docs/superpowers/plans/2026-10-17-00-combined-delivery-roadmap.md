@@ -247,5 +247,7 @@ npm run build
       （638 passed；submit/approve/control/快照/事件/恢复 六个接口，服务器 PG 集成通过）
 - [x] Plan 2 Task 5：任务 HTTP 命令与查询接口
       （651 passed；`/api/v1/tasks` 六条路由 + OpenAPI 15 条路径，401/404/422 契约测试齐全）
-- [ ] Plan 2 Task 6：鉴权事件回放与 WebSocket 流式推送（下一步）
+- [x] Plan 2 Task 6：鉴权事件回放与 WebSocket 流式推送
+      （660 passed；ws-ticket + 快照/补拉/实时事件、Redis 与内存双实现、16 条 OpenAPI 路径）
+- [ ] Plan 2 Task 7：可重启端到端任务执行验证（下一步，Plan 2 收官）
 
