@@ -120,3 +120,8 @@ outputs/
 workspace/
 tmp/
 .temp/
+
+# ===== 离线演示语料（Plan 3 Task 6）=====
+# 只提交 query.json 与 manifest.json；PDF 与临时 staging 目录不入库
+backend/demo_data/literature_review/files/
+backend/demo_data/literature_review/files.tmp-*/

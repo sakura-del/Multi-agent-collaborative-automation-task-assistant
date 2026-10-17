@@ -82,3 +82,23 @@
 ## License
 
 本项目为毕业设计作品，仅用于学术与学习用途。
+
+## 离线文献综述演示（Plan 3 Task 6）
+
+冻结语料只提交 `backend/demo_data/literature_review/query.json` 与 `manifest.json`；
+PDF 位于 `files/`（已 gitignore）。
+
+```powershell
+Set-Location backend
+
+# 1) 准备语料（唯一需要网络的步骤：检索并下载 10 篇 arXiv PDF，写入 sha256 清单）
+python scripts/prepare_demo_corpus.py
+python -m pytest tests/test_demo_corpus.py -v      # 未准备时以明确提示 SKIP
+
+# 2) 离线演示：知识库入库 → 规划确认 → 证据约束执行 → Markdown/DOCX 产物
+python -m app.cli run-literature-demo --offline --max-documents 10
+python -m app.cli run-literature-demo --offline --check   # 仅清单与 LLM 连通性
+```
+
+产物路径固定为 `<artifact_root>/<user_id>/<task_id>/<artifact_id>.{md,docx}`，
+可通过 `GET /api/v1/tasks/{task_id}/artifacts/{artifact_id}` 下载。
