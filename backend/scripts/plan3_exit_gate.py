@@ -84,6 +84,8 @@ def run_demo_cli(args: argparse.Namespace) -> tuple[int, dict[str, Any] | None, 
         args.username,
         "--timeout",
         str(args.timeout),
+        "--data-root",
+        args.data_root,
     ]
     completed = subprocess.run(
         command,
@@ -256,6 +258,15 @@ def verify_corpus(manifest_path: Path) -> dict[str, Any]:
 async def run(args: argparse.Namespace) -> dict[str, Any]:
     report: dict[str, Any] = {"ok": False, "phases": [], "failures": []}
 
+    # 上传/产物根目录：与 CLI 子进程保持一致（容器内默认 /app/data/* 在宿主机不可写）
+    from app.core.config import get_settings
+
+    data_root = Path(args.data_root).resolve()
+    settings = get_settings()
+    settings.app.upload_root = str(data_root / "uploads")
+    settings.app.artifact_root = str(data_root / "artifacts")
+    report["data_root"] = str(data_root)
+
     def phase(name: str) -> dict[str, Any]:
         entry: dict[str, Any] = {"phase": name}
         report["phases"].append(entry)
@@ -312,6 +323,11 @@ def main() -> int:
     parser.add_argument("--username", default="literature-gate")
     parser.add_argument("--timeout", type=float, default=1800.0)
     parser.add_argument("--task-id", default=None, help="复用既有任务，只做校验（不跑演示）")
+    parser.add_argument(
+        "--data-root",
+        default=str(BACKEND_DIR / ".runtime"),
+        help="宿主机可写的数据根目录（上传与产物），需与 CLI 一致",
+    )
     parser.add_argument("--report", default=None, help="把 JSON 报告写入该路径")
     args = parser.parse_args()
 
