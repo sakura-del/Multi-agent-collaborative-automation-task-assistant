@@ -14,6 +14,8 @@
 from __future__ import annotations
 
 import asyncio
+import re
+from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -42,6 +44,32 @@ _EXT_TO_DOC_TYPE: dict[str, str] = {
     ".markdown": "markdown",
     ".txt": "txt",
 }
+
+_UUID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+
+
+def resolve_retrieval_ids(
+    results: list[RetrievalResult],
+    mapping: dict[str, tuple[str, str]],
+) -> list[RetrievalResult]:
+    """把检索结果的 chunk_id 解析为可回溯的 DocChunk/Doc UUID（Plan 3 证据链）。
+
+    - 已经是 UUID 的结果（如 BM25 路径）原样保留；
+    - 索引侧合成 id（Chroma/BGE 分块 id）按 `chroma_id → (chunk_id, doc_id)` 映射替换；
+    - 映射缺失的结果直接丢弃：无法回溯到存储行的片段不能作为证据。
+    """
+    resolved: list[RetrievalResult] = []
+    for item in results:
+        if _UUID_RE.match(str(item.chunk_id)) and _UUID_RE.match(str(item.doc_id)):
+            resolved.append(item)
+            continue
+        mapped = mapping.get(str(item.chunk_id))
+        if mapped is None:
+            continue
+        resolved.append(replace(item, chunk_id=mapped[0], doc_id=mapped[1]))
+    return resolved
 
 
 class KnowledgeDocumentService:
@@ -213,11 +241,36 @@ class KnowledgeDocumentService:
         *,
         top_k: int = 8,
     ) -> list[RetrievalResult]:
-        """证据上下文检索入口（Plan 3 Task 2）：与 search 同一 owner 隔离语义。"""
-        return await self.search(
+        """证据上下文检索入口（Plan 3 Task 2）：与 search 同一 owner 隔离语义。
+
+        检索后把索引侧 chunk_id 解析为存储行 UUID（`VectorIndex.chroma_id` 映射），
+        保证每条证据都能回溯到 `DocChunk` / `KnowledgeDoc`。
+        """
+        results = await self.search(
             user_id,
             KnowledgeSearchIn(query=query, top_k=top_k),
         )
+        return await self._attach_storage_ids(results)
+
+    async def _attach_storage_ids(
+        self,
+        results: list[RetrievalResult],
+    ) -> list[RetrievalResult]:
+        """按 `VectorIndex.chroma_id` 映射把结果 id 换成存储层 UUID。"""
+        pending = [item.chunk_id for item in results if not _UUID_RE.match(str(item.chunk_id))]
+        if not pending:
+            return results
+        rows = (
+            await self._db.execute(
+                select(VectorIndex.chroma_id, VectorIndex.chunk_id, VectorIndex.doc_id).where(
+                    VectorIndex.chroma_id.in_(pending)
+                )
+            )
+        ).all()
+        mapping = {
+            str(chroma_id): (str(chunk_id), str(doc_id)) for chroma_id, chunk_id, doc_id in rows
+        }
+        return resolve_retrieval_ids(results, mapping)
 
     async def rebuild_bm25(self) -> int:
         """从持久化的 ready 分块重建 BM25 内存索引（启动恢复场景）。"""

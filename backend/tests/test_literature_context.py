@@ -171,3 +171,29 @@ class TestSearchForContext:
         assert kb.calls[0]["top_k"] == 3
         assert kb.calls[0]["where"] == {"user_id": str(USER_A)}
         assert kb.calls[0]["namespace"] == str(USER_A)
+
+
+class TestRetrievalIdResolution:
+    """Plan 3 证据链：索引侧 chunk_id 必须解析为存储层 UUID。"""
+
+    def test_keeps_uuid_results_and_maps_synthetic_ids(self) -> None:
+        from dataclasses import replace as dc_replace
+
+        from app.knowledge.services.document_service import resolve_retrieval_ids
+
+        chunk_uuid, doc_uuid = uuid4(), uuid4()
+        already = _result(chunk_id=str(chunk_uuid), doc_id=str(doc_uuid))
+        synthetic = _result(chunk_id="0b5ddd99f22604d6", doc_id=str(doc_uuid))
+        untraceable = _result(chunk_id="deadbeefdeadbeef", doc_id="")
+
+        resolved = resolve_retrieval_ids(
+            [already, synthetic, untraceable],
+            {"0b5ddd99f22604d6": (str(uuid4()), str(uuid4()))},
+        )
+
+        assert len(resolved) == 2
+        assert resolved[0].chunk_id == str(chunk_uuid)
+        assert resolved[1].chunk_id != "0b5ddd99f22604d6"
+        UUID(resolved[1].chunk_id)
+        UUID(resolved[1].doc_id)
+        assert dc_replace(already).text == resolved[0].text
