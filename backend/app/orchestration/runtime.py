@@ -57,7 +57,8 @@ class RuntimeContainer:
         self.literature_source = literature_source
         self.llm_manager: Any | None = None
         self._planner_factory: PlannerFactory = planner_factory or PlannerAgent
-        self._agent_factory: AgentFactory = agent_factory or self._default_agent
+        self._agent_factory: AgentFactory = agent_factory or self._build_default_agent
+        self._llm_missing_warned = False
         self._tasks: dict[UUID, asyncio.Task[None]] = {}
         self._started = False
         self._explicit_publisher = event_publisher is not None
@@ -114,8 +115,13 @@ class RuntimeContainer:
         )
 
     def create_planner(self) -> Any:
-        """创建规划 Agent 实例。"""
-        return self._planner_factory()
+        """创建规划 Agent 实例（注入容器 LLM，缺失时保留降级路径）。"""
+        llm = self._llm_client()
+        try:
+            return self._planner_factory(llm=llm)  # type: ignore[call-arg]
+        except TypeError:
+            # 注入式工厂（退出验收/测试）不接受 llm 参数
+            return self._planner_factory()
 
     def create_agent(self, agent_type: str) -> Any:
         """按类型创建 Agent 实例（reviewer 等由 TaskExecution 使用）。"""
@@ -152,14 +158,38 @@ class RuntimeContainer:
         """判断容器是否仍跟踪该任务的后台协程。"""
         return task_id in self._tasks
 
-    @staticmethod
-    def _default_agent(agent_type: str) -> Any:
-        """默认 Agent 工厂：无 LLM 时四大 Agent 均有降级路径。"""
+    def _llm_client(self) -> Any | None:
+        """取容器 LLM 客户端；未配置或初始化失败时返回 None（Agent 走降级路径）。
+
+        文献场景要求真实模型执行，因此首次缺失时打印一次告警，避免"静默降级"。
+        """
+        if self.llm_manager is None:
+            try:
+                from app.llm.factory import get_llm_manager
+
+                self.llm_manager = get_llm_manager()
+            except Exception:
+                self.llm_manager = None
+        if self.llm_manager is None:
+            return None
+        try:
+            return self.llm_manager.get_primary()
+        except Exception as exc:
+            if not self._llm_missing_warned:
+                logger.warning("runtime_llm_unavailable", error=str(exc))
+                self._llm_missing_warned = True
+            return None
+
+    def _build_default_agent(self, agent_type: str) -> Any:
+        """默认 Agent 工厂：有 LLM 时注入真实模型，缺失时保留降级路径。"""
+        llm = self._llm_client()
         if agent_type == "executor":
-            return ExecutorAgent()
+            return ExecutorAgent(llm=llm)
         if agent_type == "validator":
-            # 与降级执行输出兼容的宽松规则；真实模型接入后由 Plan 3 收紧
-            return ValidatorAgent(rules={"min_length": 1, "required_keywords": []})
+            # 与降级执行输出兼容的宽松规则；文献场景由工作流注入确定性引用校验
+            return ValidatorAgent(llm=llm, rules={"min_length": 1, "required_keywords": []})
         if agent_type == "reviewer":
-            return ReviewerAgent()
+            return ReviewerAgent(llm=llm)
+        if agent_type == "planner":
+            return self.create_planner()
         raise ValueError(f"未知 agent_type: {agent_type}")
