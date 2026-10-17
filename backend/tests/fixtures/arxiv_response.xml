@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:arxiv="http://arxiv.org/schemas/atom">
+  <title type="html">ArXiv Query: search_query=all:retrieval augmented generation</title>
+  <id>http://arxiv.org/api/query?search_query=all:retrieval+augmented+generation</id>
+  <updated>2024-02-01T00:00:00-05:00</updated>
+  <opensearch:totalResults xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/">2</opensearch:totalResults>
+  <entry>
+    <id>http://arxiv.org/abs/2401.12345v1</id>
+    <updated>2024-01-16T00:00:00Z</updated>
+    <published>2024-01-15T12:00:00Z</published>
+    <title>Retrieval-Augmented
+      Generation   for Evidence Tracing</title>
+    <summary>  We   study how retrieval-augmented generation
+      traces evidence across documents.  </summary>
+    <author>
+      <name>Alice Zhang</name>
+    </author>
+    <author>
+      <name>Bob Li</name>
+    </author>
+    <arxiv:primary_category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.IR" scheme="http://arxiv.org/schemas/atom"/>
+    <link href="https://arxiv.org/abs/2401.12345v1" rel="alternate" type="text/html"/>
+    <link title="pdf" href="https://arxiv.org/pdf/2401.12345v1" rel="related" type="application/pdf"/>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2212.09999v2</id>
+    <updated>2022-12-21T00:00:00Z</updated>
+    <published>2022-12-20T08:30:00Z</published>
+    <title>Older Multi-Agent Survey</title>
+    <summary>An older survey of multi-agent systems.</summary>
+    <author>
+      <name>Carol Wu</name>
+    </author>
+    <category term="cs.MA" scheme="http://arxiv.org/schemas/atom"/>
+    <link href="https://arxiv.org/abs/2212.09999v2" rel="alternate" type="text/html"/>
+    <link title="pdf" href="https://arxiv.org/pdf/2212.09999v2" rel="related" type="application/pdf"/>
+  </entry>
+</feed>

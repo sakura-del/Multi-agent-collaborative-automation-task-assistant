@@ -64,3 +64,19 @@ class DAGCycleError(AppException):
     status_code = 400
     default_message = "任务依赖图存在循环依赖"
     error_code = "DAG_CYCLE"
+
+
+class UpstreamError(AppException):
+    """上游服务返回不可重试的错误（4xx / 重定向异常 / 响应格式非法）。"""
+
+    status_code = 502
+    default_message = "上游服务返回错误"
+    error_code = "UPSTREAM_ERROR"
+
+
+class UpstreamTemporaryError(UpstreamError):
+    """上游服务暂时不可用（超时 / 连接失败 / 5xx），允许离线回退或重试。"""
+
+    status_code = 503
+    default_message = "上游服务暂时不可用"
+    error_code = "UPSTREAM_TEMPORARY"
