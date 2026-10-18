@@ -487,6 +487,8 @@ class TaskExecution:
         workflow = LiteratureReviewWorkflow(
             executor=self.container.create_agent("executor"),
             validator=ValidatorAgent(
+                # 语义补充校验需要 LLM；确定性引用校验始终先跑（Plan 5 Task 1 实跑发现此前漏注入）
+                llm=self.container.create_llm(),
                 rules={"min_length": 1, "required_keywords": []},
                 citation_validator=CitationValidator(),
             ),

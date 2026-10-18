@@ -49,6 +49,7 @@ class RuntimeContainer:
         agent_factory: AgentFactory | None = None,
         knowledge_query: Any | None = None,
         literature_source: Any | None = None,
+        llm: Any | None = None,
     ) -> None:
         self.session_factory = session_factory
         self.event_publisher: EventPublisher = event_publisher or InMemoryEventPublisher()
@@ -56,6 +57,8 @@ class RuntimeContainer:
         self.knowledge_query = knowledge_query
         self.literature_source = literature_source
         self.llm_manager: Any | None = None
+        # 显式注入的 LLM 客户端：测试/验收用，优先于全局 LLMManager，避免改动模块单例
+        self._injected_llm = llm
         self._planner_factory: PlannerFactory = planner_factory or PlannerAgent
         self._agent_factory: AgentFactory = agent_factory or self._build_default_agent
         self._llm_missing_warned = False
@@ -68,9 +71,11 @@ class RuntimeContainer:
         """初始化运行时依赖；Redis 可用时把事件/票据升级为 Redis 实现。"""
         if self._started:
             return
-        from app.llm.factory import get_llm_manager
+        # 已显式注入 LLM（测试/验收）时不再读全局单例，避免污染进程状态
+        if self._injected_llm is None:
+            from app.llm.factory import get_llm_manager
 
-        self.llm_manager = get_llm_manager()
+            self.llm_manager = get_llm_manager()
 
         if not (self._explicit_publisher and self._explicit_ticket_service):
             try:
@@ -127,6 +132,10 @@ class RuntimeContainer:
         """按类型创建 Agent 实例（reviewer 等由 TaskExecution 使用）。"""
         return self._agent_factory(agent_type)
 
+    def create_llm(self) -> Any | None:
+        """取容器 LLM 客户端（供工作流内部自建 Agent 时注入，缺失时返回 None）。"""
+        return self._llm_client()
+
     def use_planner(self, factory: PlannerFactory) -> None:
         """替换规划器工厂（退出验收/实验注入确定性规划器）。"""
         self._planner_factory = factory
@@ -159,10 +168,12 @@ class RuntimeContainer:
         return task_id in self._tasks
 
     def _llm_client(self) -> Any | None:
-        """取容器 LLM 客户端；未配置或初始化失败时返回 None（Agent 走降级路径）。
+        """取容器 LLM 客户端；显式注入优先，未配置时返回 None（Agent 走降级路径）。
 
         文献场景要求真实模型执行，因此首次缺失时打印一次告警，避免"静默降级"。
         """
+        if self._injected_llm is not None:
+            return self._injected_llm
         if self.llm_manager is None:
             try:
                 from app.llm.factory import get_llm_manager
