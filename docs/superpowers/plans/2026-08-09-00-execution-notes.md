@@ -389,6 +389,32 @@ Plan 5 Task 1 实跑发现并修复的真实缺陷：
 - 后端全量 **866 passed**，覆盖率 **87.82%**，`mypy app evaluation` **零错误**
 - **服务器实跑**：`python -m evaluation.cli run --adapter fixed --profiles all --repetitions 1` → **60 runs 全部 completed / 0 failed / ok=true**，60 个 `metrics.json`；抽样（full 画像）`citation_resolvability=1.0`、`evidence_coverage≈0.667`、`recall_at_5=0.5`、`success=1.0`
 
+### Plan 5 Task 7：论文报告生成（`6103922`）
+
+**`evaluation/reporting.py`** —— 从 run-set 目录生成全部论文素材：
+
+| 产物 | 内容 |
+| --- | --- |
+| `summary.csv` | 每次运行一行（**含 failed / incomplete 状态**，不丢弃） |
+| `aggregate.csv` | 每组每指标 n / mean / median / **95% bootstrap CI**（2000 次重采样，固定 seed） |
+| `significance.csv` | 各组 vs baseline A 的**配对 Wilcoxon**（配对键 = 课题+重复；<2 对或差值全零 → `None`，不编造 p 值） |
+| `figures/{retrieval,content_quality,citations,latency_tokens,recovery}.png` | 五张柱状图，含标题、图例、**样本量标注**、置信区间误差线 |
+| `report.md` | 所有表图都挂 run-set ID；第 4 节列出失败/不完整运行；第 5 节 LLM Judge **单独成节** |
+
+关键设计：
+- **确定性**：bootstrap/检验固定 seed，同输入两次生成的 CSV 逐字节一致（有测试）；
+- **None 语义贯穿全局**：某指标在所有运行里缺数据 → `n=0, mean=None`，不是 0；
+- **图表用英文标签**：容器/CI 常缺 CJK 字体，中文会渲染成方框（report.md 里仍是中文标题）；
+- **降级可见**：缺 matplotlib 时生成 `.md` 占位说明而不是静默跳过（服务器未装 extras 时就会暴露出来，本轮正是这样发现的）；
+- CLI 新增 `report --run-set <id|latest>`。
+
+**`docs/runbooks/experiment-reproduction.md`** —— 8 节复现手册：前置条件、输入校验、语料准备、离线演练、真实 120-run、报告生成、**复现性核对清单**、常见问题、与论文各章节的数据对应表。
+
+验收：
+- `tests/evaluation/` **75 passed**（报告 19 个新测试：逐 run 一行、聚合 mean/median/CI、配对 Wilcoxon、样本不足不编造 p、五张图存在且非空、report.md 标注 run-set 与失败运行、LLM Judge 独立章节、两次生成确定性）
+- 后端全量 **885 passed**，覆盖率 **87.86%**，`mypy app evaluation` **零错误**
+- **服务器实跑**：`run` 60 runs → `report` 生成 **9 个产物**（含 5 张真实 PNG）；目视核验 `retrieval.png`（无 RAG 组检索为 0、含 RAG 组有值、n=15、误差线）与 `citations.png` 均正确渲染
+
 Plan 4 备注：
 - 依赖版本按 Vite 5 约束固定：`vitest@^2.1.9`（vitest 5 要求 vite ≥6，会 ERESOLVE）、`@vue/test-utils@^2.4.6`、`happy-dom@^15`、`@playwright/test@^1.48.2`（e2e 浏览器安装放到 Task 8）；另新增 `@vue-flow/core`、`lucide-vue-next`。
 - 测试遵循计划：只 mock `authApi`，不 mock Axios 内部；先跑测试看失败（Step 4），再实现（Step 5–7）。

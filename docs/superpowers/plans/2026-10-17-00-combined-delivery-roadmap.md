@@ -279,5 +279,6 @@ npm run build
   - [x] Task 4：全项目 CI 门禁（6 作业全阻断：lint+mypy / 80% 覆盖 / Alembic 往返 / 前端 / 镜像构建 / Compose 冒烟；**mypy 24→0 错误**，顺带修 5 处真实缺陷并移除 6 个未使用重依赖；覆盖率 87.82%）
   - [x] Task 5：可复现实验输入（`evaluation/` 包：4 组画像严格固定参数 + 15 课题 × 3 领域 + 三领域各 10 篇冻结语料 + 盲评模板；`python -m evaluation.validate` 输出 **runs: 120**；全量 810 passed，mypy 含 evaluation 零错误）
   - [x] Task 6：实验 runner 与指标（`metrics.py` 13 个纯函数含 None 语义、`runner.py` resume-safe 原子落盘 + 失败归档、`cli.py` validate/run；56 个测试；服务器 fixed 适配器实跑 **60 runs 全 completed**；全量 866 passed）
-  - [ ] Task 7：论文报告生成（下一步）
+  - [x] Task 7：论文报告生成（`reporting.py`：summary/aggregate/significance CSV + 5 张带 CI 误差线的 PNG + report.md；配对 Wilcoxon、固定 seed 可复现、失败运行记录在案、LLM Judge 独立章节；复现手册 8 节；75 个测试；服务器实跑 9 产物；全量 885 passed）
+  - [ ] Task 8：部署/恢复/答辩 runbook（下一步）
 
