@@ -443,6 +443,57 @@ Plan 5 Task 1 实跑发现并修复的真实缺陷：
 | 引用 / 产物 | 0 / 0 | **10 处 `[E{n}]` / 2 个** |
 | 演示开始后需手工修库/终端 | 否（但未达 completed） | **否** ✅ |
 
+## Plan 5 补充加固（Exit Gate 后，2026-10-18 晚）
+
+Exit Gate 通过后，在实际使用中又暴露并修复了 3 个问题（均已合并 `main` 并有回归测试）：
+
+### 1. 规划阶段无瞬态重试（`5b96140`）
+
+**现象**：界面上新建任务后立刻变「待人工介入 / 暂无规划」。查日志为上游端点
+`openai.InternalServerError: 503 Service temporarily unavailable`——单次 5xx 就直接转人工。
+
+**修复**：`TaskExecution._retry_transient()`——仅对**瞬态**故障（5xx / 429 / 连接错误 / 超时）
+做 4 次指数退避重试（1s→2s→4s）；401/403/400/422 等配置类错误**不重试**；
+`HumanActionRequiredError` 同样不重试。补 4 个单测（成功重试、401 不重试、耗尽放弃、人工介入不重试）。
+
+### 2. 新增 DeepSeek 保底模型（`60d7bc2`）
+
+**背景**：主模型端点 `model.rhzy.ai` 持续 503，原有降级链首项 `gpt-4o-mini` 在该端点返回 404、
+glm/qwen 无有效密钥 → 降级链形同虚设。
+
+**改动**：
+- `app/llm/factory.py`：注册 `deepseek` provider（复用 `OpenAIAdapter`，OpenAI 兼容协议）
+- `app/core/config.py`：新增 `deepseek_api_key` / `deepseek_base_url`
+- `config/default.yaml`：`fallback_chain` 首项改为 `deepseek/deepseek-chat`
+- `docker-compose.yml` + `.env.example`：注入 `LLM__DEEPSEEK_API_KEY` / `LLM__DEEPSEEK_BASE_URL`
+- 密钥仅写入服务器 `.env`（600 权限、gitignore），不进代码/文档/提交
+
+**验证**（容器内实测）：
+```
+llm_fallback_triggered  failed_model=gpt-6-luna → next_model=deepseek-chat
+llm_fallback_succeeded  fallback_model=deepseek-chat
+FALLBACK_OK model= deepseek-flash
+```
+
+### 3. 容器内配置根目录解析错误（`e3a665ee`）
+
+**现象**：容器内 `get_settings().llm.fallback_chain` 为空 → 降级链不生效。
+
+**根因**：`PROJECT_ROOT = Path(__file__).resolve().parents[3]`——仓库里 `backend/app/core/config.py`
+到根正好 3 层，但镜像内是 `/app/app/core/config.py`，只有 3 层，`parents[3]` 越界到 `/`，
+于是去找 `/config/default.yaml`（不存在），YAML 被静默跳过。这是 Plan 5 Task 4 加 `COPY config` 时
+引入的路径不一致（镜像里 YAML 在 `/app/config/`）。
+
+**修复**：按候选路径**存在性**择一解析（`config` 目录与 `app` 同级即命中），并补 3 个测试
+（仓库布局、fallback 非空、容器布局模拟）。
+
+**容器内验证**：`root: /app`、`yaml_exists: True`、`fallback: [(deepseek,deepseek-chat),(glm,glm-4-flash),(qwen,qwen-turbo)]`
+
+### 端到端复验
+
+修复后完整任务：**56 秒**、5 节点全 `completed`、正文 **8 处 `[E{n}]`**、**2 个产物**（Markdown + DOCX）。
+后端全量 **897 passed**（2 skipped）、覆盖率 **88.05%**、`mypy` 零错误。
+
 ## Plan 5 Exit Gate（PASSED，2026-10-18）
 
 逐项对照计划要求（全部在服务器实测）：
