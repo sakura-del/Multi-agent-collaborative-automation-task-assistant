@@ -274,5 +274,6 @@ npm run build
   - [x] Plan 4 Exit Gate：**PASSED（2026-10-18）**——双视口 4 passed + 10 张关键截图；无文字重叠/状态变化不位移/刷新不丢状态/全程不需 Swagger 或终端；暴露并修复 4 类真实缺陷（快照不刷新、容器 LLM 与文献源未接线、移动端三处布局、服务器后端镜像过期）
 - [ ] Plan 5：加固与实验（8 task）
   - [x] Task 1：进程级确定性 E2E（本地与服务器各跑两遍 3 passed；引用可回溯 + 事件严格递增 + Markdown/DOCX 可打开；顺带修复「文献校验器未注入 LLM」与容器 LLM 注入点）
-  - [ ] Task 2：恢复 / 隔离 / 降级证明（下一步）
+  - [x] Task 2：恢复 / 隔离 / 降级证明（集成 21 passed：7 个故障注入 + 14 个安全边界；修复「快照丢弃 validation」；服务器 24 passed / 全量 785 passed）
+  - [ ] Task 3：Compose smoke 验证（下一步）
 
