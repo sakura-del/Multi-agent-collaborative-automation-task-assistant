@@ -103,7 +103,13 @@ services:
       RAG_RERANKER_MOCK: ${RAG_RERANKER_MOCK:-1}
       # JWT 密钥为必需项：.env 缺失时 compose 直接报错，避免回退弱密钥
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY is required in .env}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # LLM 配置：必须用嵌套名（pydantic-settings 的 __ 分隔）才能被应用读到；
+      # 扁平 OPENAI_API_KEY 只是 SDK 回退，值必须与嵌套项一致，避免误用占位密钥。
+      LLM__DEFAULT_PROVIDER: ${LLM__DEFAULT_PROVIDER:-openai}
+      LLM__DEFAULT_MODEL: ${LLM__DEFAULT_MODEL:-gpt-6-luna}
+      LLM__OPENAI_API_KEY: ${LLM__OPENAI_API_KEY:-}
+      LLM__OPENAI_BASE_URL: ${LLM__OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_API_KEY: ${LLM__OPENAI_API_KEY:-}
       GLM_API_KEY: ${GLM_API_KEY:-}
       QWEN_API_KEY: ${QWEN_API_KEY:-}
     # 不暴露主机端口：所有流量经 Nginx；调试可临时加回 "8000:8000"

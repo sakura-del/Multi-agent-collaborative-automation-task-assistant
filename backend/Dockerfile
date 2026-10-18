@@ -26,6 +26,8 @@ WORKDIR /app
 COPY backend/pyproject.toml ./
 COPY backend/README.md ./
 COPY backend/app ./app
+# 仓库级配置基线：settings 从 PROJECT_ROOT/config/default.yaml 读取模型等默认值
+COPY config ./config
 
 # 依赖从 pyproject 派生：.[rag-models] 安装运行时 + RAG 真实模型依赖
 # torch 先装 CPU 版（--index-url whl/cpu），避免 sentence-transformers 连带拉取
