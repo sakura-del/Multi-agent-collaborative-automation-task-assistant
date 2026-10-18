@@ -494,6 +494,38 @@ FALLBACK_OK model= deepseek-flash
 修复后完整任务：**56 秒**、5 节点全 `completed`、正文 **8 处 `[E{n}]`**、**2 个产物**（Markdown + DOCX）。
 后端全量 **897 passed**（2 skipped）、覆盖率 **88.05%**、`mypy` 零错误。
 
+### 4. 降级链"配了不生效"的三层根因（`50760e8` / `18baa52` / `acbdab2`）
+
+加完 DeepSeek 后仍反复出现「任务转人工」，逐层排查发现**三个独立缺陷**叠加：
+
+| # | 缺陷 | 现象 | 修复 |
+| --- | --- | --- | --- |
+| a | `_is_retryable` 只匹配类名含 `timeout/ratelimit/connection` | openai SDK 把 5xx 抛成 `InternalServerError`（类名不含关键字）→ 503 既不重试**也不降级** | 增加状态码判定（`>=500` 或 429）+ 类名 + 消息兜底 |
+| b | `PROJECT_ROOT = parents[3]` 在镜像里失效 | editable 安装使 `__file__` 指向 site-packages → 读不到 `/app/config/default.yaml` → `fallback_chain=[]` | `_resolve_project_root()` 多级探测（`MAA_PROJECT_ROOT` 环境变量 → `app` 包真实位置 → 文件位置 → `cwd`） |
+| c | Agent 注入的是 `manager.get_primary()` | 那是**单个适配器**，`chat()` 内部重试耗尽后直接抛，永远走不到 `manager.chat()` 的 fallback 循环 | 新增 `FallbackChatClient`（把 manager 包成适配器形状），`RuntimeContainer._llm_client()` 返回它 |
+
+验证（服务器容器内实测）：
+```
+root: /app    yaml: True    chain: [(deepseek,deepseek-chat),(glm,glm-4-flash),(qwen,qwen-turbo)]
+client: FallbackChatClient   model: gpt-6-luna
+llm_fallback_triggered  failed_model=gpt-6-luna → next_model=deepseek-chat
+llm_fallback_succeeded  fallback_model=deepseek-chat
+```
+
+### 5. Agent 并发状态竞争（`054aacf`）
+
+**现象**：10 节点任务 9 个完成，`n6` 报 `校验异常: 非法状态转换: idle → error`。
+
+**根因**：调度器并行执行节点而复用同一 Agent 实例；两个协程共享状态机时，
+A 已把状态推到 COMPLETED/IDLE，B 再 `transition(ERROR)` 就非法 → 正常结果被误判为校验异常。
+
+**修复**：新增 `BaseAgent._settle(target)`——可转换则正常 transition，否则 `reset()`；
+收尾状态只用于可观测性，不应让并发竞争中断业务结果。补 2 个竞争测试。
+
+### 端到端复验（最终）
+
+**60 秒**、**10 节点全 `completed`**、正文 **27 处 `[E{n}]`**、**2 个产物**；全量 **906 passed**。
+
 ## Plan 5 Exit Gate（PASSED，2026-10-18）
 
 逐项对照计划要求（全部在服务器实测）：
