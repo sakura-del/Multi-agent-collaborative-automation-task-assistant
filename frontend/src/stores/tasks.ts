@@ -68,15 +68,28 @@ export const useTaskStore = defineStore("tasks", () => {
     return updated;
   }
 
-  /** 合并单个事件：仅接受严格递增的 event_id，保证乱序/重放安全 */
+  /**
+   * 合并单个事件：仅接受严格递增的 event_id，保证乱序/重放安全。
+   * 事件只携带状态，像"规划生成完毕""复盘生成完毕"这类新字段需要重新拉快照，
+   * 否则界面会停在旧快照上（E2E 实跑发现：确认规划按钮一直不出现）。
+   */
+  const REFRESH_ON_STATUS = new Set(["waiting_approval", "waiting_human", "completed", "failed"]);
+
   function applyEvent(event: TaskEvent): void {
     if (event.event_id <= lastEventId.value) {
       return;
     }
     lastEventId.value = event.event_id;
     events.value = [...events.value, event];
-    if (snapshot.value && event.task_id === snapshot.value.task_id) {
-      snapshot.value = { ...snapshot.value, status: event.status as TaskSnapshot["status"] };
+    if (!snapshot.value || event.task_id !== snapshot.value.task_id) {
+      return;
+    }
+    const previousStatus = snapshot.value.status;
+    const nextStatus = event.status as TaskSnapshot["status"];
+    snapshot.value = { ...snapshot.value, status: nextStatus };
+    if (nextStatus !== previousStatus && REFRESH_ON_STATUS.has(nextStatus)) {
+      const taskId = snapshot.value.task_id;
+      void load(taskId).catch(() => undefined);
     }
   }
 
