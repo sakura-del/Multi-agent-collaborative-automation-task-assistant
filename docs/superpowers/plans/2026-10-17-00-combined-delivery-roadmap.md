@@ -266,5 +266,6 @@ npm run build
   - [x] Task 1：工作台骨架与鉴权状态（7 个单测 + `vue-tsc` + `vite build` 全过；路由守卫等待 `auth.ready`、Axios 401 单飞刷新、`AppLayout` 左导航）
   - [x] Task 2：类型化任务 API 与快照 store（15 passed；`applyEvent` 严格递增 `event_id`、`watch/stopWatching` 轮询）
   - [x] Task 3：任务创建与列表（22 passed；表单校验 + 精确 payload、桌面表格 ↔ 移动单列、空态单命令、创建后跳详情）
-  - [ ] Task 4：规划确认与稳定 DAG 展示（下一步）
+  - [x] Task 4：规划确认与 DAG 联查（36 passed；确定性几何自绘 DAG、状态变化不位移、四 Tab 由 query 驱动、approve 带版本 + 409 冲突重载）
+  - [ ] Task 5：实时事件、日志与人工干预（下一步）
 
