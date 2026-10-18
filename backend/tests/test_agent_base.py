@@ -158,3 +158,34 @@ class TestBaseAgentCommunication:
         assert msg.to_agent == "reviewer"
         assert msg.content["agent_type"] == "test_fail"
         assert "模拟执行失败" in msg.content["error"]
+
+
+class TestConcurrentReentry:
+    """Plan 5 Task 8 彩排发现：Agent 实例被复用 + DAG 并行 → 并发重入。
+
+    此前第二次 execute() 时状态机仍停在 RUNNING（上一次并发调用尚未收敛），
+    抛 `IllegalStateTransitionError: running → running`，导致节点直接转人工。
+    """
+
+    async def test_execute_resets_stale_running_state(self) -> None:
+        from app.orchestration.state import AgentStatus
+
+        agent = _TestAgentOK()
+        # 模拟"上一次执行未收敛"：手工把状态停到 RUNNING
+        agent._state.reset(AgentStatus.RUNNING)
+
+        result = await agent.execute({"value": "hello"})
+
+        assert result["echo"] == "hello"
+        assert agent.status is AgentStatus.IDLE
+
+    async def test_two_concurrent_executes_on_same_instance(self) -> None:
+        import asyncio
+
+        agent = _TestAgentOK()
+
+        first, second = await asyncio.gather(
+            agent.execute({"value": "a"}), agent.execute({"value": "b"})
+        )
+
+        assert {first["echo"], second["echo"]} == {"a", "b"}

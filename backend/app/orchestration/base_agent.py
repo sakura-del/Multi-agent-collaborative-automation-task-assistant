@@ -85,8 +85,15 @@ class BaseAgent(abc.ABC):
 
         统一处理：状态流转 → 调用子类 _run → 耗时统计 → 异常兜底。
         子类不应覆盖此方法，而应实现 _run。
+
+        并发说明：调度器会并行执行 DAG 中的多个节点，而 Agent 实例被复用。
+        因此进入 RUNNING 前先把上一次残留状态归位到 IDLE，避免并发/重入时
+        抛 `非法状态转换: running → running`（Plan 5 Task 8 彩排实测）。
         """
         trace_id = input_data.get("trace_id", str(uuid.uuid4()))
+        if self._state.status is not AgentStatus.IDLE:
+            # 上一次执行尚未回到 IDLE（并发重入或异常遗留）→ 显式重置
+            self._state.reset(AgentStatus.IDLE)
         self._state.transition(AgentStatus.RUNNING)
         start = time.perf_counter()
         try:

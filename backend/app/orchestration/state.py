@@ -62,6 +62,16 @@ class AgentStateMachine:
     def __init__(self, initial: AgentStatus = AgentStatus.IDLE) -> None:
         self._status = initial
 
+    def reset(self, to: AgentStatus = AgentStatus.IDLE) -> None:
+        """强制把状态归位（不走转换表）。
+
+        仅用于"上一次执行未正常收敛"的现场修复：例如同一 Agent 实例被并发复用，
+        上一次仍停在 RUNNING。正常流程应立即使用 `transition`。
+        """
+        old = self._status
+        self._status = to
+        logger.warning("agent_state_reset", old=old.value, new=to.value)
+
     @property
     def status(self) -> AgentStatus:
         """当前状态。"""
