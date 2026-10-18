@@ -112,7 +112,34 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--output-root", default=str(DEFAULT_OUTPUT_ROOT), help="运行产物根目录")
     run.add_argument("--run-set-id", default=None, help="复用已有 run-set（断点续跑）")
     run.add_argument("--retry-failed", action="store_true", help="重跑并归档失败运行")
+
+    report = sub.add_parser("report", help="从 run-set 生成论文报告（CSV + 图表 + markdown）")
+    report.add_argument(
+        "--run-set",
+        required=True,
+        help="run-set ID，或 latest / latest-fixed 指向最近一次运行",
+    )
+    report.add_argument("--output-root", default=str(DEFAULT_OUTPUT_ROOT), help="运行产物根目录")
+    report.add_argument("--out", default=None, help="报告输出目录（默认 <run-set>/report）")
+    report.add_argument("--seed", type=int, default=20261017, help="bootstrap/检验固定种子")
     return parser
+
+
+def _resolve_run_set(arg: str, output_root: Path) -> Path:
+    """把 `latest` / `latest-fixed` / 具体 ID 解析成 run-set 目录。"""
+    if arg not in {"latest", "latest-fixed"}:
+        candidate = output_root / arg
+        if not candidate.is_dir():
+            raise SystemExit(f"run-set 不存在: {candidate}")
+        return candidate
+    candidates = sorted(
+        (path for path in output_root.glob("rs-*") if path.is_dir()),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    if not candidates:
+        raise SystemExit(f"{output_root} 下没有 run-set 目录")
+    return candidates[0]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -121,6 +148,17 @@ def main(argv: list[str] | None = None) -> int:
         from evaluation.validate import main as validate_main
 
         return validate_main([])
+    if args.command == "report":
+        from evaluation.reporting import generate_report
+
+        output_root = Path(args.output_root).expanduser().resolve()
+        run_set_dir = _resolve_run_set(args.run_set, output_root)
+        out_dir = Path(args.out) if args.out else run_set_dir / "report"
+        artifacts = generate_report(run_set_dir, out_dir, seed=args.seed)
+        print(f"报告已生成：{out_dir}（{len(artifacts)} 个产物）")
+        for path in artifacts:
+            print(f"  {path.relative_to(out_dir).as_posix()}")
+        return 0
     return asyncio.run(_run(args))
 
 
