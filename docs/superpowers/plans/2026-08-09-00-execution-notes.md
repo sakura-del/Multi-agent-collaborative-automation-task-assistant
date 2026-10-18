@@ -526,6 +526,12 @@ A 已把状态推到 COMPLETED/IDLE，B 再 `transition(ERROR)` 就非法 → �
 
 **60 秒**、**10 节点全 `completed`**、正文 **27 处 `[E{n}]`**、**2 个产物**；全量 **906 passed**。
 
+## 已知问题（记录不修，2026-10-18）
+
+| Issue | 标题 | 级别 | 状态 | 备注 |
+| --- | --- | --- | --- | --- |
+| [#2](https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant/issues/2) | 规划生成后页面不自动显示，需手动刷新 | P2 | **记录不修**（用户要求） | 后端事件流正常（`plan_ready` 携带 `waiting_approval`/`revision=1`）；前端 `stores/tasks.ts:90` 的刷新守卫只在状态**变化**时触发，疑似漏掉「状态等值但 `plan` 为空」的场景。演示绕过：按 F5（已写入 defense-demo.md 第 5 步）。不影响任务正确性 |
+
 ## Plan 5 Exit Gate（PASSED，2026-10-18）
 
 逐项对照计划要求（全部在服务器实测）：
