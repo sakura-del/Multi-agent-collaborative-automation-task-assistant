@@ -8,20 +8,71 @@
 设计要点：
 - 日志通过 Agent 间消息异步采集，不阻塞主流程
 - LLM 归因可降级：无 LLM 时返回规则统计，保证可用
+- 引用核验（Issue #3 / 计划 §2.6）可选注入：注入 ``reference_verifier`` 时核验参考文献
+  并把统计写进 ``stats["reference_verification"]``；**未注入时行为与既有版本完全一致**
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Awaitable, Callable
-from typing import Any
+from collections.abc import Awaitable, Callable, Mapping
+from typing import TYPE_CHECKING, Any
 
 from app.core.logging import get_logger
 from app.llm.models import Message, MessageRole
 from app.orchestration.base_agent import BaseAgent
 from app.orchestration.messages import AgentMessage
+from app.tools.literature.models import (
+    ReferenceCandidate,
+    ReferenceVerdict,
+    ReferenceVerification,
+)
+
+if TYPE_CHECKING:  # 仅类型检查期导入：运行期按需懒加载，避免编排层强依赖知识库服务包
+    from app.knowledge.services.reference_verifier import ReferenceVerifier
 
 logger = get_logger(__name__)
+
+#: 判定态 → 中文标签（与 `citation_validator` 的报告口径保持一致）
+_VERDICT_LABELS: tuple[tuple[str, str], ...] = (
+    ("verified", "已验证"),
+    ("metadata_mismatch", "元数据不符"),
+    ("not_found", "未找到"),
+    ("unverified", "未核验"),
+)
+
+#: 核验统计章节标题：正文已有该章节时（复盘产物 → 导出）不得重复追加
+_REFERENCE_SECTION = "## 引用核验"
+
+#: `verification_reason` 截断长度：异常信息可能很长，避免污染 bibliography
+_MAX_REASON_LENGTH = 200
+
+
+def _verification_mark(status: Any) -> str:
+    """参考文献行的核验标记；无核验信息（老数据 / 未注入核验器）时返回空串。"""
+    if not isinstance(status, str) or not status:
+        return ""
+    return f"（核验：{dict(_VERDICT_LABELS).get(status, status)}）"
+
+
+def _summary_count(summary: Mapping[str, Any], key: str) -> int:
+    """统计值容错：非整数字段按 0 处理，避免脏 stats 让报告组装失败。"""
+    value = summary.get(key, 0)
+    if isinstance(value, bool) or not isinstance(value, int):
+        return 0
+    return value
+
+
+def _verification_line(summary: Mapping[str, Any]) -> str:
+    """`## 引用核验` 章节正文（复盘与导出共用同一展示口径）。"""
+    counts = " / ".join(
+        f"{label} {_summary_count(summary, verdict)} 条" for verdict, label in _VERDICT_LABELS
+    )
+    switch = "开启" if summary.get("intercepted") else "关闭"
+    return (
+        f"引用核验：{counts} / 已拦截 {_summary_count(summary, 'dropped')} 条；拦截开关：{switch}"
+    )
+
 
 _ATTRIBUTION_PROMPT = """请分析以下任务执行日志，定位失败根因并给出改进建议。
 
@@ -41,8 +92,19 @@ _ATTRIBUTION_PROMPT = """请分析以下任务执行日志，定位失败根因�
 class ReviewerAgent(BaseAgent):
     """复盘 Agent：收集执行日志，归因错误，生成性能统计报告。"""
 
-    def __init__(self, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        *,
+        reference_verifier: ReferenceVerifier | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """构造复盘 Agent。
+
+        ``reference_verifier`` 为可选注入：为 ``None``（默认）时复盘行为与既有版本逐字一致，
+        既不核验也不产生 ``stats["reference_verification"]``。
+        """
         super().__init__(**kwargs)
+        self.reference_verifier = reference_verifier
         # 执行日志缓冲：按 trace_id 聚合，避免跨任务混淆
         self._logs: dict[str, list[dict[str, Any]]] = {}
 
@@ -174,6 +236,8 @@ class ReviewerAgent(BaseAgent):
         bibliography = [
             {"index": index, **entry} for index, entry in enumerate(citations.values(), start=1)
         ]
+        # Issue #3：核验最终 bibliography（导出报告展示的就是这份列表）
+        bibliography, verification_summary = await self._verify_bibliography(bibliography)
         scores = self._literature_scores(validations)
         issues = [
             check.message
@@ -202,6 +266,7 @@ class ReviewerAgent(BaseAgent):
             body="\n\n".join(body_parts),
             limitations=limitations or ["（无）"],
             bibliography=bibliography,
+            reference_verification=verification_summary,
         )
         stats = {
             "node_count": len(results),
@@ -215,6 +280,8 @@ class ReviewerAgent(BaseAgent):
             "abstract": abstract,
             "limitations": limitations,
         }
+        if verification_summary is not None:
+            stats["reference_verification"] = verification_summary
         logger.info(
             "reviewer_literature_done",
             topic=topic,
@@ -229,6 +296,96 @@ class ReviewerAgent(BaseAgent):
             "issues": issues,
             "stats": stats,
         }
+
+    async def _verify_bibliography(
+        self, bibliography: list[dict[str, Any]]
+    ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+        """核验最终 bibliography，返回（拦截后的条目, ``stats`` 汇总）。
+
+        语义（计划 §2.6）：
+        - 候选由 ``candidates_from_bibliography`` 从**最终 bibliography** 构造
+          （导出报告展示的就是这份列表）；
+        - 核验器抛异常时降级为「全部未核验」：既不因此让复盘失败，也不据此剔除任何条目；
+        - ``intercept_unverified`` 打开时只剔除 ``blocked_keys``（元数据不符 / 未找到），
+          ``unverified`` 一律保留（外部源故障不得惩罚/误伤）；
+        - 拦截后重新连续编号（index 从 1 开始），剔除条数记入 ``dropped``；
+        - 未注入核验器时原样返回，且不产生任何新 stats 键（旧行为完全不变）。
+        """
+        verifier = self.reference_verifier
+        if verifier is None:
+            return bibliography, None
+
+        # 方法内导入：编排层不静态依赖知识库服务包，测试注入 fake 即可，无需真实客户端
+        from app.knowledge.services.reference_verifier import (
+            blocked_keys,
+            candidates_from_bibliography,
+            summarize_verifications,
+        )
+
+        candidates: list[ReferenceCandidate] = []
+        keys: list[str | None] = []
+        for entry in bibliography:
+            # 逐条构造：既复用冻结的候选口径，又能把结论精确映射回对应条目
+            built = candidates_from_bibliography([entry])
+            candidate = built[0] if built else None
+            keys.append(candidate.key if candidate is not None else None)
+            if candidate is not None:
+                candidates.append(candidate)
+
+        try:
+            verifications = await verifier.verify_many(candidates)
+        except Exception as exc:
+            # 核验失败绝不能让复盘整体失败：降级为「全部未核验」，且一条都不拦截
+            logger.warning("reviewer_reference_verification_failed", error=str(exc))
+            verifications = [
+                self._degraded_verification(candidate, exc) for candidate in candidates
+            ]
+
+        # 缺 `intercept_unverified` 属性（最小替身/误注入）时按「开关关闭」处理
+        intercept = bool(getattr(verifier, "intercept_unverified", False))
+        dropped = 0
+        if intercept:
+            blocked = blocked_keys(verifications)
+            kept = [
+                (entry, key)
+                for entry, key in zip(bibliography, keys, strict=True)
+                if key is None or key not in blocked
+            ]
+            dropped = len(bibliography) - len(kept)
+            bibliography = self._reindex_bibliography([entry for entry, _ in kept])
+            keys = [key for _, key in kept]
+
+        by_key = {item.reference_key: item for item in verifications}
+        for entry, key in zip(bibliography, keys, strict=True):
+            verification = by_key.get(key) if key is not None else None
+            if verification is None:
+                continue
+            entry["verification_status"] = verification.verdict.value
+            entry["verification_reason"] = verification.reason
+
+        summary = summarize_verifications(verifications, dropped=dropped, intercepted=intercept)
+        return bibliography, summary.model_dump()
+
+    @staticmethod
+    def _degraded_verification(
+        candidate: ReferenceCandidate, error: Exception
+    ) -> ReferenceVerification:
+        """核验过程异常 → 降级为「未核验」结论（外部源故障不得惩罚、不得拦截）。"""
+        return ReferenceVerification(
+            reference_key=candidate.key,
+            title=candidate.title,
+            verdict=ReferenceVerdict.UNVERIFIED,
+            reason=f"核验过程异常，降级为未核验：{error}"[:_MAX_REASON_LENGTH],
+        )
+
+    @staticmethod
+    def _reindex_bibliography(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """拦截后重新连续编号（index 从 1 开始），并保持 index 在首键位置。"""
+        reindexed: list[dict[str, Any]] = []
+        for position, entry in enumerate(entries, start=1):
+            rest = {key: value for key, value in entry.items() if key != "index"}
+            reindexed.append({"index": position, **rest})
+        return reindexed
 
     async def _polish_literature_review(
         self,
@@ -296,7 +453,9 @@ class ReviewerAgent(BaseAgent):
         body: str,
         limitations: list[str],
         bibliography: list[dict[str, Any]],
+        reference_verification: dict[str, Any] | None = None,
     ) -> str:
+        """组装复盘 Markdown；注入核验统计时追加 `## 引用核验` 章节与逐行核验标记。"""
         parts = [f"# {topic}"]
         if abstract:
             parts.append(f"## 摘要\n{abstract}")
@@ -308,8 +467,11 @@ class ReviewerAgent(BaseAgent):
             for entry in bibliography:
                 title = entry.get("title") or entry.get("source_id") or "未命名文献"
                 url = entry.get("source_url") or ""
-                lines.append(f"- [{entry['index']}] {title} — {url}".rstrip(" —"))
+                mark = _verification_mark(entry.get("verification_status"))
+                lines.append(f"- [{entry['index']}] {title} — {url}".rstrip(" —") + mark)
             parts.append("## 参考文献\n" + "\n".join(lines))
+        if reference_verification is not None:
+            parts.append(f"{_REFERENCE_SECTION}\n{_verification_line(reference_verification)}")
         return "\n\n".join(parts)
 
     def _compute_stats(self, logs: list[dict[str, Any]]) -> dict[str, Any]:

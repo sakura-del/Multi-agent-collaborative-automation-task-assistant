@@ -16,6 +16,7 @@ from collections.abc import Callable, Coroutine
 from typing import Any
 from uuid import UUID
 
+from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.db.session import AsyncSessionLocal
 from app.orchestration.agents import ExecutorAgent, PlannerAgent, ReviewerAgent, ValidatorAgent
@@ -66,6 +67,11 @@ class RuntimeContainer:
         self._started = False
         self._explicit_publisher = event_publisher is not None
         self._explicit_ticket_service = ticket_service is not None
+        # 引用真实性核验器：惰性构造（见 reference_verifier 属性）
+        self._reference_verifier: Any | None = None
+        self._reference_verifier_resolved = False
+        self._reference_sources: list[Any] = []
+        self._reference_redis: Any | None = None
 
     async def start(self) -> None:
         """初始化运行时依赖；Redis 可用时把事件/票据升级为 Redis 实现。"""
@@ -105,8 +111,97 @@ class RuntimeContainer:
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
         self._tasks.clear()
+        # 一并释放核验器持有的外部连接（未构造核验器时为空操作）
+        await self._close_reference_sources()
         self._started = False
         logger.info("runtime_container_closed", cancelled=len(pending))
+
+    @property
+    def reference_verifier(self) -> Any | None:
+        """引用真实性核验器（Issue #3 / 计划 §2.6），惰性构造。
+
+        返回 `ReferenceVerifier`；`enabled=False` 或构造失败时返回 `None`（核验能力不可用
+        不得让任务失败，调用方按「无核验」继续）。首次访问前不会创建任何 HTTP 客户端。
+        """
+        if not self._reference_verifier_resolved:
+            self._reference_verifier = self._build_reference_verifier()
+            self._reference_verifier_resolved = True
+        return self._reference_verifier
+
+    def _build_reference_verifier(self) -> Any | None:
+        """按配置构造核验器；CrossRef / OpenAlex 与 Redis 连接均为惰性建连。"""
+        config = get_settings().reference_verification
+        if not config.enabled:
+            return None
+        try:
+            import httpx
+            import redis.asyncio as aioredis
+
+            from app.knowledge.services.reference_verifier import (
+                ReferenceVerificationCache,
+                ReferenceVerifier,
+            )
+            from app.tools.literature.crossref import CrossrefClient
+            from app.tools.literature.openalex import OpenAlexClient
+
+            timeout = httpx.Timeout(config.request_timeout_seconds)
+            crossref = CrossrefClient(
+                mailto=config.contact_email,
+                user_agent=config.user_agent,
+                timeout=timeout,
+                max_retries=config.max_retries,
+            )
+            openalex = OpenAlexClient(
+                mailto=config.contact_email,
+                user_agent=config.user_agent,
+                timeout=timeout,
+                max_retries=config.max_retries,
+            )
+            self._reference_sources = [crossref, openalex]
+            # 核验缓存使用**专用** Redis 客户端（R5①）：核验是旁路能力，Redis 不可达时
+            # 每次缓存操作只等 1s 就失败并回退内存；不复用 RedisManager 的全局单例
+            # （实时推送那条链路需要正常超时，不能被核验拖慢）。
+            redis_client = aioredis.from_url(
+                get_settings().redis.url,
+                decode_responses=True,
+                socket_connect_timeout=1.0,
+                socket_timeout=1.0,
+            )
+            self._reference_redis = redis_client
+            cache = ReferenceVerificationCache(
+                redis_client=redis_client,
+                ttl=config.cache_ttl_seconds,
+            )
+            verifier = ReferenceVerifier(
+                crossref=crossref,
+                openalex=openalex,
+                cache=cache,
+                similarity_threshold=config.similarity_threshold,
+                year_tolerance=config.year_tolerance,
+                max_concurrency=config.max_concurrency,
+                intercept_unverified=config.intercept_unverified,
+                total_timeout=config.total_timeout_seconds,
+            )
+        except Exception as exc:  # 配置/依赖异常不得阻断任务执行
+            logger.warning("reference_verifier_build_failed", error=str(exc))
+            return None
+        logger.info("reference_verifier_ready", mode=config.mode)
+        return verifier
+
+    async def _close_reference_sources(self) -> None:
+        """关闭核验器持有的外部连接（HTTP 客户端 + 专用 Redis）；幂等，异常不外抛。"""
+        sources, self._reference_sources = self._reference_sources, []
+        for source in sources:
+            try:
+                await source.aclose()
+            except Exception as exc:
+                logger.warning("reference_client_close_failed", error=str(exc))
+        redis_client, self._reference_redis = self._reference_redis, None
+        if redis_client is not None:
+            try:
+                await redis_client.aclose()
+            except Exception as exc:
+                logger.warning("reference_redis_close_failed", error=str(exc))
 
     def create_scheduler(self, observer: ScheduleObserver) -> TaskScheduler:
         """创建带观察者的调度器。"""
@@ -198,7 +293,8 @@ class RuntimeContainer:
             # 与降级执行输出兼容的宽松规则；文献场景由工作流注入确定性引用校验
             return ValidatorAgent(llm=llm, rules={"min_length": 1, "required_keywords": []})
         if agent_type == "reviewer":
-            return ReviewerAgent(llm=llm)
+            # 引用核验（Issue #3）：注入容器核验器；未启用时为 None，复盘行为保持原样
+            return ReviewerAgent(llm=llm, reference_verifier=self.reference_verifier)
         if agent_type == "planner":
             return self.create_planner()
         raise ValueError(f"未知 agent_type: {agent_type}")

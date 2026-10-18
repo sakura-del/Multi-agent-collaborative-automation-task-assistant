@@ -61,3 +61,17 @@ def resolve_literature_source(
     if config.get("offline_dataset"):
         logger.warning("literature_source_offline_manifest_missing", manifest=str(path))
     return fallback if fallback is not None else ArxivLiteratureSource()
+
+
+def is_offline_literature_task(task: Any, *, manifest_path: Path | None = None) -> bool:
+    """任务是否走离线冻结清单（与 `resolve_literature_source` 同一条件）。
+
+    Issue #3 R6 接线用此判定「离线零外呼」：离线演示使用已人工核验的冻结语料，
+    默认不做外部引用核验；清单缺失时会回退 arXiv 源，因此这里也必须返回 False，
+    否则会漏掉本该执行的核验。
+    """
+    config = getattr(task, "config", None)
+    if not isinstance(config, dict) or not config.get("offline_dataset"):
+        return False
+    path = manifest_path or MANIFEST_PATH
+    return path.is_file()

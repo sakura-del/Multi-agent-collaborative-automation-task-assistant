@@ -11,16 +11,22 @@
 另有两项完整性检查（`evidence_ids_valid` / `evidence_ownership`）：
 不通过时 `retryable=False`，因为重生成无法修复标识缺失或归属越权。
 
+Issue #3 新增外部引用真实性核验（`reference_authenticity`）：
+由 `ReferenceVerifier` 预先产出四态结论（三态判定 + `unverified` 降级态）后传入，
+本模块只做确定性归并与判定，不发起任何网络请求。
+核验模式 `off` / `report` / `enforce`：`report` 为 advisory（记录但不影响通过与否），
+`enforce` 才让「未找到 / 元数据不符」导致校验不通过；`unverified` 永不判失败。
+
 `retryable=True` 仅用于可通过定向重生成修复的问题：缺失/未知引用、缺失章节、
-重复段落比例超阈值。分数保持 0–100；仅在写入既有 `ValidationResult.score`
-列（0–1）时做归一化。
+重复段落比例超阈值、以及 enforce 模式下的引用真实性问题。
+分数保持 0–100；仅在写入既有 `ValidationResult.score` 列（0–1）时做归一化。
 """
 
 from __future__ import annotations
 
 import re
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:  # 运行期按需导入：避免 knowledge → orchestration 包初始化时的循环依赖
     from app.orchestration.contracts import (
@@ -29,6 +35,7 @@ if TYPE_CHECKING:  # 运行期按需导入：避免 knowledge → orchestration 
         ValidationCheck,
         ValidationReport,
     )
+    from app.tools.literature.models import ReferenceVerification
 
 #: 计划要求的固定检查名（顺序即报告顺序）
 REQUIREMENT_CHECKS: tuple[str, ...] = (
@@ -38,6 +45,23 @@ REQUIREMENT_CHECKS: tuple[str, ...] = (
     "required_sections_present",
     "duplicate_paragraph_ratio",
 )
+
+#: Issue #3 引用真实性核验的检查名
+REFERENCE_CHECK = "reference_authenticity"
+
+#: 核验模式：off=不检查；report=advisory（不影响通过与否）；enforce=不通过则校验失败
+ReferenceCheckMode = Literal["off", "report", "enforce"]
+
+#: 判定态 → 中文标签（进入校验报告 message）
+_VERDICT_LABELS: tuple[tuple[str, str], ...] = (
+    ("verified", "已验证"),
+    ("metadata_mismatch", "元数据不符"),
+    ("not_found", "未找到"),
+    ("unverified", "未核验"),
+)
+#: 会被计入「问题条目」的判定态
+_PROBLEM_VERDICTS = frozenset({"metadata_mismatch", "not_found"})
+_MAX_REPORTED_PROBLEMS = 3
 
 MARKER_PATTERN = re.compile(r"\[E(\d+)\]")
 _SENTENCE_SPLIT = re.compile(r"[。！？!?\n]+")
@@ -76,10 +100,13 @@ class CitationValidator:
         *,
         duplicate_ratio_threshold: float = DEFAULT_DUPLICATE_RATIO_THRESHOLD,
         ownership_violation: bool = False,
+        reference_mode: ReferenceCheckMode = "off",
     ) -> None:
         self._threshold = duplicate_ratio_threshold
         # 由调用方（工作流/持久化层）注入的归属校验结果
         self._ownership_violation = ownership_violation
+        # Issue #3：引用真实性核验模式，缺省 off 保持既有报告形状完全不变
+        self._reference_mode: ReferenceCheckMode = reference_mode
 
     def validate(
         self,
@@ -87,8 +114,13 @@ class CitationValidator:
         required_sections: Sequence[str] | None = None,
         *,
         evidence_pool: Sequence[Evidence] | None = None,
+        reference_verifications: Sequence[ReferenceVerification] | None = None,
     ) -> ValidationReport:
-        """校验引用可追溯性；`evidence_pool` 缺省时使用 `result.evidence`。"""
+        """校验引用可追溯性；`evidence_pool` 缺省时使用 `result.evidence`。
+
+        `reference_verifications` 为外部引用核验结论：
+        仅当 `reference_mode != "off"` 且传入非 None 时才追加 `reference_authenticity` 检查。
+        """
         pool = list(evidence_pool if evidence_pool is not None else result.evidence)
         content = result.content or ""
         markers = [int(match) for match in MARKER_PATTERN.findall(content)]
@@ -185,8 +217,21 @@ class CitationValidator:
         else:
             checks.append(_ok("evidence_ownership", "证据归属校验通过"))
 
-        passed = all(check.passed for check in checks)
-        score = round(100.0 * sum(1 for check in checks if check.passed) / len(checks), 2)
+        # Issue #3：外部引用真实性（网络核验由 ReferenceVerifier 预先完成）
+        if self._reference_mode != "off" and reference_verifications is not None:
+            reference_check = self.check_reference_authenticity(
+                reference_verifications,
+                advisory=self._reference_mode == "report",
+            )
+            checks.append(reference_check)
+            if not reference_check.passed and not reference_check.advisory:
+                # 伪造/不符的引用可通过「只引用已核验文献」的定向重生成修复
+                retryable = True
+
+        # advisory 检查只作为审计信息：不参与通过判定与评分
+        scored = [check for check in checks if not check.advisory]
+        passed = all(check.passed for check in scored)
+        score = round(100.0 * sum(1 for check in scored if check.passed) / len(scored), 2)
         feedback = "; ".join(check.message for check in checks if not check.passed)
         from app.orchestration.contracts import ValidationReport as Report
 
@@ -196,6 +241,49 @@ class CitationValidator:
             checks=checks,
             retryable=bool(retryable and not integrity_failed),
             feedback=feedback,
+        )
+
+    @staticmethod
+    def check_reference_authenticity(
+        verifications: Sequence[ReferenceVerification],
+        *,
+        advisory: bool,
+    ) -> ValidationCheck:
+        """把 `ReferenceVerifier` 的四态结论归并为一条 `ValidationCheck`。
+
+        - `verified` / `unverified` 都算通过：后者是外部源不可用的降级态，不得误伤；
+        - `metadata_mismatch` / `not_found` 判为不通过，并在 message 中最多列出 3 条问题条目。
+        """
+        counts: dict[str, int] = {verdict: 0 for verdict, _label in _VERDICT_LABELS}
+        problems: list[ReferenceVerification] = []
+        for verification in verifications:
+            value = verification.verdict.value
+            counts[value] = counts.get(value, 0) + 1
+            if value in _PROBLEM_VERDICTS:
+                problems.append(verification)
+
+        labels = dict(_VERDICT_LABELS)
+        head = "引用核验：" + " / ".join(
+            f"{labels[verdict]} {counts.get(verdict, 0)} 条" for verdict, _label in _VERDICT_LABELS
+        )
+        message = head
+        if problems:
+            details = "; ".join(
+                f"{item.title}（{labels[item.verdict.value]}"
+                + (f"：{item.reason}" if item.reason else "")
+                + "）"
+                for item in problems[:_MAX_REPORTED_PROBLEMS]
+            )
+            message = f"{head}；问题条目：{details}"
+
+        passed = not problems
+        from app.orchestration.contracts import ValidationCheck as Check
+
+        return Check(
+            name=REFERENCE_CHECK,
+            passed=passed,
+            message=message,
+            advisory=advisory,
         )
 
     @staticmethod

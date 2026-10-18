@@ -1,0 +1,27 @@
+{
+  "status": "ok",
+  "message-type": "work-list",
+  "message": {
+    "total-results": 2,
+    "items": [
+      {
+        "DOI": "10.1000/ABC.001",
+        "URL": "https://doi.org/10.1000/abc.001",
+        "title": ["Evidence-Constrained Literature Review with Multi-Agent Collaboration"],
+        "author": [
+          {"given": "Wei", "family": "Zhang"},
+          {"name": "Evidence Review Consortium"}
+        ],
+        "issued": {"date-parts": [[2024, 5, 12]]},
+        "container-title": ["Journal of Evidence Engineering"],
+        "is-referenced-by-count": 42
+      },
+      {
+        "DOI": "10.1000/abc.002",
+        "title": ["A Survey of Citation Authenticity Verification"],
+        "issued": {"date-parts": [[2021]]},
+        "is-referenced-by-count": 7
+      }
+    ]
+  }
+}

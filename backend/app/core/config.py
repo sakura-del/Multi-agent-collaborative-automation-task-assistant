@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field, field_validator
@@ -176,6 +176,48 @@ class OrchestrationConfig(BaseModel):
     retry_backoff_factor: int = 3
 
 
+class ReferenceVerificationConfig(BaseModel):
+    """引用真实性核验配置（Issue #3 / 计划 §2.5）。
+
+    核验本身不调用 LLM，只与外部权威元数据源（CrossRef / OpenAlex）比对；
+    `mode` 决定核验结论对校验结果的影响力度：
+    - ``off``：不追加核验检查（报告形状与历史版本一致）；
+    - ``report``（默认）：advisory，只记录不参与通过判定，避免外部源波动误伤任务；
+    - ``enforce``：未找到 / 元数据不符导致校验不通过（可定向重生成修复）。
+    """
+
+    enabled: bool = True
+    mode: Literal["off", "report", "enforce"] = "report"
+    intercept_unverified: bool = False
+    """开启时未通过核验（元数据不符 / 未找到）的条目会被剔出参考文献列表。"""
+
+    similarity_threshold: float = Field(default=0.90, ge=0.0, le=1.0)
+    """标题相似度阈值：低于该值视为「未找到」（DOI 已解析成功时判「元数据不符」）。"""
+
+    year_tolerance: int = Field(default=1, ge=0)
+    cache_ttl_seconds: int = Field(default=604800, ge=0)
+    """核验结论缓存 TTL（秒），默认 7 天。"""
+
+    request_timeout_seconds: float = Field(default=20.0, gt=0.0)
+    total_timeout_seconds: float = Field(default=20.0, gt=0.0)
+    """单节点核验总预算（秒）：整体超预算时全部候选降级为「未核验」，不阻塞任务。"""
+
+    max_concurrency: int = Field(default=2, ge=1)
+    """核验外呼并发上限；未配 `contact_email` 时处于公共池（约 1 req/s），故默认压到 2。"""
+
+    verify_offline_tasks: bool = False
+    """离线清单任务（冻结语料）是否也做外部核验；默认 false（零外呼、可复现）。"""
+
+    contact_email: str = ""
+    """礼貌池联系方式；建议经环境变量注入，不写进代码仓库。"""
+
+    user_agent: str = (
+        "maa-literature-review/0.1 "
+        "(+https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant)"
+    )
+    max_retries: int = Field(default=1, ge=0)
+
+
 class CORSConfig(BaseModel):
     """CORS 跨域配置"""
 
@@ -213,6 +255,7 @@ class Settings(BaseSettings):
     rag: RAGConfig = RAGConfig()
     agent: AgentConfig = AgentConfig()
     orchestration: OrchestrationConfig = OrchestrationConfig()
+    reference_verification: ReferenceVerificationConfig = ReferenceVerificationConfig()
     cors: CORSConfig = CORSConfig()
 
     # ===== JWT 鉴权（阶段0任务3） =====
@@ -229,6 +272,7 @@ class Settings(BaseSettings):
         "rag",
         "agent",
         "orchestration",
+        "reference_verification",
         "cors",
         mode="before",
     )

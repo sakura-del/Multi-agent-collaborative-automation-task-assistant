@@ -1,0 +1,17 @@
+{
+  "status": "ok",
+  "message-type": "work",
+  "message": {
+    "DOI": "10.1000/XYZ.123",
+    "URL": "https://doi.org/10.1000/xyz.123",
+    "title": ["Evidence-Constrained Literature Review with Multi-Agent Collaboration"],
+    "author": [
+      {"given": "Wei", "family": "Zhang"},
+      {"given": "Mei", "family": "Li"}
+    ],
+    "issued": {"date-parts": [[2024, 5, 12]]},
+    "container-title": ["Journal of Evidence Engineering"],
+    "is-referenced-by-count": 42,
+    "type": "journal-article"
+  }
+}

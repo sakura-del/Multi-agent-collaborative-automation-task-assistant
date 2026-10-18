@@ -30,7 +30,7 @@ from app.db.models.log import ExecutionLog
 from app.db.models.task import Subtask, Task
 from app.db.repositories.event import EventRepository
 from app.db.repositories.task import TaskRepository
-from app.knowledge.services.citation_validator import CitationValidator
+from app.knowledge.services.citation_validator import CitationValidator, ReferenceCheckMode
 from app.knowledge.services.context_builder import LiteratureContextBuilder
 from app.orchestration.agents.planner import PlannerAgent
 from app.orchestration.agents.validator import ValidatorAgent
@@ -49,7 +49,10 @@ from app.orchestration.dag_engine import TaskDAG
 from app.orchestration.recovery import RecoveryManager
 from app.orchestration.runtime import RuntimeContainer
 from app.orchestration.scheduler import TaskScheduler
-from app.orchestration.services.literature_source import resolve_literature_source
+from app.orchestration.services.literature_source import (
+    is_offline_literature_task,
+    resolve_literature_source,
+)
 from app.orchestration.workflows.literature_review import (
     LiteratureNodeExecutor,
     LiteratureNodeValidator,
@@ -581,13 +584,50 @@ class TaskExecution:
                 # 语义补充校验需要 LLM；确定性引用校验始终先跑（Plan 5 Task 1 实跑发现此前漏注入）
                 llm=self.container.create_llm(),
                 rules={"min_length": 1, "required_keywords": []},
-                citation_validator=CitationValidator(),
+                citation_validator=CitationValidator(reference_mode=self._reference_mode()),
             ),
             context_builder=LiteratureContextBuilder(knowledge),
             # 离线演示任务走冻结清单；其余用容器注入的源或 arXiv 适配器
             source=resolve_literature_source(task, fallback=self.container.literature_source),
+            # 引用真实性核验（Issue #3）：核验器未启用或离线任务（R6）时为 None
+            reference_verifier=self._reference_verifier_for_task(task),
         )
         return workflow.use_plan(plan)
+
+    @staticmethod
+    def _reference_mode() -> ReferenceCheckMode:
+        """核验模式：未启用或配置为 off 时返回 off（保持既有报告形状不变）。"""
+        config = get_settings().reference_verification
+        if not config.enabled:
+            return "off"
+        return config.mode
+
+    def _reference_verifier_for_task(self, task: Any) -> Any | None:
+        """校验节点是否注入核验器：离线清单任务默认零外呼（R6）。"""
+        if self._offline_without_verification(task):
+            return None
+        return self.container.reference_verifier
+
+    @staticmethod
+    def _offline_without_verification(task: Any) -> bool:
+        """离线冻结清单任务且未显式打开 `verify_offline_tasks` → 不做外部核验。"""
+        if get_settings().reference_verification.verify_offline_tasks:
+            return False
+        return is_offline_literature_task(task)
+
+    def _apply_reference_verification(self, reviewer: Any, task: Any) -> None:
+        """复盘 Agent 的核验器按任务类型收敛（R6 的复盘路径）。
+
+        `RuntimeContainer._build_default_agent("reviewer")` 会注入真实核验器，而离线 e2e 的
+        bibliography 有约 10 条，逐条外呼才是超时主因；离线演示必须零外呼、可复现，因此这里
+        把核验器摘掉（注入式测试替身没有该属性时跳过）。
+        """
+        if not self._offline_without_verification(task):
+            return
+        # 注入式测试替身 / 老 Agent 没有该属性（或本来就没有核验器）时直接跳过
+        if getattr(reviewer, "reference_verifier", None) is None:
+            return
+        reviewer.reference_verifier = None
 
     def _literature_agent_factory(
         self,
@@ -671,6 +711,8 @@ class TaskExecution:
             )
 
         reviewer = self.container.create_agent("reviewer")
+        # R6 复盘路径：离线清单任务摘掉核验器（否则最终参考文献逐条外呼，离线演示不再可复现）
+        self._apply_reference_verification(reviewer, task)
         if task_type == "literature_review":
             execution_results = self._ordered_execution_results(result, ordered_nodes or [])
             validations = self._ordered_validations(result, ordered_nodes or [])

@@ -116,6 +116,12 @@ class ValidationCheck(BaseModel):
     name: str
     passed: bool
     message: str
+    advisory: bool = False
+    """true 表示「仅供参考」：结论写入报告供审计，但不参与 passed / score 判定。
+
+    Issue #3 引用真实性核验默认走 advisory（外部源不可用时避免误伤任务），
+    历史持久化负载没有该键，缺省 false 保持既有语义。
+    """
 
 
 class ValidationReport(BaseModel):

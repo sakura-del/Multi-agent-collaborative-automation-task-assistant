@@ -1,0 +1,15 @@
+{
+  "id": "https://openalex.org/W2741809807",
+  "doi": "https://doi.org/10.7717/PEERJ.4375",
+  "title": "Evidence-Constrained Literature Review with Multi-Agent Collaboration",
+  "display_name": "Evidence-Constrained Literature Review with Multi-Agent Collaboration",
+  "publication_year": 2024,
+  "cited_by_count": 128,
+  "open_access": {"is_oa": true, "oa_status": "gold", "oa_url": "https://example.org/oa.pdf"},
+  "primary_location": {"source": {"display_name": "PeerJ"}},
+  "authorships": [
+    {"author": {"display_name": "Wei Zhang"}},
+    {"author": {"display_name": "Mei Li"}}
+  ],
+  "type": "article"
+}

@@ -28,6 +28,7 @@ from app.orchestration.contracts import (
     ValidationReport,
 )
 from app.orchestration.messages import MessageType
+from app.tools.literature.models import ReferenceVerification
 
 logger = get_logger(__name__)
 
@@ -130,7 +131,12 @@ class ValidatorAgent(BaseAgent):
         return report
 
     def _run_citation_checks(self, input_data: dict[str, Any]) -> ValidationReport | None:
-        """确定性引用校验；未配置校验器或缺少类型化结果时返回 None。"""
+        """确定性引用校验；未配置校验器或缺少类型化结果时返回 None。
+
+        `reference_verifications`（Issue #3）为工作流预先产出的外部核验结论：
+        逐条 `ReferenceVerification.model_validate`，非法条目跳过而不让整次校验失败；
+        未提供时按原行为调用（报告形状不变）。
+        """
         if self._citation_validator is None:
             return None
         execution_payload = input_data.get("execution_result")
@@ -154,7 +160,24 @@ class ValidatorAgent(BaseAgent):
             execution,
             self._required_sections,
             evidence_pool=evidence_pool,
+            reference_verifications=self._reference_verifications(input_data),
         )
+
+    @staticmethod
+    def _reference_verifications(input_data: dict[str, Any]) -> list[ReferenceVerification] | None:
+        """解析 `reference_verifications` 载荷；缺失或类型不符时返回 None（保持原行为）。"""
+        payload = input_data.get("reference_verifications")
+        if not isinstance(payload, list):
+            return None
+        verifications: list[ReferenceVerification] = []
+        for item in payload:
+            try:
+                verifications.append(ReferenceVerification.model_validate(item))
+            except PydanticValidationError:
+                # 单条脏数据只跳过该条，不影响其余核验结论进入报告
+                logger.warning("reference_verification_payload_invalid")
+                continue
+        return verifications
 
     def _legacy_report(
         self,

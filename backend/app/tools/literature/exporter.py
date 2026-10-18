@@ -5,15 +5,21 @@
 - 落盘路径固定为 `<artifact_root>/<user_id>/<task_id>/<artifact_id><suffix>`；
 - Markdown 中对原始 HTML 做转义，并拒绝 `javascript:` / `data:` / `file:` 等非 HTTP(S) 链接；
 - `resolve_for_user()` 只接受严格的 32 位十六进制 ID，跨用户/跨任务/路径穿越一律 404。
+
+Issue #3 / 计划 §2.6：`stats["reference_verification"]` 存在且正文没有 `## 引用核验` 时，
+追加核验统计章节；参考文献行带核验标记。Markdown 与 DOCX 走同一条组装路径。
+无核验信息的历史 payload 渲染与既有版本逐字一致。
 """
 
 from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
+from typing import Any
 from uuid import UUID, uuid4
 
 from docx import Document as DocxDocument
@@ -25,6 +31,43 @@ from app.tools.literature.models import Artifact
 _ARTIFACT_ID = re.compile(r"^[0-9a-f]{32}$")
 _UNSAFE_SCHEME = re.compile(r"(?i)\b(?:javascript|data|file|vbscript)\s*:")
 _HTML_ESCAPES = (("&", "&amp;"), ("<", "&lt;"), (">", "&gt;"))
+
+#: 判定态 → 中文标签（与复盘 Agent / 校验报告的展示口径保持一致）
+_VERDICT_LABELS: tuple[tuple[str, str], ...] = (
+    ("verified", "已验证"),
+    ("metadata_mismatch", "元数据不符"),
+    ("not_found", "未找到"),
+    ("unverified", "未核验"),
+)
+
+#: 核验统计章节标题；复盘产物已带该章节时导出侧不得重复追加
+_REFERENCE_SECTION = "## 引用核验"
+
+
+def _verification_mark(status: Any) -> str:
+    """参考文献行的核验标记；无核验信息（历史 payload）时返回空串，保持既有渲染不变。"""
+    if not isinstance(status, str) or not status:
+        return ""
+    return f"（核验：{dict(_VERDICT_LABELS).get(status, status)}）"
+
+
+def _summary_count(summary: Mapping[str, Any], key: str) -> int:
+    """统计值容错：非整数字段按 0 处理，避免脏 stats 让导出失败。"""
+    value = summary.get(key, 0)
+    if isinstance(value, bool) or not isinstance(value, int):
+        return 0
+    return value
+
+
+def _verification_line(summary: Mapping[str, Any]) -> str:
+    """`## 引用核验` 章节正文（与复盘 Agent 的展示口径一致）。"""
+    counts = " / ".join(
+        f"{label} {_summary_count(summary, verdict)} 条" for verdict, label in _VERDICT_LABELS
+    )
+    switch = "开启" if summary.get("intercepted") else "关闭"
+    return (
+        f"引用核验：{counts} / 已拦截 {_summary_count(summary, 'dropped')} 条；拦截开关：{switch}"
+    )
 
 
 class LiteratureExporter:
@@ -91,7 +134,7 @@ class LiteratureExporter:
         )
 
     def _compose_document(self, report: ReviewReport) -> str:
-        """组装完整文档：标题 → 摘要 → 正文 → 局限性 → 参考文献。"""
+        """组装完整文档：标题 → 摘要 → 正文 → 局限性 → 参考文献 → 引用核验。"""
         body = (report.final_markdown or "").strip()
         stats = report.stats or {}
         title = str(stats.get("title") or self._first_heading(body) or "文献综述")
@@ -112,6 +155,9 @@ class LiteratureExporter:
                 for index, entry in enumerate(report.bibliography, start=1)
             ]
             parts.append("## 参考文献\n" + "\n".join(lines))
+        verification = stats.get("reference_verification")
+        if isinstance(verification, dict) and _REFERENCE_SECTION not in body:
+            parts.append(f"{_REFERENCE_SECTION}\n{_verification_line(verification)}")
 
         document = "\n\n".join(parts)
         self._validate_links(document)
@@ -126,7 +172,7 @@ class LiteratureExporter:
         prefix = f"[{index}] {title}"
         if source_id and source_id not in title:
             prefix = f"{prefix} ({source_id})"
-        return f"- {prefix}{suffix}"
+        return f"- {prefix}{suffix}{_verification_mark(entry.get('verification_status'))}"
 
     @staticmethod
     def _first_heading(body: str) -> str:

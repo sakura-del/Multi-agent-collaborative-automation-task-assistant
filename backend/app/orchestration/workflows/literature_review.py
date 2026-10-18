@@ -25,6 +25,7 @@ from pydantic import ValidationError as PydanticValidationError
 
 from app.core.exceptions import HumanActionRequiredError
 from app.core.logging import get_logger
+from app.knowledge.services.reference_verifier import candidates_from_artifacts
 from app.orchestration.agents.planner import PlannerAgent, PlannerPlanInvalidError
 from app.orchestration.base_agent import BaseAgent
 from app.orchestration.contracts import (
@@ -69,6 +70,7 @@ class LiteratureReviewWorkflow:
         reviewer: Any | None = None,
         context_builder: Any | None = None,
         source: Any | None = None,
+        reference_verifier: Any | None = None,
         top_k: int = 8,
     ) -> None:
         self._planner = planner
@@ -77,6 +79,8 @@ class LiteratureReviewWorkflow:
         self._reviewer = reviewer
         self._context_builder = context_builder
         self._source = source
+        # 引用真实性核验器（Issue #3 / 计划 §2.6）：None 表示不核验，校验节点保持原行为
+        self._reference_verifier = reference_verifier
         self._top_k = top_k
         self._plan: TaskPlan | None = None
         # 节点证据缓存：重生成时复用同一证据集（Plan 3 Task 4）
@@ -347,28 +351,50 @@ class LiteratureReviewWorkflow:
     # ===== 缝 4/5：校验与复盘 =====
 
     async def validate_node(self, task: Any, result: ExecutionResult) -> ValidationReport:
-        """委托校验 Agent；返回类型化 `ValidationReport`。"""
+        """委托校验 Agent；返回类型化 `ValidationReport`。
+
+        引用真实性核验（Issue #3 / 计划 §2.6）：核验器存在且能从检索 artifacts 解析出候选时，
+        先执行 `verify_many`，再把结论以 `reference_verifications` 随载荷交给校验 Agent。
+        核验依赖外部元数据源，异常只降级为「无核验结论」，不得让校验节点失败。
+        """
         if self._validator is None:
             raise HumanActionRequiredError("缺少校验 Agent")
         prepared = self.prepared_for(result.node_id) or {}
-        payload = await self._validator.execute(
-            {
-                "node_id": result.node_id,
-                "title": self._node_title(result.node_id),
-                "result": result.content,
-                "evidence": [item.model_dump(mode="json") for item in result.evidence],
-                "evidence_pool": prepared.get("evidence", []),
-                "execution_result": result.model_dump(mode="json"),
-                "task_id": str(getattr(task, "id", "")),
-                "trace_id": self._trace_id(task),
-            }
-        )
+        request: dict[str, Any] = {
+            "node_id": result.node_id,
+            "title": self._node_title(result.node_id),
+            "result": result.content,
+            "evidence": [item.model_dump(mode="json") for item in result.evidence],
+            "evidence_pool": prepared.get("evidence", []),
+            "execution_result": result.model_dump(mode="json"),
+            "task_id": str(getattr(task, "id", "")),
+            "trace_id": self._trace_id(task),
+        }
+        verifications = await self._verify_artifacts(result)
+        if verifications:
+            request["reference_verifications"] = [
+                verification.model_dump(mode="json") for verification in verifications
+            ]
+        payload = await self._validator.execute(request)
         if isinstance(payload, ValidationReport):
             return payload
         known_fields = set(ValidationReport.model_fields)
         return ValidationReport.model_validate(
             {key: value for key, value in payload.items() if key in known_fields}
         )
+
+    async def _verify_artifacts(self, result: ExecutionResult) -> list[Any]:
+        """对检索节点 artifacts 做引用真实性核验；无核验器 / 无候选 / 异常时返回空列表。"""
+        if self._reference_verifier is None or not result.artifacts:
+            return []
+        try:
+            candidates = candidates_from_artifacts(result.artifacts)
+            if not candidates:
+                return []
+            return list(await self._reference_verifier.verify_many(candidates))
+        except Exception as exc:  # 外部核验失败不得让校验节点失败
+            logger.warning("reference_verification_failed", node_id=result.node_id, error=str(exc))
+            return []
 
     async def review(self, task: Any, results: list[ExecutionResult]) -> ReviewReport:
         """只基于已持久化结果组装复盘报告；不调用外部工具。"""

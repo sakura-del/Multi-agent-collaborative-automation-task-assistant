@@ -69,3 +69,21 @@ orchestration:
   max_retry: 3
   retry_backoff_base: 1
   retry_backoff_factor: 3
+
+reference_verification:
+  # 引用真实性核验（Issue #3）：与 CrossRef / OpenAlex 比对参考文献元数据，产出四态结论
+  enabled: true
+  mode: "report"              # off / report / enforce；report 为 advisory（只记录不影响通过）
+  intercept_unverified: false # 开启时未通过核验的条目剔出参考文献列表
+  similarity_threshold: 0.90  # 标题相似度阈值，低于该值视为「未找到」
+  year_tolerance: 1           # 年份偏差容差（年）
+  cache_ttl_seconds: 604800   # 核验结论缓存 TTL（秒），默认 7 天
+  request_timeout_seconds: 20.0
+  total_timeout_seconds: 20.0  # 单节点核验总预算（秒）；超预算则全部候选降级为「未核验」
+  # 核验外呼并发上限。⚠️ 未配 contact_email 时处于 OpenAlex 公共池（约 1 req/s），
+  # 并发过高必然触发 429；建议在 .env 配 REFERENCE_VERIFICATION__CONTACT_EMAIL 进入 polite pool。
+  max_concurrency: 2
+  verify_offline_tasks: false # 离线清单（offline_dataset=true）任务是否也做外部核验：默认零外呼
+  contact_email: ""           # 礼貌池联系方式（建议进 .env，不进代码）
+  user_agent: "maa-literature-review/0.1 (+https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant)"
+  max_retries: 1              # 429/5xx 重试次数，重试耗尽后降级为「未核验」

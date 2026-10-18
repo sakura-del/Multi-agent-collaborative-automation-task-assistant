@@ -1,4 +1,4 @@
-"""文献源解析测试（Plan 4 Task 8 实跑发现的装配缺口）。"""
+"""文献源解析测试（Plan 4 Task 8 实跑发现的装配缺口 + Issue #3 R6 离线判定）。"""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from pathlib import Path
 
 from app.orchestration.services.literature_source import (
     ArxivLiteratureSource,
+    is_offline_literature_task,
     resolve_literature_source,
 )
 
@@ -78,3 +79,39 @@ class TestResolveLiteratureSource:
         )
 
         assert isinstance(source, ArxivLiteratureSource)
+
+
+class TestIsOfflineLiteratureTask:
+    """R6：核验接线用同一条件判定「离线清单任务」（必须与源解析口径一致）。"""
+
+    def test_offline_task_with_existing_manifest_is_true(self, tmp_path: Path) -> None:
+        manifest = _write_manifest(tmp_path)
+
+        assert is_offline_literature_task(_Task(offline_dataset=True), manifest_path=manifest)
+
+    def test_offline_task_without_manifest_is_false(self, tmp_path: Path) -> None:
+        """清单缺失时实际会回退 arXiv 源 → 不得按离线处理（否则漏核验）。"""
+        assert not is_offline_literature_task(
+            _Task(offline_dataset=True), manifest_path=tmp_path / "missing.json"
+        )
+
+    def test_online_task_is_false(self, tmp_path: Path) -> None:
+        manifest = _write_manifest(tmp_path)
+
+        assert not is_offline_literature_task(_Task(offline_dataset=False), manifest_path=manifest)
+
+    def test_task_without_config_is_false(self, tmp_path: Path) -> None:
+        manifest = _write_manifest(tmp_path)
+
+        class _NoConfig:
+            config = None
+
+        assert not is_offline_literature_task(_NoConfig(), manifest_path=manifest)
+
+    def test_defaults_to_repository_manifest(self) -> None:
+        """不传 manifest_path 时使用仓库内冻结清单；存在则为离线任务。"""
+        from app.orchestration.services.literature_source import MANIFEST_PATH
+
+        task = _Task(offline_dataset=True)
+
+        assert is_offline_literature_task(task) is MANIFEST_PATH.is_file()
