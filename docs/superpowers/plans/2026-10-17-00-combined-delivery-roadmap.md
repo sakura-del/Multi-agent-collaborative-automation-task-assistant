@@ -269,5 +269,6 @@ npm run build
   - [x] Task 4：规划确认与 DAG 联查（36 passed；确定性几何自绘 DAG、状态变化不位移、四 Tab 由 query 驱动、approve 带版本 + 409 冲突重载）
   - [x] Task 5：实时事件、日志与人工干预（52 passed；ws-ticket → 补拉 → WebSocket + 1/3/9s 退避 + 三次失败轮询降级；状态化命令；结构化日志 100 行分页）
   - [x] Task 6：知识库页面（前端 62 passed + 后端 757 passed；上传校验/进度、文档表二次确认删除、失败原因简洁展示；响应模型补 source/original_name/failure_reason）
-  - [ ] Task 7：结果视图与安全下载（下一步）
+  - [x] Task 7：结果视图与安全下载（69 passed；正文不用 v-html、参考文献仅 http(s)、评分中文标签、blob 下载用服务端 artifact_id 且立即 revoke）
+  - [ ] Task 8：浏览器级流程验收（Playwright，下一步）
 
