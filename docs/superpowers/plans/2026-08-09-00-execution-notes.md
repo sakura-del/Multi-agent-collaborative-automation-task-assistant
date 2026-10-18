@@ -415,6 +415,49 @@ Plan 5 Task 1 实跑发现并修复的真实缺陷：
 - 后端全量 **885 passed**，覆盖率 **87.86%**，`mypy app evaluation` **零错误**
 - **服务器实跑**：`run` 60 runs → `report` 生成 **9 个产物**（含 5 张真实 PNG）；目视核验 `retrieval.png`（无 RAG 组检索为 0、含 RAG 组有值、n=15、误差线）与 `citations.png` 均正确渲染
 
+### Plan 5 Task 8：部署/恢复/答辩运行手册（`2f874d9` / `34d3947`）
+
+三份运行手册（命令全部来自实测）：
+- `docs/runbooks/deployment.md`：前置条件 → 首次部署 → 端口覆盖 → 语料/模型准备 → **六步验收检查** → 备份 → 停止/更新 → 常见问题
+- `docs/runbooks/recovery.md`：PostgreSQL/Redis/Chroma 故障、迁移失败、任务卡住、上传损坏、版本回滚、演示前重置；含**快速判断表**与现场处置优先级
+- `docs/runbooks/defense-demo.md`：5–10 分钟演示脚本（11 步 + 时间预算）、**离线兜底方案**、**两次彩排记录表**、冻结版本流程
+
+文档口径统一（README / checklist.md / dev-plan-v2.md）：
+- README 新增**四态交付状态表**（implemented / tested / integrated / accepted），每行附证据；
+- checklist.md 与 dev-plan-v2.md 顶部加口径说明：作为历史蓝图保留，**当前进度以组合交付路线图为准**；旧的 23 周/19 周说法废弃，统一十周最短可行排期；**代码生成/电商场景不属于当前交付声明**；
+- `.env.example` 补全 `LLM__OPENAI_API_KEY` / `LLM__OPENAI_BASE_URL`（此前只有扁平别名，按它配置会静默失效）与 `deterministic` 离线模式说明。
+
+### 彩排发现并修复的两个真实缺陷（`34d3947`）
+
+1. **Agent 并发重入崩溃**：调度器并行执行 DAG 节点而复用同一 Agent 实例，第二次 `execute()` 时状态机仍停在 `RUNNING`，抛 `IllegalStateTransitionError: running → running`，节点直接转人工。
+   → `BaseAgent.execute()` 进入 RUNNING 前把残留状态归位；新增 `AgentStateMachine.reset()`（记录 warning）；补 `TestConcurrentReentry` 两个用例（残留 RUNNING 恢复、同一实例并发执行）。
+2. **语义校验误判**：抽取节点如实罗列多篇文献（涉及图像生成等不同主题）被 LLM 判为"与子任务主题不匹配"→ 0 分 → 节点转人工。
+   → 校验 prompt 明确口径：检索/抽取节点覆盖多主题是**正常职责**，只有内容与标题明显无关才判 false。
+
+彩排结果（详见 defense-demo.md 附 C）：
+| | 彩排 1 | 彩排 2 |
+| --- | --- | --- |
+| 起点 | 干净 `down` + `up --build`（288s，就绪 291s） | 增量重建 backend（就绪 45s） |
+| 规划 / 全流程 | 18s / 57s | **14s / 55s** |
+| 终态 | `waiting_human`（缺陷） | **`completed`** |
+| 引用 / 产物 | 0 / 0 | **10 处 `[E{n}]` / 2 个** |
+| 演示开始后需手工修库/终端 | 否（但未达 completed） | **否** ✅ |
+
+## Plan 5 Exit Gate（PASSED，2026-10-18）
+
+逐项对照计划要求（全部在服务器实测）：
+
+| 门禁项 | 结果 |
+| --- | --- |
+| 全部阻断式 CI 作业通过 | ✅ `black` 205 files unchanged、`ruff` All checks passed、`mypy` **0 issues in 128 files**、覆盖率 87.84%（≥80%）、前端 69 passed |
+| 干净 Compose 冒烟通过 | ✅ `SMOKE OK {"status":"completed","artifacts":2}`，退出码 0，零残留 |
+| 双用户隔离与重启恢复通过 | ✅ `tests/integration + test_task_recovery_integration + tests/e2e` → **27 passed** |
+| 离线真实模型演示 5–10 分钟内完成 | ✅ 彩排 2：**55 秒**从建任务到 `completed`（真实模型 gpt-6-luna） |
+| 所有正式引用可解析 | ✅ 彩排 2 正文 **10 处 `[E{n}]`** 全部可回溯（被引 chunk 均属已上传文档）；Plan 3 Exit Gate 同样零越界 |
+| 120-run 实验命令 resume-safe | ✅ `--repetitions 2` → `total=120, completed=120, failed=0, ok=true`；二次执行全部 skipped（有单测） |
+| 至少两次完整彩排有记录 | ✅ 见上表与 defense-demo.md 附 C |
+| 无未关闭的 P0/P1 缺陷 | ✅ 彩排暴露的 2 个缺陷已修复并补回归测试，全量 **887 passed** |
+
 Plan 4 备注：
 - 依赖版本按 Vite 5 约束固定：`vitest@^2.1.9`（vitest 5 要求 vite ≥6，会 ERESOLVE）、`@vue/test-utils@^2.4.6`、`happy-dom@^15`、`@playwright/test@^1.48.2`（e2e 浏览器安装放到 Task 8）；另新增 `@vue-flow/core`、`lucide-vue-next`。
 - 测试遵循计划：只 mock `authApi`，不 mock Axios 内部；先跑测试看失败（Step 4），再实现（Step 5–7）。

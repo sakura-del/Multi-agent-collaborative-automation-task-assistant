@@ -280,5 +280,17 @@ npm run build
   - [x] Task 5：可复现实验输入（`evaluation/` 包：4 组画像严格固定参数 + 15 课题 × 3 领域 + 三领域各 10 篇冻结语料 + 盲评模板；`python -m evaluation.validate` 输出 **runs: 120**；全量 810 passed，mypy 含 evaluation 零错误）
   - [x] Task 6：实验 runner 与指标（`metrics.py` 13 个纯函数含 None 语义、`runner.py` resume-safe 原子落盘 + 失败归档、`cli.py` validate/run；56 个测试；服务器 fixed 适配器实跑 **60 runs 全 completed**；全量 866 passed）
   - [x] Task 7：论文报告生成（`reporting.py`：summary/aggregate/significance CSV + 5 张带 CI 误差线的 PNG + report.md；配对 Wilcoxon、固定 seed 可复现、失败运行记录在案、LLM Judge 独立章节；复现手册 8 节；75 个测试；服务器实跑 9 产物；全量 885 passed）
-  - [ ] Task 8：部署/恢复/答辩 runbook（下一步）
+  - [x] Task 8：部署/恢复/答辩 runbook（deployment/recovery/defense-demo 三份手册；README 四态交付表；checklist/dev-plan 加口径说明；`.env.example` 补 LLM 嵌套字段；**两次彩排完成**，第 2 次 55s 内 completed、10 处引用可回溯、全程无需手工修库）
+  - [x] Plan 5 Exit Gate：**PASSED（2026-10-18）**——8 项门禁全过：CI 全阻断（mypy 0 错误/覆盖率 87.84%）、冒烟 `SMOKE OK`、隔离与恢复 27 passed、真实模型 55s 完成、引用全可解析、120-run `ok=true`、两次彩排有记录、无 P0/P1 遗留（彩排暴露的并发重入与语义误判已修复）。详见 `2026-08-09-00-execution-notes.md` §Plan 5 Exit Gate
+
+## 10. 交付总结（Plan 2–5 全部完成）
+
+| Plan | 范围 | 状态 |
+| --- | --- | --- |
+| Plan 2 | Persistent Task Runtime（7 task） | ✅ Exit Gate PASSED |
+| Plan 3 | Evidence-Backed Literature Workflow（6 task） | ✅ Exit Gate PASSED |
+| Plan 4 | Frontend Workspace（8 task） | ✅ Exit Gate PASSED |
+| Plan 5 | Hardening & Experiments（8 task） | ✅ Exit Gate PASSED |
+
+后续（W8–W10 之后）：跑真实 120-run 实验矩阵（`python -m evaluation.cli run --profiles all --repetitions 2`）→ 生成报告 → 论文撰写与答辩。
 

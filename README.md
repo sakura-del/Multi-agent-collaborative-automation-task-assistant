@@ -87,7 +87,7 @@
 | 可复现实验输入（4 组 × 15 课题 × 3 语料） | accepted | Plan 5 Task 5；`validate` 输出 `runs: 120` |
 | 实验 runner 与指标 | accepted | Plan 5 Task 6；服务器 fixed 适配器 60 runs 全完成 |
 | 论文报告生成（CSV + 5 图 + report.md） | accepted | Plan 5 Task 7；服务器 9 产物，固定 seed 可复现 |
-| 部署/恢复/答辩运行手册 | implemented, tested | Plan 5 Task 8；命令均来自实测，彩排记录见 defense-demo.md 附 C |
+| 部署/恢复/答辩运行手册 | accepted | Plan 5 Task 8；命令均来自实测；**两次彩排记录**见 defense-demo.md 附 C（第 2 次 55s 完成、引用可回溯、全程无需手工修库/终端） |
 
 > 当前仅支持**文献综述**这一正式业务场景。代码生成、电商文案等属于论文中的扩展讨论，**不作为当前交付能力声明**。
 
