@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends, File, Form, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_active_user
+from app.db.models.knowledge import KnowledgeDoc
 from app.db.models.user import User
 from app.db.session import get_db
 from app.knowledge.models.document import ChunkStrategy
@@ -52,6 +53,23 @@ def get_document_service(db: AsyncSession = Depends(get_db)) -> KnowledgeDocumen
     )
 
 
+def _to_out(doc: KnowledgeDoc) -> KnowledgeDocumentOut:
+    """ORM → 响应体：附带列表页需要的来源、原始文件名与失败原因（截断、不带栈）。"""
+    meta = doc.meta_info or {}
+    reason = meta.get("error")
+    return KnowledgeDocumentOut(
+        id=doc.id,
+        title=doc.title,
+        doc_type=doc.doc_type,
+        index_status=doc.index_status,
+        chunk_count=doc.chunk_count,
+        created_at=doc.created_at,
+        source=doc.source,
+        original_name=meta.get("original_name"),
+        failure_reason=str(reason)[:200] if reason else None,
+    )
+
+
 # ===== 端点 =====
 
 
@@ -70,7 +88,7 @@ async def upload_document(
 ) -> KnowledgeDocumentOut:
     """上传文档：受控存储 → 解析分块 → 双索引 → 持久化。"""
     doc = await service.ingest(current_user.id, file, title=title, strategy=strategy)
-    return KnowledgeDocumentOut.model_validate(doc)
+    return _to_out(doc)
 
 
 @router.get(
@@ -84,7 +102,7 @@ async def list_documents(
 ) -> KnowledgeDocumentList:
     """列出当前用户名下的全部文档。"""
     docs = await service.list(current_user.id)
-    return KnowledgeDocumentList(documents=[KnowledgeDocumentOut.model_validate(d) for d in docs])
+    return KnowledgeDocumentList(documents=[_to_out(doc) for doc in docs])
 
 
 @router.delete(
@@ -99,7 +117,7 @@ async def delete_document(
 ) -> KnowledgeDocumentOut:
     """删除文档；跨用户或不存在的 doc_id 返回 404。"""
     doc = await service.delete(current_user.id, doc_id)
-    return KnowledgeDocumentOut.model_validate(doc)
+    return _to_out(doc)
 
 
 @router.get(

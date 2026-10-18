@@ -24,6 +24,10 @@ class KnowledgeDocumentOut(BaseModel):
     index_status: str
     chunk_count: int
     created_at: datetime
+    # 列表页展示所需的最小元数据（不泄漏 file_path 等内部细节）
+    source: str = ""
+    original_name: str | None = None
+    failure_reason: str | None = None
 
 
 class KnowledgeDocumentList(BaseModel):

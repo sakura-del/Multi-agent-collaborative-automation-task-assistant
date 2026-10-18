@@ -172,3 +172,52 @@ export interface WsTicket {
   ticket: string;
   expires_in: number;
 }
+
+// ===== 知识库契约（与后端 app/schemas/knowledge.py 对齐）=====
+
+export type ChunkStrategy = "recursive" | "fixed" | "semantic";
+
+export interface KnowledgeDocument {
+  id: string;
+  title: string;
+  doc_type: string;
+  index_status: string;
+  chunk_count: number;
+  created_at: string;
+  source: string;
+  original_name: string | null;
+  failure_reason: string | null;
+}
+
+export interface KnowledgeDocumentList {
+  documents: KnowledgeDocument[];
+}
+
+export interface KnowledgeStats {
+  total_docs: number;
+  total_chunks: number;
+  vector_index_ready: boolean;
+  bm25_index_ready: boolean;
+  last_update?: string | null;
+}
+
+export interface KnowledgeSearchInput {
+  query: string;
+  top_k?: number;
+  skip_cache?: boolean;
+  skip_rerank?: boolean;
+}
+
+export interface KnowledgeSearchItem {
+  chunk_id: string;
+  doc_id: string;
+  text: string;
+  score: number;
+  source: string;
+}
+
+export interface KnowledgeSearchOut {
+  query: string;
+  total: number;
+  results: KnowledgeSearchItem[];
+}
