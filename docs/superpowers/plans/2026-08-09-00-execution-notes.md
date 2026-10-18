@@ -306,6 +306,36 @@ Plan 5 Task 1 实跑发现并修复的真实缺陷：
 - `SMOKE OK {"status": "completed", "artifacts": 2}`，退出码 0；`maa-test` 容器/卷**全部清理**，生产五容器保持 healthy
 - 后端全量 **793 passed**（新增 8 个冒烟客户端单测）
 
+### Plan 5 Task 4：全项目 CI 门禁（`e7594c9`）
+
+`.github/workflows/ci.yml` 重写为 6 个作业，**所有检查均为阻断式**（移除全部 `|| true` 与 `continue-on-error`）：
+
+| 作业 | 内容 |
+| --- | --- |
+| `lint` | `pip install -e ".[dev]"`（依赖唯一来源是 pyproject）→ `black --check` → `ruff check` → **`mypy app`（阻断）** |
+| `test` | `pytest tests --cov=app --cov-fail-under=80`（覆盖率门槛从 70% 提到 80%）+ 上传 coverage.xml |
+| `migration` | PostgreSQL 16 service：`alembic upgrade head` → `downgrade -1` → `upgrade head` 往返 + PG 集成测试 |
+| `frontend` | Node 20 + `npm ci` → Vitest → `vue-tsc` → `vite build` |
+| `build-check` | 后端镜像 + 冒烟客户端镜像均可构建 |
+| `smoke` | 依赖 `test`+`frontend` 通过后跑 `scripts/smoke.sh`（隔离 project `maa-test`），失败时 dump 服务日志 |
+
+同时把门禁真正打通所需的**真实代码修复**（mypy 从 24 个错误 → 0）：
+1. `KnowledgeDocumentService.list()` 遮蔽内置 `list` 类型，使同类 `-> list[...]` 注解被当成方法引用（4 个 `valid-type`）→ 重命名为 `list_documents()`（调用点同步）。
+2. `app/tools/literature/arxiv.py`：`published` 一直是 `str`、链接是裸字符串，**靠 Pydantic 运行期隐式转换**才没出错 → 显式 `datetime.fromisoformat()` + `HttpUrl(...)`，并补非法时间格式的 `ValidationException`。
+3. `app/orchestration/scheduler.py`：`gather(return_exceptions=True)` 的结果联合类型未收窄 → 改用 `isinstance(nr, BaseException)` + `continue`，让 `nr` 在后续分支确定为 `NodeResult`。
+4. `app/core/logging.py`：`renderer` 变量被推断为 `JSONRenderer` 却赋 `ConsoleRenderer` → 显式标注 `Any`。
+5. `app/knowledge/services/document_parser.py`：`para.style` 可能为 `None` → 先兜底再取 `.name`。
+6. `app/core/redis.py`：`hgetall` 返回 bytes/str 混合 → 统一转 `str`（真实健壮性改进，不只是类型标注）；`hset(mapping=...)` 是 redis-py 标注限制 → 定向 `type: ignore`。
+7. `app/orchestration/agents/reviewer.py`：`_polish_literature_review` 在 `self.llm is None` 时会崩 → 提前返回 `{}`（真实缺陷）。
+8. `app/db/repositories/task.py`：Core `update(Task.__table__)` 与 `CursorResult.rowcount` 的第三方标注差异 → 定向 `type: ignore`。
+9. `app/cli.py`：误用 `starlette.datastructures.UploadFile` → 改 `fastapi.UploadFile`。
+10. `backend/pyproject.toml`：移除**代码从未引用**的重依赖 `langchain` / `langchain-community` / `tiktoken` / `beautifulsoup4` / `openpyxl` / `pandoc`（显著缩短 CI 安装与镜像构建；`requests` 是 starlette 误报、`aioredis` 是 `redis.asyncio` 别名，均保留）。
+
+验证（本地 + 服务器同口径）：
+- `black --check`：191 files unchanged；`ruff check`：All checks passed；**`mypy app`：Success, no issues in 120 source files**
+- `pytest --cov-fail-under=80`：**793 passed, 1 skipped，覆盖率 87.82%**（服务器 113s，本地 147s）
+- 前端：Vitest **69 passed**、`vue-tsc` 通过、`vite build` 成功（199KB JS / 16.65KB CSS）
+
 Plan 4 备注：
 - 依赖版本按 Vite 5 约束固定：`vitest@^2.1.9`（vitest 5 要求 vite ≥6，会 ERESOLVE）、`@vue/test-utils@^2.4.6`、`happy-dom@^15`、`@playwright/test@^1.48.2`（e2e 浏览器安装放到 Task 8）；另新增 `@vue-flow/core`、`lucide-vue-next`。
 - 测试遵循计划：只 mock `authApi`，不 mock Axios 内部；先跑测试看失败（Step 4），再实现（Step 5–7）。

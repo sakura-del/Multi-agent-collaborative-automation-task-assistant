@@ -276,5 +276,6 @@ npm run build
   - [x] Task 1：进程级确定性 E2E（本地与服务器各跑两遍 3 passed；引用可回溯 + 事件严格递增 + Markdown/DOCX 可打开；顺带修复「文献校验器未注入 LLM」与容器 LLM 注入点）
   - [x] Task 2：恢复 / 隔离 / 降级证明（集成 21 passed：7 个故障注入 + 14 个安全边界；修复「快照丢弃 validation」；服务器 24 passed / 全量 785 passed）
   - [x] Task 3：Compose 发布冒烟（服务器实跑两次 `SMOKE OK`：30 事件递增、md 3408B/docx 37661B、零残留且生产栈不受影响；冒烟栈端口/卷全部隔离；8 个客户端单测；全量 793 passed）
-  - [ ] Task 4：全项目 CI 门禁（下一步）
+  - [x] Task 4：全项目 CI 门禁（6 作业全阻断：lint+mypy / 80% 覆盖 / Alembic 往返 / 前端 / 镜像构建 / Compose 冒烟；**mypy 24→0 错误**，顺带修 5 处真实缺陷并移除 6 个未使用重依赖；覆盖率 87.82%）
+  - [ ] Task 5：可复现实验输入（下一步）
 
