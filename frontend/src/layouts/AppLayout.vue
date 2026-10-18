@@ -128,26 +128,33 @@ function handleLogout() {
   .app-nav {
     flex-direction: row;
     align-items: center;
-    gap: 0.75rem;
-    padding: 0.6rem 0.75rem;
+    flex-wrap: nowrap;
+    gap: 0.5rem;
+    padding: 0.55rem 0.75rem;
     border-right: none;
     border-bottom: 1px solid var(--color-border);
   }
 
-  .app-nav__brand {
-    padding: 0;
-    white-space: nowrap;
+  /* 窄屏只留导航与登出，避免文字被挤成竖排 */
+  .app-nav__brand,
+  .app-nav__user {
+    display: none;
   }
 
   .app-nav__links {
     flex-direction: row;
     gap: 0.25rem;
+    flex: 1 1 auto;
     overflow-x: auto;
+  }
+
+  .app-nav__link {
+    flex: 0 0 auto;
+    white-space: nowrap;
   }
 
   .app-nav__footer {
     margin-top: 0;
-    margin-left: auto;
     padding: 0;
   }
 

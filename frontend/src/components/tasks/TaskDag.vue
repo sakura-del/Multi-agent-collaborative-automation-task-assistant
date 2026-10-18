@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 
 import type { PlanNode, SubtaskStatus } from "@/api/types";
 import {
@@ -28,6 +28,14 @@ const emit = defineEmits<{ select: [nodeId: string] }>();
 const positions = computed(() => layoutDag(props.nodes));
 const bounds = computed(() => dagBounds(positions.value));
 const scale = ref(1);
+
+/** 窄屏默认适配窗口，避免 DAG 一进来就被裁切（桌面保持 1:1 便于读数） */
+onMounted(() => {
+  if (typeof window !== "undefined" && window.innerWidth <= 720) {
+    const available = Math.max(window.innerWidth - 72, 240);
+    scale.value = Number(Math.min(1, available / Math.max(bounds.value.width, 1)).toFixed(3));
+  }
+});
 
 function toggleFit() {
   // happy-dom 下没有真实尺寸，取容器宽度做保守估算
