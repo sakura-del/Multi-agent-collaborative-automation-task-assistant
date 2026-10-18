@@ -93,15 +93,22 @@ const emit = defineEmits<{ approve: [version: number]; regenerate: [] }>();
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.plan-panel__header > div:first-child {
+  min-width: 0;
 }
 
 .plan-panel__header h2 {
   font-size: 1.05rem;
+  overflow-wrap: anywhere;
 }
 
 .plan-panel__actions {
   display: flex;
   gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 .plan-panel__grid {

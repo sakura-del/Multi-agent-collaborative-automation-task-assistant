@@ -118,4 +118,41 @@ function handleLogout() {
   padding: 1.5rem 2rem;
   min-width: 0;
 }
+
+/* 移动端：左侧导航折成顶部横向导航，内容占满宽度（Plan 4 Exit Gate 移动视口要求） */
+@media (max-width: 720px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .app-nav {
+    flex-direction: row;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.6rem 0.75rem;
+    border-right: none;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .app-nav__brand {
+    padding: 0;
+    white-space: nowrap;
+  }
+
+  .app-nav__links {
+    flex-direction: row;
+    gap: 0.25rem;
+    overflow-x: auto;
+  }
+
+  .app-nav__footer {
+    margin-top: 0;
+    margin-left: auto;
+    padding: 0;
+  }
+
+  .app-main {
+    padding: 1rem;
+  }
+}
 </style>

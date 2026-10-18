@@ -233,6 +233,7 @@ onBeforeUnmount(() => {
   gap: 0.25rem;
   border-bottom: 1px solid var(--color-border);
   margin-bottom: 1rem;
+  overflow-x: auto;
 }
 
 .tabs__item {
@@ -242,6 +243,8 @@ onBeforeUnmount(() => {
   font-size: 0.9rem;
   color: #475569;
   border-bottom: 2px solid transparent;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .tabs__item.active {
