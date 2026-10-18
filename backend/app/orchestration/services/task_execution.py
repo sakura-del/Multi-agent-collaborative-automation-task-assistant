@@ -901,6 +901,11 @@ class TaskExecution:
     def _subtask_snapshot(row: Subtask) -> SubtaskSnapshot:
         data = row.output_data if isinstance(row.output_data, dict) else {}
         output = data.get("output") if isinstance(data.get("output"), dict) else data or None
+        # 校验结果（passed/retryable/checks）必须随快照下发：
+        # 界面节点详情与验收脚本都靠它判断「为什么停在 WAITING_HUMAN」（Plan 5 Task 2 发现此前被丢弃）
+        validation = data.get("validation")
+        if isinstance(validation, dict):
+            output = {**(output or {}), "validation": validation}
         return SubtaskSnapshot(
             node_id=row.node_id,
             title=row.title,
