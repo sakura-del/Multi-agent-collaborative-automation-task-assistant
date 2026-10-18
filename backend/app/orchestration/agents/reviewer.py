@@ -241,6 +241,10 @@ class ReviewerAgent(BaseAgent):
         # 方法内导入：避免 agents 包与 workflows 包互相导入
         from app.orchestration.workflows.prompts import render_reviewer_prompt
 
+        llm = self.llm
+        if llm is None:  # 无 LLM 时直接跳过润色（调用方已做确定性组装）
+            return {}
+
         prompt = render_reviewer_prompt(
             topic=topic,
             results_json=json.dumps(
@@ -252,7 +256,7 @@ class ReviewerAgent(BaseAgent):
             event_stats_json=json.dumps(event_stats, ensure_ascii=False),
         )
         try:
-            response = await self.llm.chat(
+            response = await llm.chat(
                 [
                     Message(
                         role=MessageRole.SYSTEM,

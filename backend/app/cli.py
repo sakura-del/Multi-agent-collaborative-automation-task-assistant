@@ -212,8 +212,8 @@ async def _ensure_user(username: str) -> uuid.UUID:
 
 async def _ingest_corpus(user_id: uuid.UUID, source, *, max_documents: int) -> None:
     """把语料 PDF 入库到演示账号知识库（已入库则跳过）。"""
+    from fastapi import UploadFile
     from sqlalchemy import select
-    from starlette.datastructures import UploadFile
 
     from app.db.models.knowledge import KnowledgeDoc
     from app.db.session import AsyncSessionLocal

@@ -215,7 +215,12 @@ class KnowledgeDocumentService:
         )
         return doc
 
-    async def list(self, user_id: UUID) -> list[KnowledgeDoc]:
+    async def list_documents(self, user_id: UUID) -> list[KnowledgeDoc]:
+        """列出用户名下文档。
+
+        方法名不使用 `list`：它会遮蔽内置类型，使同类的 `-> list[...]` 注解
+        被解析成方法引用（mypy `valid-type` 报错）。
+        """
         """列出用户文档。"""
         return await self._repo.list_for_user(user_id)
 

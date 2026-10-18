@@ -101,7 +101,7 @@ async def list_documents(
     service: KnowledgeDocumentService = Depends(get_document_service),
 ) -> KnowledgeDocumentList:
     """列出当前用户名下的全部文档。"""
-    docs = await service.list(current_user.id)
+    docs = await service.list_documents(current_user.id)
     return KnowledgeDocumentList(documents=[_to_out(doc) for doc in docs])
 
 

@@ -1,23 +1,35 @@
-# 多智能体协作自动化任务助手 - CI 流水线
-# 阶段0任务6：从阶段1起每个阶段 CI 必须包含单元测试执行与覆盖率检查
-# 覆盖率低于阶段验收标准即视为构建失败
+# 多智能体协作自动化任务助手 - CI 流水线（Plan 5 Task 4）
+#
+# 门禁原则：任何检查失败即阻断合并（不存在 `|| true` 或 `continue-on-error`）。
+# 依赖唯一来源是 backend/pyproject.toml（`pip install -e ".[dev]"`），
+# 不再在 workflow 里手工维护第三方包清单。
+#
+# 作业图：
+#   lint ─┬─> test（覆盖率 ≥80%）
+#         ├─> migration（Alembic 升降级往返，PostgreSQL 16）
+#         └─> frontend（Vitest + vue-tsc + vite build）
+#   build-check（Dockerfile 可构建）
+#   smoke（需要 test + frontend 通过，验证 Compose 全链路）
 
 name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, develop, "codex/**"]
   pull_request:
     branches: [main, develop]
 
-# 同一分支的并发任务取消旧的，节省 CI 资源
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "20"
+
 jobs:
   lint:
-    name: Lint & Type Check
+    name: Lint, Format & Types
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,28 +37,28 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
           cache-dependency-path: backend/pyproject.toml
 
-      - name: Install linters
+      - name: Install backend (dev extras)
+        working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          # 固定版本与 .pre-commit-config.yaml 保持一致，确保本地与 CI 格式化结果可复现
-          pip install black==24.4.2 ruff==0.4.4 mypy==1.10.0
+          # 依赖唯一来源：pyproject.toml；重型真实模型包在 rag-models，CI 不安装
+          pip install -e ".[dev]"
 
-      - name: Run Black (check formatting)
+      - name: Black (format check)
         working-directory: backend
         run: black --check app tests
 
-      - name: Run Ruff (lint)
+      - name: Ruff (lint)
         working-directory: backend
         run: ruff check app tests
 
-      - name: Run Mypy (type check, non-blocking)
+      - name: Mypy (type check, blocking)
         working-directory: backend
-        run: mypy app || true
-        continue-on-error: true
+        run: mypy app
 
   test:
     name: Unit Tests & Coverage
@@ -58,80 +70,128 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
           cache-dependency-path: backend/pyproject.toml
 
-      - name: Install dependencies
+      - name: Install backend (dev extras)
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          # 阶段1：安装运行时依赖 + 测试依赖
-          # 注意：passlib 已移除，改用 bcrypt 直接哈希；新增 email-validator
-          # 依赖列表需与 backend/pyproject.toml 保持同步，避免遗漏导致 import 失败
-          # 阶段5新增 RAG 测试必需包：chromadb(向量库)、jieba(中文分词)、rank-bm25(BM25 索引)
-          # 重型可选包(sentence-transformers/FlagEmbedding/PyMuPDF/python-docx)在测试中通过
-          # sys.modules mock 注入避开，无需在 CI 安装以节省时间
-          pip install \
-            "fastapi>=0.110.0" \
-            "uvicorn[standard]>=0.27.0" \
-            "pydantic>=2.6.0" \
-            "pydantic-settings>=2.1.0" \
-            "email-validator>=2.0.0" \
-            "PyYAML>=6.0.1" \
-            "sqlalchemy[asyncio]>=2.0.25" \
-            "asyncpg>=0.29.0" \
-            "alembic>=1.13.0" \
-            "redis>=5.0.0" \
-            "structlog>=24.1.0" \
-            "python-jose[cryptography]>=3.3.0" \
-            "bcrypt>=4.0.0" \
-            "python-multipart>=0.0.9" \
-            "websockets>=12.0" \
-            "httpx>=0.26.0" \
-            "tenacity>=8.2.3" \
-            "networkx>=3.2.1" \
-            "openai>=1.12.0" \
-            "jinja2>=3.1.3" \
-            "pytest>=8.0.0" \
-            "pytest-asyncio>=0.23.5" \
-            "pytest-cov>=4.1.0" \
-            "aiosqlite>=0.19.0" \
-            "fakeredis>=2.21.0" \
-            "lupa>=2.0" \
-            "chromadb>=0.4.22" \
-            "jieba>=0.42.1" \
-            "rank-bm25>=0.2.2"
+          pip install -e ".[dev]"
 
-      - name: Run pytest with coverage
+      - name: Run pytest with coverage gate (>=80%)
         working-directory: backend
         env:
           APP_ENV: test
-          # pydantic-settings 嵌套分隔符为 __ ，映射到 settings.database.url
+          # pydantic-settings 嵌套分隔符 __ 映射 settings.database.url
           DATABASE__URL: "sqlite+aiosqlite:///:memory:"
           REDIS__URL: "redis://localhost:6379/0"
           JWT_SECRET_KEY: "ci-test-secret-not-for-production"
+          RAG_EMBEDDING_MOCK: "1"
+          RAG_RERANKER_MOCK: "1"
         run: |
           pytest tests \
             --cov=app \
             --cov-report=xml:coverage.xml \
             --cov-report=term-missing \
-            --cov-fail-under=70
+            --cov-fail-under=80
 
       - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-report
+          name: backend-coverage
           path: backend/coverage.xml
           if-no-files-found: warn
+
+  migration:
+    name: Alembic Round-Trip (PostgreSQL 16)
+    runs-on: ubuntu-latest
+    needs: lint
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: maa
+          POSTGRES_PASSWORD: maa_secret_pwd
+          POSTGRES_DB: multi_agent_assistant
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U maa -d multi_agent_assistant"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      APP_ENV: test
+      DATABASE__URL: "postgresql+asyncpg://maa:maa_secret_pwd@localhost:5432/multi_agent_assistant"
+      REDIS__URL: "redis://localhost:6379/0"
+      JWT_SECRET_KEY: "ci-test-secret-not-for-production"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install backend (dev extras)
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Upgrade to head
+        working-directory: backend
+        run: alembic upgrade head
+
+      - name: Downgrade one revision
+        working-directory: backend
+        run: alembic downgrade -1
+
+      - name: Upgrade back to head
+        working-directory: backend
+        run: alembic upgrade head
+
+      - name: PostgreSQL integration tests
+        working-directory: backend
+        run: pytest tests/test_task_repository.py -m integration -q
+
+  frontend:
+    name: Frontend Unit, Types & Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Unit tests (Vitest)
+        run: npm run test:unit -- --run
+
+      - name: Type check (vue-tsc)
+        run: npm run type-check
+
+      - name: Build (vite)
+        run: npm run build
 
   build-check:
     name: Docker Build Check
     runs-on: ubuntu-latest
     needs: lint
-    # 仅验证 Dockerfile 可构建，不推送镜像
-    # build context 为仓库根（pyproject readme 指向 ../README.md）
     steps:
       - uses: actions/checkout@v4
 
@@ -147,3 +207,28 @@ jobs:
           tags: maa-backend:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Build smoke client image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/smoke/Dockerfile
+          push: false
+          tags: maa-smoke:ci
+
+  smoke:
+    name: Compose Release Smoke
+    runs-on: ubuntu-latest
+    needs: [test, frontend]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run compose smoke (isolated project maa-test)
+        run: |
+          chmod +x scripts/smoke.sh
+          ./scripts/smoke.sh
+
+      - name: Dump service logs on failure
+        if: failure()
+        run: |
+          docker compose -p maa-test -f docker-compose.yml -f docker-compose.smoke.yml --profile test logs --tail 120 || true

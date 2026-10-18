@@ -223,7 +223,9 @@ async def set_task_status(
         mapping.update({k: str(v) for k, v in extra.items()})
     # pipeline 批量执行 HSET + EXPIRE，减少网络往返
     pipe = client.pipeline()
-    pipe.hset(key, mapping=mapping)
+    # redis-py 的 hset mapping 类型标注不接受 dict[str, str]，运行期完全支持；
+    # 显式忽略该第三方类型标注差异（不影响行为）
+    pipe.hset(key, mapping=mapping)  # type: ignore[arg-type]
     pipe.expire(key, ttl)
     await pipe.execute()
 
@@ -232,7 +234,12 @@ async def get_task_status(task_id: str) -> dict[str, str]:
     """读取任务状态 Hash。不存在返回空字典。"""
     client = get_redis()
     key = _TASK_STATUS_KEY.format(task_id=task_id)
-    return await client.hgetall(key)
+    raw = await client.hgetall(key)
+    # redis-py 返回 dict[bytes|str, bytes|str]（取决于 decode_responses），统一转 str
+    return {
+        (k.decode() if isinstance(k, bytes) else k): (v.decode() if isinstance(v, bytes) else v)
+        for k, v in raw.items()
+    }
 
 
 async def delete_task_status(task_id: str) -> None:

@@ -138,7 +138,9 @@ def _parse_docx(file_path: str) -> tuple[str, list[dict[str, Any]]]:
         text = para.text.strip()
         if not text:
             continue
-        style = (para.style.name or "").lower()
+        # para.style 在部分 docx 里为 None，需先兜底再取 name
+        style_obj = para.style
+        style = ((style_obj.name if style_obj is not None else "") or "").lower()
         if style.startswith("heading"):
             _flush()
             # 提取 heading 级别

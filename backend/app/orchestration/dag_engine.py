@@ -130,11 +130,11 @@ class TaskDAG:
         ready = self.get_ready_nodes(completed)
 
         # 依赖深度：该节点到叶节点的最长路径长度，越深越优先
-        def priority_key(nid: str) -> tuple[int, int]:
+        def priority_key(nid: str) -> tuple[int, str]:
             attrs = self.get_node(nid)
             urgency = attrs.get("priority", 5)
             depth = self._dependency_depth(nid)
-            return (-(urgency * (1 + depth)), nid)  # 负号降序
+            return (-(urgency * (1 + depth)), nid)  # 负号降序，第二键保证排序稳定
 
         return sorted(ready, key=priority_key)
 

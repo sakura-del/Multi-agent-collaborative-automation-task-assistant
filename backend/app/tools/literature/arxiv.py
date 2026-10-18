@@ -13,12 +13,13 @@ from __future__ import annotations
 import json
 import xml.etree.ElementTree as ET
 from collections.abc import AsyncIterator
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 from uuid import UUID
 
 import httpx
+from pydantic import HttpUrl
 from pydantic import ValidationError as PydanticValidationError
 
 from app.core.exceptions import (
@@ -114,7 +115,7 @@ class ArxivClient:
     def _parse_entry(entry: ET.Element) -> LiteratureRecord:
         raw_id = _normalize_text(entry.findtext(f"{ATOM_NS}id"))
         title = _normalize_text(entry.findtext(f"{ATOM_NS}title"))
-        published = _normalize_text(entry.findtext(f"{ATOM_NS}published"))
+        published_text = _normalize_text(entry.findtext(f"{ATOM_NS}published"))
         source_url: str | None = None
         pdf_url: str | None = None
         for link in entry.findall(f"{ATOM_NS}link"):
@@ -126,8 +127,14 @@ class ArxivClient:
             elif link.get("rel") == "alternate":
                 source_url = source_url or href
 
-        if not raw_id or not title or not published or not source_url or not pdf_url:
+        if not raw_id or not title or not published_text or not source_url or not pdf_url:
             raise ValidationException("arXiv 条目缺少必需字段")
+
+        # 显式转换为契约类型：published_at 需要 datetime，链接字段需要 HttpUrl
+        try:
+            published = datetime.fromisoformat(published_text.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValidationException("arXiv 条目的 published 时间格式非法") from exc
 
         source_id = raw_id.rsplit("/abs/", 1)[-1].strip() or raw_id.rsplit("/", 1)[-1]
         authors = [
@@ -147,8 +154,8 @@ class ArxivClient:
                 authors=authors,
                 abstract=_normalize_text(entry.findtext(f"{ATOM_NS}summary")),
                 published_at=published,
-                source_url=source_url,
-                pdf_url=pdf_url,
+                source_url=HttpUrl(source_url),
+                pdf_url=HttpUrl(pdf_url),
                 categories=categories,
             )
         except PydanticValidationError as exc:

@@ -116,12 +116,14 @@ class TaskRepository(BaseRepository[Task]):
 
         # 用 Core UPDATE 直接操作表，避免 ORM-enabled update 使 onupdate 列过期
         table = Task.__table__
-        result = await self.db.execute(
-            update(table)
+        statement = (
+            update(table)  # type: ignore[arg-type]
             .where(table.c.id == task.id, table.c.status.in_(expected_values))
             .values(**values)
         )
-        if result.rowcount != 1:
+        result = await self.db.execute(statement)
+        # Core UPDATE 运行期返回 CursorResult（有 rowcount），mypy 只看到 Result
+        if result.rowcount != 1:  # type: ignore[attr-defined]
             raise IllegalTaskStateError(
                 f"任务 {task.id} 当前状态 {task.status!r} 不在允许集合 "
                 f"{sorted(expected_values)} 内，拒绝转换到 {target.value}"

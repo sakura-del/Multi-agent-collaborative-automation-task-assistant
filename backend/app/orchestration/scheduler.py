@@ -198,7 +198,7 @@ class TaskScheduler:
             # 处理结果：无论成功失败都标记为已处理，避免无限循环
             for nid, nr in zip(batch, node_results, strict=False):
                 processed.add(nid)
-                if isinstance(nr, Exception):
+                if isinstance(nr, BaseException):
                     # gather 返回的异常（_execute_node 内部未捕获的意外错误）
                     unexpected = NodeResult(
                         node_id=nid,
@@ -208,7 +208,9 @@ class TaskScheduler:
                     result.node_results[nid] = unexpected
                     result.waiting_human.append(nid)
                     await self._observer.on_result(task_id, unexpected)
-                elif nr.status is SubtaskStatus.COMPLETED:
+                    continue
+                # 此处 nr 已确定为 NodeResult（异常分支已 continue）
+                if nr.status is SubtaskStatus.COMPLETED:
                     result.completed.append(nid)
                     self._completed.add(nid)
                     if nr.output is not None:
