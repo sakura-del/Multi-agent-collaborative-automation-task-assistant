@@ -34,6 +34,10 @@ _ADAPTER_REGISTRY: dict[str, type[BaseLLM]] = {
     "qwen": QwenAdapter,
 }
 
+# 确定性适配器：仅用于离线演练 / 冒烟 / 回归（`LLM__DEFAULT_PROVIDER=deterministic`）。
+# 延迟注册避免 llm 包导入链在模块初始化期引入额外依赖。
+_DETERMINISTIC_PROVIDER = "deterministic"
+
 
 def create_llm(
     provider: str,
@@ -60,6 +64,11 @@ def create_llm(
         LLMException: provider 不在注册表中
     """
     adapter_cls = _ADAPTER_REGISTRY.get(provider)
+    if adapter_cls is None and provider == _DETERMINISTIC_PROVIDER:
+        # 惰性导入：只在显式选用确定性 provider 时才加载（生产默认路径无额外开销）
+        from app.llm.deterministic import DeterministicLLM
+
+        return DeterministicLLM(model=model or "deterministic")
     if adapter_cls is None:
         raise LLMException(
             f"不支持的 LLM provider: {provider}",

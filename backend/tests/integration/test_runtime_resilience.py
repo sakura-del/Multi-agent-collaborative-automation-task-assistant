@@ -245,9 +245,23 @@ class TestFailureDegradation:
         class _NoEvidenceLLM(FixedLiteratureLLM):
             """执行节点永远输出不含引用标记的正文 → evidence_is_cited 必然失败。"""
 
-            @staticmethod
-            def _executor_content(_user_prompt: str) -> str:
-                return "## 证据梳理\n本节没有任何引用标记，也没有标注模型推断的结论。"
+            async def _raw_chat(self, messages, **kwargs):  # type: ignore[override]
+                from app.llm.deterministic import render_response
+                from app.llm.models import LLMResponse, Usage
+
+                # 执行类调用改写成"无引用"正文；其余用途保持原样
+                content = render_response(messages)
+                if "[E" not in content and "## 证据梳理" not in content:
+                    content = render_response(messages)
+                else:
+                    content = "## 证据梳理\n本节没有任何引用标记，也没有标注模型推断的结论。"
+                self.calls.append({"system": "", "user": "", "content": content})
+                return LLMResponse(
+                    content=content,
+                    usage=Usage(prompt_tokens=10, completion_tokens=10),
+                    finish_reason="stop",
+                    model=self.model,
+                )
 
         resilience_env["install"](llm=_NoEvidenceLLM())
         token = _register_and_login(client, "exhaust-user")

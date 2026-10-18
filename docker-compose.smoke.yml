@@ -1,0 +1,82 @@
+# 发布冒烟专用 Compose override（Plan 5 Task 3）
+#
+# 用法（生产栈可以同时运行，互不干扰）：
+#   docker compose -p maa-test -f docker-compose.yml -f docker-compose.smoke.yml \
+#     --profile test up -d --build
+#   docker compose -p maa-test -f docker-compose.yml -f docker-compose.smoke.yml \
+#     --profile test run --rm smoke
+#   docker compose -p maa-test -f docker-compose.yml -f docker-compose.smoke.yml \
+#     --profile test down --volumes
+#
+# 隔离手段：
+#   - `-p maa-test` 让网络/卷/容器前缀与生产栈不同（生产是 multi-agent-assistant）
+#   - 覆盖 container_name，避免与生产容器重名冲突
+#   - 覆盖宿主端口为高位端口，避免与生产端口冲突
+#   - backend 强制确定性适配器（LLM__DEFAULT_PROVIDER=deterministic）且不注入真实密钥
+
+services:
+  postgres:
+    container_name: maa-test-postgres
+    # !override：Compose 默认把 ports 合并（生产 5433 仍会保留），这里必须整体替换
+    ports: !override
+      - "35433:5432"
+
+  redis:
+    container_name: maa-test-redis
+    ports: !override
+      - "36379:6379"
+
+  chroma:
+    container_name: maa-test-chroma
+    ports: !override
+      - "38002:8000"
+
+  backend:
+    container_name: maa-test-backend
+    environment:
+      # 冒烟不依赖真实模型：确定性适配器走与真实模型完全相同的 Agent 调用路径
+      LLM__DEFAULT_PROVIDER: deterministic
+      LLM__DEFAULT_MODEL: deterministic
+      LLM__OPENAI_API_KEY: ""
+      OPENAI_API_KEY: ""
+      GLM_API_KEY: ""
+      QWEN_API_KEY: ""
+      APP__ENV: test
+
+  nginx:
+    container_name: maa-test-nginx
+    ports: !override
+      - "48081:80"
+
+  # ===== 冒烟客户端（仅 test profile）=====
+  smoke:
+    profiles: ["test"]
+    build:
+      context: .
+      dockerfile: docker/smoke/Dockerfile
+    environment:
+      BASE_URL: http://nginx
+      SMOKE_READY_TIMEOUT: "180"
+      SMOKE_TASK_TIMEOUT: "900"
+    depends_on:
+      nginx:
+        condition: service_started
+    # 不挂载源码目录、不注入真实模型密钥
+    networks:
+      - maa-network
+
+# 覆盖命名卷：生产栈的卷名是固定 maa-*-data，冒烟必须用独立卷，
+# 否则 `down --volumes` 会删掉生产数据。
+volumes:
+  postgres_data:
+    name: maa-test-postgres-data
+  redis_data:
+    name: maa-test-redis-data
+  chroma_data:
+    name: maa-test-chroma-data
+  uploads_data:
+    name: maa-test-uploads-data
+  artifacts_data:
+    name: maa-test-artifacts-data
+  model_cache:
+    name: maa-test-model-cache
