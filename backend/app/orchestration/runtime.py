@@ -170,7 +170,9 @@ class RuntimeContainer:
     def _llm_client(self) -> Any | None:
         """取容器 LLM 客户端；显式注入优先，未配置时返回 None（Agent 走降级路径）。
 
-        文献场景要求真实模型执行，因此首次缺失时打印一次告警，避免"静默降级"。
+        注意：必须返回**带降级能力**的客户端（`FallbackChatClient`），
+        而不是 `manager.get_primary()` 的单个适配器——后者主模型 503 时不会
+        触发 fallback_chain，任务会直接转人工（Plan 5 Task 8 实跑踩过）。
         """
         if self._injected_llm is not None:
             return self._injected_llm
@@ -183,13 +185,9 @@ class RuntimeContainer:
                 self.llm_manager = None
         if self.llm_manager is None:
             return None
-        try:
-            return self.llm_manager.get_primary()
-        except Exception as exc:
-            if not self._llm_missing_warned:
-                logger.warning("runtime_llm_unavailable", error=str(exc))
-                self._llm_missing_warned = True
-            return None
+        from app.llm.factory import FallbackChatClient
+
+        return FallbackChatClient(self.llm_manager)
 
     def _build_default_agent(self, agent_type: str) -> Any:
         """默认 Agent 工厂：有 LLM 时注入真实模型，缺失时保留降级路径。"""

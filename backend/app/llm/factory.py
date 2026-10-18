@@ -293,6 +293,38 @@ class LLMManager:
 _global_manager: LLMManager | None = None
 
 
+class FallbackChatClient:
+    """把 `LLMManager` 包装成「单个适配器」形状，供 Agent 注入使用。
+
+    背景（Plan 5 Task 8 实跑）：Agent 收到的是 `manager.get_primary()`，那只是一个
+    适配器实例，主模型 503 时**不会**触发降级链，任务直接转人工。本包装器让
+    `agent.llm.chat(...)` 实际走 `manager.chat(...)`（含 fallback_chain），
+    同时保留 `model` / `provider` 属性供日志与提示词使用。
+
+    注入 `llm=` 的测试仍可传任意适配器实例；只有生产装配才用本包装器。
+    """
+
+    def __init__(self, manager: LLMManager) -> None:
+        self._manager = manager
+
+    @property
+    def model(self) -> str:
+        return self._manager._primary[1] if self._manager._primary else "unknown"
+
+    @property
+    def provider(self) -> str:
+        return self._manager._primary[0] if self._manager._primary else "unknown"
+
+    async def chat(self, messages: Any, **kwargs: Any) -> Any:
+        return await self._manager.chat(messages, **kwargs)
+
+    def stream_chat(self, messages: Any, **kwargs: Any) -> Any:
+        return self._manager.stream_chat(messages, **kwargs)
+
+    def __repr__(self) -> str:
+        return f"<FallbackChatClient primary={self.provider}/{self.model}>"
+
+
 def get_llm_manager() -> LLMManager:
     """获取全局 LLM 管理器单例。
 
@@ -304,3 +336,12 @@ def get_llm_manager() -> LLMManager:
 
         _global_manager = LLMManager(get_settings().llm)
     return _global_manager
+
+
+def get_llm_client() -> FallbackChatClient | None:
+    """获取带降级能力的 LLM 客户端（Agent 注入用）；初始化失败返回 None。"""
+    try:
+        return FallbackChatClient(get_llm_manager())
+    except Exception as exc:
+        logger.warning("llm_client_unavailable", error=str(exc))
+        return None
