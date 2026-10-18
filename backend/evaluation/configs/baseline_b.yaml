@@ -1,0 +1,15 @@
+# 实验画像 B：多 Agent，无 RAG，但启用校验与复盘（消融"检索"这一项）
+name: multi_agent_no_rag
+agent_mode: multi
+retrieval_mode: none
+validation_enabled: true
+review_enabled: true
+
+provider: openai
+model: gpt-6-luna
+temperature: 0.2
+max_output_tokens: 2048
+prompt_version: lit-v1
+corpus_version: corpus-10-v1
+seed: 20261017
+runs_per_topic: 2

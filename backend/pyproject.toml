@@ -71,6 +71,13 @@ rag-models = [
     "FlagEmbedding>=1.2.10",
 ]
 
+# 实验依赖（Plan 5 Task 5）：只在跑实验/出报告时安装，产品运行不需要
+evaluation = [
+    "pandas>=2.2,<3",
+    "scipy>=1.13,<2",
+    "matplotlib>=3.9,<4",
+]
+
 # 开发依赖：测试、格式化、类型检查
 dev = [
     "pytest>=8.0.0",

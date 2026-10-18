@@ -1,0 +1,116 @@
+{
+  "version": 1,
+  "description": "Plan 5 Task 5 冻结课题集：3 领域 × 5 课题 = 15 个。topic_id/领域/检索式在本文件冻结，实验期间不得改动；corpus_manifest 指向各领域离线语料清单（Task 5 后续补齐，缺失即校验失败）。",
+  "domains": {
+    "ai": "人工智能",
+    "software_engineering": "软件工程",
+    "education_technology": "教育技术"
+  },
+  "topics": [
+    {
+      "topic_id": "ai-rag-eval",
+      "domain": "ai",
+      "topic_zh": "检索增强生成系统的质量评估方法",
+      "query_en": "retrieval augmented generation quality evaluation metrics",
+      "corpus_manifest": "evaluation/datasets/corpora/ai.json"
+    },
+    {
+      "topic_id": "ai-multi-agent-coord",
+      "domain": "ai",
+      "topic_zh": "多智能体协作机制与协调策略",
+      "query_en": "multi-agent collaboration coordination strategies LLM",
+      "corpus_manifest": "evaluation/datasets/corpora/ai.json"
+    },
+    {
+      "topic_id": "ai-llm-hallucination",
+      "domain": "ai",
+      "topic_zh": "大语言模型幻觉的检测与缓解",
+      "query_en": "large language model hallucination detection mitigation",
+      "corpus_manifest": "evaluation/datasets/corpora/ai.json"
+    },
+    {
+      "topic_id": "ai-prompt-eng",
+      "domain": "ai",
+      "topic_zh": "提示词工程与指令遵循能力",
+      "query_en": "prompt engineering instruction following evaluation",
+      "corpus_manifest": "evaluation/datasets/corpora/ai.json"
+    },
+    {
+      "topic_id": "ai-kg-qa",
+      "domain": "ai",
+      "topic_zh": "知识图谱问答与推理",
+      "query_en": "knowledge graph question answering reasoning",
+      "corpus_manifest": "evaluation/datasets/corpora/ai.json"
+    },
+    {
+      "topic_id": "se-code-review",
+      "domain": "software_engineering",
+      "topic_zh": "自动化代码审查方法与效果",
+      "query_en": "automated code review large language models",
+      "corpus_manifest": "evaluation/datasets/corpora/software_engineering.json"
+    },
+    {
+      "topic_id": "se-test-gen",
+      "domain": "software_engineering",
+      "topic_zh": "单元测试自动生成技术",
+      "query_en": "automated unit test generation LLM",
+      "corpus_manifest": "evaluation/datasets/corpora/software_engineering.json"
+    },
+    {
+      "topic_id": "se-defect-pred",
+      "domain": "software_engineering",
+      "topic_zh": "软件缺陷预测与定位",
+      "query_en": "software defect prediction localization machine learning",
+      "corpus_manifest": "evaluation/datasets/corpora/software_engineering.json"
+    },
+    {
+      "topic_id": "se-ci-opt",
+      "domain": "software_engineering",
+      "topic_zh": "持续集成流水线优化",
+      "query_en": "continuous integration pipeline optimization build time",
+      "corpus_manifest": "evaluation/datasets/corpora/software_engineering.json"
+    },
+    {
+      "topic_id": "se-req-trace",
+      "domain": "software_engineering",
+      "topic_zh": "需求可追溯性与变更影响分析",
+      "query_en": "requirements traceability change impact analysis",
+      "corpus_manifest": "evaluation/datasets/corpora/software_engineering.json"
+    },
+    {
+      "topic_id": "edu-adaptive",
+      "domain": "education_technology",
+      "topic_zh": "自适应学习路径推荐",
+      "query_en": "adaptive learning path recommendation personalized",
+      "corpus_manifest": "evaluation/datasets/corpora/education_technology.json"
+    },
+    {
+      "topic_id": "edu-learning-analytics",
+      "domain": "education_technology",
+      "topic_zh": "学习分析与学情预警",
+      "query_en": "learning analytics early warning student performance",
+      "corpus_manifest": "evaluation/datasets/corpora/education_technology.json"
+    },
+    {
+      "topic_id": "edu-ai-tutor",
+      "domain": "education_technology",
+      "topic_zh": "AI 智能辅导系统的设计与成效",
+      "query_en": "AI tutoring system intelligent tutoring effectiveness",
+      "corpus_manifest": "evaluation/datasets/corpora/education_technology.json"
+    },
+    {
+      "topic_id": "edu-auto-feedback",
+      "domain": "education_technology",
+      "topic_zh": "作业自动批改与反馈生成",
+      "query_en": "automated feedback generation assignment grading",
+      "corpus_manifest": "evaluation/datasets/corpora/education_technology.json"
+    },
+    {
+      "topic_id": "edu-integrity",
+      "domain": "education_technology",
+      "topic_zh": "学术诚信检测与 AI 使用规范",
+      "query_en": "academic integrity detection AI writing plagiarism",
+      "corpus_manifest": "evaluation/datasets/corpora/education_technology.json"
+    }
+  ]
+}

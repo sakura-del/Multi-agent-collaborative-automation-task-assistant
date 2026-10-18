@@ -1,0 +1,16 @@
+# 实验画像 A：单 Agent，无 RAG、无校验、无复盘（最弱基线）
+name: single_agent_no_rag
+agent_mode: single
+retrieval_mode: none
+validation_enabled: false
+review_enabled: false
+
+# 以下参数为可复现性固定值（roadmap §3），四组必须完全一致
+provider: openai
+model: gpt-6-luna
+temperature: 0.2
+max_output_tokens: 2048
+prompt_version: lit-v1
+corpus_version: corpus-10-v1
+seed: 20261017
+runs_per_topic: 2

@@ -134,3 +134,9 @@ backend/.runtime/
 frontend/e2e/screenshots/
 frontend/e2e/.artifacts/
 
+
+# ===== 实验层（Plan 5 Task 5）=====
+# 只提交实验清单与配置；下载的 PDF 与运行产物不入库
+backend/evaluation/datasets/corpora/*-files/
+backend/evaluation/runs/
+backend/evaluation/reports/

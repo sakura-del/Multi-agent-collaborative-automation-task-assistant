@@ -1,0 +1,15 @@
+# 实验画像 C：多 Agent + 向量 RAG（消融"混合检索 + 重排"这一项）
+name: multi_agent_vector_rag
+agent_mode: multi
+retrieval_mode: vector
+validation_enabled: true
+review_enabled: true
+
+provider: openai
+model: gpt-6-luna
+temperature: 0.2
+max_output_tokens: 2048
+prompt_version: lit-v1
+corpus_version: corpus-10-v1
+seed: 20261017
+runs_per_topic: 2
