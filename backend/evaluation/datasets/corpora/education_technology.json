@@ -23,7 +23,7 @@
       "categories": [
         "cs.HC"
       ],
-      "local_path": "2412.10568v1.pdf",
+      "local_path": "education_technology-files/01_Learner_Control_Explainable_Analytics__2412.10568v1.pdf",
       "sha256": "f34d178f4dd5790ea4a7ed9d9ee3d134232b4af5f949b113491a108742a6e937",
       "size": 1787387
     },
@@ -42,7 +42,7 @@
       "categories": [
         "cs.CY"
       ],
-      "local_path": "2503.09748v1.pdf",
+      "local_path": "education_technology-files/02_Tutoring_Systems_Systematic_Review__2503.09748v1.pdf",
       "sha256": "a230fb5af83218027a5fe06e037af70e341db2abb124335734a01626b2c48981",
       "size": 251588
     },
@@ -65,7 +65,7 @@
         "cs.AI",
         "cs.CY"
       ],
-      "local_path": "2401.03238v1.pdf",
+      "local_path": "education_technology-files/03_LLM_Assess_Tutor_Performance__2401.03238v1.pdf",
       "sha256": "2ff706f6b9b7891a103b34a309c53c9b5a9b3b8e273cdc25b5463ff09e90cf94",
       "size": 334744
     },
@@ -86,7 +86,7 @@
         "cs.CL",
         "cs.GT"
       ],
-      "local_path": "2406.15890v1.pdf",
+      "local_path": "education_technology-files/04_Language_Alignment_Nash_Learning__2406.15890v1.pdf",
       "sha256": "1c270f75d28d823028f0f8a83559f5deaa4ed18fb3040dcb3eae7e6039f10d46",
       "size": 453992
     },
@@ -106,7 +106,7 @@
         "cs.LG",
         "cs.AI"
       ],
-      "local_path": "2508.14311v2.pdf",
+      "local_path": "education_technology-files/05_Online_Learning_Fairness_Regularizers__2508.14311v2.pdf",
       "sha256": "ce48f09ff7302a5161afbc5eda81c341b2803d0c2d57554c51fd1e17585c4b75",
       "size": 631967
     },
@@ -128,7 +128,7 @@
         "cs.CY",
         "cs.HC"
       ],
-      "local_path": "2303.12388v1.pdf",
+      "local_path": "education_technology-files/06_Analytics_SelfRegulated_Learning__2303.12388v1.pdf",
       "sha256": "2bd79c93d691b43f0397f9069179e51c21ad581d02489384d103c247dec82a12",
       "size": 1009574
     },
@@ -150,7 +150,7 @@
         "cs.LG",
         "cs.HC"
       ],
-      "local_path": "2308.04332v1.pdf",
+      "local_path": "education_technology-files/07_RLHF_Blender_Interactive_Interface__2308.04332v1.pdf",
       "sha256": "d94bf2caa427374e3bdff34e082cf56ba4442a43ebff07b134afd3ba49597138",
       "size": 1663865
     },
@@ -176,7 +176,7 @@
       "categories": [
         "cs.CY"
       ],
-      "local_path": "2412.20923v1.pdf",
+      "local_path": "education_technology-files/08_Doer_Effect_Beyond_WEIRD__2412.20923v1.pdf",
       "sha256": "1f3bffbca858cef16f4030aca729a9d2a700e1847b5b4d9284ebbf45eaf22646",
       "size": 1197279
     },
@@ -196,7 +196,7 @@
       "categories": [
         "cs.CY"
       ],
-      "local_path": "2303.12392v1.pdf",
+      "local_path": "education_technology-files/09_LAVA_Learning_Analytics_Visual__2303.12392v1.pdf",
       "sha256": "dec0792cf53bc56476e5f7872bf9ed423205699808d698a8a2f624293bc0b0dd",
       "size": 1463325
     },
@@ -221,7 +221,7 @@
         "cs.HC",
         "cs.AI"
       ],
-      "local_path": "2412.11255v1.pdf",
+      "local_path": "education_technology-files/10_Tutor_Equity_Training_GenAI__2412.11255v1.pdf",
       "sha256": "606e94f6ce9cda5b179327d459d97c22a10e4156f4215511972603080d0b65fa",
       "size": 1284976
     }

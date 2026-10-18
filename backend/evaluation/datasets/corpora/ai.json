@@ -23,7 +23,7 @@
       "categories": [
         "cs.CV"
       ],
-      "local_path": "2506.06962v3.pdf",
+      "local_path": "ai-files/01_AR-RAG_Autoregressive_Retrieval__2506.06962v3.pdf",
       "sha256": "7f18a80e431b0342bac236ea02bcd28c093ba3ce46f01efd9ddacb8782eab634",
       "size": 8870231
     },
@@ -43,7 +43,7 @@
       "categories": [
         "cs.CL"
       ],
-      "local_path": "2309.15217v2.pdf",
+      "local_path": "ai-files/02_Ragas_RAG_Evaluation__2309.15217v2.pdf",
       "sha256": "6c24762a3f277fd120ed1adf34b01420ecf92f18ff6d1b5435fa0a09cb804ecb",
       "size": 231984
     },
@@ -64,7 +64,7 @@
       "categories": [
         "cs.AI"
       ],
-      "local_path": "2412.05838v1.pdf",
+      "local_path": "ai-files/03_MultiAgent_Collaborative_RAG__2412.05838v1.pdf",
       "sha256": "1e1db0a851d8e48f88b773736ec296912d6a40903963525951aa64fede8f2479",
       "size": 1157800
     },
@@ -87,7 +87,7 @@
       "categories": [
         "cs.HC"
       ],
-      "local_path": "2504.13684v1.pdf",
+      "local_path": "ai-files/04_ContextAware_Cognitive_Augmentation__2504.13684v1.pdf",
       "sha256": "9826e4c1f19b497c8d1b05d5500b51798e01303e059d37b4c839da10a886189c",
       "size": 1091455
     },
@@ -110,7 +110,7 @@
         "cs.HC",
         "cs.ET"
       ],
-      "local_path": "2504.17204v1.pdf",
+      "local_path": "ai-files/05_Factually_Wearable_FactCheck__2504.17204v1.pdf",
       "sha256": "f53b3c02564f652d1f20699e7a9d6ce0578116d5c2944560bebda6c2d90a5f06",
       "size": 13527937
     },
@@ -133,7 +133,7 @@
         "cs.IR",
         "cs.LG"
       ],
-      "local_path": "2411.18583v1.pdf",
+      "local_path": "ai-files/06_Automated_Literature_Review_NLP_LLM__2411.18583v1.pdf",
       "sha256": "4eaef290fa07edb7fb33f0667840d1a35bb8983b9a0097f1e47a376abba6c6c9",
       "size": 664722
     },
@@ -151,7 +151,7 @@
       "categories": [
         "cs.HC"
       ],
-      "local_path": "2504.14689v1.pdf",
+      "local_path": "ai-files/07_AI_Augment_Human_Performed__2504.14689v1.pdf",
       "sha256": "69fd5e63df12b394264ad43a97c4b1a7f9ed352bd27fdaeeb559fc16fc0d1fc3",
       "size": 115607
     },
@@ -172,7 +172,7 @@
         "cs.AI",
         "cs.LG"
       ],
-      "local_path": "2412.06333v3.pdf",
+      "local_path": "ai-files/08_Conventions_MultiAgent_Action_Space__2412.06333v3.pdf",
       "sha256": "f25d8712f22ae8f2970ab0e02f9150e1b0ea10e4f60dc4e4ff00364d560303b4",
       "size": 8562953
     },
@@ -193,7 +193,7 @@
         "cs.AI",
         "cs.IR"
       ],
-      "local_path": "2510.22344v1.pdf",
+      "local_path": "ai-files/09_FAIR-RAG_Faithful_Adaptive_Refinement__2510.22344v1.pdf",
       "sha256": "edee709f8cbf7b5cccaa4e104817ab6c332be751209e38ca835aeb9092160227",
       "size": 2367153
     },
@@ -218,7 +218,7 @@
         "cs.CL",
         "cs.AI"
       ],
-      "local_path": "2402.12317v2.pdf",
+      "local_path": "ai-files/10_EVOR_Evolving_Retrieval_CodeGen__2402.12317v2.pdf",
       "sha256": "dddad00061e815cad00c56a5283bd467cb3694927e5c3331c685d670774bbe84",
       "size": 549497
     }

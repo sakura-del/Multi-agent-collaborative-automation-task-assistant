@@ -23,7 +23,7 @@
       "categories": [
         "cs.CL"
       ],
-      "local_path": "2303.12869v1.pdf",
+      "local_path": "software_engineering-files/01_JaCoText_Java_CodeText_Generation__2303.12869v1.pdf",
       "sha256": "26328e77f0b831d6e0069ec6ec051c312b9383670ebb7e02db8c4ca4579efd37",
       "size": 647409
     },
@@ -42,7 +42,7 @@
         "cs.AI",
         "cs.ET"
       ],
-      "local_path": "2404.17586v1.pdf",
+      "local_path": "software_engineering-files/02_Future_Scientific_Publishing_AutoGen__2404.17586v1.pdf",
       "sha256": "c85982a2dd27cff871df2348f9d24e6ea66cd9fcf3566ad012869f8657d43866",
       "size": 297751
     },
@@ -64,7 +64,7 @@
         "cs.AI",
         "cs.IR"
       ],
-      "local_path": "2509.25716v1.pdf",
+      "local_path": "software_engineering-files/03_DeepCodeSeek_Realtime_API_Retrieval__2509.25716v1.pdf",
       "sha256": "e7ddf6233530fc60696f706fc4452a6adb7ec31c5bfe3f37e647afa5f007ebca",
       "size": 2434181
     },
@@ -86,7 +86,7 @@
       "categories": [
         "cs.SE"
       ],
-      "local_path": "2305.04764v2.pdf",
+      "local_path": "software_engineering-files/04_ChatUniTest_LLM_Test_Generation__2305.04764v2.pdf",
       "sha256": "bea81b547fb7aea5d9fcba2f7f63f717a57f8b7164ec31891293b2e64d6090b2",
       "size": 705592
     },
@@ -105,7 +105,7 @@
         "cs.SE",
         "cs.AI"
       ],
-      "local_path": "2508.18003v1.pdf",
+      "local_path": "software_engineering-files/05_Automating_Code_Review__2508.18003v1.pdf",
       "sha256": "e89f14f7f74449807df8924d6ef63caf273e145ba51141c17e97040e654f0c62",
       "size": 665681
     },
@@ -127,7 +127,7 @@
         "cs.SE",
         "cs.AI"
       ],
-      "local_path": "2511.20403v2.pdf",
+      "local_path": "software_engineering-files/06_LLM_Unit_Test_Java_Assessment__2511.20403v2.pdf",
       "sha256": "647bb8ee6d8b6777b8b8697d3ace52a5b78d8b8bf5ce41d0939a7e26edb347fa",
       "size": 1480827
     },
@@ -150,7 +150,7 @@
         "cs.IR",
         "cs.LG"
       ],
-      "local_path": "2411.18583v1.pdf",
+      "local_path": "software_engineering-files/07_Automated_Literature_Review_NLP_LLM__2411.18583v1.pdf",
       "sha256": "4eaef290fa07edb7fb33f0667840d1a35bb8983b9a0097f1e47a376abba6c6c9",
       "size": 664722
     },
@@ -175,7 +175,7 @@
         "cs.CL",
         "cs.AI"
       ],
-      "local_path": "2402.12317v2.pdf",
+      "local_path": "software_engineering-files/08_EVOR_Evolving_Retrieval_CodeGen__2402.12317v2.pdf",
       "sha256": "dddad00061e815cad00c56a5283bd467cb3694927e5c3331c685d670774bbe84",
       "size": 549497
     },
@@ -194,7 +194,7 @@
       "categories": [
         "cs.AI"
       ],
-      "local_path": "2301.10079v2.pdf",
+      "local_path": "software_engineering-files/09_Reformulation_Automated_Planning_SLR__2301.10079v2.pdf",
       "sha256": "6180c2a005d61dc1a6394fd119613c8a4c97a3d8614b23ef8cfa272ddd730029",
       "size": 452677
     },
@@ -220,7 +220,7 @@
         "cs.CL",
         "cs.LG"
       ],
-      "local_path": "2505.17928v2.pdf",
+      "local_path": "software_engineering-files/10_DefectFocused_Code_Review__2505.17928v2.pdf",
       "sha256": "379c9610c7323e3feb475d44f34631de064bec8bd121d24304567f7bed0f626d",
       "size": 1144774
     }
