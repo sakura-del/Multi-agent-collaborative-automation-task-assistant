@@ -30,7 +30,7 @@ class SmokeError(RuntimeError):
     """冒烟断言失败。"""
 
 
-def _fail(message: str) -> "SmokeError":
+def _fail(message: str) -> SmokeError:
     return SmokeError(message)
 
 
@@ -201,7 +201,7 @@ def main() -> int:
         except SmokeError as exc:
             print(f"SMOKE FAILED: {exc}", file=sys.stderr)
             return 1
-        except Exception as exc:  # noqa: BLE001 - 冒烟需要暴露出任何异常
+        except Exception as exc:
             print(f"SMOKE ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)
             return 1
 

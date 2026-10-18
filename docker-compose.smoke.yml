@@ -65,7 +65,6 @@ services:
     # 不挂载源码目录、不注入真实模型密钥
     networks:
       - maa-network
-
 # 覆盖命名卷：生产栈的卷名是固定 maa-*-data，冒烟必须用独立卷，
 # 否则 `down --volumes` 会删掉生产数据。
 volumes:
