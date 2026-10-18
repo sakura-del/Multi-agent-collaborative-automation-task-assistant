@@ -206,11 +206,27 @@ Plan 3 notes:
 - 新增 Plan 3 验收脚本 `scripts/plan3_exit_gate.py`（阶段：语料哈希 → 离线真实模型演示 → 引用可回溯/产物哈希/重启恢复 → JSON 报告），含 6 个纯函数测试；与 CLI 共用 `--data-root`（默认 `backend/.runtime`）以适配宿主机运行。
 - **服务器可达性**：`10.0.10.2` 自 23:17 起 ping/SSH/HTTP(48080) 全部超时（与用户提到的另一项目 200G 占用事件同期，用户确认与本项目无关），服务器侧验证与 Exit Gate 重跑待其恢复。
 
+## Plan 3 Exit Gate（PASSED，2026-10-18）
+
+验收入口：`cd backend && python scripts/plan3_exit_gate.py --max-documents 10 --username literature-gate2 --timeout 2400 --report /tmp/p3_gate_report2.json`（服务器 PostgreSQL + Redis + 离线 10 篇语料 + 真实模型 `gpt-6-luna`）。
+
+| 阶段 | 结果 |
+| --- | --- |
+| corpus | 10 条记录，sha256 全部一致 |
+| offline_demo | CLI 退出码 0，任务 `ea46442d-387b-4abb-b044-164798ca1c97` 状态 **completed**，真实 LLM 调用（单节点 executor 8.2s），规划出 **7 个节点**（n1–n7） |
+| verify_task | **引用全可回溯**：n1/n2/n6/n7 无标记；n3 6 标记/池 8/引用 4；n4 16/8/6；n5 15/8/6 —— 越界标记 `[]`、缺失分块 `[]`；**产物双哈希一致**：markdown 26,546 B、docx 40,828 B（`sha256_recorded == sha256_actual`）；**重启恢复**：`recover()` 后状态 completed→completed、事件 40→40、各节点 `retry_count` 全 0 不变 |
+
+关键修复（本轮）：
+- `756bbd9`：`evidence_is_cited` 语义从「池内每条证据都必须被引用」改为「池非空时正文必须真正引用池内证据，覆盖率作为提示」——抽取节点只采样相关证据是合理的；Exit Gate 实跑证明原口径会让 n2 永远失败（8 条池仅引用 4 条）。
+- `ac4a53a`/`b9a4489`/`88e9968`：Exit Gate harness 三处口径/接口修正——标记越界按**节点证据池**（`evidence_pool`）判定而非被引用子集、`resolve_for_user()` 返回 `Path`、`ExecutionLog` 从 `app.db.models.log` 导入。
+- 服务器回归：unit suite **757 passed**（1 skipped）、PG 集成 **1 passed**、Plan 2 Exit Gate 重跑 **ok=true**。
+
 ## Plan 4（前端工作台）执行记录
 
 | Task | commit | 交付与验证 |
 | --- | --- | --- |
-| 1 | `0cecd66` | 工作台骨架 + 鉴权状态：`api/types.ts`、`api/client.ts`（单一 Axios 实例、401 单飞刷新 `refreshPromise`、`_retry` 防环、刷新失败回调登出）、`api/auth.ts`、`stores/auth.ts`（bootstrap/login/register/refresh/logout）、`router/index.ts`（/login、/tasks、/tasks/:taskId、/knowledge + 等待 `auth.ready` 的守卫）、`layouts/AppLayout.vue`（安静左导航 + 当前用户 + 图标登出）、`views/LoginView.vue`（登录/注册 + redirect 回跳）、三个占位视图、`test/setup.ts`（每例清 localStorage）；Vitest 配置进 `vite.config.ts`。**验证：`npm run test:unit -- --run` 7 passed、`npm run type-check` 通过、`npm run build` 成功（154KB JS / 3.4KB CSS）** |
+| 1 | `0cecd66` | 工作台骨架 + 鉴权状态：`api/types.ts`、`api/client.ts`（单一 Axios 实例、401 单飞刷新 `refreshPromise`、`_retry` 防环、刷新失败回调登出）、`api/auth.ts`、`stores/auth.ts`（bootstrap/login/register/refresh/logout）、`router/index.ts`（/login、/tasks、/tasks/:taskId、/knowledge + 等待 `auth.ready` 的守卫）、`layouts/AppLayout.vue`（安静左导航 + 当前用户 + 图标登出）、`views/LoginView.vue`（登录/注册 + redirect 回跳）、三个占位视图、`test/setup.ts`（每例清 localStorage）；Vitest 配置进 `vite.config.ts`。**验证：7 个单测通过、`vue-tsc` 通过、`vite build` 成功（154KB JS / 3.4KB CSS）** |
+| 2 | `928258c` | 类型化任务契约 + 快照 store：`api/types.ts` 镜像后端 `TaskStatus`(11)/`SubtaskStatus`(11)/`TaskCommand`(5)/`TaskCreate`/`TaskSummary`/`TaskSnapshot`/`SubtaskSnapshot`/`TaskPlan`/`PlanNode`/`TaskEvent(Page)`/`ReviewReport`/`Artifact`；`api/tasks.ts` 七个 adapter（list/create/get/approve/control/events/wsTicket；create 按后端实际返回 `TaskCreateOut`）；`stores/tasks.ts` 持有 `items/snapshot/events/lastEventId/watching`，`applyEvent` 只接受严格递增 `event_id`（乱序/重放安全），`watch/stopWatching` 先轮询（WebSocket 留给 Task 5）。**验证：8 个新单测（含 15 passed 合计）、`vue-tsc` 与 `vite build` 通过** |
 
 Plan 4 备注：
 - 依赖版本按 Vite 5 约束固定：`vitest@^2.1.9`（vitest 5 要求 vite ≥6，会 ERESOLVE）、`@vue/test-utils@^2.4.6`、`happy-dom@^15`、`@playwright/test@^1.48.2`（e2e 浏览器安装放到 Task 8）；另新增 `@vue-flow/core`、`lucide-vue-next`。
