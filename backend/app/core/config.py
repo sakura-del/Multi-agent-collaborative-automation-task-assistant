@@ -94,6 +94,9 @@ class LLMConfig(BaseModel):
     glm_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
     qwen_api_key: str | None = None
     qwen_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    # DeepSeek：OpenAI 兼容协议，作为主模型 5xx 时的保底通道（Plan 5 答辩保障）
+    deepseek_api_key: str | None = None
+    deepseek_base_url: str = "https://api.deepseek.com/v1"
 
 
 class RAGConfig(BaseModel):

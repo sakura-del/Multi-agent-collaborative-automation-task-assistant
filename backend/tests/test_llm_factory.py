@@ -226,3 +226,47 @@ class TestLLMManagerStream:
         async for c in manager.stream_chat([Message(role=MessageRole.USER, content="q")]):
             chunks.append(c)
         assert chunks == ["chunk1", "chunk2", "chunk3"]
+
+
+class TestDeepSeekFallback:
+    """主模型持续 5xx 时的保底通道（Plan 5 答辩保障）。
+
+    实跑背景：model.rhzy.ai 端点返回 503，导致规划直接失败转人工；
+    配置 fallback_chain 首项为 deepseek 后应能自动接管。
+    """
+
+    def test_deepseek_registered_as_openai_compatible(self) -> None:
+        from app.llm.adapters import OpenAIAdapter
+        from app.llm.factory import _ADAPTER_REGISTRY
+
+        assert "deepseek" in _ADAPTER_REGISTRY
+        assert _ADAPTER_REGISTRY["deepseek"] is OpenAIAdapter
+
+    def test_config_has_deepseek_credentials_fields(self) -> None:
+        from app.core.config import LLMConfig
+
+        cfg = LLMConfig()
+        assert cfg.deepseek_api_key is None
+        assert cfg.deepseek_base_url == "https://api.deepseek.com/v1"
+
+    def test_fallback_chain_puts_deepseek_first(self) -> None:
+        from pathlib import Path
+
+        import yaml
+
+        path = Path(__file__).resolve().parents[2] / "config" / "default.yaml"
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        chain = data["llm"]["fallback_chain"]
+
+        assert chain[0]["provider"] == "deepseek"
+        assert chain[0]["model"] == "deepseek-chat"
+
+    def test_manager_initializes_deepseek_base_url(self) -> None:
+        from app.core.config import LLMConfig
+        from app.llm.factory import LLMManager
+
+        cfg = LLMConfig(deepseek_api_key="sk-test", deepseek_base_url="https://api.deepseek.com/v1")
+        manager = LLMManager(cfg)
+
+        assert manager._api_keys["deepseek"] == "sk-test"
+        assert manager._base_urls["deepseek"] == "https://api.deepseek.com/v1"

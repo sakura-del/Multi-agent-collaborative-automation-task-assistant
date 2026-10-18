@@ -32,6 +32,8 @@ _ADAPTER_REGISTRY: dict[str, type[BaseLLM]] = {
     "openai": OpenAIAdapter,
     "glm": GLMAdapter,
     "qwen": QwenAdapter,
+    # DeepSeek 使用 OpenAI 兼容协议，直接复用 OpenAIAdapter（base_url 指向 api.deepseek.com）
+    "deepseek": OpenAIAdapter,
 }
 
 # 确定性适配器：仅用于离线演练 / 冒烟 / 回归（`LLM__DEFAULT_PROVIDER=deterministic`）。
@@ -131,7 +133,7 @@ class LLMManager:
         self._timeout = getattr(config, "request_timeout", 30)
         self._max_retries = getattr(config, "max_retries", 3)
         # 读取各厂商 API Key 与 base_url
-        for provider in ("openai", "glm", "qwen"):
+        for provider in ("openai", "glm", "qwen", "deepseek"):
             self._api_keys[provider] = getattr(config, f"{provider}_api_key", None)
             self._base_urls[provider] = getattr(config, f"{provider}_base_url", "")
         # 设置主模型

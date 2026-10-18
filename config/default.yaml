@@ -36,10 +36,13 @@ llm:
     daily_token_limit: 1000000
     monthly_token_limit: 20000000
     alert_threshold: 0.8
-  # 降级链：主模型超时/失败后依次尝试
+  # 降级链：主模型超时/失败后依次尝试。
+  # 注意（Plan 5 答辩保障）：原先首项 gpt-4o-mini 在该端点返回 404、
+  # glm/qwen 无有效密钥，等于降级链形同虚设。现改为 DeepSeek 打头（OpenAI 兼容，
+  # 已实测可用），保留其余作为末位兜底。
   fallback_chain:
-    - provider: "openai"
-      model: "gpt-4o-mini"
+    - provider: "deepseek"
+      model: "deepseek-chat"
     - provider: "glm"
       model: "glm-4-flash"
     - provider: "qwen"
