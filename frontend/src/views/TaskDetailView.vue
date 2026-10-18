@@ -7,8 +7,10 @@ import StatusBadge from "@/components/common/StatusBadge.vue";
 import NodeDetail from "@/components/tasks/NodeDetail.vue";
 import PlanPanel from "@/components/tasks/PlanPanel.vue";
 import TaskDag from "@/components/tasks/TaskDag.vue";
+import TaskLog from "@/components/tasks/TaskLog.vue";
+import TaskToolbar from "@/components/tasks/TaskToolbar.vue";
 import { useTaskStore } from "@/stores/tasks";
-import type { PlanNode, SubtaskStatus } from "@/api/types";
+import type { PlanNode, SubtaskStatus, TaskControl } from "@/api/types";
 import { formatDateTime } from "@/utils/task-status";
 
 // 任务详情：Tab 由路由 query 驱动（刷新不丢），规划确认与 DAG 联查
@@ -104,6 +106,18 @@ async function handleRegenerate() {
   }
 }
 
+async function handleControl(payload: TaskControl) {
+  pending.value = true;
+  errorMessage.value = null;
+  try {
+    await store.control(props.taskId, payload);
+  } catch (error) {
+    errorMessage.value = (error as Error).message;
+  } finally {
+    pending.value = false;
+  }
+}
+
 watch(
   () => props.taskId,
   () => {
@@ -156,6 +170,15 @@ onBeforeUnmount(() => {
       </button>
     </nav>
 
+    <TaskToolbar
+      class="detail__toolbar"
+      :status="store.snapshot?.status ?? 'created'"
+      :pending="pending"
+      :selected-node-id="selectedNodeId"
+      :selected-node-status="selectedSubtask?.status ?? null"
+      @command="handleControl"
+    />
+
     <div v-if="activeTab === 'plan'" class="detail__panel">
       <PlanPanel
         :plan="store.snapshot?.plan ?? null"
@@ -180,9 +203,7 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-else-if="activeTab === 'logs'" class="detail__panel">
-      <p class="page__hint">
-        最近 {{ store.events.length }} 条事件（实时推送与日志面板在 Task 5 完善）。
-      </p>
+      <TaskLog :events="store.events" />
     </div>
 
     <div v-else class="detail__panel">

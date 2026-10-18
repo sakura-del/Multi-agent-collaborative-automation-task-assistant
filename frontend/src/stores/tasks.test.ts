@@ -17,6 +17,20 @@ vi.mock("@/api/tasks", () => ({
   },
 }));
 
+// 事件会话在 Task 5 单测里单独覆盖；此处只验证 store 的接线
+const startSpy = vi.fn(
+  async (
+    _taskId: string,
+    _after: number,
+    _onEvent: (event: TaskEvent) => void,
+    _handlers?: { onSnapshot?: (snapshot: unknown) => void }
+  ) => undefined
+);
+const stopSpy = vi.fn();
+vi.mock("@/services/task-events", () => ({
+  createTaskEventSession: () => ({ start: startSpy, stop: stopSpy }),
+}));
+
 function snapshot(overrides: Partial<TaskSnapshot> = {}): TaskSnapshot {
   return {
     task_id: "task-1",
@@ -114,23 +128,27 @@ describe("task store", () => {
     expect(store.snapshot?.status).toBe("running");
   });
 
-  it("polls for new events while watching and stops on stopWatching", async () => {
+  it("starts the realtime session while watching and stops it on stopWatching", async () => {
     const store = useTaskStore();
     vi.mocked(taskApi.get).mockResolvedValue(snapshot());
-    vi.mocked(taskApi.events).mockResolvedValue({ events: [], next_event_id: 0 });
 
     store.watch("task-1");
-    await vi.advanceTimersByTimeAsync(0); // 首次立即拉取
-    const initialCalls = vi.mocked(taskApi.events).mock.calls.length;
+    await vi.advanceTimersByTimeAsync(0);
 
-    await vi.advanceTimersByTimeAsync(4000);
-    const pollingCalls = vi.mocked(taskApi.events).mock.calls.length;
-    expect(pollingCalls).toBeGreaterThan(initialCalls);
+    expect(startSpy).toHaveBeenCalledTimes(1);
+    expect(startSpy.mock.calls[0][0]).toBe("task-1");
+    expect(startSpy.mock.calls[0][1]).toBe(0); // 从 lastEventId 开始补拉
+    expect(store.watching).toBe(true);
+
+    // 会话回调把事件合并进 store
+    const onEvent = startSpy.mock.calls[0][2];
+    onEvent(event(11, "running"));
+    expect(store.lastEventId).toBe(11);
+    expect(store.events).toHaveLength(1);
 
     store.stopWatching();
+    expect(stopSpy).toHaveBeenCalledTimes(1);
     expect(store.watching).toBe(false);
-    await vi.advanceTimersByTimeAsync(8000);
-    expect(vi.mocked(taskApi.events).mock.calls.length).toBe(pollingCalls);
   });
 
   it("sends control commands and stores the returned snapshot", async () => {

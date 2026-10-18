@@ -2,6 +2,7 @@ import { ref } from "vue";
 import { defineStore } from "pinia";
 
 import { taskApi } from "@/api/tasks";
+import { createTaskEventSession, type TaskEventSession } from "@/services/task-events";
 import type {
   TaskControl,
   TaskCreate,
@@ -11,10 +12,8 @@ import type {
   TaskSummary,
 } from "@/api/types";
 
-/** 轮询间隔：WebSocket 由 Plan 4 Task 5 接入，此处先保证状态可推进 */
-const POLL_INTERVAL_MS = 2000;
-
-// 任务状态唯一归属：视图只读 store，不直接调用 Axios
+// 任务状态唯一归属：视图只读 store，不直接调用 Axios。
+// 实时事件走 WebSocket 会话（Task 5），失败自动降级为 HTTP 补拉轮询。
 export const useTaskStore = defineStore("tasks", () => {
   const items = ref<TaskSummary[]>([]);
   const snapshot = ref<TaskSnapshot | null>(null);
@@ -24,7 +23,7 @@ export const useTaskStore = defineStore("tasks", () => {
   const listLoading = ref(false);
   const detailLoading = ref(false);
 
-  let timer: ReturnType<typeof setInterval> | null = null;
+  let session: TaskEventSession | null = null;
   let watchedTaskId: string | null = null;
 
   async function loadList(): Promise<void> {
@@ -89,24 +88,31 @@ export const useTaskStore = defineStore("tasks", () => {
     }
   }
 
+  /** 启动实时事件会话：票据 → 快照 → 补拉 → WebSocket；失败由服务内部降级轮询 */
   function watch(taskId: string): void {
     stopWatching();
     watching.value = true;
     watchedTaskId = taskId;
-    void (async () => {
-      await load(taskId);
-      await pullEvents(taskId);
-    })();
-    timer = setInterval(() => {
-      void pullEvents(taskId).catch(() => undefined);
-    }, POLL_INTERVAL_MS);
+    session = createTaskEventSession({
+      wsTicket: taskApi.wsTicket,
+      replay: taskApi.events,
+      loadSnapshot: (id) => load(id),
+    });
+    void session
+      .start(taskId, lastEventId.value, (event) => applyEvent(event), {
+        onSnapshot: (incoming) => {
+          const next = incoming as TaskSnapshot | null;
+          if (next && next.task_id === taskId) {
+            snapshot.value = { ...(snapshot.value ?? next), ...next };
+          }
+        },
+      })
+      .catch(() => undefined);
   }
 
   function stopWatching(): void {
-    if (timer !== null) {
-      clearInterval(timer);
-      timer = null;
-    }
+    session?.stop();
+    session = null;
     watching.value = false;
     watchedTaskId = null;
   }
