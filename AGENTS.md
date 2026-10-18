@@ -86,6 +86,7 @@ curl -s http://127.0.0.1:48080/api/v1/health/ready
   export JWT_SECRET_KEY="ci-test-secret-not-for-production"
   ```
 - 宿主机端口（由未入库的 `docker-compose.override.yml` 指定）：postgres `35433` / redis `36379` / chroma `38002` / nginx `48080`
+- ⚠️ **服务器 CPU 单核吞吐约为本机 1/28**（2026-10-19 实测：同一非文献子集本地 14.89s vs 服务器 418.53s；主机 192 核、load ~44，多项目共存）。**不要在服务器跑全量 `pytest tests` 等结果**（约需 3 小时），服务器验证用「定向用例 + 容器内脚本」；全量门禁以本地为准
 
 ### 4.3 本地 → 服务器同步（标准流程）
 
