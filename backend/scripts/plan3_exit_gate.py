@@ -233,7 +233,7 @@ async def verify_task(task_id: str) -> dict[str, Any]:
 async def _event_count(task_id: str) -> int:
     from sqlalchemy import func, select
 
-    from app.db.models.task import ExecutionLog
+    from app.db.models.log import ExecutionLog
     from app.db.session import AsyncSessionLocal
 
     async with AsyncSessionLocal() as session:
