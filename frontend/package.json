@@ -13,7 +13,6 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
-    "@vue-flow/core": "^1.48.2",
     "axios": "^1.6.8",
     "lucide-vue-next": "^0.577.0",
     "pinia": "^2.1.7",

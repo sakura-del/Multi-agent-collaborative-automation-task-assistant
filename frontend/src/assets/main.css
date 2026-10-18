@@ -75,6 +75,25 @@ button {
   background: var(--color-card);
 }
 
+/* 键盘可达性：所有可交互元素统一焦点环 */
+:where(button, a, input, select, textarea, [role="button"], [tabindex]):focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+.btn:hover:not(:disabled) {
+  border-color: #cbd5e1;
+}
+
+.btn--primary:hover:not(:disabled) {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+}
+
+a {
+  color: var(--color-primary);
+}
+
 .banner {
   padding: 0.5rem 0.75rem;
   border-radius: 8px;
