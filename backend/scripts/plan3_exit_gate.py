@@ -140,11 +140,13 @@ async def verify_task(task_id: str) -> dict[str, Any]:
             output = (sub.output_data or {}).get("output") or {}
             execution = output.get("execution_result") or {}
             content = str(execution.get("content", "") or output.get("result", ""))
-            evidence = execution.get("evidence") or []
-            unresolved = unresolved_markers(content, len(evidence))
+            cited = execution.get("evidence") or []
+            # 标记编号对应「节点证据池」（校验器同样按池校验）；execution.evidence 只是被引用子集
+            pool = output.get("evidence_pool") or cited
+            unresolved = unresolved_markers(content, len(pool))
             missing = [
                 item.get("chunk_id")
-                for item in evidence
+                for item in cited
                 if item.get("chunk_id") not in {str(chunk) for chunk in stored_chunks}
             ]
             report["citations"].append(
@@ -152,7 +154,8 @@ async def verify_task(task_id: str) -> dict[str, Any]:
                     "node_id": sub.node_id,
                     "status": sub.status,
                     "markers": len(extract_markers(content)),
-                    "evidence": len(evidence),
+                    "evidence_pool": len(pool),
+                    "evidence_cited": len(cited),
                     "unresolved": unresolved,
                     "missing_chunks": missing,
                 }
