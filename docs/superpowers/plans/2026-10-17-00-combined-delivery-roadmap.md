@@ -278,5 +278,6 @@ npm run build
   - [x] Task 3：Compose 发布冒烟（服务器实跑两次 `SMOKE OK`：30 事件递增、md 3408B/docx 37661B、零残留且生产栈不受影响；冒烟栈端口/卷全部隔离；8 个客户端单测；全量 793 passed）
   - [x] Task 4：全项目 CI 门禁（6 作业全阻断：lint+mypy / 80% 覆盖 / Alembic 往返 / 前端 / 镜像构建 / Compose 冒烟；**mypy 24→0 错误**，顺带修 5 处真实缺陷并移除 6 个未使用重依赖；覆盖率 87.82%）
   - [x] Task 5：可复现实验输入（`evaluation/` 包：4 组画像严格固定参数 + 15 课题 × 3 领域 + 三领域各 10 篇冻结语料 + 盲评模板；`python -m evaluation.validate` 输出 **runs: 120**；全量 810 passed，mypy 含 evaluation 零错误）
-  - [ ] Task 6：实验 runner 与指标（下一步）
+  - [x] Task 6：实验 runner 与指标（`metrics.py` 13 个纯函数含 None 语义、`runner.py` resume-safe 原子落盘 + 失败归档、`cli.py` validate/run；56 个测试；服务器 fixed 适配器实跑 **60 runs 全 completed**；全量 866 passed）
+  - [ ] Task 7：论文报告生成（下一步）
 

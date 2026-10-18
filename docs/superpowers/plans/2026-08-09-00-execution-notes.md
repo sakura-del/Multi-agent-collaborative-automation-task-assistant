@@ -362,6 +362,33 @@ Plan 5 Task 1 实跑发现并修复的真实缺陷：
 - 后端全量 **810 passed**、覆盖率 **87.85%**、`mypy app evaluation` **零错误**
 - **服务器实跑语料准备**：`[ai] 10 篇`、`[software_engineering] 10 篇`、`[education_technology] 10 篇`（36M / 8.7M / 9.7M PDF，已 gitignore），`python -m evaluation.validate` 输出 **`runs: 120`**，与 roadmap §3 冻结设计一致
 
+### Plan 5 Task 6：实验 runner 与指标（`e1d301a`）
+
+**`evaluation/metrics.py`** —— 全部纯函数，核心契约：**分母未定义返回 `None`，绝不用 0 冒充**（"没有标注" ≠ "得分为 0"）：
+
+| 类别 | 指标 |
+| --- | --- |
+| 检索质量 | `recall_at_k`、`reciprocal_rank`（MRR 用第一个相关结果）、`ndcg_at_k`（分级相关性 + 理想 DCG，IDCG=0 时返回 None） |
+| 引用/证据 | `citation_resolvability`（越界标记算不可解析）、`evidence_coverage`、`error_citation_rate`、`duplicate_paragraph_ratio` |
+| 执行质量 | `success_rate`、`mean_duration`、`total_tokens`、`retry_count`（Σ(attempts−1)）、`recovery_success` |
+| 汇总 | `aggregate`（忽略 None）、`summarize_run` |
+
+**`evaluation/runner.py`** —— resume-safe 矩阵执行：
+- 矩阵 `4 组 × 15 课题 × 2 次 = 120 runs`，顺序稳定（同输入产同一相对路径序列）
+- 每 run 目录含 `config.json / task.json / events.jsonl / result.md / review.json / metrics.json`；**全部非空且 metrics 可解析**才算完成 → resume 跳过
+- **原子写入**：先写 `.tmp` 再 `os.replace()`，中途崩溃不留"看起来完整"的半成品
+- 失败运行保留 `error.txt` 现场且**不覆盖**；`--retry-failed` 时才把旧现场归档到 `attempts/retry-*`
+- 无事件的 run 写入占位事件，保证「非空」是可靠完成判据
+- 单 run 失败不中断整个矩阵；`RunReport` 汇总 completed/skipped/failed 并落 `run_set.json`
+- 执行器可注入：`FixedAdapterExecutor`（离线演练，四组检索能力可区分）/ `TaskExecutionExecutor`（真实模型）
+
+**`evaluation/cli.py`** —— `validate` / `run --profiles all|子集 --topic --repetitions --adapter fixed|live --retry-failed --run-set-id`，打印 run-set ID、completed/skipped/failed 与产物根目录。
+
+验证：
+- `tests/evaluation/` **56 passed**（指标 33 + runner 15 + CLI 8）：固定小样本断言精确值、None 语义、矩阵 120、原子写无 `.tmp` 残留、resume 不重复执行、失败保留现场、重试归档、失败不阻塞其他 run、进度回调、metrics 不重复存正文
+- 后端全量 **866 passed**，覆盖率 **87.82%**，`mypy app evaluation` **零错误**
+- **服务器实跑**：`python -m evaluation.cli run --adapter fixed --profiles all --repetitions 1` → **60 runs 全部 completed / 0 failed / ok=true**，60 个 `metrics.json`；抽样（full 画像）`citation_resolvability=1.0`、`evidence_coverage≈0.667`、`recall_at_5=0.5`、`success=1.0`
+
 Plan 4 备注：
 - 依赖版本按 Vite 5 约束固定：`vitest@^2.1.9`（vitest 5 要求 vite ≥6，会 ERESOLVE）、`@vue/test-utils@^2.4.6`、`happy-dom@^15`、`@playwright/test@^1.48.2`（e2e 浏览器安装放到 Task 8）；另新增 `@vue-flow/core`、`lucide-vue-next`。
 - 测试遵循计划：只 mock `authApi`，不 mock Axios 内部；先跑测试看失败（Step 4），再实现（Step 5–7）。
