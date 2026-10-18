@@ -1,0 +1,229 @@
+{
+  "version": 1,
+  "domain": "education_technology",
+  "query": "adaptive learning analytics automated feedback tutoring",
+  "date_from": "2023-01-01",
+  "date_to": "2025-12-31",
+  "generated_at": "2026-10-18T09:43:29.915377+00:00",
+  "record_count": 10,
+  "records": [
+    {
+      "source_id": "2412.10568v1",
+      "title": "How Learner Control and Explainable Learning Analytics on Skill Mastery Shape Student Desires to Finish and Avoid Loss in Tutored Practice",
+      "authors": [
+        "Conrad Borchers",
+        "Jeroen Ooge",
+        "Cindy Peng",
+        "Vincent Aleven"
+      ],
+      "abstract": "Personalized problem selection enhances student practice in tutoring systems. Prior research has focused on transparent problem selection that supports learner control but rarely engages learners in selecting practice materials. We explored how different levels of control (i.e., full AI control, shared control, and full learner control), combined with showing learning analytics on skill mastery and visual what-if explanations, can support students in practice contexts requiring high degrees of self-regulation, such as homework. Semi-structured interviews with six middle school students revealed three key insights: (1) participants highly valued learner control for an enhanced learning experience and better self-regulation, especially because most wanted to avoid losses in skill mastery; (2) only seeing their skill mastery estimates often made participants base problem selection on their weaknesses; and (3) what-if explanations stimulated participants to focus more on their strengths and improve skills until they were mastered. These findings show how explainable learning analytics could shape students' selection strategies when they have control over what to practice. They suggest promising avenues for helping students learn to regulate their effort, motivation, and goals during practice with tutoring systems.",
+      "published_at": "2024-12-13T21:16:42Z",
+      "source_url": "https://arxiv.org/abs/2412.10568v1",
+      "pdf_url": "https://arxiv.org/pdf/2412.10568v1",
+      "categories": [
+        "cs.HC"
+      ],
+      "local_path": "2412.10568v1.pdf",
+      "sha256": "f34d178f4dd5790ea4a7ed9d9ee3d134232b4af5f949b113491a108742a6e937",
+      "size": 1787387
+    },
+    {
+      "source_id": "2503.09748v1",
+      "title": "Advancing Education through Tutoring Systems: A Systematic Literature Review",
+      "authors": [
+        "Vincent Liu",
+        "Ehsan Latif",
+        "Xiaoming Zhai"
+      ],
+      "abstract": "This study systematically reviews the transformative role of Tutoring Systems, encompassing Intelligent Tutoring Systems (ITS) and Robot Tutoring Systems (RTS), in addressing global educational challenges through advanced technologies. As many students struggle with proficiency in core academic areas, Tutoring Systems emerge as promising solutions to bridge learning gaps by delivering personalized and adaptive instruction. ITS leverages artificial intelligence (AI) models, such as Bayesian Knowledge Tracing and Large Language Models, to provide precise cognitive support, while RTS enhances social and emotional engagement through human-like interactions. This systematic review, adhering to the PRISMA framework, analyzed 86 representative studies. We evaluated the pedagogical and technological advancements, engagement strategies, and ethical considerations surrounding these systems. Based on these parameters, Latent Class Analysis was conducted and identified three distinct categories: computer-based ITS, robot-based RTS, and multimodal systems integrating various interaction modes. The findings reveal significant advancements in AI techniques that enhance adaptability, engagement, and learning outcomes. However, challenges such as ethical concerns, scalability issues, and gaps in cognitive adaptability persist. The study highlights the complementary strengths of ITS and RTS, proposing integrated hybrid solutions to maximize educational benefits. Future research should focus on bridging gaps in scalability, addressing ethical considerations comprehensively, and advancing AI models to support diverse educational needs.",
+      "published_at": "2025-03-12T18:47:07Z",
+      "source_url": "https://arxiv.org/abs/2503.09748v1",
+      "pdf_url": "https://arxiv.org/pdf/2503.09748v1",
+      "categories": [
+        "cs.CY"
+      ],
+      "local_path": "2503.09748v1.pdf",
+      "sha256": "a230fb5af83218027a5fe06e037af70e341db2abb124335734a01626b2c48981",
+      "size": 251588
+    },
+    {
+      "source_id": "2401.03238v1",
+      "title": "Using Large Language Models to Assess Tutors' Performance in Reacting to Students Making Math Errors",
+      "authors": [
+        "Sanjit Kakarla",
+        "Danielle Thomas",
+        "Jionghao Lin",
+        "Shivang Gupta",
+        "Kenneth R. Koedinger"
+      ],
+      "abstract": "Research suggests that tutors should adopt a strategic approach when addressing math errors made by low-efficacy students. Rather than drawing direct attention to the error, tutors should guide the students to identify and correct their mistakes on their own. While tutor lessons have introduced this pedagogical skill, human evaluation of tutors applying this strategy is arduous and time-consuming. Large language models (LLMs) show promise in providing real-time assessment to tutors during their actual tutoring sessions, yet little is known regarding their accuracy in this context. In this study, we investigate the capacity of generative AI to evaluate real-life tutors' performance in responding to students making math errors. By analyzing 50 real-life tutoring dialogues, we find both GPT-3.5-Turbo and GPT-4 demonstrate proficiency in assessing the criteria related to reacting to students making errors. However, both models exhibit limitations in recognizing instances where the student made an error. Notably, GPT-4 tends to overidentify instances of students making errors, often attributing student uncertainty or inferring potential errors where human evaluators did not. Future work will focus on enhancing generalizability by assessing a larger dataset of dialogues and evaluating learning transfer. Specifically, we will analyze the performance of tutors in real-life scenarios when responding to students' math errors before and after lesson completion on this crucial tutoring skill.",
+      "published_at": "2024-01-06T15:34:27Z",
+      "source_url": "https://arxiv.org/abs/2401.03238v1",
+      "pdf_url": "https://arxiv.org/pdf/2401.03238v1",
+      "categories": [
+        "cs.HC",
+        "cs.AI",
+        "cs.CY"
+      ],
+      "local_path": "2401.03238v1.pdf",
+      "sha256": "2ff706f6b9b7891a103b34a309c53c9b5a9b3b8e273cdc25b5463ff09e90cf94",
+      "size": 334744
+    },
+    {
+      "source_id": "2406.15890v1",
+      "title": "Language Alignment via Nash-learning and Adaptive feedback",
+      "authors": [
+        "Ari Azarafrooz",
+        "Farshid Faal"
+      ],
+      "abstract": "Recent research has shown the potential of Nash Learning via Human Feedback for large language model alignment by incorporating the notion of a preference model in a minimax game setup. We take this idea further by casting the alignment as a mirror descent algorithm against the adaptive feedback of an improved opponent, thereby removing the need for learning a preference model or the existence of an annotated dataset altogether. The resulting algorithm, which we refer to as Language Alignment via Nash-learning and Adaptive feedback (LANA), is capable of self-alignment without the need for a human-annotated preference dataset. We support this statement with various experiments and mathematical discussion.",
+      "published_at": "2024-06-22T16:55:21Z",
+      "source_url": "https://arxiv.org/abs/2406.15890v1",
+      "pdf_url": "https://arxiv.org/pdf/2406.15890v1",
+      "categories": [
+        "cs.LG",
+        "cs.AI",
+        "cs.CL",
+        "cs.GT"
+      ],
+      "local_path": "2406.15890v1.pdf",
+      "sha256": "1c270f75d28d823028f0f8a83559f5deaa4ed18fb3040dcb3eae7e6039f10d46",
+      "size": 453992
+    },
+    {
+      "source_id": "2508.14311v2",
+      "title": "Online Learning with Multiple Fairness Regularizers via Graph-Structured Feedback",
+      "authors": [
+        "Quan Zhou",
+        "Jakub Marecek",
+        "Robert Shorten"
+      ],
+      "abstract": "There is an increasing need to enforce multiple, often competing, measures of fairness within automated decision systems. The appropriate weighting of these fairness objectives is typically unknown a priori, may change over time and, in our setting, must be learned adaptively through sequential interactions. In this work, we address this challenge in a bandit setting, where decisions are made with graph-structured feedback.",
+      "published_at": "2025-08-19T23:32:26Z",
+      "source_url": "https://arxiv.org/abs/2508.14311v2",
+      "pdf_url": "https://arxiv.org/pdf/2508.14311v2",
+      "categories": [
+        "cs.LG",
+        "cs.AI"
+      ],
+      "local_path": "2508.14311v2.pdf",
+      "sha256": "ce48f09ff7302a5161afbc5eda81c341b2803d0c2d57554c51fd1e17585c4b75",
+      "size": 631967
+    },
+    {
+      "source_id": "2303.12388v1",
+      "title": "Designing Theory-Driven Analytics-Enhanced Self-Regulated Learning Applications",
+      "authors": [
+        "Mohamed Amine Chatti",
+        "Volkan Yücepur",
+        "Arham Muslim",
+        "Mouadh Guesmi",
+        "Shoeb Joarder"
+      ],
+      "abstract": "There is an increased interest in the application of learning analytics (LA) to promote self-regulated learning (SRL). A variety of LA dashboards and indicators were proposed to support different crucial SRL processes, such as planning, awareness, self-reflection, self-monitoring, and feedback. However, the design of these dashboards and indicators is often without reference to theories in learning science, human-computer interaction (HCI), and information visualization (InfoVis). Moreover, there is a lack of theoretically sound frameworks to guide the systematic design and development of LA dashboards and indicators to scaffold SRL. This chapter seeks to explore theoretical underpinnings of the design of LA-enhanced SRL applications, drawing from the fields of learning science, HCI, and InfoVis. We first present the Student-Centered Learning Analytics-enhanced Self-Regulated Learning (SCLA-SRL) methodology for building theory-driven LA-enhanced SRL applications for and with learners. We then put this methodology into practice by designing and developing LA indicators to support novice programmers' SRL in a higher education context.",
+      "published_at": "2023-03-22T08:52:54Z",
+      "source_url": "https://arxiv.org/abs/2303.12388v1",
+      "pdf_url": "https://arxiv.org/pdf/2303.12388v1",
+      "categories": [
+        "cs.CY",
+        "cs.HC"
+      ],
+      "local_path": "2303.12388v1.pdf",
+      "sha256": "2bd79c93d691b43f0397f9069179e51c21ad581d02489384d103c247dec82a12",
+      "size": 1009574
+    },
+    {
+      "source_id": "2308.04332v1",
+      "title": "RLHF-Blender: A Configurable Interactive Interface for Learning from Diverse Human Feedback",
+      "authors": [
+        "Yannick Metz",
+        "David Lindner",
+        "Raphaël Baur",
+        "Daniel Keim",
+        "Mennatallah El-Assady"
+      ],
+      "abstract": "To use reinforcement learning from human feedback (RLHF) in practical applications, it is crucial to learn reward models from diverse sources of human feedback and to consider human factors involved in providing feedback of different types. However, the systematic study of learning from diverse types of feedback is held back by limited standardized tooling available to researchers. To bridge this gap, we propose RLHF-Blender, a configurable, interactive interface for learning from human feedback. RLHF-Blender provides a modular experimentation framework and implementation that enables researchers to systematically investigate the properties and qualities of human feedback for reward learning. The system facilitates the exploration of various feedback types, including demonstrations, rankings, comparisons, and natural language instructions, as well as studies considering the impact of human factors on their effectiveness. We discuss a set of concrete research opportunities enabled by RLHF-Blender. More information is available at https://rlhfblender.info/.",
+      "published_at": "2023-08-08T15:21:30Z",
+      "source_url": "https://arxiv.org/abs/2308.04332v1",
+      "pdf_url": "https://arxiv.org/pdf/2308.04332v1",
+      "categories": [
+        "cs.LG",
+        "cs.HC"
+      ],
+      "local_path": "2308.04332v1.pdf",
+      "sha256": "d94bf2caa427374e3bdff34e082cf56ba4442a43ebff07b134afd3ba49597138",
+      "size": 1663865
+    },
+    {
+      "source_id": "2412.20923v1",
+      "title": "Does the Doer Effect Exist Beyond WEIRD Populations? Toward Analytics in Radio and Phone-Based Learning",
+      "authors": [
+        "Darren Butler",
+        "Conrad Borchers",
+        "Michael W. Asher",
+        "Yongmin Lee",
+        "Sonya Karnataki",
+        "Sameeksha Dangi",
+        "Samyukta Athreya",
+        "John Stamper",
+        "Amy Ogan",
+        "Paulo F. Carvalho"
+      ],
+      "abstract": "The Doer Effect states that completing more active learning activities, like practice questions, is more strongly related to positive learning outcomes than passive learning activities, like reading, watching, or listening to course materials. Although broad, most evidence has emerged from practice with tutoring systems in Western, Industrialized, Rich, Educated, and Democratic (WEIRD) populations in North America and Europe. Does the Doer Effect generalize beyond WEIRD populations, where learners may practice in remote locales through different technologies? Through learning analytics, we provide evidence from N = 234 Ugandan students answering multiple-choice questions via phones and listening to lectures via community radio. Our findings support the hypothesis that active learning is more associated with learning outcomes than passive learning. We find this relationship is weaker for learners with higher prior educational attainment. Our findings motivate further study of the Doer Effect in diverse populations. We offer considerations for future research in designing and evaluating contextually relevant active and passive learning opportunities including leveraging familiar technology, increasing the number of practice opportunities, and aligning multiple data sources.",
+      "published_at": "2024-12-30T13:10:15Z",
+      "source_url": "https://arxiv.org/abs/2412.20923v1",
+      "pdf_url": "https://arxiv.org/pdf/2412.20923v1",
+      "categories": [
+        "cs.CY"
+      ],
+      "local_path": "2412.20923v1.pdf",
+      "sha256": "1f3bffbca858cef16f4030aca729a9d2a700e1847b5b4d9284ebbf45eaf22646",
+      "size": 1197279
+    },
+    {
+      "source_id": "2303.12392v1",
+      "title": "The LAVA Model: Learning Analytics Meets Visual Analytics",
+      "authors": [
+        "Mohamed Amine Chatti",
+        "Arham Muslim",
+        "Manpriya Guliani",
+        "Mouadh Guesmi"
+      ],
+      "abstract": "Human-Centered learning analytics (HCLA) is an approach that emphasizes the human factors in learning analytics and truly meets user needs. User involvement in all stages of the design, analysis, and evaluation of learning analytics is the key to increase value and drive forward the acceptance and adoption of learning analytics. Visual analytics is a multidisciplinary data science research field that follows a human-centered approach and thus has the potential to foster the acceptance of learning analytics. Although various domains have already made use of visual analytics, it has not been considered much with respect to learning analytics. This paper explores the benefits of incorporating visual analytics concepts into the learning analytics process by (a) proposing the Learning Analytics and Visual Analytics (LAVA) model as enhancement of the learning analytics process with human in the loop, (b) applying the LAVA model in the Open Learning Analytics Platform (OpenLAP) to support humancentered indicator design, and (c) evaluating how blending learning analytics and visual analytics can enhance the acceptance and adoption of learning analytics, based on the technology acceptance model (TAM).",
+      "published_at": "2023-03-22T08:57:42Z",
+      "source_url": "https://arxiv.org/abs/2303.12392v1",
+      "pdf_url": "https://arxiv.org/pdf/2303.12392v1",
+      "categories": [
+        "cs.CY"
+      ],
+      "local_path": "2303.12392v1.pdf",
+      "sha256": "dec0792cf53bc56476e5f7872bf9ed423205699808d698a8a2f624293bc0b0dd",
+      "size": 1463325
+    },
+    {
+      "source_id": "2412.11255v1",
+      "title": "Do Tutors Learn from Equity Training and Can Generative AI Assess It?",
+      "authors": [
+        "Danielle R. Thomas",
+        "Conrad Borchers",
+        "Sanjit Kakarla",
+        "Jionghao Lin",
+        "Shambhavi Bhushan",
+        "Boyuan Guo",
+        "Erin Gatz",
+        "Kenneth R. Koedinger"
+      ],
+      "abstract": "Equity is a core concern of learning analytics. However, applications that teach and assess equity skills, particularly at scale are lacking, often due to barriers in evaluating language. Advances in generative AI via large language models (LLMs) are being used in a wide range of applications, with this present work assessing its use in the equity domain. We evaluate tutor performance within an online lesson on enhancing tutors' skills when responding to students in potentially inequitable situations. We apply a mixed-method approach to analyze the performance of 81 undergraduate remote tutors. We find marginally significant learning gains with increases in tutors' self-reported confidence in their knowledge in responding to middle school students experiencing possible inequities from pretest to posttest. Both GPT-4o and GPT-4-turbo demonstrate proficiency in assessing tutors ability to predict and explain the best approach. Balancing performance, efficiency, and cost, we determine that few-shot learning using GPT-4o is the preferred model. This work makes available a dataset of lesson log data, tutor responses, rubrics for human annotation, and generative AI prompts. Future work involves leveling the difficulty among scenarios and enhancing LLM prompts for large-scale grading and assessment.",
+      "published_at": "2024-12-15T17:36:40Z",
+      "source_url": "https://arxiv.org/abs/2412.11255v1",
+      "pdf_url": "https://arxiv.org/pdf/2412.11255v1",
+      "categories": [
+        "cs.HC",
+        "cs.AI"
+      ],
+      "local_path": "2412.11255v1.pdf",
+      "sha256": "606e94f6ce9cda5b179327d459d97c22a10e4156f4215511972603080d0b65fa",
+      "size": 1284976
+    }
+  ]
+}

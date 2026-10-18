@@ -50,15 +50,15 @@ jobs:
 
       - name: Black (format check)
         working-directory: backend
-        run: black --check app tests
+        run: black --check app tests evaluation
 
       - name: Ruff (lint)
         working-directory: backend
-        run: ruff check app tests
+        run: ruff check app tests evaluation
 
       - name: Mypy (type check, blocking)
         working-directory: backend
-        run: mypy app
+        run: mypy app evaluation
 
   test:
     name: Unit Tests & Coverage

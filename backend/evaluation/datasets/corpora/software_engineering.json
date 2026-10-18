@@ -1,0 +1,228 @@
+{
+  "version": 1,
+  "domain": "software_engineering",
+  "query": "automated code review test generation defect prediction",
+  "date_from": "2023-01-01",
+  "date_to": "2025-12-31",
+  "generated_at": "2026-10-18T09:43:20.854687+00:00",
+  "record_count": 10,
+  "records": [
+    {
+      "source_id": "2303.12869v1",
+      "title": "JaCoText: A Pretrained Model for Java Code-Text Generation",
+      "authors": [
+        "Jessica López Espejel",
+        "Mahaman Sanoussi Yahaya Alassan",
+        "Walid Dahhane",
+        "El Hassane Ettifouri"
+      ],
+      "abstract": "Pretrained transformer-based models have shown high performance in natural language generation task. However, a new wave of interest has surged: automatic programming language generation. This task consists of translating natural language instructions to a programming code. Despite the fact that well-known pretrained models on language generation have achieved good performance in learning programming languages, effort is still needed in automatic code generation. In this paper, we introduce JaCoText, a model based on Transformers neural network. It aims to generate java source code from natural language text. JaCoText leverages advantages of both natural language and code generation models. More specifically, we study some findings from the state of the art and use them to (1) initialize our model from powerful pretrained models, (2) explore additional pretraining on our java dataset, (3) carry out experiments combining the unimodal and bimodal data in the training, and (4) scale the input and output length during the fine-tuning of the model. Conducted experiments on CONCODE dataset show that JaCoText achieves new state-of-the-art results.",
+      "published_at": "2023-03-22T19:01:25Z",
+      "source_url": "https://arxiv.org/abs/2303.12869v1",
+      "pdf_url": "https://arxiv.org/pdf/2303.12869v1",
+      "categories": [
+        "cs.CL"
+      ],
+      "local_path": "2303.12869v1.pdf",
+      "sha256": "26328e77f0b831d6e0069ec6ec051c312b9383670ebb7e02db8c4ca4579efd37",
+      "size": 647409
+    },
+    {
+      "source_id": "2404.17586v1",
+      "title": "The Future of Scientific Publishing: Automated Article Generation",
+      "authors": [
+        "Jeremy R. Harper"
+      ],
+      "abstract": "This study introduces a novel software tool leveraging large language model (LLM) prompts, designed to automate the generation of academic articles from Python code a significant advancement in the fields of biomedical informatics and computer science. Selected for its widespread adoption and analytical versatility, Python served as a foundational proof of concept; however, the underlying methodology and framework exhibit adaptability across various GitHub repo's underlining the tool's broad applicability (Harper 2024). By mitigating the traditionally time-intensive academic writing process, particularly in synthesizing complex datasets and coding outputs, this approach signifies a monumental leap towards streamlining research dissemination. The development was achieved without reliance on advanced language model agents, ensuring high fidelity in the automated generation of coherent and comprehensive academic content. This exploration not only validates the successful application and efficiency of the software but also projects how future integration of LLM agents which could amplify its capabilities, propelling towards a future where scientific findings are disseminated more swiftly and accessibly.",
+      "published_at": "2024-04-11T16:47:02Z",
+      "source_url": "https://arxiv.org/abs/2404.17586v1",
+      "pdf_url": "https://arxiv.org/pdf/2404.17586v1",
+      "categories": [
+        "cs.HC",
+        "cs.AI",
+        "cs.ET"
+      ],
+      "local_path": "2404.17586v1.pdf",
+      "sha256": "c85982a2dd27cff871df2348f9d24e6ea66cd9fcf3566ad012869f8657d43866",
+      "size": 297751
+    },
+    {
+      "source_id": "2509.25716v1",
+      "title": "DeepCodeSeek: Real-Time API Retrieval for Context-Aware Code Generation",
+      "authors": [
+        "Esakkivel Esakkiraja",
+        "Denis Akhiyarov",
+        "Aditya Shanmugham",
+        "Chitra Ganapathy"
+      ],
+      "abstract": "Current search techniques are limited to standard RAG query-document applications. In this paper, we propose a novel technique to expand the code and index for predicting the required APIs, directly enabling high-quality, end-to-end code generation for auto-completion and agentic AI applications. We address the problem of API leaks in current code-to-code benchmark datasets by introducing a new dataset built from real-world ServiceNow Script Includes that capture the challenge of unclear API usage intent in the code. Our evaluation metrics show that this method achieves 87.86% top-40 retrieval accuracy, allowing the critical context with APIs needed for successful downstream code generation. To enable real-time predictions, we develop a comprehensive post-training pipeline that optimizes a compact 0.6B reranker through synthetic dataset generation, supervised fine-tuning, and reinforcement learning. This approach enables our compact reranker to outperform a much larger 8B model while maintaining 2.5x reduced latency, effectively addressing the nuances of enterprise-specific code without the computational overhead of larger models.",
+      "published_at": "2025-09-30T03:23:27Z",
+      "source_url": "https://arxiv.org/abs/2509.25716v1",
+      "pdf_url": "https://arxiv.org/pdf/2509.25716v1",
+      "categories": [
+        "cs.SE",
+        "cs.AI",
+        "cs.IR"
+      ],
+      "local_path": "2509.25716v1.pdf",
+      "sha256": "e7ddf6233530fc60696f706fc4452a6adb7ec31c5bfe3f37e647afa5f007ebca",
+      "size": 2434181
+    },
+    {
+      "source_id": "2305.04764v2",
+      "title": "ChatUniTest: A Framework for LLM-Based Test Generation",
+      "authors": [
+        "Yinghao Chen",
+        "Zehao Hu",
+        "Chen Zhi",
+        "Junxiao Han",
+        "Shuiguang Deng",
+        "Jianwei Yin"
+      ],
+      "abstract": "Unit testing is an essential yet frequently arduous task. Various automated unit test generation tools have been introduced to mitigate this challenge. Notably, methods based on large language models (LLMs) have garnered considerable attention and exhibited promising results in recent years. Nevertheless, LLM-based tools encounter limitations in generating accurate unit tests. This paper presents ChatUniTest, an LLM-based automated unit test generation framework. ChatUniTest incorporates an adaptive focal context mechanism to encompass valuable context in prompts and adheres to a generation-validation-repair mechanism to rectify errors in generated unit tests. Subsequently, we have developed ChatUniTest Core, a common library that implements core workflow, complemented by the ChatUniTest Toolchain, a suite of seamlessly integrated tools enhancing the capabilities of ChatUniTest. Our effectiveness evaluation reveals that ChatUniTest outperforms TestSpark and EvoSuite in half of the evaluated projects, achieving the highest overall line coverage. Furthermore, insights from our user study affirm that ChatUniTest delivers substantial value to various stakeholders in the software testing domain. ChatUniTest is available at https://github.com/ZJU-ACES-ISE/ChatUniTest, and the demo video is available at https://www.youtube.com/watch?v=GmfxQUqm2ZQ.",
+      "published_at": "2023-05-08T15:12:07Z",
+      "source_url": "https://arxiv.org/abs/2305.04764v2",
+      "pdf_url": "https://arxiv.org/pdf/2305.04764v2",
+      "categories": [
+        "cs.SE"
+      ],
+      "local_path": "2305.04764v2.pdf",
+      "sha256": "bea81b547fb7aea5d9fcba2f7f63f717a57f8b7164ec31891293b2e64d6090b2",
+      "size": 705592
+    },
+    {
+      "source_id": "2508.18003v1",
+      "title": "Previously on... Automating Code Review",
+      "authors": [
+        "Robert Heumüller",
+        "Frank Ortmeier"
+      ],
+      "abstract": "Modern Code Review (MCR) is a standard practice in software engineering, yet it demands substantial time and resource investments. Recent research has increasingly explored automating core review tasks using machine learning (ML) and deep learning (DL). As a result, there is substantial variability in task definitions, datasets, and evaluation procedures. This study provides the first comprehensive analysis of MCR automation research, aiming to characterize the field's evolution, formalize learning tasks, highlight methodological challenges, and offer actionable recommendations to guide future research. Focusing on the primary code review tasks, we systematically surveyed 691 publications and identified 24 relevant studies published between May 2015 and April 2024. Each study was analyzed in terms of tasks, models, metrics, baselines, results, validity concerns, and artifact availability. In particular, our analysis reveals significant potential for standardization, including 48 task metric combinations, 22 of which were unique to their original paper, and limited dataset reuse. We highlight challenges and derive concrete recommendations for examples such as the temporal bias threat, which are rarely addressed so far. Our work contributes to a clearer overview of the field, supports the framing of new research, helps to avoid pitfalls, and promotes greater standardization in evaluation practices.",
+      "published_at": "2025-08-25T13:12:48Z",
+      "source_url": "https://arxiv.org/abs/2508.18003v1",
+      "pdf_url": "https://arxiv.org/pdf/2508.18003v1",
+      "categories": [
+        "cs.SE",
+        "cs.AI"
+      ],
+      "local_path": "2508.18003v1.pdf",
+      "sha256": "e89f14f7f74449807df8924d6ef63caf273e145ba51141c17e97040e654f0c62",
+      "size": 665681
+    },
+    {
+      "source_id": "2511.20403v2",
+      "title": "LLMs for Automated Unit Test Generation and Assessment in Java: The AgoneTest Framework",
+      "authors": [
+        "Andrea Lops",
+        "Fedelucio Narducci",
+        "Azzurra Ragone",
+        "Michelantonio Trizio",
+        "Claudio Bartolini"
+      ],
+      "abstract": "Unit testing is an essential but resource-intensive step in software development, ensuring individual code units function correctly. This paper introduces AgoneTest, an automated evaluation framework for Large Language Model-generated (LLM) unit tests in Java. AgoneTest does not aim to propose a novel test generation algorithm; rather, it supports researchers and developers in comparing different LLMs and prompting strategies through a standardized end-to-end evaluation pipeline under realistic conditions. We introduce the Classes2Test dataset, which maps Java classes under test to their corresponding test classes, and a framework that integrates advanced evaluation metrics, such as mutation score and test smells, for a comprehensive assessment. Experimental results show that, for the subset of tests that compile, LLM-generated tests can match or exceed human-written tests in terms of coverage and defect detection. Our findings also demonstrate that enhanced prompting strategies contribute to test quality. AgoneTest clarifies the potential of LLMs in software testing and offers insights for future improvements in model design, prompt engineering, and testing practices.",
+      "published_at": "2025-11-25T15:33:00Z",
+      "source_url": "https://arxiv.org/abs/2511.20403v2",
+      "pdf_url": "https://arxiv.org/pdf/2511.20403v2",
+      "categories": [
+        "cs.SE",
+        "cs.AI"
+      ],
+      "local_path": "2511.20403v2.pdf",
+      "sha256": "647bb8ee6d8b6777b8b8697d3ace52a5b78d8b8bf5ce41d0939a7e26edb347fa",
+      "size": 1480827
+    },
+    {
+      "source_id": "2411.18583v1",
+      "title": "Automated Literature Review Using NLP Techniques and LLM-Based Retrieval-Augmented Generation",
+      "authors": [
+        "Nurshat Fateh Ali",
+        "Md. Mahdi Mohtasim",
+        "Shakil Mosharrof",
+        "T. Gopi Krishna"
+      ],
+      "abstract": "This research presents and compares multiple approaches to automate the generation of literature reviews using several Natural Language Processing (NLP) techniques and retrieval-augmented generation (RAG) with a Large Language Model (LLM). The ever-increasing number of research articles provides a huge challenge for manual literature review. It has resulted in an increased demand for automation. Developing a system capable of automatically generating the literature reviews from only the PDF files as input is the primary objective of this research work. The effectiveness of several Natural Language Processing (NLP) strategies, such as the frequency-based method (spaCy), the transformer model (Simple T5), and retrieval-augmented generation (RAG) with Large Language Model (GPT-3.5-turbo), is evaluated to meet the primary objective. The SciTLDR dataset is chosen for this research experiment and three distinct techniques are utilized to implement three different systems for auto-generating the literature reviews. The ROUGE scores are used for the evaluation of all three systems. Based on the evaluation, the Large Language Model GPT-3.5-turbo achieved the highest ROUGE-1 score, 0.364. The transformer model comes in second place and spaCy is at the last position. Finally, a graphical user interface is created for the best system based on the large language model.",
+      "published_at": "2024-11-27T18:27:07Z",
+      "source_url": "https://arxiv.org/abs/2411.18583v1",
+      "pdf_url": "https://arxiv.org/pdf/2411.18583v1",
+      "categories": [
+        "cs.CL",
+        "cs.AI",
+        "cs.IR",
+        "cs.LG"
+      ],
+      "local_path": "2411.18583v1.pdf",
+      "sha256": "4eaef290fa07edb7fb33f0667840d1a35bb8983b9a0097f1e47a376abba6c6c9",
+      "size": 664722
+    },
+    {
+      "source_id": "2402.12317v2",
+      "title": "EVOR: Evolving Retrieval for Code Generation",
+      "authors": [
+        "Hongjin Su",
+        "Shuyang Jiang",
+        "Yuhang Lai",
+        "Haoyuan Wu",
+        "Boao Shi",
+        "Che Liu",
+        "Qian Liu",
+        "Tao Yu"
+      ],
+      "abstract": "Recently the retrieval-augmented generation (RAG) has been successfully applied in code generation. However, existing pipelines for retrieval-augmented code generation (RACG) employ static knowledge bases with a single source, limiting the adaptation capabilities of Large Language Models (LLMs) to domains they have insufficient knowledge of. In this work, we develop a novel pipeline, EVOR, that employs the synchronous evolution of both queries and diverse knowledge bases. On two realistic settings where the external knowledge is required to solve code generation tasks, we compile four new datasets associated with frequently updated libraries and long-tail programming languages, named EVOR-BENCH. Extensive experiments demonstrate that EVOR achieves two to four times of execution accuracy compared to other methods such as Reflexion (Shinn et al., 2024), DocPrompting (Zhou et al., 2023), etc. We demonstrate that EVOR is flexible and can be easily combined with them to achieve further improvement. Further analysis reveals that EVOR benefits from the synchronous evolution of queries and documents and the diverse information sources in the knowledge base. We hope that our studies will inspire more insights into the design of advanced RACG pipelines in future research. Our model, code, and data are available at https://arks-codegen.github.io.",
+      "published_at": "2024-02-19T17:37:28Z",
+      "source_url": "https://arxiv.org/abs/2402.12317v2",
+      "pdf_url": "https://arxiv.org/pdf/2402.12317v2",
+      "categories": [
+        "cs.CL",
+        "cs.AI"
+      ],
+      "local_path": "2402.12317v2.pdf",
+      "sha256": "dddad00061e815cad00c56a5283bd467cb3694927e5c3331c685d670774bbe84",
+      "size": 549497
+    },
+    {
+      "source_id": "2301.10079v2",
+      "title": "Reformulation Techniques for Automated Planning: A Systematic Review",
+      "authors": [
+        "Diaeddin Alarnaouti",
+        "George Baryannis",
+        "Mauro Vallati"
+      ],
+      "abstract": "Automated planning is a prominent area of Artificial Intelligence, and an important component for intelligent autonomous agents. A cornerstone of domain-independent planning is the separation between planning logic, i.e. the automated reasoning side, and the knowledge model, that encodes a formal representation of domain knowledge needed to reason upon a given problem to synthesise a solution plan. Such a separation enables the use of reformulation techniques, which transform how a model is represented in order to improve the efficiency of plan generation. Over the past decades, significant research effort has been devoted to the design of reformulation techniques. In this paper, we present a systematic review of the large body of work on reformulation techniques for classical planning, aiming to provide a holistic view of the field and to foster future research in the area. As a tangible outcome, we provide a qualitative comparison of the existing classes of techniques, that can help researchers gain an overview of their strengths and weaknesses.",
+      "published_at": "2023-01-24T15:33:37Z",
+      "source_url": "https://arxiv.org/abs/2301.10079v2",
+      "pdf_url": "https://arxiv.org/pdf/2301.10079v2",
+      "categories": [
+        "cs.AI"
+      ],
+      "local_path": "2301.10079v2.pdf",
+      "sha256": "6180c2a005d61dc1a6394fd119613c8a4c97a3d8614b23ef8cfa272ddd730029",
+      "size": 452677
+    },
+    {
+      "source_id": "2505.17928v2",
+      "title": "Towards Practical Defect-Focused Automated Code Review",
+      "authors": [
+        "Junyi Lu",
+        "Lili Jiang",
+        "Xiaojia Li",
+        "Jianbing Fang",
+        "Fengjun Zhang",
+        "Li Yang",
+        "Chun Zuo"
+      ],
+      "abstract": "The complexity of code reviews has driven efforts to automate review comments, but prior approaches oversimplify this task by treating it as snippet-level code-to-text generation and relying on text similarity metrics like BLEU for evaluation. These methods overlook repository context, real-world merge request evaluation, and defect detection, limiting their practicality. To address these issues, we explore the full automation pipeline within the online recommendation service of a company with nearly 400 million daily active users, analyzing industry-grade C++ codebases comprising hundreds of thousands of lines of code. We identify four key challenges: 1) capturing relevant context, 2) improving key bug inclusion (KBI), 3) reducing false alarm rates (FAR), and 4) integrating human workflows. To tackle these, we propose 1) code slicing algorithms for context extraction, 2) a multi-role LLM framework for KBI, 3) a filtering mechanism for FAR reduction, and 4) a novel prompt design for better human interaction. Our approach, validated on real-world merge requests from historical fault reports, achieves a 2x improvement over standard LLMs and a 10x gain over previous baselines. While the presented results focus on C++, the underlying framework design leverages language-agnostic principles (e.g., AST-based analysis), suggesting potential for broader applicability.",
+      "published_at": "2025-05-23T14:06:26Z",
+      "source_url": "https://arxiv.org/abs/2505.17928v2",
+      "pdf_url": "https://arxiv.org/pdf/2505.17928v2",
+      "categories": [
+        "cs.SE",
+        "cs.AI",
+        "cs.CL",
+        "cs.LG"
+      ],
+      "local_path": "2505.17928v2.pdf",
+      "sha256": "379c9610c7323e3feb475d44f34631de064bec8bd121d24304567f7bed0f626d",
+      "size": 1144774
+    }
+  ]
+}

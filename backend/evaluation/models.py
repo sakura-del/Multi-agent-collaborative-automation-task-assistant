@@ -110,7 +110,7 @@ class ExperimentConfig(BaseModel):
     @model_validator(mode="after")
     def _check_switch_consistency(self) -> ExperimentConfig:
         """画像开关必须与名称语义一致，避免"名字叫 baseline 但开了 RAG"。"""
-        expected: dict[str, dict[str, Any]] = {
+        expected_by_profile: dict[str, dict[str, Any]] = {
             "single_agent_no_rag": {
                 "agent_mode": AgentMode.SINGLE,
                 "retrieval_mode": RetrievalMode.NONE,
@@ -135,7 +135,8 @@ class ExperimentConfig(BaseModel):
                 "validation_enabled": True,
                 "review_enabled": True,
             },
-        }[self.name]
+        }
+        expected = expected_by_profile[self.name]
         for field, want in expected.items():
             if getattr(self, field) != want:
                 raise ValueError(
