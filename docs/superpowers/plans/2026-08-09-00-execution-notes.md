@@ -552,3 +552,110 @@ Plan 4 备注：
 - 测试遵循计划：只 mock `authApi`，不 mock Axios 内部；先跑测试看失败（Step 4），再实现（Step 5–7）。
 - **配置优先级缺陷（待修，Plan 5 实验前必须解决）**：`get_settings()` 用 `Settings(**yaml_defaults)` 把 `config/default.yaml` 当作**构造参数**注入，而 pydantic-settings 中 init 参数优先级最高，导致 `.env` 与进程环境变量**无法覆盖** YAML 值（注释声称可覆盖）。本次只能通过改 `config/default.yaml` 切换模型；建议后续改为自定义 `settings_customise_sources`（YAML 作为最低优先级来源）并补一条覆盖顺序测试。
 - **模型可用性（服务器端点 `https://model.rhzy.ai/v1` 实测）**：该 group 仅支持 `gpt-6-luna`；`gpt-4o` 与 `gpt-4o-mini` 均返回 `404 model_not_found`。因此 `config/default.yaml` 的 `llm.default_model` 由 `gpt-4o-mini` 改为 `gpt-6-luna`（`6f2972d`），与正式实验模型一致；密钥仅写入 `.env`（gitignore，600 权限），不进入代码/文档/提交。
+
+---
+
+## Issue #3 引用真实性校验（CrossRef/OpenAlex）执行记录（2026-10-19）
+
+**Issue**：[#3](https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant/issues/3)（P0，路线图 Phase 1 缺口排序第 1 位）
+**提交**：`42b5e54`（功能）+ 文档/注释修正
+**计划**：[2026-10-18-03-reference-authenticity-plan.md](2026-10-18-03-reference-authenticity-plan.md)（含冻结接口与裁决 R1–R7）
+
+### 1. 交付能力
+
+把现有「内部证据可追溯」（`[E{n}]` → `doc_id` + `chunk_id`）扩展到「**外部文献可核验**」，
+输出四态结论并并入校验报告与导出产物：
+
+| 结论 | 判定条件 |
+| --- | --- |
+| ✅ `verified` | DOI 或标题可解析，且标题/年份/作者与外部元数据吻合 |
+| ⚠️ `metadata_mismatch` | 文献存在，但标题相似度低于阈值，或年份/作者偏差超容差，或 DOI 无效 |
+| ❌ `not_found` | DOI 不存在（或无效）**且**标题检索在外部源无命中 |
+| ⏸ `unverified` | 外部源超时/限流/不可用 → 降级态，**永不判失败、不阻塞任务** |
+
+新增：`app/tools/literature/crossref.py`、`openalex.py`、`app/knowledge/services/reference_verifier.py`；
+`citation_validator` 新增 `reference_authenticity` 检查（`off`/`report`/`enforce`，默认 `report` 为 advisory）；
+复盘 `stats["reference_verification"]` 统计、参考文献逐条标记、导出报告 `## 引用核验` 章节、
+可选「拦截未通过条目」开关（`dropped` 可审计）。**只取元数据、不取全文**（版权约束）。
+
+### 2. 实测证据
+
+**本地全量门禁**（冻结树，AGENTS.md §3 四条命令）：
+
+| 命令 | 结果 |
+| --- | --- |
+| `black app tests evaluation` | 216 files（仅新增的 `test_reference_live.py` 被格式化后干净） |
+| `ruff check --fix app tests evaluation` | All checks passed |
+| `mypy app evaluation` | Success: no issues found in **131** source files（改动前 120） |
+| `pytest tests -q --cov=app --cov-fail-under=80` | **1159 passed, 8 skipped**，164.92s，覆盖率 **88.83%**（门禁 ≥80%） |
+
+**真实 API 验收**（`tests/test_reference_live.py`，需 `MAA_REFERENCE_LIVE=1`）：本机 **6/6**、服务器 **6/6**
+
+| 场景 | 期望 | 实测 |
+| --- | --- | --- |
+| 真实 DOI `10.2196/80371` | 已验证 | ✅ verified（相似度 1.00，crossref） |
+| 伪造 DOI `10.9999/definitely-not-real-xyz` | 未找到 | ✅ not_found |
+| 真实 DOI + 改错标题 | 元数据不符 | ✅ metadata_mismatch |
+| 语料真实 arXiv 条目（无 DOI，标题检索） | 已验证 | ✅ verified（Ragas 2023 vs OpenAlex 2024，容差内） |
+| 新近未收录预印本 | 未找到 | ✅ not_found（诚实结论，故默认 advisory） |
+| 外部源不可达 | 未验证（降级） | ✅ unverified，不抛异常 |
+
+**服务器部署验证**（`docker compose build backend && up -d`，容器内实跑）：
+
+```
+CFG enabled=True mode=report concurrency=2 total_timeout=20.0 ttl=604800
+REAL_DOI verdict=verified cached=False similarity=1.00 source=crossref
+CACHE_HIT second_cached=True verdict=verified          ← Redis 缓存路径在生产依赖下真的生效
+FAKE_DOI verdict=not_found
+CONTAINER_CLOSED_OK
+```
+
+**容器内端到端（复盘 → 导出，真实核验、真实 Redis、无 LLM）**：
+
+```
+STATS {'total': 2, 'verified': 1, 'not_found': 1, 'unverified': 0, 'dropped': 0, ...}
+  [1] status=verified   Ragas: Automated Evaluation of Retrieval Augmented Generation
+  [2] status=not_found  Quantum Foam Stabilization via Coffee Consumption...（故意伪造）
+引用核验：已验证 1 条 / 元数据不符 0 条 / 未找到 1 条 / 未核验 0 条 / 已拦截 0 条；拦截开关：关闭
+EXPORT_MD_SECTION True | EXPORT_DOCX bytes 37043
+```
+
+健康检查：`{"status":"ready","checks":{"database":"ok","redis":"ok","chroma":"ok"}}`
+
+### 3. 关键裁决与根因（全部由实测驱动，非推测）
+
+| # | 裁决 | 根因/依据 |
+| --- | --- | --- |
+| R1 | DOI 解析成功而标题不符 → **元数据不符**（不能判未找到） | Issue 原文表格「元数据不符 = DOI 存在但标题/作者/年份偏差超阈值」；否则验收项「故意改错标题 → 元数据不符」不成立 |
+| R2 | 核验缓存接口改 **async** | 项目 Redis 只有 `redis.asyncio`（`RedisManager`），同步接口无法 await → 「Redis 优先」名存实亡 |
+| R3 | `Retry-After > 2s` **不得在任务路径内睡眠** | 实测 OpenAlex 返回 429 + `Retry-After: 60`，旧实现每次睡 60s，把任务从秒级拖到分钟级 |
+| R4 | 核验**整批时间预算**（默认 20s），超预算降级 | 核验是旁路能力，不能支配任务耗时；放在 `verify_many` 内部使校验与复盘两条路径同时受保护 |
+| R5 | 缓存**连续失败熔断** + 专用 Redis 客户端（1s 超时） | 实测 Redis 不可达时每次操作付 2.7–5s 超时，10 候选 ≈ 1–2 分钟 |
+| R6 | **离线清单任务不做外部核验**（含复盘路径） | 离线 e2e「不访问网络」契约被破坏，且演示需零外呼、可复现；开关 `verify_offline_tasks` 可显式打开 |
+| R7 | 默认并发 4 → **2** | 未配 `contact_email` 时处于 OpenAlex 公共池（约 1 req/s），4 并发必然 429 |
+
+**集成期真缺陷（全量门禁抓出）**：全量 `pytest tests` 一度从 152s 变 **>25 分钟不结束**、
+`tests/e2e` 3 项超时失败（547s ≈ 3×180s 轮询上限）。定位靠**计时探针**（分别计时 Redis 操作与
+真实核验），不是猜——结论见上表 R3/R5/R6。修复后全量回到 **151–165s**、e2e 全绿。
+
+### 4. 真实 API 探针结论（设计与默认值的依据）
+
+- 本机与服务器均可直连 `api.crossref.org` / `api.openalex.org`（无需代理）；
+- CrossRef `GET /works/{doi}`：命中 200、伪造 404；**标题检索会返回重复预印本与无关结果** →
+  必须按相似度取最优并设阈值，不能取首条；
+- OpenAlex 404 返回体是 **HTML**（不是 JSON）→ 404 必须在解析前短路为 `None`（已实现并有测试）；
+- **冻结语料实测（10 条，OpenAlex 标题检索）**：6 条相似度 1.000（年份漂移 ≤1 年，在默认容差内）、
+  3 条最佳相似度 0.38–0.48（新近预印本尚未被收录）、1 条命中错条目。
+  → 约 30% 的「未收录」是**诚实结论**，这正是默认 `mode=report`（advisory）而非 `enforce` 的原因。
+
+### 5. 偏差与遗留
+
+1. **`contact_email` 目前只能改 `config/default.yaml`**：本机实测 `REFERENCE_VERIFICATION__CONTACT_EMAIL`
+   环境变量**不生效**——被「配置优先级缺陷」（`Settings(**yaml_defaults)` 使 init 参数优先级高于环境变量，
+   见本文件 Plan 4 备注）阻塞。已把 yaml/字段注释改成真话，未编造 `.env` 用法；该缺陷修复后应改回 `.env`。
+2. **前端未展示核验结果**：本次只做后端链路 + 导出报告；前端展示属 Phase 1 后续。
+3. **离线任务默认不核验**（R6 设计决策）：演示要看到核验统计需把 `verify_offline_tasks` 置 true
+   （注意那会让离线演示依赖外网）。
+4. 未跑「非离线（arXiv 源）真实任务」的完整 LLM 端到端：核验链路本身已在容器内用真实 API + 真实 Redis
+   验证，全量套件与 e2e 全绿；arXiv 全链路任务留待下次产品化任务一并验证。
+

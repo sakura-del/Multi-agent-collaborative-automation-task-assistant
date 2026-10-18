@@ -81,9 +81,12 @@ reference_verification:
   request_timeout_seconds: 20.0
   total_timeout_seconds: 20.0  # 单节点核验总预算（秒）；超预算则全部候选降级为「未核验」
   # 核验外呼并发上限。⚠️ 未配 contact_email 时处于 OpenAlex 公共池（约 1 req/s），
-  # 并发过高必然触发 429；建议在 .env 配 REFERENCE_VERIFICATION__CONTACT_EMAIL 进入 polite pool。
+  # 并发过高必然触发 429；配好 contact_email 进入 polite pool 后可适当调高。
   max_concurrency: 2
   verify_offline_tasks: false # 离线清单（offline_dataset=true）任务是否也做外部核验：默认零外呼
-  contact_email: ""           # 礼貌池联系方式（建议进 .env，不进代码）
+  # 礼貌池联系方式。⚠️ 当前配置系统存在已知缺陷（YAML 作为 init 参数优先级最高，
+  # 环境变量无法覆盖，见 execution-notes「配置优先级缺陷」），因此**必须直接改本文件**，
+  # 写 `REFERENCE_VERIFICATION__CONTACT_EMAIL` 环境变量当前不生效；待该缺陷修复后再改回 .env。
+  contact_email: ""
   user_agent: "maa-literature-review/0.1 (+https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant)"
   max_retries: 1              # 429/5xx 重试次数，重试耗尽后降级为「未核验」

@@ -296,8 +296,11 @@ reference_verification:
   `ManifestLiteratureSource` 离线任务默认**不做外部核验**（`reference_verifier=None`）：
   冻结语料已人工核验，离线演示要零外呼、可复现；需要展示核验时显式打开该开关。
 - **R7（默认并发降到 2）**：`max_concurrency` 默认 **2**（原 4）。未配置 `contact_email` 时处于
-  OpenAlex 公共池（约 1 req/s），4 并发必然触发 429；**上线时应在 `.env` 配 `REFERENCE_VERIFICATION__CONTACT_EMAIL`**
-  进入 polite pool（文档已注明）。
+  OpenAlex 公共池（约 1 req/s），4 并发必然触发 429；配好 `contact_email` 进入 polite pool 后可调高。
+  ⚠️ **注意**：`contact_email` 目前只能改 `config/default.yaml` —— 配置系统存在已知缺陷
+  （YAML 作为 init 参数优先级最高，环境变量无法覆盖，见 `execution-notes` 的「配置优先级缺陷」），
+  写 `REFERENCE_VERIFICATION__CONTACT_EMAIL` 环境变量**实测不生效**（本机已复现）。
+  该缺陷修复后本字段应改回 `.env` 注入。
 
 **回归要求**：修完后 `pytest tests` 必须回到分钟级以内（基线 152s）且 `tests/e2e` 全绿；
 `test_reference_live.py`（`MAA_REFERENCE_LIVE=1`）仍全绿。

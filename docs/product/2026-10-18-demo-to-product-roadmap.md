@@ -235,13 +235,19 @@ RenderJob(id, project_id, status, output_uri, error, trace)
 
 | 优先级 | 功能 | 价值 | 依赖 |
 | --- | --- | --- | --- |
-| **P0** | 引用真实性校验（CrossRef/OpenAlex） | ⭐ 核心护城河，唯一对抗知网的差异点 | 无 |
+| **P0** | ✅ 引用真实性校验（CrossRef/OpenAlex）——**已完成**（`42b5e54`，见 [实施计划](../superpowers/plans/2026-10-18-03-reference-authenticity-plan.md)） | ⭐ 核心护城河，唯一对抗知网的差异点 | 无 |
 | **P0** | CSL 引用引擎 + **GB/T 7714—2025 默认** | 用户点名 + 新国标先发 | 无 |
 | **P0** | Word 模板导入 + 一键切换 | 用户点名；生成即合规 | CSL 引擎 |
 | **P0** | 检索源扩展（OpenAlex + S2 + PubMed） | 摆脱 arXiv 单一源 | 无 |
 | P1 | 账号体系（邮箱验证/密码重置） | 才能开放注册 | 无 |
 | P1 | 速率限制 + 按用户配额 | 上线必备 | 无 |
 | P2 | RIS/BibTeX 导入导出 | 打通 Zotero/EndNote | 无 |
+
+**Issue #3 完成情况**（2026-10-19）：后端核验链路已交付——CrossRef/OpenAlex 适配器、
+四态判定（已验证 / 元数据不符 / 未找到 / 未验证降级）、核验缓存、校验报告检查项、
+导出报告统计与「拦截未通过条目」开关；本地全量门禁 1159 passed / 覆盖率 88.83%，
+真实 API 验收 6/6。**尚未做**：前端展示核验结果（Phase 1 后续）、`contact_email` 的
+`.env` 注入（被既有配置优先级缺陷阻塞，见 execution-notes）。
 
 ### Phase 2 · 做闭环（约 3 个月）
 

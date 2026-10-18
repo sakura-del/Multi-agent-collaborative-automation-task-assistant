@@ -209,7 +209,8 @@ class ReferenceVerificationConfig(BaseModel):
     """离线清单任务（冻结语料）是否也做外部核验；默认 false（零外呼、可复现）。"""
 
     contact_email: str = ""
-    """礼貌池联系方式；建议经环境变量注入，不写进代码仓库。"""
+    """礼貌池联系方式。⚠️ 受已知配置优先级缺陷影响（YAML 作为 init 参数优先级高于环境变量），
+    当前只能改 `config/default.yaml`；写 `REFERENCE_VERIFICATION__CONTACT_EMAIL` 环境变量不生效。"""
 
     user_agent: str = (
         "maa-literature-review/0.1 "
