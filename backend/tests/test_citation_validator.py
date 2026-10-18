@@ -68,8 +68,19 @@ class TestCitationRules:
         assert _checks(report)["citation_markers_resolve"] is False
         assert "E9" in report.feedback or "[E9]" in report.feedback
 
-    def test_uncited_evidence_fails(self) -> None:
+    def test_partial_evidence_coverage_passes_with_note(self) -> None:
+        """单节点只引用池内部分证据是允许的：通过但记录覆盖率提示。"""
         content = GOOD_CONTENT.replace("[E2]", "").replace("[E1][E2]", "[E1]")
+        report = CitationValidator().validate(_result(content), REQUIRED_SECTIONS)
+
+        assert report.passed is True
+        check = next(item for item in report.checks if item.name == "evidence_is_cited")
+        assert check.passed is True
+        assert "未引用" in check.message
+
+    def test_output_ignoring_all_evidence_fails(self) -> None:
+        """池非空却完全不引用证据：视为空转，可重试失败（Plan 3 Exit Gate 实跑语义）。"""
+        content = GOOD_CONTENT.replace("[E1]", "").replace("[E2]", "")
         report = CitationValidator().validate(_result(content), REQUIRED_SECTIONS)
 
         assert report.passed is False
@@ -77,13 +88,14 @@ class TestCitationRules:
         assert _checks(report)["evidence_is_cited"] is False
 
     def test_evidence_pool_larger_than_result_contract_is_detected(self) -> None:
-        """引用标记漏掉结果契约外的证据（pool 比 result.evidence 多）也算未引用。"""
+        """池比 result.evidence 多时仍要求正文用到池内证据，并给出覆盖率提示。"""
         pool = [_evidence(1), _evidence(2), _evidence(3)]
         result = _result(GOOD_CONTENT, evidence=[_evidence(1), _evidence(2)])
         report = CitationValidator().validate(result, REQUIRED_SECTIONS, evidence_pool=pool)
 
-        assert report.passed is False
-        assert _checks(report)["evidence_is_cited"] is False
+        check = next(item for item in report.checks if item.name == "evidence_is_cited")
+        assert check.passed is True
+        assert "[E3]" in check.message
 
     def test_bare_literature_claim_fails(self) -> None:
         content = GOOD_CONTENT + "\n研究表明 RAG 可以显著提升事实一致性。\n"

@@ -3,7 +3,7 @@
 不调用 LLM，按固定五项检查生成 `ValidationReport`：
 
     citation_markers_resolve      引用标记必须落在证据池范围内
-    evidence_is_cited             证据池中的每条证据都必须被引用
+    evidence_is_cited             证据池非空时正文必须真正引用池内证据（不要求逐条引用）
     formal_claims_have_evidence   形式化断言必须带引用或显式标注「模型推断」
     required_sections_present     必需章节齐全
     duplicate_paragraph_ratio     重复段落比例不超过阈值（默认 0.20）
@@ -110,15 +110,25 @@ class CitationValidator:
         else:
             checks.append(_ok("citation_markers_resolve", f"{len(used)} 个引用标记全部可解析"))
 
+        # 语义：只要证据池非空，正文就必须真正用上池内证据（避免忽略检索结果的空转），
+        # 但不要求逐条引用——单节点只采样相关证据是合理的；覆盖率作为提示信息记录。
         uncited = [index for index in range(1, len(pool) + 1) if index not in used]
-        if uncited:
+        if pool and not used:
             checks.append(
                 _fail(
                     "evidence_is_cited",
-                    f"证据未被引用: {[f'[E{index}]' for index in uncited]}",
+                    f"{len(pool)} 条证据均未被引用，正文未使用检索证据",
                 )
             )
             retryable = True
+        elif uncited:
+            checks.append(
+                _ok(
+                    "evidence_is_cited",
+                    f"已引用 {len(used)}/{len(pool)} 条证据；未引用: "
+                    f"{[f'[E{index}]' for index in uncited]}",
+                )
+            )
         else:
             checks.append(_ok("evidence_is_cited", f"{len(pool)} 条证据均被引用"))
 
