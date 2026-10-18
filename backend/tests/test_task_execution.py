@@ -472,3 +472,87 @@ class TestRecovery:
                 await container.close()
         finally:
             await engine.dispose()
+
+
+class TestTransientRetry:
+    """规划阶段瞬态故障重试（Plan 5 Task 8 实跑遇到上游 503 直接转人工）。"""
+
+    async def test_retries_transient_5xx_then_succeeds(self) -> None:
+        from app.orchestration.services.task_execution import TaskExecution
+
+        calls = {"n": 0}
+
+        class _Boom(Exception):
+            status_code = 503
+
+        async def op():
+            calls["n"] += 1
+            if calls["n"] < 3:
+                raise _Boom("Service temporarily unavailable")
+            return "ok"
+
+        execution = TaskExecution.__new__(TaskExecution)
+        result = await execution._retry_transient(
+            op, task_id=uuid.UUID(int=0), stage="test", attempts=4, base_delay=0.0
+        )
+
+        assert result == "ok"
+        assert calls["n"] == 3
+
+    async def test_does_not_retry_configuration_errors(self) -> None:
+        from app.orchestration.services.task_execution import TaskExecution
+
+        calls = {"n": 0}
+
+        class _AuthError(Exception):
+            status_code = 401
+
+        async def op():
+            calls["n"] += 1
+            raise _AuthError("Incorrect API key provided")
+
+        execution = TaskExecution.__new__(TaskExecution)
+        with pytest.raises(_AuthError):
+            await execution._retry_transient(
+                op, task_id=uuid.UUID(int=0), stage="test", attempts=4, base_delay=0.0
+            )
+
+        assert calls["n"] == 1, "401 不应重试"
+
+    async def test_gives_up_after_attempts(self) -> None:
+        from app.orchestration.services.task_execution import TaskExecution
+
+        calls = {"n": 0}
+
+        class _Boom(Exception):
+            status_code = 503
+
+        async def op():
+            calls["n"] += 1
+            raise _Boom("503")
+
+        execution = TaskExecution.__new__(TaskExecution)
+        with pytest.raises(_Boom):
+            await execution._retry_transient(
+                op, task_id=uuid.UUID(int=0), stage="test", attempts=3, base_delay=0.0
+            )
+
+        assert calls["n"] == 3
+
+    async def test_human_action_error_is_not_retried(self) -> None:
+        from app.core.exceptions import HumanActionRequiredError
+        from app.orchestration.services.task_execution import TaskExecution
+
+        calls = {"n": 0}
+
+        async def op():
+            calls["n"] += 1
+            raise HumanActionRequiredError("规划契约非法")
+
+        execution = TaskExecution.__new__(TaskExecution)
+        with pytest.raises(HumanActionRequiredError):
+            await execution._retry_transient(
+                op, task_id=uuid.UUID(int=0), stage="test", attempts=4, base_delay=0.0
+            )
+
+        assert calls["n"] == 1

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -23,7 +24,7 @@ from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy import func, select
 
 from app.core.config import get_settings
-from app.core.exceptions import NotFoundException, ValidationException
+from app.core.exceptions import HumanActionRequiredError, NotFoundException, ValidationException
 from app.core.logging import get_logger
 from app.db.models.log import ExecutionLog
 from app.db.models.task import Subtask, Task
@@ -277,7 +278,12 @@ class TaskExecution:
     # ===== 后台流程：规划 =====
 
     async def _plan(self, task_id: UUID) -> None:
-        """后台规划：生成 TaskPlan + DAG，失败时进行一次 schema 修复。"""
+        """后台规划：生成 TaskPlan + DAG，失败时进行一次 schema 修复。
+
+        上游模型端点可能瞬时 5xx/超时（Plan 5 Task 8 实跑遇到 503），
+        因此规划调用带**有限次退避重试**；配置类错误（401/400）不重试，
+        直接转人工，避免无意义等待。
+        """
         try:
             async with self._session_factory() as session:
                 task = await TaskRepository(session).get(task_id)
@@ -290,11 +296,17 @@ class TaskExecution:
             if task_type == "literature_review":
                 # 文献场景：由工作流承担规划 + 一次契约修复；失败抛 HumanActionRequiredError
                 workflow = self._literature_workflow(task)
-                plan = await workflow.plan(task)
+                plan = await self._retry_transient(
+                    lambda: workflow.plan(task), task_id=task_id, stage="planning"
+                )
                 dag = PlannerAgent.build_dag(plan)
             else:
                 planner = self.container.create_planner()
-                plan, dag = await self._generate_plan(planner, requirement, trace_id)
+                plan, dag = await self._retry_transient(
+                    lambda: self._generate_plan(planner, requirement, trace_id),
+                    task_id=task_id,
+                    stage="planning",
+                )
 
             async with self._session_factory() as session:
                 repo = TaskRepository(session)
@@ -323,6 +335,85 @@ class TaskExecution:
         except Exception as exc:
             logger.exception("task_planning_failed", task_id=str(task_id))
             await self._mark_waiting_human(task_id, f"规划失败: {exc}")
+
+    async def _retry_transient(
+        self,
+        operation: Callable[[], Awaitable[Any]],
+        *,
+        task_id: UUID,
+        stage: str,
+        attempts: int = 4,
+        base_delay: float = 1.0,
+    ) -> Any:
+        """对**瞬态**上游故障做有限次退避重试。
+
+        哪些算瞬态：HTTP 5xx（含 503 Service temporarily unavailable）、
+        连接错误、读超时、429。哪些不算：401/403（密钥问题）、400/422（请求非法）——
+        这些重试也不会成功，直接抛出交给上层转人工。
+
+        注意：`HumanActionRequiredError`（规划契约修复后仍非法）同样不重试。
+        """
+        last_error: Exception | None = None
+        for attempt in range(1, attempts + 1):
+            try:
+                return await operation()
+            except HumanActionRequiredError:
+                raise
+            except Exception as exc:
+                if not self._is_transient_error(exc) or attempt >= attempts:
+                    raise
+                last_error = exc
+                delay = base_delay * (2 ** (attempt - 1))
+                logger.warning(
+                    "transient_upstream_retry",
+                    task_id=str(task_id),
+                    stage=stage,
+                    attempt=attempt,
+                    max_attempts=attempts,
+                    delay_s=delay,
+                    error=str(exc)[:200],
+                )
+                await asyncio.sleep(delay)
+        raise last_error if last_error else RuntimeError("重试未执行")
+
+    @staticmethod
+    def _is_transient_error(exc: Exception) -> bool:
+        """判定是否为值得重试的瞬态上游错误。"""
+        name = type(exc).__name__
+        # openai SDK 的 5xx / 429 / 连接类异常
+        if name in {
+            "InternalServerError",
+            "ServiceUnavailableError",
+            "APIStatusError",
+            "APIConnectionError",
+            "APITimeoutError",
+            "RateLimitError",
+            "ConnectError",
+            "ReadTimeout",
+            "ConnectTimeout",
+            "TimeoutException",
+        }:
+            return True
+        # 其他库包装过的同类错误：看状态码与消息
+        status = getattr(exc, "status_code", None)
+        if isinstance(status, int) and (status >= 500 or status == 429):
+            return True
+        text = str(exc).lower()
+        return any(
+            token in text
+            for token in (
+                "service temporarily unavailable",
+                "temporarily unavailable",
+                "connection error",
+                "timed out",
+                "read timeout",
+                "connection reset",
+                "503",
+                "502",
+                "504",
+                "429",
+            )
+        )
 
     async def _generate_plan(
         self,
