@@ -16,8 +16,21 @@ import yaml
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# 项目根目录：backend/ 的上一层
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+# 项目根目录解析。
+# 仓库内：<root>/backend/app/core/config.py → parents[3] 即 <root>
+# 容器内：/app/app/core/config.py → 只有 3 层，parents[3] 会越界到 "/"
+# 因此按「候选路径存在性」择一，避免镜像里读不到 config/default.yaml
+# （Plan 5 Task 8 实测：容器内 fallback_chain 曾因此为空）。
+_FILE_DIR = Path(__file__).resolve().parent
+_ROOT_CANDIDATES = [
+    _FILE_DIR.parents[2] if len(_FILE_DIR.parents) > 2 else None,  # 仓库根
+    _FILE_DIR.parents[1],  # 容器 /app（config 与 app 同级）
+    _FILE_DIR.parents[0],  # 兜底：/app/app
+]
+PROJECT_ROOT = next(
+    (candidate for candidate in _ROOT_CANDIDATES if candidate and (candidate / "config").is_dir()),
+    _ROOT_CANDIDATES[0] or _FILE_DIR,
+)
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config" / "default.yaml"
 ENV_FILE = PROJECT_ROOT / ".env"
 

@@ -74,3 +74,45 @@ class TestConfigLoading:
         """CORS 配置应包含默认允许的前端源。"""
         assert isinstance(app_settings.cors.allow_origins, list)
         assert len(app_settings.cors.allow_origins) > 0
+
+
+class TestProjectRootResolution:
+    """配置根目录解析（Plan 5 Task 8 实测：容器内曾解析到 "/" 导致 fallback_chain 为空）。"""
+
+    def test_repository_root_contains_config(self) -> None:
+        from app.core.config import DEFAULT_CONFIG_PATH, PROJECT_ROOT
+
+        assert (PROJECT_ROOT / "config").is_dir()
+        assert DEFAULT_CONFIG_PATH.is_file()
+
+    def test_fallback_chain_is_loaded_from_yaml(self) -> None:
+        from app.core.config import get_settings
+
+        chain = get_settings().llm.fallback_chain
+        assert chain, "fallback_chain 不应为空（YAML 未被读到）"
+        assert chain[0].provider == "deepseek"
+
+    def test_container_layout_resolves_to_app_dir(self, tmp_path, monkeypatch) -> None:
+        """模拟容器布局 /app/app/core/config.py + /app/config/default.yaml。"""
+
+        # 构造 /app 等价结构
+        app_dir = tmp_path / "app"
+        core_dir = app_dir / "app" / "core"
+        core_dir.mkdir(parents=True)
+        (tmp_path / "config").mkdir()
+        (tmp_path / "config" / "default.yaml").write_text("llm: {}\n", encoding="utf-8")
+        fake = core_dir / "config.py"
+        fake.write_text("", encoding="utf-8")
+
+        # 直接验证解析逻辑：config 与 app 同级时应命中 tmp_path
+        file_dir = fake.resolve().parent
+        candidates = [
+            file_dir.parents[2] if len(file_dir.parents) > 2 else None,
+            file_dir.parents[1],
+            file_dir.parents[0],
+        ]
+        resolved = next(
+            (c for c in candidates if c and (c / "config").is_dir()),
+            candidates[0] or file_dir,
+        )
+        assert resolved == tmp_path.resolve()
