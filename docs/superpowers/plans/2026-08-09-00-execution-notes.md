@@ -247,6 +247,17 @@ Plan 3 notes:
 Plan 4 备注（Task 4 偏差说明）：
 - 计划建议用 Vue Flow 渲染 DAG；实际实现为**固定几何自绘 DAG**（绝对定位节点 + SVG 依赖边 + 溢出滚动平移 + 适应窗口缩放）。理由：Step 1 要求"状态变化时节点不移动"与确定性几何，自绘可把几何收敛到纯函数 `layoutDag()`（9 个测试直接覆盖，happy-dom 下零 flake），且无需连接点（Handle）管线；禁用拖拽/连线编辑、保留平移/适应窗口/选择等交互要求全部满足。相应地移除了未使用的 `@vue-flow/core` 依赖；若 Plan 5 之后需要图编辑能力再引入。
 
+## Plan 5（加固与实验）执行记录
+
+| Task | commit | 交付与验证 |
+| --- | --- | --- |
+| 1 | `6543a51` | 进程级确定性 E2E：`tests/fakes/runtime.py`（`FixedLiteratureLLM` 按 **system prompt 用途**分派规划/执行/语义校验/复盘四类响应、只从证据行取 `[E{n}]` 避免越界；`FixedEmbedding`/`FixedReranker` 确定性；`RecordingEventPublisher` 记录有序事件）、`tests/e2e/test_literature_review_e2e.py`（注册→上传 2 篇 TXT→建任务→`waiting_approval`→按精确 revision 确认→`completed`→**引用可回溯**（被引 chunk 必须是该用户已上传文档的分块）→**事件 ID 严格递增且唯一**→下载并打开 Markdown/DOCX（DOCX 校验 `word/document.xml`）；另有「提示词用途全覆盖」与「连续两次运行节点集合与正文一致」两个用例）；`RuntimeContainer` 增加 `llm=` 注入点（`start()` 不再读全局单例、新增 `create_llm()`）。**验证：本地与服务器各连续跑两遍均 3 passed；后端全量 764 passed** |
+
+Plan 5 Task 1 实跑发现并修复的真实缺陷：
+- 文献工作流自建的 `ValidatorAgent` **没有注入 LLM**，语义补充校验永远走降级默认值（`_check_semantic` 在 `llm is None` 时直接返回 80 分）。已改为 `llm=self.container.create_llm()`，使确定性引用校验 + LLM 语义校验两条路径都被真实覆盖。
+- `RuntimeContainer.start()` 原本无条件读取全局 `LLMManager`，测试注入会污染进程状态；现改为「显式注入优先、否则读全局」。
+- 固定 LLM 早期版本从整段 prompt 抓 `[E{n}]`，会把依赖输出里的标记也带上，导致执行器判定「引用超出证据范围」并重试耗尽；改为只解析证据行。
+
 Plan 4 备注：
 - 依赖版本按 Vite 5 约束固定：`vitest@^2.1.9`（vitest 5 要求 vite ≥6，会 ERESOLVE）、`@vue/test-utils@^2.4.6`、`happy-dom@^15`、`@playwright/test@^1.48.2`（e2e 浏览器安装放到 Task 8）；另新增 `@vue-flow/core`、`lucide-vue-next`。
 - 测试遵循计划：只 mock `authApi`，不 mock Axios 内部；先跑测试看失败（Step 4），再实现（Step 5–7）。

@@ -272,4 +272,7 @@ npm run build
   - [x] Task 7：结果视图与安全下载（69 passed；正文不用 v-html、参考文献仅 http(s)、评分中文标签、blob 下载用服务端 artifact_id 且立即 revoke）
   - [x] Task 8：浏览器级流程验收（桌面 + 移动 4 passed；注册→上传→建任务→确认规划→DAG 状态变化→完成→引用校验→下载 md/docx；刷新保状态、WS 阻断降级轮询且事件去重）
   - [x] Plan 4 Exit Gate：**PASSED（2026-10-18）**——双视口 4 passed + 10 张关键截图；无文字重叠/状态变化不位移/刷新不丢状态/全程不需 Swagger 或终端；暴露并修复 4 类真实缺陷（快照不刷新、容器 LLM 与文献源未接线、移动端三处布局、服务器后端镜像过期）
+- [ ] Plan 5：加固与实验（8 task）
+  - [x] Task 1：进程级确定性 E2E（本地与服务器各跑两遍 3 passed；引用可回溯 + 事件严格递增 + Markdown/DOCX 可打开；顺带修复「文献校验器未注入 LLM」与容器 LLM 注入点）
+  - [ ] Task 2：恢复 / 隔离 / 降级证明（下一步）
 
