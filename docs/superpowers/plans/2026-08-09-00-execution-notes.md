@@ -284,6 +284,28 @@ Plan 5 Task 1 实跑发现并修复的真实缺陷：
 - 测试自身的问题（非产品缺陷）：跨文件全局状态污染（直接给 `settings.app.max_upload_bytes` 赋值）导致 `test_knowledge_api` 顺序失败 → 改用 `monkeypatch.setattr` 自动还原；`exporter.export_*` 返回 `Artifact`（无 `.path`），需用 `resolve_for_user()` 取路径。
 - 服务器验证：integration + recovery **24 passed**；全量 **785 passed**（1 skipped）。
 
+### Plan 5 Task 3：Compose 发布冒烟（`dcd0f37` / `7548b47` / `6d841c6`）
+
+交付：
+- `backend/app/tools/smoke/smoke.py`：网络内冒烟客户端 —— 等就绪（默认 120s）→ 注册登录 → 上传 TXT → 建离线任务 → 确认规划 → 轮询完成 → 下载 Markdown/DOCX → 校验（`[E{n}]` 引用存在、产物非空、DOCX 是含 `word/document.xml` 的 ZIP、事件 ID 严格递增），任一项不符即非零退出。
+- `docker/smoke/Dockerfile`：只装 `httpx`，`COPY backend/app/tools/smoke`（CI 测的就是镜像里跑的），非 root 运行，不挂源码、不注入真实密钥。
+- `docker-compose.smoke.yml`：`test` profile 的 `smoke` 服务（`BASE_URL=http://nginx`）+ 冒烟栈覆盖 —— 容器名前缀 `maa-test-`、宿主端口错开到 **35443/36389/38012/48082**（生产是 35433/36379/38002/48080）、**命名卷改为 `maa-test-*`**（关键：Compose 的 `down --volumes` 否则会删生产数据）。
+- `scripts/smoke.sh` / `scripts/smoke.ps1`：`up -d --build` → `run --rm smoke` → `down --volumes`，shell 用 `trap`、PowerShell 用 `try/finally`；失败时打印服务日志，`KEEP=1` 可保留现场。
+- `backend/app/llm/deterministic.py` + provider 注册：`LLM__DEFAULT_PROVIDER=deterministic` 走确定性适配器（与真实模型完全相同的 Agent 调用路径），冒烟不需要任何真实密钥。
+
+关键实现细节（踩过的坑）：
+1. Compose 的 `ports` 是**合并**语义，override 文件里必须用 `ports: !override` 才能整体替换，否则生产端口仍被占用导致 `Bind for 0.0.0.0:36379 failed: port is already allocated`。
+2. 生产栈的命名卷是固定 `name: maa-*-data`，冒烟若不覆盖卷名，`down --volumes` 会**删除生产数据**；已在 smoke override 中全部改为 `maa-test-*`。
+3. `docker compose up` 失败时脚本原先仍继续执行（`set -uo pipefail` 下不算致命），已改为显式判断并打印日志退出。
+4. 冒烟客户端最初放在 `docker/smoke/`，pytest 根是 `backend/` 无法导入 → 迁到 `backend/app/tools/smoke/`（同时随 `app` 包进镜像），并补 8 个 MockTransport 单测覆盖成功链路与失败分支。
+
+验证（服务器实跑两次）：
+- `readiness ok: {database: ok, redis: ok, chroma: ok}`
+- 文档索引 ready（chunks=1）；任务 `58b7a5db-ae95-43b6-a721-64e7d7315009` **completed**
+- 产物：markdown **3408 B**、docx **37661 B**；事件 **30** 条严格递增
+- `SMOKE OK {"status": "completed", "artifacts": 2}`，退出码 0；`maa-test` 容器/卷**全部清理**，生产五容器保持 healthy
+- 后端全量 **793 passed**（新增 8 个冒烟客户端单测）
+
 Plan 4 备注：
 - 依赖版本按 Vite 5 约束固定：`vitest@^2.1.9`（vitest 5 要求 vite ≥6，会 ERESOLVE）、`@vue/test-utils@^2.4.6`、`happy-dom@^15`、`@playwright/test@^1.48.2`（e2e 浏览器安装放到 Task 8）；另新增 `@vue-flow/core`、`lucide-vue-next`。
 - 测试遵循计划：只 mock `authApi`，不 mock Axios 内部；先跑测试看失败（Step 4），再实现（Step 5–7）。
