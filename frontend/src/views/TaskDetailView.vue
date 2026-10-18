@@ -8,6 +8,7 @@ import NodeDetail from "@/components/tasks/NodeDetail.vue";
 import PlanPanel from "@/components/tasks/PlanPanel.vue";
 import TaskDag from "@/components/tasks/TaskDag.vue";
 import TaskLog from "@/components/tasks/TaskLog.vue";
+import TaskResult from "@/components/tasks/TaskResult.vue";
 import TaskToolbar from "@/components/tasks/TaskToolbar.vue";
 import { useTaskStore } from "@/stores/tasks";
 import type { PlanNode, SubtaskStatus, TaskControl } from "@/api/types";
@@ -59,10 +60,6 @@ const selectedSubtask = computed(
 );
 
 const artifacts = computed(() => store.snapshot?.artifacts ?? []);
-
-function artifactHref(artifactId: string): string {
-  return `/api/v1/tasks/${props.taskId}/artifacts/${artifactId}`;
-}
 
 async function refresh() {
   errorMessage.value = null;
@@ -207,23 +204,12 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-else class="detail__panel">
-      <div v-if="store.snapshot?.review_report" class="result">
-        <section class="result__markdown">
-          <h2>最终综述</h2>
-          <pre data-test="result-markdown">{{ store.snapshot.review_report.final_markdown }}</pre>
-        </section>
-        <section class="result__artifacts">
-          <h2>产物</h2>
-          <ul>
-            <li v-for="artifact in artifacts" :key="artifact.artifact_id">
-              <a :href="artifactHref(artifact.artifact_id)" :download="artifact.download_name">
-                {{ artifact.download_name }}
-              </a>
-              <span class="page__hint"> {{ artifact.kind }} · {{ artifact.size }} B</span>
-            </li>
-          </ul>
-        </section>
-      </div>
+      <TaskResult
+        v-if="store.snapshot?.review_report"
+        :task-id="props.taskId"
+        :report="store.snapshot.review_report"
+        :artifacts="artifacts"
+      />
       <p v-else class="page__hint">任务尚未产出复盘报告。</p>
     </div>
   </section>
