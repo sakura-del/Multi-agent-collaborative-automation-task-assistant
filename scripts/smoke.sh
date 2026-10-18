@@ -10,7 +10,9 @@
 set -uo pipefail
 
 PROJECT="maa-test"
-COMPOSE="docker compose -p ${PROJECT} -f docker-compose.yml -f docker-compose.smoke.yml --profile test"
+COMPOSE_FILES=(-f docker-compose.yml -f docker-compose.smoke.yml)
+compose() { docker compose -p "${PROJECT}" "${COMPOSE_FILES[@]}" --profile test "$@"; }
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${REPO_ROOT}"
 
@@ -25,24 +27,28 @@ fi
 
 cleanup() {
   if [ "${KEEP:-0}" = "1" ]; then
-    echo "保留冒烟栈；手动清理： ${COMPOSE} down --volumes"
+    echo "保留冒烟栈；手动清理： docker compose -p ${PROJECT} ${COMPOSE_FILES[*]} --profile test down --volumes"
     return
   fi
   echo "清理冒烟栈..."
-  ${COMPOSE} down --volumes --remove-orphans >/dev/null 2>&1 || true
+  compose down --volumes --remove-orphans >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM
 
 echo "构建并启动冒烟栈（project=${PROJECT}）..."
-${COMPOSE} up -d --build || exit 1
+if ! compose up -d --build; then
+  echo "冒烟栈启动失败" >&2
+  compose logs --tail 60 2>&1 >&2 || true
+  exit 1
+fi
 
 echo "运行冒烟客户端..."
-${COMPOSE} run --rm smoke
+compose run --rm smoke
 STATUS=$?
 
 if [ "${STATUS}" -ne 0 ]; then
-  echo "冒烟失败，输出最近 80 行服务日志：" >&2
-  ${COMPOSE} logs --tail 80 backend nginx >&2 || true
+  echo "冒烟失败（退出码 ${STATUS}），输出最近 80 行服务日志：" >&2
+  compose logs --tail 80 backend nginx >&2 || true
 fi
 
 exit "${STATUS}"

@@ -11,25 +11,26 @@
 # 隔离手段：
 #   - `-p maa-test` 让网络/卷/容器前缀与生产栈不同（生产是 multi-agent-assistant）
 #   - 覆盖 container_name，避免与生产容器重名冲突
-#   - 覆盖宿主端口为高位端口，避免与生产端口冲突
+#   - 覆盖宿主端口到**高位段**（35443/36389/38012/48082）：生产栈默认用
+#     35433/36379/38002/48080（见服务器 docker-compose.override.yml），必须错开
 #   - backend 强制确定性适配器（LLM__DEFAULT_PROVIDER=deterministic）且不注入真实密钥
 
 services:
   postgres:
     container_name: maa-test-postgres
-    # !override：Compose 默认把 ports 合并（生产 5433 仍会保留），这里必须整体替换
+    # !override：Compose 默认把 ports 合并（生产端口仍会保留），这里必须整体替换
     ports: !override
-      - "35433:5432"
+      - "35443:5432"
 
   redis:
     container_name: maa-test-redis
     ports: !override
-      - "36379:6379"
+      - "36389:6379"
 
   chroma:
     container_name: maa-test-chroma
     ports: !override
-      - "38002:8000"
+      - "38012:8000"
 
   backend:
     container_name: maa-test-backend
@@ -46,7 +47,7 @@ services:
   nginx:
     container_name: maa-test-nginx
     ports: !override
-      - "48081:80"
+      - "48082:80"
 
   # ===== 冒烟客户端（仅 test profile）=====
   smoke:
