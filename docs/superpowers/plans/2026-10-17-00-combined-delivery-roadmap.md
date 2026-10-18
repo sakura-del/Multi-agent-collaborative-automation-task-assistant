@@ -261,8 +261,9 @@ npm run build
   - [x] Task 4：确定性引用校验与定向重做（718 passed；五项固定检查 + 两次重生成后转人工）
   - [x] Task 5：复盘汇总与 Markdown/DOCX 导出（734 passed；产物哈希 + owner-scoped 下载 + 服务器实测落盘）
   - [x] Task 6：冻结离线演示语料 + CLI（744 passed；服务器已下载 10 篇/36MB + sha256 清单，语料测试 11 passed）
-  - [ ] Plan 3 Exit Gate：离线真实模型任务（引用全可回溯 + 重启恢复保留已完成节点 + Markdown/DOCX 哈希记录）——**进行中**：已修复「容器无 LLM 导致静默降级」（`12f9c85`）与「依赖标记未重定位」（`cc548e5`）；实跑达 n1–n4 完成/确定性 96.0，n5 待验证；**当前阻塞：LLM 密钥被网关判定失效（500 Failed to validate API key）+ 服务器 10.0.10.2 不可达，需恢复后重跑**（验收入口：`python scripts/plan3_exit_gate.py --max-documents 10`）
+  - [x] Plan 3 Exit Gate：**PASSED（2026-10-18）**——任务 `ea46442d-387b-4abb-b044-164798ca1c97`（7 节点，真实模型 `gpt-6-luna`）：引用越界 `[]`/缺失分块 `[]`、markdown 26,546 B 与 docx 40,828 B 双哈希一致、`recover()` 后状态与事件数（40）不变；服务器回归 757 passed + PG 集成 + Plan 2 门禁 ok；证据见 `2026-08-09-00-execution-notes.md` §Plan 3 Exit Gate
 - [ ] Plan 4：前端工作台（8 task，分支 `codex/plan3-literature-workflow` 上继续）
   - [x] Task 1：工作台骨架与鉴权状态（7 个单测 + `vue-tsc` + `vite build` 全过；路由守卫等待 `auth.ready`、Axios 401 单飞刷新、`AppLayout` 左导航）
-  - [ ] Task 2：类型化任务 API 与快照 store（下一步）
+  - [x] Task 2：类型化任务 API 与快照 store（15 passed；`applyEvent` 严格递增 `event_id`、`watch/stopWatching` 轮询）
+  - [ ] Task 3：任务列表与创建流程（下一步）
 
