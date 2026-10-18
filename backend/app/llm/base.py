@@ -209,14 +209,35 @@ class BaseLLM(ABC):
 
     @staticmethod
     def _is_retryable(exc: Exception) -> bool:
-        """判断异常是否可重试。
+        """判断异常是否可重试（同时决定是否触发降级链）。
 
-        可重试：超时、连接错误、限流（429）。
-        不可重试：鉴权失败（401）、参数错误（400）、内容违规。
+        可重试：超时、连接错误、限流（429）、上游 5xx（如 503 Service temporarily
+        unavailable —— 答辩保障实测该端点会间歇返回 503）。
+        不可重试：鉴权失败（401/403）、参数错误（400/422），重试与降级都无意义。
+
+        实现说明：openai SDK 把 5xx 抛成 `InternalServerError`（类名不含 timeout 等
+        关键字），早期只按类名匹配，导致 503 既不重试也不降级，任务直接转人工。
         """
-        # openai 库的异常类名含 APITimeoutError / RateLimitError / APIConnectionError
         name = type(exc).__name__.lower()
-        return any(k in name for k in ("timeout", "ratelimit", "connection", "retry"))
+        if any(k in name for k in ("timeout", "ratelimit", "connection", "retry")):
+            return True
+        # 上游 5xx：优先看状态码，其次看类名/消息
+        status = getattr(exc, "status_code", None)
+        if isinstance(status, int):
+            return status >= 500 or status == 429
+        if any(k in name for k in ("internalserver", "serviceunavailable", "badgateway")):
+            return True
+        text = str(exc).lower()
+        return any(
+            token in text
+            for token in (
+                "503",
+                "502",
+                "504",
+                "service temporarily unavailable",
+                "temporarily unavailable",
+            )
+        )
 
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__} provider={self.provider} model={self.model}>"

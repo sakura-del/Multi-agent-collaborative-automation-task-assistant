@@ -135,3 +135,61 @@ class TestBaseLLM:
         repr_str = repr(mock)
         assert "openai" in repr_str
         assert "gpt-4" in repr_str
+
+
+class TestRetryableClassification:
+    """异常可重试判定（决定是否重试 + 是否触发降级链）。
+
+    实跑背景：端点间歇返回 503，openai SDK 抛 `InternalServerError`（类名不含
+    timeout/connection 等关键字），旧实现判为不可重试 → 既不重试也不降级 → 任务转人工。
+    """
+
+    def test_5xx_status_is_retryable(self) -> None:
+        from app.llm.base import BaseLLM
+
+        class _Err(Exception):
+            status_code = 503
+
+        assert BaseLLM._is_retryable(_Err("x")) is True
+
+    def test_internal_server_error_by_name_is_retryable(self) -> None:
+        from app.llm.base import BaseLLM
+
+        class InternalServerError(Exception):
+            pass
+
+        assert BaseLLM._is_retryable(InternalServerError("boom")) is True
+
+    def test_503_message_is_retryable(self) -> None:
+        from app.llm.base import BaseLLM
+
+        exc = RuntimeError("Error code: 503 - Service temporarily unavailable")
+        assert BaseLLM._is_retryable(exc) is True
+
+    def test_auth_error_is_not_retryable(self) -> None:
+        from app.llm.base import BaseLLM
+
+        class _Err(Exception):
+            status_code = 401
+
+        assert BaseLLM._is_retryable(_Err("Incorrect API key")) is False
+
+    def test_bad_request_is_not_retryable(self) -> None:
+        from app.llm.base import BaseLLM
+
+        class _Err(Exception):
+            status_code = 400
+
+        assert BaseLLM._is_retryable(_Err("bad request")) is False
+
+    def test_timeout_and_connection_still_retryable(self) -> None:
+        from app.llm.base import BaseLLM
+
+        class APITimeoutError(Exception):
+            pass
+
+        class APIConnectionError(Exception):
+            pass
+
+        assert BaseLLM._is_retryable(APITimeoutError("t")) is True
+        assert BaseLLM._is_retryable(APIConnectionError("c")) is True
