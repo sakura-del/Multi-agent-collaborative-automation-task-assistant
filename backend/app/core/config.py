@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -16,21 +17,55 @@ import yaml
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# 项目根目录解析。
-# 仓库内：<root>/backend/app/core/config.py → parents[3] 即 <root>
-# 容器内：/app/app/core/config.py → 只有 3 层，parents[3] 会越界到 "/"
-# 因此按「候选路径存在性」择一，避免镜像里读不到 config/default.yaml
-# （Plan 5 Task 8 实测：容器内 fallback_chain 曾因此为空）。
-_FILE_DIR = Path(__file__).resolve().parent
-_ROOT_CANDIDATES = [
-    _FILE_DIR.parents[2] if len(_FILE_DIR.parents) > 2 else None,  # 仓库根
-    _FILE_DIR.parents[1],  # 容器 /app（config 与 app 同级）
-    _FILE_DIR.parents[0],  # 兜底：/app/app
-]
-PROJECT_ROOT = next(
-    (candidate for candidate in _ROOT_CANDIDATES if candidate and (candidate / "config").is_dir()),
-    _ROOT_CANDIDATES[0] or _FILE_DIR,
-)
+
+# 项目根目录解析（多种部署形态都要能读到 config/default.yaml）。
+#
+# 需要覆盖的三种布局：
+#   1) 仓库内：<root>/backend/app/core/config.py      → <root>
+#   2) 容器内（COPY 后）：/app/app/core/config.py      → /app（config 与 app 同级）
+#   3) editable 安装：config.py 位于 site-packages，但 sys.path 里有真实包目录
+#
+# Plan 5 Task 8 两次踩坑：先是 parents[3] 在镜像里越界到 "/"；修完后又因为
+# editable 安装让 __file__ 指向 site-packages，仍然找不到 /app/config。
+# 因此这里综合「环境变量 > 包目录候选 > 当前工作目录」逐级探测。
+def _resolve_project_root() -> Path:
+    # 1) 显式覆盖（容器/自定义部署可用 MAA_PROJECT_ROOT 指定）
+    explicit = os.getenv("MAA_PROJECT_ROOT")
+    if explicit and (Path(explicit) / "config").is_dir():
+        return Path(explicit).resolve()
+
+    candidates: list[Path] = []
+
+    # 2) 从 app 包的实际位置推断（优先，editable 安装下 __file__ 不可靠）
+    try:
+        import app as _app_pkg
+
+        pkg_dir = Path(_app_pkg.__file__).resolve().parent  # .../app
+        candidates.extend(
+            [
+                pkg_dir.parent,  # /app（容器）或 backend/（仓库）
+                pkg_dir.parent.parent,  # 仓库根
+                pkg_dir,  # 兜底
+            ]
+        )
+    except Exception:  # pragma: no cover - 极端环境下导入失败
+        pass
+
+    # 3) 从本文件位置推断
+    file_dir = Path(__file__).resolve().parent
+    candidates.extend([file_dir.parents[i] for i in range(min(3, len(file_dir.parents)))])
+
+    # 4) 当前工作目录（容器 WORKDIR=/app 时命中）
+    candidates.append(Path.cwd())
+
+    for candidate in candidates:
+        if candidate and (candidate / "config" / "default.yaml").is_file():
+            return candidate
+    # 都没命中时返回最可能的根，后续读取会给出明确告警
+    return candidates[0] if candidates else file_dir
+
+
+PROJECT_ROOT = _resolve_project_root()
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config" / "default.yaml"
 ENV_FILE = PROJECT_ROOT / ".env"
 
