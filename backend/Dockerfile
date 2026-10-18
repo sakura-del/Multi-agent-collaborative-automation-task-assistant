@@ -28,6 +28,8 @@ COPY backend/README.md ./
 COPY backend/app ./app
 # 仓库级配置基线：settings 从 PROJECT_ROOT/config/default.yaml 读取模型等默认值
 COPY config ./config
+# 冻结离线演示语料清单（PDF 不入镜像，由用户在界面/CLI 上传入库）
+COPY backend/demo_data ./demo_data
 
 # 依赖从 pyproject 派生：.[rag-models] 安装运行时 + RAG 真实模型依赖
 # torch 先装 CPU 版（--index-url whl/cpu），避免 sentence-transformers 连带拉取

@@ -48,6 +48,7 @@ from app.orchestration.dag_engine import TaskDAG
 from app.orchestration.recovery import RecoveryManager
 from app.orchestration.runtime import RuntimeContainer
 from app.orchestration.scheduler import TaskScheduler
+from app.orchestration.services.literature_source import resolve_literature_source
 from app.orchestration.workflows.literature_review import (
     LiteratureNodeExecutor,
     LiteratureNodeValidator,
@@ -490,7 +491,8 @@ class TaskExecution:
                 citation_validator=CitationValidator(),
             ),
             context_builder=LiteratureContextBuilder(knowledge),
-            source=self.container.literature_source,
+            # 离线演示任务走冻结清单；其余用容器注入的源或 arXiv 适配器
+            source=resolve_literature_source(task, fallback=self.container.literature_source),
         )
         return workflow.use_plan(plan)
 

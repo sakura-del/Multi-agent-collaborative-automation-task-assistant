@@ -65,10 +65,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             logger.warning("bm25_startup_rebuild_skipped", error=str(exc))
 
     # ===== 任务运行时（Plan 2 Task 4）=====
+    from app.knowledge.services.search_provider import KnowledgeSearchProvider
     from app.orchestration.runtime import RuntimeContainer
     from app.orchestration.services.task_execution import TaskExecution
 
-    container = RuntimeContainer()
+    # 文献任务需要 owner-scoped 证据检索：按调用开 session 的提供者（Plan 4 Task 8 实跑发现此前未接入）
+    container = RuntimeContainer(knowledge_query=KnowledgeSearchProvider())
     await container.start()
     task_execution = TaskExecution(container)
     app.state.container = container
