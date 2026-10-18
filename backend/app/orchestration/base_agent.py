@@ -101,8 +101,8 @@ class BaseAgent(abc.ABC):
             self._last_duration = time.perf_counter() - start
             self._exec_count += 1
             # 任务完成后回到空闲，等待下一任务
-            self._state.transition(AgentStatus.COMPLETED)
-            self._state.transition(AgentStatus.IDLE)
+            self._settle(AgentStatus.COMPLETED)
+            self._settle(AgentStatus.IDLE)
             logger.info(
                 "agent_execute_ok",
                 agent_type=self.agent_type,
@@ -112,7 +112,7 @@ class BaseAgent(abc.ABC):
             return result
         except Exception as exc:
             self._last_duration = time.perf_counter() - start
-            self._state.transition(AgentStatus.ERROR)
+            self._settle(AgentStatus.ERROR)
             logger.error(
                 "agent_execute_failed",
                 agent_type=self.agent_type,
@@ -123,8 +123,21 @@ class BaseAgent(abc.ABC):
             # 广播错误消息，供复盘 Agent 采集与其他 Agent 感知
             await self._broadcast_error(exc, trace_id)
             # 错误恢复到空闲，允许后续重试调度
-            self._state.transition(AgentStatus.IDLE)
+            self._settle(AgentStatus.IDLE)
             raise
+
+    def _settle(self, target: AgentStatus) -> None:
+        """把状态推进到 target；并发场景下若已被其它协程改走则跳过。
+
+        背景（Plan 5 Task 8 实跑）：调度器并行执行节点而复用同一 Agent 实例，
+        两个协程共享状态机时，A 已把状态推到 COMPLETED/IDLE，B 再 transition(ERROR)
+        就会抛 `非法状态转换: idle → error`，把正常结果变成"校验异常"转人工。
+        收尾状态只用于可观测性，不应让并发竞争中断业务结果。
+        """
+        if self._state.can_transition(target):
+            self._state.transition(target)
+        else:
+            self._state.reset(target)
 
     @abc.abstractmethod
     async def _run(self, input_data: dict[str, Any]) -> dict[str, Any]:

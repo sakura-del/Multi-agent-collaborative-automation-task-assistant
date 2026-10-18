@@ -189,3 +189,35 @@ class TestConcurrentReentry:
         )
 
         assert {first["echo"], second["echo"]} == {"a", "b"}
+
+
+class TestConcurrentStateRace:
+    """并发竞争下收尾状态不应中断业务结果（Plan 5 Task 8 实跑：n6 报 idle → error）。"""
+
+    async def test_settle_skips_when_already_advanced(self) -> None:
+        from app.orchestration.state import AgentStatus
+
+        agent = _TestAgentOK()
+        # 模拟另一协程已把状态推到 COMPLETED
+        agent._state.reset(AgentStatus.COMPLETED)
+
+        # 不应抛异常
+        agent._settle(AgentStatus.ERROR)
+        assert agent.status is AgentStatus.ERROR
+
+    async def test_parallel_executes_with_failure_do_not_crash(self) -> None:
+        """一个成功、一个失败并发执行：两者都应正常返回/抛出，不因状态竞争崩溃。"""
+        import asyncio
+
+        agent = _TestAgentOK()
+
+        results = await asyncio.gather(
+            agent.execute({"value": "a"}),
+            agent.execute({"value": "b"}),
+            return_exceptions=True,
+        )
+
+        # 不应出现 IllegalStateTransitionError
+        from app.orchestration.state import IllegalStateTransitionError
+
+        assert not any(isinstance(r, IllegalStateTransitionError) for r in results)
