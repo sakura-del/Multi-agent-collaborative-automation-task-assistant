@@ -14,6 +14,8 @@ export default defineConfig({
     environment: "happy-dom",
     setupFiles: ["./src/test/setup.ts"],
     clearMocks: true,
+    // 只跑单元测试；Playwright 规格（e2e/*.spec.ts）由 `npm run test:e2e` 负责
+    include: ["src/**/*.test.ts"],
   },
   server: {
     // 开发服务器端口，与后端 CORS allow_origins 保持一致

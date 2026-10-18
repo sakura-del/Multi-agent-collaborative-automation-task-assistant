@@ -257,14 +257,20 @@ onBeforeUnmount(() => {
 
 .detail__split {
   display: grid;
+  /* minmax(0, 1fr)：允许内容收缩，避免固定宽度的 DAG 画布把栅格撑宽 */
   grid-template-columns: minmax(0, 1fr) 300px;
   gap: 1rem;
   align-items: start;
+  min-width: 0;
+}
+
+.detail__panel {
+  min-width: 0;
 }
 
 @media (max-width: 900px) {
   .detail__split {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

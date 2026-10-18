@@ -143,6 +143,7 @@ function statusOf(nodeId: string): SubtaskStatus | undefined {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  min-width: 0;
 }
 
 .dag__toolbar {
@@ -162,6 +163,8 @@ function statusOf(nodeId: string): SubtaskStatus | undefined {
   border-radius: 12px;
   background: #fcfdff;
   max-height: 420px;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .dag__canvas {
