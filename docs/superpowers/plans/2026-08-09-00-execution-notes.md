@@ -336,6 +336,32 @@ Plan 5 Task 1 实跑发现并修复的真实缺陷：
 - `pytest --cov-fail-under=80`：**793 passed, 1 skipped，覆盖率 87.82%**（服务器 113s，本地 147s）
 - 前端：Vitest **69 passed**、`vue-tsc` 通过、`vite build` 成功（199KB JS / 16.65KB CSS）
 
+### Plan 5 Task 5：可复现实验输入（`8122e86` / `65bd610`）
+
+新建 **`backend/evaluation/`**（与 `app/` 物理隔离：`app/` 是被测量系统，`evaluation/` 管输入→运行→指标→报告）：
+
+| 文件 | 作用 |
+| --- | --- |
+| `models.py` | 三个不可变契约（`frozen=True, extra="forbid"`）：`ExperimentConfig` / `EvaluationTopic` / `HumanRating` |
+| `configs/{baseline_a,baseline_b,baseline_c,full}.yaml` | 四组画像，开关与名称**强一致校验**（名为 baseline_b 却开 RAG 直接报错） |
+| `datasets/topics.json` | 15 课题 × 3 领域 × 5，含中文主题/英文检索式/语料清单路径 |
+| `datasets/corpora/{ai,software_engineering,education_technology}.json` | 三领域各 10 篇的冻结语料清单（sha256；PDF 目录已 gitignore） |
+| `datasets/ratings_template.csv` | 盲评表头，`anonymous_output_id` 含 `baseline/multi_agent/hybrid` 等分组词即报错 |
+| `prepare_corpora.py` | 唯一需网络的步骤：按领域检索 arXiv → 各下载 10 篇 → 写 sha256 清单（原子替换） |
+| `validate.py` | 一次性校验画像/课题/语料/盲评模板，输出 `{profiles, topics, domains, corpora, runs:120}` |
+
+可复现性硬约束（`ExperimentConfig` 强制，不是靠文档约定）：
+- `model=gpt-6-luna`、`provider=openai`、`temperature=0.2`、`max_output_tokens=2048`、`prompt_version=lit-v1`、`corpus_version=corpus-10-v1`、`seed=20261017`、`runs_per_topic=2`
+- 四组画像的这些字段由 `validate.load_profiles()` **互相比较**，任一组漂移即失败
+- 语料清单记录数必须等于 `corpus_version` 声明的 10 篇
+
+`pyproject.toml` 新增 `[project.optional-dependencies].evaluation`（pandas/scipy/matplotlib），产品运行与 CI 默认都不装；CI 的 black/ruff/mypy 已把 `evaluation` 纳入门禁。
+
+验证：
+- 本地 **17 passed**（画像固定参数/非法温度/未知画像/开关不一致/多余字段/模型漂移/不可变/课题重复与格式/领域非法/评分越界/匿名 ID 泄漏分组/校验 CLI 失败与成功）
+- 后端全量 **810 passed**、覆盖率 **87.85%**、`mypy app evaluation` **零错误**
+- **服务器实跑语料准备**：`[ai] 10 篇`、`[software_engineering] 10 篇`、`[education_technology] 10 篇`（36M / 8.7M / 9.7M PDF，已 gitignore），`python -m evaluation.validate` 输出 **`runs: 120`**，与 roadmap §3 冻结设计一致
+
 Plan 4 备注：
 - 依赖版本按 Vite 5 约束固定：`vitest@^2.1.9`（vitest 5 要求 vite ≥6，会 ERESOLVE）、`@vue/test-utils@^2.4.6`、`happy-dom@^15`、`@playwright/test@^1.48.2`（e2e 浏览器安装放到 Task 8）；另新增 `@vue-flow/core`、`lucide-vue-next`。
 - 测试遵循计划：只 mock `authApi`，不 mock Axios 内部；先跑测试看失败（Step 4），再实现（Step 5–7）。
