@@ -173,9 +173,10 @@ async def verify_task(task_id: str) -> dict[str, Any]:
         for item in task.artifacts or []:
             artifact_id = str(item.get("artifact_id"))
             try:
-                path, download_name = exporter.resolve_for_user(task.user_id, task.id, artifact_id)
+                path = Path(exporter.resolve_for_user(task.user_id, task.id, artifact_id))
             except Exception as exc:
                 raise AssertionError(f"产物 {artifact_id} 无法解析: {exc}") from exc
+            download_name = path.name
             digest = sha256_file(path)
             report["artifacts"].append(
                 {
