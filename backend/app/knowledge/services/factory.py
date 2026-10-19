@@ -83,9 +83,27 @@ def init_kb(
         persist_dir = os.getenv("RAG_CHROMA_PATH", ".chroma_db")
     else:
         persist_dir = chroma_persist_dir
+
+    # 服务端模式（compose 提供独立 chroma 服务）：RAG__CHROMA_HOST 非空时走 HTTP。
+    # 此前该配置形同虚设——容器内始终用本地嵌入模式，与 compose 的 chroma 服务脱节，
+    # 且 chromadb 1.x 的 Rust 绑定在全新容器里会崩（CI smoke 因此失败）。
+    #
+    # 显式传入 `chroma_persist_dir` 表示调用方要自行控制存储模式（测试传 "" 走内存），
+    # 此时**不套用配置里的服务端地址**，否则测试会去连不存在的 chroma 主机。
+    from app.core.config import get_settings as _get_settings
+
+    rag_cfg = _get_settings().rag
+    chroma_host = ""
+    chroma_port = 8000
+    if chroma_persist_dir is None:
+        chroma_host = (getattr(rag_cfg, "chroma_host", "") or "").strip()
+        chroma_port = int(getattr(rag_cfg, "chroma_port", 8000))
+
     _vector_store = VectorStore(
         embedding_service=_embedding,
         persist_directory=persist_dir,
+        chroma_host=chroma_host,
+        chroma_port=chroma_port,
     )
     _bm25_index = BM25Index()
     _parser = DocumentParser()

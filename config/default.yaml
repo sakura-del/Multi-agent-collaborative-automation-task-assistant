@@ -55,8 +55,11 @@ rag:
   chunk_overlap: 64
   retrieval_top_k: 10
   rerank_top_k: 5
-  # Chroma 服务地址（容器内走服务名 chroma；本地开发可改为 localhost）
-  chroma_host: "chroma"
+  # Chroma 服务地址。**留空 = 不连服务端**（本地嵌入/内存模式）。
+  # 只有 docker-compose 显式注入 RAG__CHROMA_HOST=chroma 时才走 HTTP 客户端。
+  # 历史缺陷：此处曾是 "chroma"（容器 DNS 名），导致本地开发/CI 试图解析不存在的主机，
+  # 单测里 `init_kb()` 不传 chroma_persist_dir 时会去连它而报 getaddrinfo failed。
+  chroma_host: ""
   chroma_port: 8000
 
 agent:

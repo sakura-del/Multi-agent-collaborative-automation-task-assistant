@@ -36,6 +36,8 @@ class VectorStore:
         *,
         collection_name: str = "knowledge_base",
         persist_directory: str | None = None,
+        chroma_host: str | None = None,
+        chroma_port: int = 8000,
     ) -> None:
         self._embedding = embedding_service
         self._collection_name = collection_name
@@ -44,17 +46,31 @@ class VectorStore:
         if persist_directory is None:
             persist_directory = os.getenv("RAG_CHROMA_PATH", ".chroma_db")
         self._persist_directory = persist_directory
+        # 服务端模式（compose 提供独立 chroma 服务）：给出 host 时优先走 HTTP，
+        # 与 docker-compose 的 RAG__CHROMA_HOST / RAG__CHROMA_PORT 对齐。
+        self._chroma_host = (chroma_host or "").strip()
+        self._chroma_port = int(chroma_port)
         self._client: Any = None
         self._collection: Any = None
 
     def _ensure_collection(self) -> None:
-        """延迟初始化 Chroma 客户端与 collection。"""
+        """延迟初始化 Chroma 客户端与 collection。
+
+        三种模式（优先级从高到低）：
+        1. **服务端**：给了 `chroma_host` → `HttpClient`（compose 的独立 chroma 服务）。
+           数据由服务端持久化，`persist_directory` 不参与。
+        2. **本地持久化**：有 `persist_directory` → `PersistentClient`（单机开发）。
+        3. **内存**：两者都空 → `Client()`（测试）。
+        """
         if self._collection is not None:
             return
 
         import chromadb
 
-        if self._persist_directory:
+        if self._chroma_host:
+            # 服务端模式：与 compose 的 chroma 服务通信，不在容器本地落库
+            self._client = chromadb.HttpClient(host=self._chroma_host, port=self._chroma_port)
+        elif self._persist_directory:
             # 持久化模式：数据落盘
             self._client = chromadb.PersistentClient(path=self._persist_directory)
         else:
@@ -69,7 +85,11 @@ class VectorStore:
         logger.info(
             "vector_store_initialized",
             collection=self._collection_name,
-            persist=bool(self._persist_directory),
+            mode=(
+                f"http:{self._chroma_host}:{self._chroma_port}"
+                if self._chroma_host
+                else ("persist" if self._persist_directory else "memory")
+            ),
         )
 
     @property

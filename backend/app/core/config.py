@@ -156,8 +156,10 @@ class RAGConfig(BaseModel):
     chunk_overlap: int = 64
     retrieval_top_k: int = 10
     rerank_top_k: int = 5
-    # Chroma 服务地址（容器内走服务名；本地开发默认 localhost）
-    chroma_host: str = "chroma"
+    # Chroma 服务地址。**默认空 = 不连服务端**（本地嵌入/内存模式），
+    # 只有 docker-compose 显式注入 RAG__CHROMA_HOST=chroma 时才走 HTTP 客户端。
+    # 历史缺陷：默认值曾是 "chroma"（容器 DNS 名），导致本地/CI 试图解析不存在的主机。
+    chroma_host: str = ""
     chroma_port: int = 8000
 
 

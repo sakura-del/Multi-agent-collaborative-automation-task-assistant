@@ -57,8 +57,10 @@ services:
       - maa-network
 
   # ===== Chroma 向量数据库（阶段5 RAG 使用） =====
+  # ⚠️ 版本必须与 backend 依赖 chromadb 一致（pyproject.toml 锁定 ==1.5.9）。
+  # 曾用 0.4.24 而客户端是 1.5.9 → 跨大版本不兼容（HttpClient 报 {"detail":"Not Found"}）。
   chroma:
-    image: chromadb/chroma:0.4.24
+    image: chromadb/chroma:1.5.9
     container_name: maa-chroma
     restart: unless-stopped
     environment:
@@ -70,8 +72,8 @@ services:
     volumes:
       - chroma_data:/chroma/chroma
     healthcheck:
-      # chroma 镜像无 curl，改用 python urllib 探测 heartbeat
-      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/v1/heartbeat').status==200 else 1)"]
+      # chroma 镜像无 curl，改用 python urllib 探测 v2 heartbeat（1.x 起路径为 /api/v2/heartbeat）
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/v2/heartbeat').status==200 else 1)"]
       interval: 15s
       timeout: 5s
       retries: 5

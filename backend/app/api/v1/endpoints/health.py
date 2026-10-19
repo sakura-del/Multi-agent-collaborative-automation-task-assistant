@@ -58,15 +58,23 @@ async def probe_redis() -> bool:
 
 
 async def probe_chroma() -> bool:
-    """Chroma 探测：调用 Chroma 服务 heartbeat 端点。"""
-    url = f"http://{settings.rag.chroma_host}:{settings.rag.chroma_port}/api/v1/heartbeat"
-    try:
-        async with httpx.AsyncClient(timeout=_PROBE_TIMEOUT) as client:
-            resp = await client.get(url)
-            return resp.status_code == 200
-    except Exception as exc:
-        logger.warning("readiness_chroma_failed", url=url, error=str(exc))
-        return False
+    """Chroma 探测：调用 Chroma 服务 heartbeat 端点。
+
+    路径随服务端版本变化：0.4.x 为 `/api/v1/heartbeat`，1.x 起为 `/api/v2/heartbeat`。
+    本仓库两端已统一到 1.5.9（见 docker-compose.yml 与 pyproject.toml），故用 v2；
+    同时保留 v1 回退，避免滚动升级期间误报不健康。
+    """
+    base = f"http://{settings.rag.chroma_host}:{settings.rag.chroma_port}"
+    paths = ("/api/v2/heartbeat", "/api/v1/heartbeat")
+    async with httpx.AsyncClient(timeout=_PROBE_TIMEOUT) as client:
+        for path in paths:
+            try:
+                resp = await client.get(f"{base}{path}")
+                if resp.status_code == 200:
+                    return True
+            except Exception as exc:
+                logger.warning("readiness_chroma_failed", url=f"{base}{path}", error=str(exc))
+    return False
 
 
 # ===== 端点 =====
