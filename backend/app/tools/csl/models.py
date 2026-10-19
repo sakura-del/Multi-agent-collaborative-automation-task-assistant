@@ -138,6 +138,13 @@ class CslItem(BaseModel):
     issued_year: int | None = None
     doi: str | None = None
     url: str | None = None
+    medium: str | None = None
+    """载体标识代码（GB/T 7714—2025 附录 A.2）：``MM`` 缩微资料 / ``MT`` / ``DK`` / ``CD`` 等。
+
+    样式侧 `carrier-identifier` 宏直接输出该值（形成 ``[J/MM]``）；
+    缺省时按「有 URL/DOI 即 ``OL``」推断。2025 版新增 ``MM``。
+    """
+
     language: str = "zh-CN"
     """★ 决定 locale 分组（ADR §4.2）：``zh*`` → zh-CN，``en*`` → en-US。"""
 
@@ -184,6 +191,7 @@ class CslItem(BaseModel):
             "issued_year": parse_year(data.get("issued")),
             "doi": normalize_doi(_first_present(data, "DOI", "doi")),
             "url": _text(_first_present(data, "URL", "url")) or None,
+            "medium": _text(data.get("medium")) or None,
             "language": language
             or detect_language(title=title, authors=[author_sort_text(name) for name in authors]),
         }
@@ -206,6 +214,7 @@ class CslItem(BaseModel):
             "page": self.page,
             "publisher": self.publisher,
             "publisher-place": self.publisher_place,
+            "medium": self.medium,
         }
         for key, value in optional.items():
             if value:
@@ -278,6 +287,110 @@ def author_sort_text(name: CslName) -> str:
     return " ".join(part for part in (name.family, name.given) if part)
 
 
+# ===== 排序键：中文按拼音（Issue #4 剩余项）=====
+
+_CJK_CHAR_PATTERN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+
+
+def sort_key_text(text: Any) -> str:
+    """著者/题名的排序键：**中文按拼音**，其余按 casefold 原文。
+
+    为什么不能直接用 Unicode 码位：中文姓名按码位排序会得到
+    「赵(U+8D75) < 陈(U+9648) < 白(U+767D)」这种明显不合字顺的结果。
+    这里把每个 CJK 字符替换为其**不带声调**的拼音（`赵` → `zhao`），
+    非 CJK 字符原样保留，从而与西文混排时也能得到合理顺序。
+
+    同音不同字（如「张伟」「章伟」）的拼音键相同，排序再回落到原文码位，
+    保证**确定性**（同一批输入永远得到同一顺序）。
+
+    非 CJK 文本完全不受影响（`Smith` → `smith`），故西文语料排序行为不变。
+    """
+    raw = _text(text)
+    if not raw:
+        return ""
+    if not _CJK_CHAR_PATTERN.search(raw):
+        return raw.casefold()
+
+    # 逐字符替换：CJK → 拼音（无声调），非 CJK 原样；同音字用原文作次级键
+    pieces: list[str] = []
+    for char in raw:
+        if _CJK_CHAR_PATTERN.match(char):
+            pieces.append("".join(_lazy_pinyin(char)))
+        else:
+            pieces.append(char.casefold())
+    return "".join(pieces)
+
+
+def sort_key_with_original(text: Any) -> tuple[str, str]:
+    """排序键 + 原文次级键：拼音相同的条目按原文码位定序（保证确定性）。"""
+    raw = _text(text)
+    return sort_key_text(raw), raw
+
+
+def _lazy_pinyin(text: str) -> list[str]:
+    """懒加载 pypinyin（未安装时退化为原字符，绝不让排序崩掉）。"""
+    try:
+        from pypinyin import lazy_pinyin
+    except ImportError:  # pragma: no cover - 依赖缺失时的防御性降级
+        return [text]
+    try:
+        return lazy_pinyin(text) or [text]
+    except Exception:  # pragma: no cover - 拼音库异常不得影响渲染
+        return [text]
+
+
+# ===== 姓名大小写归一（Issue #4 剩余项）=====
+
+
+def normalize_name_case(value: Any) -> str:
+    """把**全大写**姓名归一为「首字母大写 + 其余小写」；已是正常大小写的原样返回。
+
+    背景：`citeproc-py 0.11.1` 在 ``name-part text-case="capitalize-first"`` 上会抛
+    ``AttributeError``，因此 CSL 样式无法做该变换；若上游元数据给的是 ``"SMITH J"``，
+    参考文献就会输出全大写，与 GB/T 7714—2025「英文著者仅首字母大写」不符。
+    故在**数据层**归一。
+
+    只处理「整段都是大写」的情况（含连字符各段），不触碰已正常大小写的姓名
+    （``McDonald`` / ``Espinosa-Anke`` 保持原样），也不触碰中文。
+    """
+    text = _text(value)
+    if not text:
+        return ""
+    # 只归一「全大写」：不含小写字母，且至少含一个字母
+    has_lower = any(char.islower() for char in text)
+    has_upper = any(char.isupper() for char in text)
+    if has_lower or not has_upper:
+        return text
+
+    # 逐段首字母大写（按空格与连字符分段），单字母（首字母缩写）保持大写
+    def _capitalize(segment: str) -> str:
+        if not segment:
+            return segment
+        if len(segment) == 1:
+            return segment.upper()
+        return segment[0].upper() + segment[1:].lower()
+
+    parts: list[str] = []
+    for chunk in re.split(r"([\s\-]+)", text):
+        if not chunk:
+            continue
+        if chunk.isspace() or set(chunk) == {"-"}:
+            parts.append(chunk)
+        else:
+            parts.append(_capitalize(chunk))
+    return "".join(parts)
+
+
+def normalize_csl_name(name: CslName) -> CslName:
+    """对 ``CslName`` 的 family/given 施加大小写归一（literal 原样保留）。"""
+    if name.literal:
+        return name
+    return CslName(
+        family=normalize_name_case(name.family),
+        given=normalize_name_case(name.given),
+    )
+
+
 def parse_csl_name(text: Any) -> CslName:
     """姓名字符串 → ``CslName``。
 
@@ -296,11 +409,11 @@ def parse_csl_name(text: Any) -> CslName:
         return CslName(literal=raw)
     if "," in raw:
         family, _, given = raw.partition(",")
-        return CslName(family=family.strip(), given=given.strip())
+        return normalize_csl_name(CslName(family=family.strip(), given=given.strip()))
     parts = raw.split()
     if len(parts) == 1:
-        return CslName(family=parts[0])
-    return CslName(family=parts[-1], given=" ".join(parts[:-1]))
+        return normalize_csl_name(CslName(family=parts[0]))
+    return normalize_csl_name(CslName(family=parts[-1], given=" ".join(parts[:-1])))
 
 
 def detect_language(*, title: str, authors: Sequence[str] = (), explicit: str | None = None) -> str:
@@ -463,6 +576,7 @@ def csl_item_from_bibliography_entry(entry: Mapping[str, Any]) -> CslItem | None
         issued_year=parse_year(_first_present(entry, "year", "issued", "published_at")),
         doi=normalize_doi(doi),
         url=_text(_first_present(entry, "source_url", "url")) or None,
+        medium=_text(entry.get("medium")) or None,
         language=detect_language(
             title=title,
             authors=author_texts,
@@ -533,12 +647,17 @@ def _name_from_any(value: Any) -> CslName:
 
 
 def _csl_name_from_json(value: Any) -> CslName:
-    """CSL-JSON ``author[i]`` → ``CslName``（忽略 ``affiliation`` 等未建模字段）。"""
+    """CSL-JSON ``author[i]`` → ``CslName``（忽略 ``affiliation`` 等未建模字段）。
+
+    family/given 会做**大小写归一**（全大写 → 首字母大写），见 `normalize_name_case`。
+    """
     if isinstance(value, Mapping):
-        return CslName(
-            family=_text(value.get("family")),
-            given=_text(value.get("given")),
-            literal=_text(value.get("literal")),
+        return normalize_csl_name(
+            CslName(
+                family=_text(value.get("family")),
+                given=_text(value.get("given")),
+                literal=_text(value.get("literal")),
+            )
         )
     if isinstance(value, str):
         return parse_csl_name(value)

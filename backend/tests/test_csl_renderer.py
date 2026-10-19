@@ -654,14 +654,19 @@ class TestOrdering:
         ]
 
     def test_author_date_sorts_by_first_author_then_year(self) -> None:
+        """西文按字母序、中文按**拼音**序（Issue #4 剩余项：此前按 Unicode 码位）。
+
+        中文拼音：陈(chen) < 牛(niu) < 赵(zhao) —— 这才是正确的著者字顺；
+        旧实现按码位会得到 牛(725B) < 赵(8D75) < 陈(9648)，明显不合字顺。
+        """
         ordered = sort_items(load_corpus_items(), "author-date")
         assert [item.id for item in ordered] == [
+            "src:book-multi-agent-2022",  # 陈国强（chen）
             "src:2309.15217v2",  # Es
             "src:arxiv-fair-rag-2025",  # Garcia
+            "doi:10.1234/zh.journal.2024.001",  # 牛耕田（niu）
             "src:conf-orchestration-2024",  # Smith
-            "doi:10.1234/zh.journal.2024.001",  # 牛耕田（Unicode 码位序，无拼音库）
-            "src:thesis-evidence-tracing-2025",  # 赵敏
-            "src:book-multi-agent-2022",  # 陈国强
+            "src:thesis-evidence-tracing-2025",  # 赵敏（zhao）
         ]
 
     def test_unknown_ordering_rejected(self) -> None:

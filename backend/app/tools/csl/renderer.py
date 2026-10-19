@@ -45,6 +45,7 @@ from app.tools.csl.models import (
     StyleResolver,
     author_sort_text,
     normalize_title,
+    sort_key_text,
 )
 
 #: 引擎自带的 bibliography 编号前缀（冻结规则，计划 §1.3；裁决 R-M1-3① 放宽）：
@@ -108,11 +109,16 @@ def sort_items(items: Sequence[CslItem], ordering: str) -> list[CslItem]:
     raise ValueError(f"未知 ordering：{ordering!r}（仅支持 citation-order / author-date）")
 
 
-def _author_date_key(item: CslItem) -> tuple[str, int, str]:
-    """作者-出版年排序键：第一作者（literal 优先）→ 年份 → 归一题名。"""
-    first = author_sort_text(item.author[0]).casefold() if item.author else ""
+def _author_date_key(item: CslItem) -> tuple[str, str, int, str]:
+    """作者-出版年排序键：第一作者（literal 优先）→ 年份 → 归一题名。
+
+    第一作者按 `sort_key_text` 取键：**中文按拼音**（`赵` → `zhao`），
+    西文按 casefold；同音不同字回落到原文码位保证确定性排序。
+    """
+    first_text = author_sort_text(item.author[0]) if item.author else ""
     return (
-        first,
+        sort_key_text(first_text),
+        first_text,
         item.issued_year if item.issued_year is not None else 0,
         normalize_title(item.title),
     )

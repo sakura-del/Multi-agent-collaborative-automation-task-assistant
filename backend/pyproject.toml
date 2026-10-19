@@ -67,6 +67,10 @@ dependencies = [
     # 上游自述 CSL 覆盖率约 60% + Alpha，故必须用 golden 测试兜住我们真正用到的构造；
     # 失败时的路线内逃生通道是 pandoc --citeproc（不回到 citeproc-js）。
     "citeproc-py==0.11.1",
+
+    # 中文著者字顺（Issue #4 剩余项）：author-date 排序按拼音而非 Unicode 码位。
+    # pypinyin 为 MIT、纯 Python、无运行时依赖（~840KB）；未安装时排序自动退化为码位（不崩）。
+    "pypinyin==0.55.0",
 ]
 
 [project.optional-dependencies]
