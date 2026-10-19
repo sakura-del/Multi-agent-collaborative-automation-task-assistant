@@ -1105,6 +1105,80 @@ RESULT: PASS
 `docs/runbooks/defense-demo.md` 第 5 步的「如规划未自动出现，按 F5 刷新」绕过说明**可以删除**
 （该缺陷已修复，且服务器实测通过）。
 
+---
+
+## P1 配置优先级缺陷执行记录（2026-10-19）
+
+**提交**：`f943a44`（3 文件，+219）
+
+### 1. 根因
+
+`get_settings()` 旧实现：
+
+```python
+defaults = _load_yaml_defaults()
+return Settings(**defaults)      # ← yaml 变成 init 参数
+```
+
+pydantic-settings 的优先级是 **init 参数 > 环境变量 > .env > 默认值**，所以
+`config/default.yaml` 反而**压过**了 `.env` 与系统环境变量：
+
+```
+REFERENCE_VERIFICATION__CONTACT_EMAIL=me@example.org   # 不生效
+contact_email: ""                                      # YAML 里的空值赢
+```
+
+后果（已实际发生）：Issue #3 的 `contact_email` 只能手改 yaml 注入，
+任何「用部署环境变量覆盖 yaml 默认值」的运维手段全部失效。
+
+### 2. 修复
+
+新增 `_YamlDefaultsSource(PydanticBaseSettingsSource)`，通过
+`Settings.settings_customise_sources()` 插到**最低优先级**（仅高于类默认值）：
+
+```
+init → env → dotenv → yaml → file_secrets
+```
+
+pydantic-settings 按返回顺序先命中者赢，故环境变量正常覆盖 yaml，而 yaml 仍作基线生效。
+`get_settings()` 简化为 `Settings()`。
+
+### 3. 测试（`tests/test_config_priority.py`，9 例）
+
+- 环境变量覆盖 yaml 顶层标量（`JWT_SECRET_KEY`）
+- **覆盖嵌套字段**（`REFERENCE_VERIFICATION__CONTACT_EMAIL`，即 Issue #3 实际阻塞点）
+- 覆盖嵌套数值 / 布尔 / 列表（`LLM__FALLBACK_CHAIN`）
+- 无环境变量时 yaml 仍生效（**不丢基线**）；yaml 部分字段 + 类默认值合并
+- yaml 缺失时不崩、回落类默认值
+- 回归：仓库真实 `default.yaml` 的 `fallback_chain` 仍被加载
+
+### 4. 服务器容器内验证（真实 yaml + 真实环境变量）
+
+```
+YAML contact_email      = ''            YAML max_concurrency = 2
+ENV  CONTACT_EMAIL      = 'ops@example.org'   ENV MAX_CONCURRENCY = 7
+--- 生效值 ---
+settings.contact_email  = 'ops@example.org'    ← 环境变量赢
+settings.max_concurrency= 7                    ← 环境变量赢
+--- yaml 基线仍应生效 ---
+fallback_chain[0]       = deepseek             ← yaml 基线仍在
+app.name 非空            = True
+jwt_algorithm           = HS256
+RESULT: PASS
+```
+
+### 5. 门禁
+
+black/ruff 干净；`mypy` 0 错误（141 文件）；`pytest` **1571 passed / 8 skipped**；
+覆盖率 **89.58%**（`config.py` 97%）。
+
+### 6. 顺带更新
+
+`config/default.yaml` 里关于该缺陷的过时注释已改为「✅ 已修复，推荐在 `.env` 写
+`REFERENCE_VERIFICATION__CONTACT_EMAIL=you@example.org`」——Issue #3 的 `contact_email`
+遗留项就此闭环。
+
+
 
 
 
