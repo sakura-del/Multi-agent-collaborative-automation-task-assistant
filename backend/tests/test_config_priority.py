@@ -32,8 +32,7 @@ import textwrap
 import pytest
 
 #: 临时 yaml 基线：故意给出一组"非默认"值，便于断言谁赢
-YAML_BASELINE = textwrap.dedent(
-    """
+YAML_BASELINE = textwrap.dedent("""
     app:
       env: "production"
       debug: true
@@ -44,8 +43,7 @@ YAML_BASELINE = textwrap.dedent(
       max_concurrency: 2
       verify_offline_tasks: false
     jwt_secret_key: "yaml-secret"
-    """
-)
+    """)
 
 
 @pytest.fixture

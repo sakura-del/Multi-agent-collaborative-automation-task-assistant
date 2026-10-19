@@ -98,9 +98,15 @@ dev = [
     "aiosqlite>=0.19.0",  # 测试环境用 SQLite 内存库替代 PostgreSQL
     "fakeredis>=2.21.0",  # 测试环境用 fake redis 替代真实 Redis
     "lupa>=2.0",  # fakeredis 的 Lua eval 支持（分布式锁测试需要）
-    "black>=24.2.0",
-    "ruff>=0.2.2",
-    "mypy>=1.8.0",
+    # ⚠️ 代码质量工具必须**锁定版本**（用 ==，不用 >=）：
+    # CI 通过 `pip install -e ".[dev]"` 装依赖，宽松下限会让 CI 装到最新版，
+    # 而本地 venv 是旧版 → 「本地全绿、CI 红」的假象。曾因 black 24→26 的
+    # 「hug 括号」规则变更导致 10+ 个提交全部 CI 失败（2026-10-19 修复）。
+    # 升级流程：改这里的版本 → 本地 `pip install -e ".[dev]"` → 跑 black/ruff/mypy
+    # → 提交格式化差异，保证 CI 与本地始终同一版本。
+    "black==26.10.1",
+    "ruff==0.16.0",
+    "mypy==2.3.0",
     "pre-commit>=3.6.2",
 ]
 

@@ -23,6 +23,22 @@ from evaluation.reporting import (
 METRIC_KEYS = list(ALL_METRICS)
 
 
+def _matplotlib_available() -> bool:
+    """CI 只装 `[dev]`，不装 `[evaluation]`（matplotlib 属可选依赖）。
+
+    `render_figures` 在缺 matplotlib 时会生成 `.md` 占位文件而非 PNG（**设计如此**，
+    不静默跳过）。因此图表断言必须按依赖是否可用区分，否则「本地绿、CI 红」。
+    """
+    try:
+        import matplotlib  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+MATPLOTLIB_AVAILABLE = _matplotlib_available()
+
+
 def _write_run(
     root: Path,
     profile: str,
@@ -211,22 +227,44 @@ class TestReportGeneration:
         output = tmp_path / "report"
         artifacts = generate_report(run_set, output)
 
-        expected = {
+        # 与绘图无关的产物恒存在
+        always = {
             "summary.csv",
             "aggregate.csv",
             "significance.csv",
             "report.md",
-            "figures/retrieval.png",
-            "figures/content_quality.png",
-            "figures/citations.png",
-            "figures/latency_tokens.png",
-            "figures/recovery.png",
         }
+        figure_names = [
+            "figures/retrieval",
+            "figures/content_quality",
+            "figures/citations",
+            "figures/latency_tokens",
+            "figures/recovery",
+        ]
+        # 有 matplotlib → PNG；缺 matplotlib → `.md` 占位（实现的设计：不静默跳过）
+        figure_ext = ".png" if MATPLOTLIB_AVAILABLE else ".md"
+        expected = always | {f"{name}{figure_ext}" for name in figure_names}
+
         produced = {path.relative_to(output).as_posix() for path in artifacts}
         assert expected <= produced
         for relative in expected:
             assert (output / relative).is_file(), f"缺少 {relative}"
             assert (output / relative).stat().st_size > 0, f"{relative} 为空"
+
+    def test_figures_degrade_to_placeholder_without_matplotlib(
+        self, run_set: Path, tmp_path: Path
+    ) -> None:
+        """缺 matplotlib 时必须产出可读占位说明，而不是静默缺失（设计契约）。"""
+        output = tmp_path / "report"
+        artifacts = generate_report(run_set, output)
+        produced = {path.relative_to(output).as_posix() for path in artifacts}
+
+        if MATPLOTLIB_AVAILABLE:
+            assert "figures/retrieval.png" in produced
+        else:
+            placeholder = output / "figures" / "retrieval.md"
+            assert placeholder.is_file()
+            assert "matplotlib" in placeholder.read_text(encoding="utf-8")
 
     def test_summary_csv_has_one_row_per_run(self, run_set: Path, tmp_path: Path) -> None:
         output = tmp_path / "report"
