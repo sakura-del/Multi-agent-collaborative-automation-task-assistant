@@ -1178,6 +1178,69 @@ black/ruff 干净；`mypy` 0 错误（141 文件）；`pytest` **1571 passed / 8
 `REFERENCE_VERIFICATION__CONTACT_EMAIL=you@example.org`」——Issue #3 的 `contact_email`
 遗留项就此闭环。
 
+---
+
+## Issue #4 剩余三项收尾执行记录（2026-10-19）
+
+**提交**：`deefaaa`（著者-出版年制）+ `a986785`（三项剩余能力）
+
+### 1. GB/T 7714—2025 著者-出版年制（`deefaaa`）
+
+新增 `gbt7714-2025-author-date.csl`（自研、标准 CSL 1.0.2、零 CSL-M），注册为第 6 个预置样式。
+与数字制共用同一套著录规则，差异仅三处：正文标注 `(著者 年)`、参考文献表不编号按著者字顺、
+**出版年紧跟著者项**。
+
+**自研缺陷（先红后绿）**：首版把 `issued-year` 同时放进著者项与出版项 → 年份重复两次
+（`… 2023. Ragas…[J/OL]. Proceedings …, 2023, 12(3): …`）。修法：`container-periodical` /
+`publishing-info` / 预印本 / 数据集分支都不再输出年份。测试按**结构**判断而非简单计数
+（题名里可能有年份，如 `Proceedings of the 2024 …`；DOI 里也有），避免误报。
+
+### 2. 三项剩余能力（`a986785`）
+
+| 项 | 修法 | 关键点 |
+| --- | --- | --- |
+| **`CslItem.medium`** | 新增字段 + `to_csl_json`/`from_csl_json` 双向映射 + bibliography 透传 | 样式侧 `carrier-identifier` 早已支持，此前数据流不到 → `[J/MM]` 永远出不来；显式 medium 优先于「有 URL 即 OL」 |
+| **中文拼音排序** | 新增 `sort_key_text()`：CJK 逐字替换为无声调拼音，其余 casefold | 旧实现按 Unicode 码位得「牛 < 赵 < 陈」（不合字顺），现为「陈(chen) < 牛(niu) < 赵(zhao)」；同音字回落原文码位保证确定性；西文行为不变 |
+| **全大写姓名归一** | 新增 `normalize_name_case()`，接入 `parse_csl_name` 与 `_csl_name_from_json` | `citeproc-py` 的 `name-part capitalize-first` 抛 AttributeError，样式侧做不了，必须在数据层归一；只处理整段全大写（含连字符分段），`McDonald`/中文不动 |
+
+**新增依赖**：`pypinyin==0.55.0`（MIT、纯 Python、无运行时依赖 ~840KB）。
+未安装时 `sort_key_text` 自动退化为码位排序（不崩）。
+
+### 3. golden 快照变更（预期内的正确变更）
+
+| 快照 | 是否变化 | 原因 |
+| --- | --- | --- |
+| `gb2025-numeric` / `ieee` / `nature` | **未变** | citation-order 排序，与拼音无关 |
+| `gb2025-author-date` / `apa` | **已更新** | 中文条目按拼音重排（这正是本次要修的行为） |
+
+### 4. 服务器容器内验证（真实依赖）
+
+```
+=== 1. medium（2025 载体标识 MM）===
+entry: [1] 缩微资料示例[J/MM]. 2024.
+含 [J/MM]: True
+
+=== 2. 拼音排序 ===
+拼音键: [('赵敏','zhaomin'), ('陈国强','chenguoqiang'), ('白露','bailu')]
+排序结果: ['白露', '陈国强', '赵敏']   正确（白<陈<赵）: True
+
+=== 3. 全大写姓名归一 ===
+SMITH -> Smith          ESPINOSA-ANKE -> Espinosa-Anke
+McDonald（不动）-> McDonald        SMITH, J -> family='Smith' given='J'
+渲染: [1] Es S. Ragas: Automated Evaluation[J]. 2023.    已归一: True
+
+RESULT: PASS
+```
+
+### 5. 门禁
+
+black/ruff 干净；`mypy` 0 错误（141 文件）；`pytest` **1610 passed / 8 skipped**；
+覆盖率 **89.64%**（`models.py` 94%）。新增测试 22 例（`tests/test_csl_remaining_items.py`）
++ 16 例（`tests/test_csl_author_date_style.py`）。
+
+**至此 Issue #4 的全部验收项与遗留项均已闭环。**
+
+
 
 
 
