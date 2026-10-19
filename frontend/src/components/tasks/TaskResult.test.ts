@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { mount } from "@vue/test-utils";
 
 import TaskResult from "@/components/tasks/TaskResult.vue";
-import type { Artifact, ReviewReport } from "@/api/types";
+import ReferenceVerificationPanel from "@/components/tasks/ReferenceVerificationPanel.vue";
+import type { Artifact, ReferenceVerificationSummary, ReviewReport } from "@/api/types";
 
 const downloadArtifact = vi.fn();
 vi.mock("@/api/tasks", () => ({
@@ -124,5 +125,167 @@ describe("TaskResult", () => {
 
     expect(wrapper.find('[data-test="download-markdown"]').attributes("disabled")).toBeUndefined();
     expect(wrapper.find('[data-test="download-docx"]').attributes("disabled")).toBeDefined();
+  });
+});
+
+// ===== 引用真实性核验集成（Issue #3 遗留项 / 计划 §1.2）=====
+
+function verificationSummary(
+  overrides: Partial<ReferenceVerificationSummary> = {}
+): ReferenceVerificationSummary {
+  return {
+    total: 3,
+    verified: 1,
+    metadata_mismatch: 1,
+    not_found: 1,
+    unverified: 0,
+    cached_hits: 1,
+    dropped: 0,
+    intercepted: false,
+    ...overrides,
+  };
+}
+
+describe("TaskResult · 引用核验集成", () => {
+  it("passes the parsed summary and per-entry verdicts to the panel", () => {
+    const summary = verificationSummary();
+    const wrapper = mountResult({
+      report: report({
+        stats: { documents: 10, reference_verification: summary },
+        bibliography: [
+          { index: 1, title: "已验证文献", verification_status: "verified" },
+          { index: 2, title: "元数据不符文献", verification_status: "metadata_mismatch" },
+          { index: 3, title: "未核验文献" },
+        ],
+      }),
+    });
+
+    const panel = wrapper.findComponent(ReferenceVerificationPanel);
+    expect(panel.exists()).toBe(true);
+    expect(panel.props("summary")).toEqual(summary);
+    expect(panel.props("entries")).toEqual([
+      { index: 1, title: "已验证文献", url: null, verification_status: "verified" },
+      { index: 2, title: "元数据不符文献", url: null, verification_status: "metadata_mismatch" },
+      { index: 3, title: "未核验文献", url: null, verification_status: null },
+    ]);
+  });
+
+  it("renders the panel above the existing bibliography list", () => {
+    const wrapper = mountResult({
+      report: report({
+        stats: { reference_verification: verificationSummary() },
+      }),
+    });
+
+    const panelElement = wrapper.findComponent(ReferenceVerificationPanel).element;
+    const listElement = wrapper.find("ol.result__bibliography").element;
+    expect(
+      panelElement.compareDocumentPosition(listElement) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+  });
+
+  it("passes null when the task has no reference_verification stats", () => {
+    // 离线任务默认不做核验：stats 里没有该键（计划 §0.2）
+    const wrapper = mountResult();
+    const panel = wrapper.findComponent(ReferenceVerificationPanel);
+
+    expect(panel.exists()).toBe(true);
+    expect(panel.props("summary")).toBeNull();
+    expect(panel.props("entries")).toEqual([
+      {
+        index: 1,
+        title: "RAG 评估",
+        url: "https://arxiv.org/abs/2401.00001v1",
+        verification_status: null,
+      },
+      { index: 2, title: "危险链接", url: null, verification_status: null },
+      { index: 3, title: "无链接", url: null, verification_status: null },
+    ]);
+  });
+
+  it.each([
+    ["非对象", "verification"],
+    ["缺字段", { verified: 1, total: 1 }],
+    ["计数非数字", { ...verificationSummary(), verified: "1" }],
+    ["intercepted 非布尔", { ...verificationSummary(), intercepted: "no" }],
+  ])("treats a malformed summary as missing: %s", (_label, value) => {
+    const wrapper = mountResult({
+      report: report({ stats: { documents: 10, reference_verification: value } }),
+    });
+
+    // 类型不符 → null（不抛错、不臆造 0 值）
+    expect(wrapper.findComponent(ReferenceVerificationPanel).props("summary")).toBeNull();
+  });
+
+  it("keeps unknown verification_status values as null", () => {
+    const wrapper = mountResult({
+      report: report({
+        stats: { reference_verification: verificationSummary() },
+        bibliography: [
+          { index: 1, title: "未知状态", verification_status: "bogus" },
+          { index: 2, title: "数字状态", verification_status: 7 },
+        ],
+      }),
+    });
+
+    const entries = wrapper.findComponent(ReferenceVerificationPanel).props("entries") as Array<{
+      verification_status: string | null;
+    }>;
+    expect(entries.map((entry) => entry.verification_status)).toEqual([null, null]);
+  });
+
+  it("accepts every backend verdict value", () => {
+    const wrapper = mountResult({
+      report: report({
+        stats: { reference_verification: verificationSummary() },
+        bibliography: [
+          { index: 1, title: "a", verification_status: "verified" },
+          { index: 2, title: "b", verification_status: "metadata_mismatch" },
+          { index: 3, title: "c", verification_status: "not_found" },
+          { index: 4, title: "d", verification_status: "unverified" },
+        ],
+      }),
+    });
+
+    const entries = wrapper.findComponent(ReferenceVerificationPanel).props("entries") as Array<{
+      verification_status: string | null;
+    }>;
+    expect(entries.map((entry) => entry.verification_status)).toEqual([
+      "verified",
+      "metadata_mismatch",
+      "not_found",
+      "unverified",
+    ]);
+  });
+
+  it("renders the real panel badges while keeping the bibliography list intact", () => {
+    const wrapper = mountResult({
+      report: report({
+        stats: { reference_verification: verificationSummary() },
+        bibliography: [
+          { index: 1, title: "已验证文献", verification_status: "verified" },
+          { index: 2, title: "未核验文献" },
+        ],
+      }),
+    });
+
+    // 徽标由 Panel 渲染（方案 A）：我这里不再重复渲染同一 data-test
+    expect(wrapper.find('[data-test="verification-panel"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="verification-count-verified"]').text()).toContain("1");
+    expect(wrapper.find('[data-test="bibliography-verdict-1"]').text()).toBe("已验证");
+    expect(wrapper.find('[data-test="bibliography-verdict-2"]').exists()).toBe(false);
+    // 既有参考文献列表仍由 TaskResult 渲染，未被 Panel 取代
+    expect(wrapper.findAll('[data-test^="bibliography-item-"]')).toHaveLength(2);
+  });
+
+  it("shows the explicit empty state when the task skipped verification", () => {
+    const wrapper = mountResult();
+
+    expect(wrapper.find('[data-test="verification-empty"]').text()).toContain(
+      "本次任务未做外部引用核验"
+    );
+    // 未核验 ≠ 核验 0 条：不得渲染统计数字或徽标
+    expect(wrapper.find('[data-test="verification-summary"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="bibliography-verdict-1"]').exists()).toBe(false);
   });
 });

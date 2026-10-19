@@ -53,6 +53,8 @@ class TaskCreate(BaseModel):
     citation_style: str = Field(default="gbt7714", min_length=1, max_length=64)
     document_ids: list[UUID] = Field(default_factory=list, max_length=50)
     offline_dataset: bool = False
+    verify_references: bool | None = None
+    """是否做外部引用核验（Issue #3）：None=沿用全局配置；True=强制核验（含离线任务）；False=跳过。"""
 
     def to_contract(self) -> LiteratureReviewRequest:
         """映射为编排层契约（HTTP 层不向编排层传递自身模型）。"""

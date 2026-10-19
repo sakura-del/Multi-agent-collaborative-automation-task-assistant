@@ -195,6 +195,14 @@ class LiteratureReviewRequest(BaseModel):
     citation_style: str = Field(default="gbt7714", min_length=1, max_length=64)
     document_ids: list[UUID] = Field(default_factory=list, max_length=50)
     offline_dataset: bool = False
+    verify_references: bool | None = None
+    """本任务是否做外部引用核验（Issue #3）。
+
+    - ``None``（默认）：沿用全局配置——离线清单任务零外呼（R6），在线任务核验；
+    - ``True``：本任务强制核验，**即使离线**（核验结论有 7 天缓存兜底），
+      用于让「引用可核验」在离线演示中可见；
+    - ``False``：本任务强制跳过核验。
+    """
 
 
 class TaskControlRequest(BaseModel):

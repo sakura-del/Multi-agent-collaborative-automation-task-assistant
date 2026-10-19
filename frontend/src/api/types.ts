@@ -69,6 +69,8 @@ export interface TaskCreate {
   citation_style?: string;
   document_ids?: string[];
   offline_dataset?: boolean;
+  /** 本任务是否做外部引用核验：true 时即使离线语料也与 CrossRef/OpenAlex 比对（Issue #3 遗留项） */
+  verify_references?: boolean;
 }
 
 export interface TaskCreateOut {
@@ -241,4 +243,33 @@ export interface CitationStyleOut {
 export interface CitationStyleList {
   styles: CitationStyleOut[];
   default_style_id: string;
+}
+
+// ===== 引用真实性核验契约（Issue #3 前端展示；计划 2026-10-19-03b §1.2）=====
+
+/** 单条参考文献的核验结论（与后端 `ReferenceVerdict` 对齐）。 */
+export type VerificationStatus = "verified" | "metadata_mismatch" | "not_found" | "unverified";
+
+/**
+ * 核验统计汇总（`review_report.stats.reference_verification`）。
+ *
+ * 离线任务默认不做核验：该键**不存在** → 展示层必须走明确空态，不得臆造 0 值。
+ */
+export interface ReferenceVerificationSummary {
+  total: number;
+  verified: number;
+  metadata_mismatch: number;
+  not_found: number;
+  unverified: number;
+  cached_hits: number;
+  dropped: number;
+  intercepted: boolean;
+}
+
+/** 结果页参考文献条目；`verification_status` 为 `null` 表示未核验或值非法。 */
+export interface BibliographyEntry {
+  index: number;
+  title: string;
+  url: string | null;
+  verification_status: VerificationStatus | null;
 }

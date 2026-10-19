@@ -3,7 +3,14 @@ import { computed, ref } from "vue";
 import { Download, FileText } from "lucide-vue-next";
 
 import { taskApi } from "@/api/tasks";
-import type { Artifact, ReviewReport } from "@/api/types";
+import ReferenceVerificationPanel from "@/components/tasks/ReferenceVerificationPanel.vue";
+import type {
+  Artifact,
+  BibliographyEntry,
+  ReferenceVerificationSummary,
+  ReviewReport,
+  VerificationStatus,
+} from "@/api/types";
 
 // 结果视图：左侧正文（纯文本渲染，不用 v-html），右侧克制的元数据栏
 const props = defineProps<{
@@ -30,12 +37,6 @@ const scores = computed(() =>
   }))
 );
 
-interface BibliographyEntry {
-  index: number;
-  title: string;
-  url: string | null;
-}
-
 /** 只允许 http/https 链接，其余退化为纯文本（避免 javascript:/data: 注入） */
 function safeUrl(value: unknown): string | null {
   if (typeof value !== "string") {
@@ -43,6 +44,69 @@ function safeUrl(value: unknown): string | null {
   }
   return /^https?:\/\//i.test(value) ? value : null;
 }
+
+// ===== 引用核验（Issue #3 遗留项）：stats 是 Record<string, unknown>，必须安全解析 =====
+
+const VERIFICATION_STATUSES: readonly VerificationStatus[] = [
+  "verified",
+  "metadata_mismatch",
+  "not_found",
+  "unverified",
+];
+
+const SUMMARY_COUNT_KEYS = [
+  "total",
+  "verified",
+  "metadata_mismatch",
+  "not_found",
+  "unverified",
+  "cached_hits",
+  "dropped",
+] as const;
+
+/** 非法值 → null（不渲染徽标，也不猜测结论） */
+function parseVerificationStatus(value: unknown): VerificationStatus | null {
+  return typeof value === "string" && (VERIFICATION_STATUSES as readonly string[]).includes(value)
+    ? (value as VerificationStatus)
+    : null;
+}
+
+/**
+ * 安全解析 `stats.reference_verification`：缺键 / 类型不符 → null。
+ *
+ * 不抛错、也不臆造 0 值——离线任务默认不核验，展示层必须能区分「未核验」与「核验 0 条」。
+ */
+function parseVerificationSummary(value: unknown): ReferenceVerificationSummary | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const counts: Record<string, number> = {};
+  for (const key of SUMMARY_COUNT_KEYS) {
+    const raw = record[key];
+    if (typeof raw !== "number" || !Number.isFinite(raw)) {
+      return null;
+    }
+    counts[key] = raw;
+  }
+  if (typeof record.intercepted !== "boolean") {
+    return null;
+  }
+  return {
+    total: counts.total,
+    verified: counts.verified,
+    metadata_mismatch: counts.metadata_mismatch,
+    not_found: counts.not_found,
+    unverified: counts.unverified,
+    cached_hits: counts.cached_hits,
+    dropped: counts.dropped,
+    intercepted: record.intercepted,
+  };
+}
+
+const verificationSummary = computed<ReferenceVerificationSummary | null>(() =>
+  parseVerificationSummary(props.report.stats?.reference_verification)
+);
 
 const bibliography = computed<BibliographyEntry[]>(() =>
   (props.report.bibliography ?? []).map((item, position) => {
@@ -52,6 +116,7 @@ const bibliography = computed<BibliographyEntry[]>(() =>
       index,
       title: String(record.title ?? record.source_id ?? `文献 ${index}`),
       url: safeUrl(record.source_url ?? record.url),
+      verification_status: parseVerificationStatus(record.verification_status),
     };
   })
 );
@@ -140,6 +205,8 @@ async function download(kind: "markdown" | "docx") {
 
       <section>
         <h3>参考文献</h3>
+        <!-- 核验统计 + 逐条结论（逐条徽标由 Panel 渲染，列表项只提供数据） -->
+        <ReferenceVerificationPanel :summary="verificationSummary" :entries="bibliography" />
         <ol class="result__bibliography">
           <li
             v-for="entry in bibliography"

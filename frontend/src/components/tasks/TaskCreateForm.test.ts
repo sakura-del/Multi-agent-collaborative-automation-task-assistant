@@ -133,6 +133,7 @@ describe("TaskCreateForm", () => {
       citation_style: "apa",
       offline_dataset: true,
       document_ids: ["doc-1"],
+      verify_references: false,
     });
   });
 
@@ -222,5 +223,40 @@ describe("TaskCreateForm", () => {
     await wrapper.find("form").trigger("submit");
 
     expect(wrapper.emitted("submit")?.[0][0]).toMatchObject({ citation_style: "gbt7714" });
+  });
+});
+
+// ===== 引用核验开关（Issue #3 遗留项 / 计划 §1.3）=====
+
+describe("TaskCreateForm · 引用核验开关", () => {
+  it("keeps reference verification off by default", async () => {
+    const wrapper = mountForm();
+    const checkbox = wrapper.find('[data-test="verify-references"]');
+
+    expect(checkbox.exists()).toBe(true);
+    expect((checkbox.element as HTMLInputElement).checked).toBe(false);
+
+    await fillValidForm(wrapper);
+    await wrapper.find("form").trigger("submit");
+
+    expect(wrapper.emitted("submit")?.[0][0]).toMatchObject({ verify_references: false });
+  });
+
+  it("submits verify_references: true when the switch is enabled", async () => {
+    const wrapper = mountForm();
+    await wrapper.find('[data-test="verify-references"]').setValue(true);
+    await fillValidForm(wrapper);
+    await wrapper.find("form").trigger("submit");
+
+    expect(wrapper.emitted("submit")?.[0][0]).toMatchObject({ verify_references: true });
+  });
+
+  it("explains the external comparison and the extra latency", () => {
+    const wrapper = mountForm();
+    const label = wrapper.find('[data-test="verify-references-label"]').text();
+
+    expect(label).toContain("CrossRef");
+    expect(label).toContain("OpenAlex");
+    expect(label).toContain("耗时");
   });
 });

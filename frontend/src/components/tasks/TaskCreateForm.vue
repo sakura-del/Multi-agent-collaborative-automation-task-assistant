@@ -46,6 +46,8 @@ const language = ref<"zh" | "en">("zh");
 const styleOptions = ref<StyleOption[] | null>(null);
 const citationStyle = ref("gbt7714");
 const offlineDataset = ref(false);
+// 引用核验默认关闭：与全局默认一致，避免用户无感知地引入外呼延迟（Issue #3 遗留项）
+const verifyReferences = ref(false);
 const selectedDocuments = ref<string[]>([]);
 const validationMessages = ref<string[]>([]);
 
@@ -140,6 +142,7 @@ function handleSubmit() {
     citation_style: citationStyle.value,
     offline_dataset: offlineDataset.value,
     document_ids: [...selectedDocuments.value],
+    verify_references: verifyReferences.value,
   };
   emit("submit", payload);
 }
@@ -266,6 +269,11 @@ function handleSubmit() {
     <label class="checkbox">
       <input v-model="offlineDataset" data-test="offline" type="checkbox" />
       <span>使用离线演示语料（冻结 10 篇，不访问 arXiv）</span>
+    </label>
+
+    <label class="checkbox" data-test="verify-references-label">
+      <input v-model="verifyReferences" data-test="verify-references" type="checkbox" />
+      <span>引用核验：与 CrossRef/OpenAlex 比对文献元数据，可能增加任务耗时</span>
     </label>
 
     <fieldset v-if="props.documents.length" class="documents">

@@ -612,10 +612,30 @@ class TaskExecution:
         return config.mode
 
     def _reference_verifier_for_task(self, task: Any) -> Any | None:
-        """校验节点是否注入核验器：离线清单任务默认零外呼（R6）。"""
-        if self._offline_without_verification(task):
+        """校验节点是否注入核验器：按任务级开关收敛，缺省沿用 R6（离线零外呼）。"""
+        if not self._should_verify_references(task):
             return None
         return self.container.reference_verifier
+
+    @staticmethod
+    def _verify_references_switch(task: Any) -> bool | None:
+        """读取任务级核验开关（Issue #3）：`None` 表示沿用全局配置。"""
+        config = getattr(task, "config", None)
+        if not isinstance(config, dict):
+            return None
+        value = config.get("verify_references")
+        return value if isinstance(value, bool) else None
+
+    @classmethod
+    def _should_verify_references(cls, task: Any) -> bool:
+        """任务是否做外部引用核验（Issue #3 开关 + R6 默认）。
+
+        优先级：显式 `verify_references` > 全局 `verify_offline_tasks` > 离线零外呼。
+        """
+        switch = cls._verify_references_switch(task)
+        if switch is not None:
+            return switch
+        return not cls._offline_without_verification(task)
 
     @staticmethod
     def _offline_without_verification(task: Any) -> bool:
@@ -630,8 +650,10 @@ class TaskExecution:
         `RuntimeContainer._build_default_agent("reviewer")` 会注入真实核验器，而离线 e2e 的
         bibliography 有约 10 条，逐条外呼才是超时主因；离线演示必须零外呼、可复现，因此这里
         把核验器摘掉（注入式测试替身没有该属性时跳过）。
+
+        Issue #3 起尊重任务级开关：显式 `verify_references=True` 时**保留**核验器。
         """
-        if not self._offline_without_verification(task):
+        if self._should_verify_references(task):
             return
         # 注入式测试替身 / 老 Agent 没有该属性（或本来就没有核验器）时直接跳过
         if getattr(reviewer, "reference_verifier", None) is None:
