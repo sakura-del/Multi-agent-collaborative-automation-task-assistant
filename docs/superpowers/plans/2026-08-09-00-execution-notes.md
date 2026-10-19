@@ -880,6 +880,56 @@ passed=False retryable=False score=90
 语义通过→不可重试；**跨用户证据→仍不可重试且不调 LLM**（守卫）；确定性可重试失败→仍会跑语义校验；
 legacy 路径同语义。
 
+---
+
+## Issue #7 执行记录：正文冗余治理（2026-10-19）
+
+**背景**：Issue #6 的遗留项。复盘正文是各节点 `content` 的机械拼接，
+最终 Markdown 出现大面积重复段落（这也是 `duplicate_paragraph_ratio` 能"看见"重复的原因）。
+
+### 1. 生产取证（已完成任务 `45539af8` / `80b09d27` 的真实产物）
+
+| 任务 | 正文字符 | 正文段落 | 完全重复段落 | 比例 |
+| --- | --- | --- | --- | --- |
+| `45539af8` | 11621 | 57 | **26** | **0.456** |
+| `80b09d27` | 8779 | 51 | **24** | **0.471** |
+
+标题结构也暴露同一问题：`## 参考文献` 出现 **3 次**；
+`### 1. Ragas: Automated Evaluation…` 这类条目标题出现 **3 次**。
+
+### 2. 根因
+
+`ReviewerAgent._build_literature_review()` 对**每个**节点无条件执行
+`body_parts.append(result.content)`，然后 `"\n\n".join(body_parts)`。而管线里的节点内容天然互相包含：
+
+- `search`：检索结果列表；
+- `extract`：逐条抽取（含条目标题）；
+- `write`：综述正文（常复述 extract 的段落）；
+- `validate` / `review`：`_summarize_dependencies()` 把上游节点输出**整体拼接**
+  （形如 `[n3] …\n\n[n4] …`）——即「拼接的拼接」。
+
+于是正文里同一段内容可能出现 2–3 次，`## 参考文献` 这类章节也会随作者节点重复带入。
+
+### 3. 修复
+
+| 改动 | 说明 |
+| --- | --- |
+| `contracts.ExecutionResult` | 新增 `node_type`（Issue #7 由工作流填写，缺省空串表示历史负载「无法判定」）与 `content_role`（显式覆盖，缺省空串） |
+| `literature_review.execute_node` | 三个分支（search / extract·write / 汇总）都标注 `node_type`；`node_type` 随 `execution_result` 持久化并回流到复盘 |
+| `reviewer._contributes_to_body()` | 只有 `extract` / `write`（作者正文）进正文；`search` / `validate` / `review`（机械汇总）**不进正文**；`node_type` 缺失时**返回 True**（无法判定就不擅自丢内容，保持既有行为）；显式 `content_role` 优先 |
+| `reviewer._assemble_body()` | 按「首次出现顺序」去除**完全重复**的段落（空白归一后比较，不做模糊合并）；并剔除作者节点**自带**的 `## 参考文献` / `## 局限性` / `## 引用核验` 章节（由复盘统一生成） |
+
+### 4. 测试（`tests/test_review_body_dedup.py`，10 例）
+
+- 汇总节点内容不进正文（断言 `[n3]` / `[n4]` 拼接痕迹不出现）；
+- `## 参考文献` 全篇只出现 1 次（含作者节点自带参考文献的场景——守卫：正文其他内容不得被连带删除）；
+- 两个作者节点含同一段落 → 只保留 1 次，且正文段落零重复；
+- 摘要取自作者正文（不以 `[n` 开头）；
+- **向后兼容**：无 `node_type` 的历史负载 → 内容全部保留（不丢内容）；
+- 单作者节点输出逐字不变；
+- 工作流 `execute_node` 为两类节点都标注类型、`review` 把 `node_type` 传给复盘。
+
+
 
 
 

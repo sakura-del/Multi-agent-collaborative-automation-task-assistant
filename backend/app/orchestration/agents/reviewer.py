@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Awaitable, Callable, Mapping
 from typing import TYPE_CHECKING, Any
 
@@ -72,6 +73,81 @@ def _verification_line(summary: Mapping[str, Any]) -> str:
     return (
         f"引用核验：{counts} / 已拦截 {_summary_count(summary, 'dropped')} 条；拦截开关：{switch}"
     )
+
+
+def _contributes_to_body(result: Any) -> bool:
+    """该节点内容是否应进入复盘正文（Issue #7）。
+
+    `extract` / `write` 是作者正文，进正文；
+    `search`（检索结果列表）、`validate` / `review`（依赖输出的机械汇总，
+    而汇总里又已包含上游节点全文）不进正文——否则正文大面积重复
+    （生产实测：57 段里 26 段重复，`## 参考文献` 出现 3 次）。
+
+    `node_type` 缺失（历史持久化负载）时返回 True：无法判定角色就不擅自丢内容，
+    保持既有行为。显式 `content_role` 优先于类型推断。
+    """
+    role = str(getattr(result, "content_role", "") or "")
+    if role == "aggregated":
+        return False
+    if role == "authored":
+        return True
+    node_type = str(getattr(result, "node_type", "") or "")
+    if not node_type:
+        return True
+    return node_type in {"extract", "write"}
+
+
+def _assemble_body(body_parts: list[str]) -> str:
+    """拼接正文并去除**完全重复的段落**（Issue #7）。
+
+    多个作者节点之间仍可能复述同一段内容（如 extract 与 write 都写了同一段背景），
+    按「首次出现顺序」保留一次即可。只去重完全相同的段落（按空白归一后比较），
+    不做模糊合并，避免把不同内容误删。
+
+    同时剔除作者正文里**自带的** `## 参考文献` / `## 局限性` / `## 引用核验` 章节：
+    这些章节由复盘统一生成，节点自带的版本会造成同一章节出现多次
+    （生产实测：`## 参考文献` 出现 3 次）。只删这三个受管章节，其余内容原样保留。
+    """
+    paragraphs: list[str] = []
+    seen: set[str] = set()
+    skipping = False
+    for part in body_parts:
+        for block in part.split("\n\n"):
+            stripped = block.strip()
+            if not stripped:
+                continue
+            heading = _managed_section_heading(stripped)
+            if heading is not None:
+                # 进入受管章节：其内容由复盘统一生成，正文里整体丢弃
+                skipping = True
+                continue
+            if stripped.startswith("#"):
+                # 任何其他标题都结束受管章节的跳过状态
+                skipping = False
+            if skipping:
+                continue
+            key = re.sub(r"\s+", " ", stripped)
+            if key in seen:
+                continue
+            seen.add(key)
+            paragraphs.append(stripped)
+    return "\n\n".join(paragraphs)
+
+
+#: 由复盘统一生成、节点正文不得自带的章节标题
+_MANAGED_SECTIONS = ("参考文献", "局限性", "引用核验")
+
+
+def _managed_section_heading(block: str) -> str | None:
+    """若该块是受管章节标题（`## 参考文献` 等），返回章节名；否则 None。"""
+    match = re.match(r"^#{1,3}\s+(.+?)\s*$", block)
+    if match is None:
+        return None
+    title = match.group(1).strip()
+    for name in _MANAGED_SECTIONS:
+        if title == name or title.startswith(f"{name}：") or title.startswith(f"{name}:"):
+            return name
+    return None
 
 
 def _enrich_reference_entry(entry: dict[str, Any], artifact: Mapping[str, Any]) -> None:
@@ -250,7 +326,7 @@ class ReviewerAgent(BaseAgent):
         citations: dict[str, dict[str, Any]] = {}
         for result in results:
             content = (result.content or "").strip()
-            if content:
+            if content and _contributes_to_body(result):
                 body_parts.append(content)
             for item in result.evidence:
                 url = str(item.source_url) if item.source_url else ""
@@ -303,7 +379,7 @@ class ReviewerAgent(BaseAgent):
         final_markdown = self._compose_review_markdown(
             topic=topic,
             abstract=abstract,
-            body="\n\n".join(body_parts),
+            body=_assemble_body(body_parts),
             limitations=limitations or ["（无）"],
             bibliography=bibliography,
             reference_verification=verification_summary,

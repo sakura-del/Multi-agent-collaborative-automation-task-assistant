@@ -339,7 +339,7 @@ class LiteratureReviewWorkflow:
             if self._executor is None:
                 raise HumanActionRequiredError("缺少执行 Agent")
             evidence = [Evidence.model_validate(item) for item in prepared_node["evidence"]]
-            return await self._executor.execute_result(
+            result = await self._executor.execute_result(
                 node_id=plan_node.id,
                 title=plan_node.title,
                 description=prepared_node["description"],
@@ -351,6 +351,9 @@ class LiteratureReviewWorkflow:
                 validation_feedback=validation_feedback,
                 trace_id=self._trace_id(task),
             )
+            # Issue #7：标注节点类型，供复盘区分作者正文与机械汇总
+            result.node_type = plan_node.type
+            return result
 
         # validate / review：不调用任何工具，只汇总依赖输出
         content = self._summarize_dependencies(dependency_outputs or {})
@@ -360,6 +363,7 @@ class LiteratureReviewWorkflow:
             content=content,
             warnings=warnings,
             duration_ms=0,
+            node_type=plan_node.type,
         )
 
     async def _execute_search(
@@ -381,6 +385,7 @@ class LiteratureReviewWorkflow:
             content=content,
             artifacts=[record.model_dump(mode="json") for record in records],
             duration_ms=0,
+            node_type=node.type,
         )
 
     # ===== 缝 4/5：校验与复盘 =====

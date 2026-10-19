@@ -106,6 +106,19 @@ class ExecutionResult(BaseModel):
     duration_ms: int = Field(ge=0)
     prompt_tokens: int = Field(default=0, ge=0)
     completion_tokens: int = Field(default=0, ge=0)
+    node_type: str = ""
+    """节点类型（search/extract/write/validate/review），Issue #7 起由工作流填写。
+
+    复盘用它区分**作者正文**（extract/write）与**机械汇总**（search/validate/review）：
+    后者内容是其他节点输出的拼接，若并入正文会造成大面积重复。
+    历史持久化负载没有该键，缺省空串表示「无法判定」，复盘保持既有行为。
+    """
+
+    content_role: str = ""
+    """内容角色（authored/aggregated，Issue #7）：显式标注时优先于 `node_type` 推断。
+
+    缺省空串表示未标注，由复盘按 `node_type` 判定。
+    """
 
 
 class ValidationCheck(BaseModel):
