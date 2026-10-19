@@ -15,7 +15,7 @@ from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 
 # 项目根目录解析（多种部署形态都要能读到 config/default.yaml）。
@@ -236,9 +236,16 @@ class CORSConfig(BaseModel):
 class Settings(BaseSettings):
     """全局配置入口。
 
-    加载顺序：
-    1. `config/default.yaml` 提供默认值
-    2. `.env` 文件与系统环境变量覆盖（嵌套字段用 `__` 分隔）
+    加载顺序（**优先级由低到高**）：
+    1. 类字段默认值
+    2. `config/default.yaml`（仅作为默认值基线）
+    3. `.env` 文件
+    4. 系统环境变量（嵌套字段用 `__` 分隔）
+
+    历史缺陷（P1，2026-10-19 修复）：旧实现 `Settings(**yaml_defaults)` 把 yaml 当作
+    **init 参数**传入，而 pydantic-settings 中 init 参数优先级最高，导致
+    「yaml 压过 .env / 环境变量」——Issue #3 的 `contact_email` 因此只能手改 yaml。
+    现改为 `settings_customise_sources` 里插入**最低优先级**的 yaml 源。
     """
 
     model_config = SettingsConfigDict(
@@ -264,6 +271,28 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 60
     jwt_refresh_token_expire_days: int = 7
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: Any,
+        env_settings: Any,
+        dotenv_settings: Any,
+        file_secret_settings: Any,
+    ) -> tuple[Any, ...]:
+        """把 `default.yaml` 插到**最低优先级**（仅高于类默认值）。
+
+        pydantic-settings 按返回顺序依次尝试，**先命中者赢**。因此
+        「env → dotenv → yaml」保证环境变量能覆盖 yaml，而 yaml 仍作为基线生效。
+        """
+        return (
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            _YamlDefaultsSource(settings_cls),
+            file_secret_settings,
+        )
 
     @field_validator(
         "app",
@@ -296,16 +325,32 @@ def _load_yaml_defaults() -> dict:
     return data
 
 
+class _YamlDefaultsSource(PydanticBaseSettingsSource):
+    """把 `config/default.yaml` 作为**最低优先级**配置源（P1 缺陷修复）。
+
+    为什么不用 `Settings(**yaml_defaults)`：那是 init 参数，优先级高于环境变量，
+    会让 `.env` / 部署环境变量彻底失效（Issue #3 的 `contact_email` 即受此害）。
+    """
+
+    def get_field_value(self, field: Any, field_name: str) -> tuple[Any, str, bool]:
+        # 本源一次性返回整个 yaml 字典，故逐字段读取不走这里
+        return None, field_name, False
+
+    def __call__(self) -> dict[str, Any]:
+        return _load_yaml_defaults()
+
+
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     """获取全局配置单例。
 
     使用 lru_cache 保证全应用共享同一份配置对象，
     避免重复读取文件。测试时调用 `get_settings.cache_clear()` 重置。
+
+    yaml 基线由 `Settings.settings_customise_sources` 以最低优先级注入，
+    因此 `.env` 与系统环境变量可以正常覆盖它（P1 缺陷修复）。
     """
-    defaults = _load_yaml_defaults()
-    # 把 default.yaml 内容作为构造参数；环境变量仍会通过 BaseSettings 机制覆盖
-    return Settings(**defaults)
+    return Settings()
 
 
 # 便于直接 `from app.core.config import settings`
