@@ -773,5 +773,30 @@ EXPORT_MD_SECTION True | EXPORT_DOCX bytes 37043
 `CslItem.medium` 字段（用于 `MM` 等载体标识）、author-date 的中文拼音排序（当前按 Unicode 码位）、
 Markdown 斜体 formatter（当前 `plain`）。以上已列入计划 §0 的 M2 列。
 
+### 5. 服务器验证（真实依赖 + 真实模型）
+
+1. **容器内真实验收**（`docker compose exec backend python -`）：5 个预置样式全部可用，默认
+   `gbt7714-2025-numeric`（`default_locale=zh-CN`）、`warnings=[]`；
+   `[1] Es S, …, et al. …[J/OL]. …` / `[2] 陈国强, 刘洋. 多智能体系统导论[M]. …` / `[3] 赵敏. …[D]. …`；
+   内联 marker `中文引用 [2]，英文引用 [1]。`；BibTeX/RIS 正常。
+   **同一批条目切 5 种样式**（GB2025 / GB2015 / APA / IEEE / Nature）全部渲染成功，
+   其中 2015 vendored 样式输出 `ES S, JAMES J, …`（**全大写**）与自研 2025 的 `Es S, James J, …`
+   形成对照，坐实「2025 版改为仅首字母大写」这一变化。
+2. **端到端真实任务**（真实 API + 真实模型，`citation_style=gbt7714`，离线语料）：
+   任务 `7a1a3259-1c40-485b-a871-06f833cc4320` → `completed`；下载的 Markdown 产物中
+   `## 参考文献` 已是 CSL 渲染结果（`[1]`–`[7]`、真实题名/作者/年份、类型标识 `[J/OL]`、
+   英文条目 `et al.`），且 `[E{n}]` 证据标记保留 —— 证明 `citation_style` 从 API → `task.config`
+   → 导出渲染全链路生效。
+
+### 6. 服务器验证中发现的问题（**与本轮改动无关，但需记录**）
+
+首次端到端跑（任务 `8d7b63d4-…`）转 `waiting_human`：**n5（validate 节点）连续 3 次校验未通过**
+（`error: 校验未通过`）。查该用户历史任务：`2026-10-18` 的 5 次运行中 **2 次 waiting_human、2 次 completed、1 次 cancelled**，
+即**「校验未通过转人工」是先前就存在的间歇行为**（约 40% 运行触发），不是 Issue #4 M1 引入：
+M1 提交不含 `validator.py` / `literature_review.py`，而该失败发生在**导出之前**（任务未进入 REVIEWING）。
+复跑一次即 `completed`。**这会影响演示可靠性**，建议单列任务排查（疑似 `formal_claims_have_evidence`
+或章节缺失导致的可重试失败），当前先记录不修。
+
+
 
 
