@@ -1240,6 +1240,49 @@ black/ruff 干净；`mypy` 0 错误（141 文件）；`pytest` **1610 passed / 8
 
 **至此 Issue #4 的全部验收项与遗留项均已闭环。**
 
+---
+
+## CI 修复执行记录：自 2026-10-18 起 CI 连续全红（2026-10-19）
+
+**提交**：`f6ba56e`（工具版本锁定 + 可选依赖测试）、`7c73cd4`（chroma 版本对齐 + HTTP 模式）、
+`25bcd3e` + `3cfc60e`（chroma healthcheck）
+
+**结果**：CI **6/6 作业全绿**（自 2026-08-03 以来首次）。此前 10+ 个提交全部 `failure`。
+
+### 1. 三个独立成因（逐个暴露，修完一层才看到下一层）
+
+| # | 成因 | 证据 | 修法 |
+| --- | --- | --- | --- |
+| ① | **工具版本漂移**（主因） | `pyproject.toml` 用下限约束（`black>=24.2.0`），CI 每次装**最新版**：本地 black 24.4.2 vs CI **26.10.1**；black 25+ 改了「hug 括号」规则 → `test_config_priority.py` 被判定需重排 → `black --check` 失败 → 后续 ruff/mypy/test/migration/build/smoke **全部 skipped** | `dev` 组改**精确锁定** `black==26.10.1` / `ruff==0.16.0` / `mypy==2.3.0`；本地 venv 同步升级后重新格式化 |
+| ② | **测试依赖可选包** | `test_reporting.py` 硬断言 `figures/*.png`，但 matplotlib 属 `[evaluation]` 可选依赖，CI 只装 `[dev]`；`render_figures` 设计是「缺 matplotlib → 生成 `.md` 占位」 | 测试按依赖可用性分支断言；新增「缺 matplotlib 时产出占位说明」契约测试 |
+| ③ | **chroma 客户端/服务端跨大版本 + 配置形同虚设** | 客户端 `>=0.4.22` → CI 装 **1.5.9**，镜像仍 **0.4.24**；容器内实测 `HttpClient` 对 0.4.24 返回 `{"detail":"Not Found"}`。且 `VectorStore` 从不读 `RAG__CHROMA_HOST`——容器内一直在 `/app/.chroma_db` 建本地库，与 compose 的 chroma 服务脱节；chromadb 1.x Rust 绑定在全新容器里还会崩（`KeyError: '.chroma_db'`） | 两端统一 **1.5.9** 并锁定 `chromadb==1.5.9`；`VectorStore` 增加 `chroma_host/port`，按 **HttpClient → PersistentClient → Client** 三级选择；`factory` 从 `settings.rag` 传入；`chroma_host` 默认值 `"chroma"` → `""`（yaml 与 config 同步） |
+| ④ | **healthcheck 用错 shell** | 1.5.9 镜像**不含 python/curl/wget**（`command -v python` → NO_PYTHON），旧的 `python -c urllib...` 必然失败；改用 bash `/dev/tcp` 后又踩到 `CMD-SHELL` 走 **dash**（`/dev/tcp` 是 bash 特性，dash 报 `Directory nonexistent`） | 改为 `CMD` + 显式 `bash -c`；heartbeat 路径改 v2（0.4.x 是 v1，1.x 是 v2）；`probe_chroma` v2 优先 + v1 回退 |
+
+### 2. 生产环境同步（用户确认后执行）
+
+chroma 0.4.24 → 1.5.9 **不向后兼容旧向量数据**（隔离卷实测：1.5.9 挂载 0.4.24 的卷能启动，
+但集合列表为 `[]`）。故按「备份 → 重建」执行：
+
+1. 备份：`pg_dump` 32M + chroma 卷 `chroma_backup_20261019_195818.tar.gz`
+2. `docker compose stop backend chroma` → 启动新 chroma（1.5.9）
+3. 重建 backend 镜像（新 `probe_chroma` 才生效）→ `{"status":"ready","chroma":"ok"}`
+4. **验证检索仍正常**：`POST /knowledge/search` 返回真实论文原文（`source: hybrid`），
+   118 个文档全部 `ready`、2835 分块、`knowledge_base` 集合存在
+
+### 3. 门禁
+
+本地：black/ruff 干净；mypy 0 错误（141 文件）；pytest **1618 passed / 8 skipped**。
+CI 等价环境（独立 venv，只装 `[dev]`、无 matplotlib、black 26.10.1）全量通过。
+CI：**Lint / Frontend / Unit Tests / Alembic / Docker Build / Compose Smoke 6 项全绿**。
+
+### 4. 教训（已写入 pyproject 注释）
+
+- **代码质量工具必须 `==` 锁定**，否则「本地绿、CI 红」是必然的；
+- **测试不得硬依赖可选依赖**，要么按可用性分支，要么装进 `[dev]`；
+- **客户端与服务端（镜像）版本必须成对锁定**，跨大版本必然不兼容；
+- **容器 healthcheck 要确认镜像里真有的工具**（1.x 的 chroma 镜像没有 python）。
+
+
 
 
 

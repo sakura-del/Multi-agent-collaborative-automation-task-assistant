@@ -25,8 +25,9 @@
 | 冻结 tag | `defense-v1` |
 | Plan 状态 | Plan 2 / 3 / 4 / 5 **全部 Exit Gate PASSED** |
 | 产品化进度 | **Issue #2 / #3 / #4 / #5 / #6 / #7 全部关闭且遗留项清零**；配置优先级缺陷已修复 |
-| 后端测试 | **1610 passed**, 8 skipped；覆盖率 **89.64%**；`mypy` 0 错误（141 文件） |
+| 后端测试 | **1618 passed**, 8 skipped；覆盖率 **89.64%**；`mypy` 0 错误（141 文件） |
 | 前端测试 | Vitest **112 passed**；Playwright E2E **4 passed**（桌面 + 移动双视口） |
+| CI | **6/6 作业全绿**（2026-10-19 修复；此前自 08-03 起连续失败） |
 | 服务器 | 已同步，五容器 healthy，`curl http://127.0.0.1:48080/api/v1/health/ready` → `{"status":"ready"}` |
 
 **演示账号**：`demo` / `demo12345`（知识库已有 10 篇冻结语料 / 2834 分块）
