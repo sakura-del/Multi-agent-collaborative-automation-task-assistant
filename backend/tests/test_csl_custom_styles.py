@@ -70,7 +70,7 @@ class TestRegisterCustom:
         ids = [meta.style_id for meta in registry.list_styles()]
 
         assert "lab-custom" not in ids
-        assert len(ids) == 5
+        assert len(ids) == 6  # 5 个原预置 + GB/T 7714—2025 著者-出版年制
 
     def test_register_is_idempotent(self, tmp_path: Path) -> None:
         registry = StyleRegistry()

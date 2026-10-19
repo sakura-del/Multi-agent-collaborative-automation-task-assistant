@@ -52,6 +52,7 @@ TOKEN_B = "token-b"
 PRESET_IDS = (
     "gbt7714-2025-numeric",
     "gbt7714-2015-numeric",
+    "gbt7714-2025-author-date",
     "apa",
     "ieee",
     "nature",
@@ -210,7 +211,7 @@ def _stored_files(env: StyleEnv) -> list[str]:
 
 
 class TestListStyles:
-    def test_lists_five_presets_with_default_first(self, style_env: StyleEnv) -> None:
+    def test_lists_all_presets_with_default_first(self, style_env: StyleEnv) -> None:
         resp = style_env.client.get(API, headers=_auth(TOKEN_A))
 
         assert resp.status_code == 200

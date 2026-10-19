@@ -49,6 +49,13 @@ _PRESET_STYLES: tuple[tuple[str, str, Numbering, Ordering, str], ...] = (
         "citation-order",
         "zh-CN",
     ),
+    (
+        "gbt7714-2025-author-date",
+        "GB/T 7714—2025 著者-出版年制",
+        "none",
+        "author-date",
+        "zh-CN",
+    ),
     ("apa", "APA 7th Edition 著者-出版年制", "none", "author-date", "en-US"),
     ("ieee", "IEEE 顺序编码制", "citation-number", "citation-order", "en-US"),
     ("nature", "Nature 顺序编码制", "citation-number", "citation-order", "en-GB"),

@@ -27,6 +27,7 @@ from app.tools.csl.styles import CSL_M_PATTERNS, StyleRegistry, StyleRejected
 EXPECTED_STYLE_IDS = [
     "gbt7714-2025-numeric",
     "gbt7714-2015-numeric",
+    "gbt7714-2025-author-date",
     "apa",
     "ieee",
     "nature",
@@ -35,6 +36,7 @@ EXPECTED_STYLE_IDS = [
 EXPECTED_NUMBERING: dict[str, tuple[str, str]] = {
     "gbt7714-2025-numeric": ("citation-number", "citation-order"),
     "gbt7714-2015-numeric": ("citation-number", "citation-order"),
+    "gbt7714-2025-author-date": ("none", "author-date"),
     "apa": ("none", "author-date"),
     "ieee": ("citation-number", "citation-order"),
     "nature": ("citation-number", "citation-order"),

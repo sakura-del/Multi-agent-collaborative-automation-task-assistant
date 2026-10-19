@@ -15,15 +15,18 @@ CSL 样式生态由 [CitationStyles.org](https://citationstyles.org/)（CSL 项�
 
 | 文件 | 说明 | 许可 | sha256 | 大小 |
 | --- | --- | --- | --- | --- |
-| `gbt7714-2025-numeric.csl` | GB/T 7714—2025《信息与文献 参考文献著录规则》顺序编码制，标准 CSL 1.0.2 | CC BY-SA 3.0 | `8fdf685d6b013ec080fd766e37d1e973ca3437a29c9d8697d2b5da7a312b67f6` | 14877 B |
+| `gbt7714-2025-numeric.csl` | GB/T 7714—2025《信息与文献 参考文献著录规则》**顺序编码制**，标准 CSL 1.0.2 | CC BY-SA 3.0 | `8fdf685d6b013ec080fd766e37d1e973ca3437a29c9d8697d2b5da7a312b67f6` | 14877 B |
+| `gbt7714-2025-author-date.csl` | GB/T 7714—2025 **著者-出版年制**，标准 CSL 1.0.2 | CC BY-SA 3.0 | `9f4d2b125652ef3723b9685396f602a76526c2de51a92b7c92afe559cfd96f9c` | 15341 B |
 
-**独立实现声明**：`gbt7714-2025-numeric.csl` 由本项目**独立实现**（宏结构、宏命名、分支组织均为自行编写），
-**没有整段复制**任何上游样式；仅在编写前阅读了下列两份参考实现，用于核对 GB/T 7714 的著录格式与 2025 版变化：
+**独立实现声明**：上述两份自研样式均由本项目**独立实现**（宏结构、宏命名、分支组织均为自行编写），
+**没有整段复制**任何上游样式；仅在编写前阅读了下列参考实现，用于核对 GB/T 7714 的著录格式与 2025 版变化：
 
 | 参考实现 | 来源 | 作者 | 许可 | sha256 |
 | --- | --- | --- | --- | --- |
 | GB/T 7714—2015 顺序编码制（官方） | <https://github.com/citation-style-language/styles/blob/master/china-national-standard-gb-t-7714-2015-numeric.csl> | 牛耕田（buffalo_d@163.com）；贡献者 Zeping Lee | CC BY-SA 3.0 | `d9cd04f94bc21a99dc320d0a2230d5a1fb47e3634c17c5820cf975c40db3c0c7` |
+| GB/T 7714—2015 著者-出版年制（官方） | <https://github.com/citation-style-language/styles/blob/master/china-national-standard-gb-t-7714-2015-author-date.csl> | 牛耕田（buffalo_d@163.com）；贡献者 Zeping Lee | CC BY-SA 3.0 | 仅作格式比对，未纳入本仓库 |
 | GB/T 7714—2025（顺序编码，双语）（社区） | <https://github.com/zotero-chinese/styles/blob/main/src/GB-T-7714—2025（顺序编码，双语）/GB-T-7714—2025（顺序编码，双语）.csl> | Zeping Lee | CC BY-SA 3.0 | `e0c3a67c7346ad83fc55cb92c03385810387258887413da613d07f482c53476b` |
+| GB/T 7714—2025（著者-出版年，双语）（社区） | <https://github.com/zotero-chinese/styles> | Zeping Lee | CC BY-SA 3.0 | 仅作格式比对，未纳入本仓库 |
 
 自研样式对 2025 版变化的落地方式：
 
