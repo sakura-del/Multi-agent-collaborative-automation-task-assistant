@@ -51,12 +51,15 @@ class RuntimeContainer:
         knowledge_query: Any | None = None,
         literature_source: Any | None = None,
         llm: Any | None = None,
+        style_registry: Any | None = None,
     ) -> None:
         self.session_factory = session_factory
         self.event_publisher: EventPublisher = event_publisher or InMemoryEventPublisher()
         self.ticket_service: Any = ticket_service or InMemoryTicketService()
         self.knowledge_query = knowledge_query
         self.literature_source = literature_source
+        # 引用样式注册表（Issue #4 M2）：与上传入口共用同一实例，渲染期才能解析自定义样式
+        self.style_registry = style_registry
         self.llm_manager: Any | None = None
         # 显式注入的 LLM 客户端：测试/验收用，优先于全局 LLMManager，避免改动模块单例
         self._injected_llm = llm

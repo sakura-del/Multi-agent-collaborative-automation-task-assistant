@@ -15,6 +15,8 @@ from __future__ import annotations
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,11 +27,13 @@ from starlette.responses import Response
 from app import __version__
 from app.api.middleware import AuthContextMiddleware
 from app.api.v1.router import api_router
-from app.core.config import settings
+from app.core.config import get_settings, settings
 from app.core.exceptions import AppException
 from app.core.logging import bind_request_context, configure_logging, get_logger
 from app.core.redis import RedisManager
 from app.db.session import engine
+
+logger = get_logger(__name__)
 
 # ===== 应用生命周期 =====
 
@@ -64,13 +68,27 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         except Exception as exc:  # 首次启动表未建或库为空时不阻塞启动
             logger.warning("bm25_startup_rebuild_skipped", error=str(exc))
 
+    # ===== 引用样式注册表（Issue #4 M2）=====
+    # 上传样式要能被**渲染期**解析，故渲染器与上传入口共用同一实例。
+    # 启动时把库中已上传的样式重新登记，重启后自定义样式依然可用。
+    from app.tools.csl.styles import StyleRegistry
+
+    style_registry = StyleRegistry()
+    app.state.style_registry = style_registry
+    try:
+        await _restore_custom_styles(style_registry)
+    except Exception as exc:  # 测试库未建表 / 迁移未跑时不阻塞启动
+        logger.warning("custom_style_restore_skipped", error=str(exc))
+
     # ===== 任务运行时（Plan 2 Task 4）=====
     from app.knowledge.services.search_provider import KnowledgeSearchProvider
     from app.orchestration.runtime import RuntimeContainer
     from app.orchestration.services.task_execution import TaskExecution
 
     # 文献任务需要 owner-scoped 证据检索：按调用开 session 的提供者（Plan 4 Task 8 实跑发现此前未接入）
-    container = RuntimeContainer(knowledge_query=KnowledgeSearchProvider())
+    container = RuntimeContainer(
+        knowledge_query=KnowledgeSearchProvider(), style_registry=style_registry
+    )
     await container.start()
     task_execution = TaskExecution(container)
     app.state.container = container
@@ -86,6 +104,38 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await container.close()
     await engine.dispose()
     await RedisManager.close()
+
+
+async def _restore_custom_styles(registry: Any) -> None:
+    """把库中已上传的自定义样式重新登记到共享注册表（Issue #4 M2）。
+
+    上传样式落盘在 `artifact_root.parent/csl_styles/{user_id}/`，DB 行记录元数据。
+    进程重启后必须重新登记，否则任务渲染会报「未知引用样式」。
+    单个样式登记失败（文件被删/损坏）只跳过该条，不影响启动。
+    """
+    from sqlalchemy import select
+
+    from app.db.models.citation_style import CitationStyle
+    from app.db.session import AsyncSessionLocal
+
+    storage_root = (Path(get_settings().app.artifact_root).parent / "csl_styles").resolve()
+    restored = 0
+    async with AsyncSessionLocal() as session:
+        rows = (await session.execute(select(CitationStyle))).scalars().all()
+        for row in rows:
+            if row.user_id is None:
+                continue  # 预置样式由静态表提供，不落盘
+            path = (storage_root / str(row.user_id) / row.filename).resolve()
+            if not path.is_file():
+                logger.warning("custom_style_file_missing", style_id=row.style_id, path=str(path))
+                continue
+            try:
+                registry.register_custom(row.style_id, path)
+                restored += 1
+            except Exception as exc:
+                logger.warning("custom_style_restore_failed", style_id=row.style_id, error=str(exc))
+    if restored:
+        logger.info("custom_styles_restored", count=restored)
 
 
 # ===== 中间件 =====

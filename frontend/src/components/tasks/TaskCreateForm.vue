@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
-import type { TaskCreate } from "@/api/types";
+import { listCitationStyles } from "@/api/citation-styles";
+import type { CitationStyleSource, TaskCreate } from "@/api/types";
 
 // 创建表单：只做校验与 payload 组装，提交动作由父组件负责（保持可测）
 const props = withDefaults(
@@ -22,6 +23,18 @@ const KEYWORD_MAX = 10;
 const DOC_MIN = 1;
 const DOC_MAX = 50;
 
+interface StyleOption {
+  style_id: string;
+  title: string;
+  source: CitationStyleSource;
+}
+
+// 列表接口不可用时的内置降级项：表单必须始终可用（Issue #4 M2 §1.5）
+const BUILT_IN_STYLES: StyleOption[] = [
+  { style_id: "gbt7714", title: "GB/T 7714", source: "preset" },
+  { style_id: "apa", title: "APA", source: "preset" },
+];
+
 const topic = ref("");
 const keywords = ref<string[]>([]);
 const keywordDraft = ref("");
@@ -29,12 +42,34 @@ const maxDocuments = ref(20);
 const dateFrom = ref("");
 const dateTo = ref("");
 const language = ref<"zh" | "en">("zh");
-const citationStyle = ref<"gbt7714" | "apa">("gbt7714");
+// null = 列表未加载成功 → 渲染内置两项（降级）；非 null = 渲染动态下拉
+const styleOptions = ref<StyleOption[] | null>(null);
+const citationStyle = ref("gbt7714");
 const offlineDataset = ref(false);
 const selectedDocuments = ref<string[]>([]);
 const validationMessages = ref<string[]>([]);
 
 const canSubmit = computed(() => !props.pending);
+
+onMounted(async () => {
+  try {
+    const data = await listCitationStyles();
+    const options: StyleOption[] = data.styles.map((style) => ({
+      style_id: style.style_id,
+      title: style.title,
+      source: style.source,
+    }));
+    if (!options.length) {
+      return;
+    }
+    styleOptions.value = options;
+    const preferred = options.find((option) => option.style_id === data.default_style_id);
+    citationStyle.value = preferred ? preferred.style_id : options[0].style_id;
+  } catch {
+    // 列表不可用时静默降级为内置两项：创建任务不能被引用样式接口拖垮
+    styleOptions.value = null;
+  }
+});
 
 function addKeyword() {
   const value = keywordDraft.value.trim().replace(/,$/, "");
@@ -199,23 +234,30 @@ function handleSubmit() {
         </div>
       </div>
       <div class="field">
-        <span class="field__label">引用格式</span>
-        <div class="segmented">
+        <label v-if="styleOptions" for="task-citation-style" class="field__label">引用格式</label>
+        <span v-else class="field__label">引用格式</span>
+        <!-- 列表可用：动态下拉（预置 + 自定义）；不可用：内置两项降级 -->
+        <select
+          v-if="styleOptions"
+          id="task-citation-style"
+          v-model="citationStyle"
+          data-test="style-select"
+          class="input"
+        >
+          <option v-for="style in styleOptions" :key="style.style_id" :value="style.style_id">
+            {{ style.title }}{{ style.source === "custom" ? "（自定义）" : "" }}
+          </option>
+        </select>
+        <div v-else class="segmented">
           <button
+            v-for="style in BUILT_IN_STYLES"
+            :key="style.style_id"
             type="button"
-            data-test="style-gbt7714"
-            :class="{ active: citationStyle === 'gbt7714' }"
-            @click="citationStyle = 'gbt7714'"
+            :data-test="`style-${style.style_id}`"
+            :class="{ active: citationStyle === style.style_id }"
+            @click="citationStyle = style.style_id"
           >
-            GB/T 7714
-          </button>
-          <button
-            type="button"
-            data-test="style-apa"
-            :class="{ active: citationStyle === 'apa' }"
-            @click="citationStyle = 'apa'"
-          >
-            APA
+            {{ style.title }}
           </button>
         </div>
       </div>

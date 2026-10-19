@@ -1,13 +1,38 @@
-import { describe, expect, it } from "vitest";
-import { mount } from "@vue/test-utils";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { flushPromises, mount } from "@vue/test-utils";
 
 import TaskCreateForm from "@/components/tasks/TaskCreateForm.vue";
+import type { CitationStyleOut } from "@/api/types";
+
+// 样式下拉走真实 api 模块（列表接口由 client mock 提供），与 DocumentUpload 测试同风格
+vi.mock("@/api/client", () => ({
+  default: {
+    get: vi.fn(),
+    post: vi.fn(),
+    delete: vi.fn(),
+  },
+}));
+
+import api from "@/api/client";
 
 // 表单只负责校验与 payload 组装：提交动作由父组件（TaskListView）发起
 function mountForm(props: Record<string, unknown> = {}) {
   return mount(TaskCreateForm, {
     props: { pending: false, error: null, documents: [], ...props },
   });
+}
+
+function apiStyleRow(overrides: Partial<CitationStyleOut> = {}): CitationStyleOut {
+  return {
+    style_id: "gbt7714-2025-numeric",
+    title: "GB/T 7714—2025（顺序编码制）",
+    numbering: "citation-number",
+    ordering: "citation-order",
+    default_locale: "zh-CN",
+    source: "preset",
+    is_default: true,
+    ...overrides,
+  };
 }
 
 async function fillValidForm(wrapper: ReturnType<typeof mountForm>) {
@@ -19,6 +44,11 @@ async function fillValidForm(wrapper: ReturnType<typeof mountForm>) {
 }
 
 describe("TaskCreateForm", () => {
+  beforeEach(() => {
+    // 默认让样式列表不可用：既有用例因此始终看到内置两项的降级形态
+    vi.mocked(api.get).mockRejectedValue(new Error("样式列表不可用"));
+  });
+
   it("rejects a topic shorter than 5 characters", async () => {
     const wrapper = mountForm();
     await wrapper.find('[data-test="topic"]').setValue("RAG");
@@ -114,5 +144,83 @@ describe("TaskCreateForm", () => {
   it("shows the server error message near the form", () => {
     const wrapper = mountForm({ error: "后端不可用" });
     expect(wrapper.find('[data-test="form-error"]').text()).toContain("后端不可用");
+  });
+
+  // ===== 动态样式下拉（Issue #4 M2 §1.5）=====
+
+  it("loads the style list and preselects default_style_id", async () => {
+    vi.mocked(api.get).mockResolvedValueOnce({
+      data: {
+        styles: [
+          apiStyleRow(),
+          apiStyleRow({ style_id: "apa", title: "APA 7th", is_default: false }),
+          apiStyleRow({
+            style_id: "my-style",
+            title: "我的国标样式",
+            source: "custom",
+            is_default: false,
+          }),
+        ],
+        default_style_id: "gbt7714-2025-numeric",
+      },
+    });
+    const wrapper = mountForm();
+
+    await flushPromises();
+
+    const select = wrapper.find('[data-test="style-select"]');
+    expect(select.exists()).toBe(true);
+    expect(select.findAll("option")).toHaveLength(3);
+    expect((select.element as HTMLSelectElement).value).toBe("gbt7714-2025-numeric");
+    // 自定义样式同样出现在下拉里
+    expect(select.text()).toContain("我的国标样式");
+
+    await fillValidForm(wrapper);
+    await wrapper.find("form").trigger("submit");
+
+    expect(wrapper.emitted("submit")?.[0][0]).toMatchObject({
+      citation_style: "gbt7714-2025-numeric",
+    });
+  });
+
+  it("submits the style chosen from the dynamic dropdown", async () => {
+    vi.mocked(api.get).mockResolvedValueOnce({
+      data: {
+        styles: [
+          apiStyleRow(),
+          apiStyleRow({
+            style_id: "my-style",
+            title: "我的国标样式",
+            source: "custom",
+            is_default: false,
+          }),
+        ],
+        default_style_id: "gbt7714-2025-numeric",
+      },
+    });
+    const wrapper = mountForm();
+    await flushPromises();
+
+    await wrapper.find('[data-test="style-select"]').setValue("my-style");
+    await fillValidForm(wrapper);
+    await wrapper.find("form").trigger("submit");
+
+    expect(wrapper.emitted("submit")?.[0][0]).toMatchObject({ citation_style: "my-style" });
+  });
+
+  it("falls back to the built-in styles when the list request fails", async () => {
+    const wrapper = mountForm();
+
+    await flushPromises();
+
+    // 列表不可用时保留内置两项，表单必须仍然可用
+    expect(wrapper.find('[data-test="style-select"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="style-gbt7714"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="style-apa"]').exists()).toBe(true);
+
+    await fillValidForm(wrapper);
+    await wrapper.find("form").trigger("submit");
+
+    expect(wrapper.emitted("submit")?.[0][0]).toMatchObject({ citation_style: "gbt7714" });
   });
 });

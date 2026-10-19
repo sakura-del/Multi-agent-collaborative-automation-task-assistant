@@ -65,7 +65,8 @@ export interface TaskCreate {
   date_to?: string | null;
   max_documents?: number;
   output_language?: "zh" | "en";
-  citation_style?: "gbt7714" | "apa";
+  /** M2 起样式是一等实体：取值可以是预置样式或用户上传的 style_id */
+  citation_style?: string;
   document_ids?: string[];
   offline_dataset?: boolean;
 }
@@ -220,4 +221,24 @@ export interface KnowledgeSearchOut {
   query: string;
   total: number;
   results: KnowledgeSearchItem[];
+}
+
+// ===== 引用样式契约（与后端 app/schemas/citation_style.py 对齐，Issue #4 M2 §1.3）=====
+
+/** `preset` = 系统预置（不可删）；`custom` = 当前用户上传（可删） */
+export type CitationStyleSource = "preset" | "custom";
+
+export interface CitationStyleOut {
+  style_id: string;
+  title: string;
+  numbering: "citation-number" | "none";
+  ordering: "citation-order" | "author-date";
+  default_locale: string;
+  source: CitationStyleSource;
+  is_default: boolean;
+}
+
+export interface CitationStyleList {
+  styles: CitationStyleOut[];
+  default_style_id: string;
 }

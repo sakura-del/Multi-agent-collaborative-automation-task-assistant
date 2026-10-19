@@ -10,9 +10,11 @@
   log.py:         EXECUTION_LOG / VALIDATION_RESULT / FAILURE_CASE
   feedback.py:    HUMAN_FEEDBACK
   knowledge.py:   KNOWLEDGE_DOC / DOC_CHUNK / VECTOR_INDEX
+  citation_style.py: CITATION_STYLE（Issue #4 M2：用户自定义 CSL 样式）
 """
 
 from app.db.models.agent import Agent, AgentInteraction
+from app.db.models.citation_style import CitationStyle
 from app.db.models.feedback import HumanFeedback
 from app.db.models.knowledge import DocChunk, KnowledgeDoc, VectorIndex
 from app.db.models.log import ExecutionLog, FailureCase, ValidationResult
@@ -22,6 +24,7 @@ from app.db.models.user import User
 __all__ = [
     "Agent",
     "AgentInteraction",
+    "CitationStyle",
     "DocChunk",
     "ExecutionLog",
     "FailureCase",

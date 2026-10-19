@@ -84,6 +84,9 @@ class StyleRegistry(StyleResolver):
         self._styles_dir = (
             Path(styles_dir) if styles_dir is not None else Path(__file__).parent / "styles"
         )
+        # 进程内登记的自定义样式（Issue #4 M2）：style_id → 已通过准入的 StyleMeta。
+        # 上传样式落在每用户独立目录，不在 `styles/` 下，故需显式登记才能被渲染器解析。
+        self._custom: dict[str, StyleMeta] = {}
 
     @property
     def styles_dir(self) -> Path:
@@ -105,23 +108,64 @@ class StyleRegistry(StyleResolver):
     def meta(self, style_id: str) -> StyleMeta:
         """返回样式元数据；未知 id → ValueError（协议约定）。
 
-        预置样式用静态表；目录内的自定义样式回退到 `validate_csl_file()` 现场推断。
+        预置样式用静态表；自定义样式（已登记）用登记时的准入结果；
+        目录内的其他 `.csl` 回退到 `validate_csl_file()` 现场推断。
         """
         raw = (style_id or "").strip()
         resolved = STYLE_ALIASES.get(raw, raw)
         preset = self._preset_meta(resolved)
         if preset is not None:
             return preset
+        custom = self._custom.get(resolved)
+        if custom is not None:
+            return custom
         path = self._styles_dir / f"{resolved}.csl"
         if resolved and path.is_file():
             return self.validate_csl_file(path)
         raise ValueError(f"未知引用样式：{style_id}")
+
+    # ===== 自定义样式登记（Issue #4 M2）=====
+
+    def register_custom(self, style_id: str, path: Path) -> StyleMeta:
+        """登记一个**已上传**的自定义样式（幂等）。
+
+        登记前跑与预置样式**完全相同**的准入校验（`validate_csl_file`），
+        不合规直接抛 `StyleRejected`——不会因为「是用户上传的」就放宽标准。
+        预置样式优先：`style_id` 与预置冲突时拒绝登记，避免上传文件覆盖 `apa` 等。
+        """
+        resolved = (style_id or "").strip()
+        if not resolved:
+            raise ValidationException("自定义样式缺少 style_id")
+        if self._preset_meta(resolved) is not None:
+            raise ValidationException(f"自定义样式不得覆盖预置样式：{resolved}")
+
+        source = Path(path)
+        meta = self.validate_csl_file(source)  # 不合规 → StyleRejected
+        self._custom[resolved] = meta.model_copy(
+            update={"style_id": resolved, "path": source, "is_default": False}
+        )
+        return self._custom[resolved]
+
+    def unregister_custom(self, style_id: str) -> None:
+        """注销自定义样式（幂等）；预置样式不受影响。"""
+        self._custom.pop((style_id or "").strip(), None)
+
+    def custom_style_ids(self) -> list[str]:
+        """当前已登记的自定义样式 ID（供调试/诊断，不参与协议）。"""
+        return sorted(self._custom)
 
     # ===== 注册表查询 =====
 
     def get(self, style_id: str) -> Path:
         """返回样式文件路径；未知 id 或资产缺失 → ValidationException。"""
         resolved = self.resolve(style_id)
+        custom = self._custom.get(resolved)
+        if custom is not None:
+            if not custom.path.is_file():
+                raise ValidationException(
+                    f"自定义样式文件不存在：{custom.path}（style_id={resolved}）"
+                )
+            return custom.path
         path = self._styles_dir / f"{resolved}.csl"
         if not path.is_file():
             raise ValidationException(f"样式文件不存在：{path}（style_id={resolved}）")
@@ -193,6 +237,7 @@ class StyleRegistry(StyleResolver):
         ids = {style_id for style_id, *_rest in _PRESET_STYLES}
         if self._styles_dir.is_dir():
             ids.update(path.stem for path in self._styles_dir.glob("*.csl"))
+        ids.update(self._custom)
         return ids
 
 

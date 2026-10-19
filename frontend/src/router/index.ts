@@ -3,11 +3,12 @@ import { createRouter, createWebHistory } from "vue-router";
 import AppLayout from "@/layouts/AppLayout.vue";
 import KnowledgeView from "@/views/KnowledgeView.vue";
 import LoginView from "@/views/LoginView.vue";
+import StyleView from "@/views/StyleView.vue";
 import TaskDetailView from "@/views/TaskDetailView.vue";
 import TaskListView from "@/views/TaskListView.vue";
 import { useAuthStore } from "@/stores/auth";
 
-// 四个页面：登录、任务列表、任务详情、知识库；工作台页面统一挂在 AppLayout 下
+// 五个页面：登录、任务列表、任务详情、知识库、引用样式；工作台页面统一挂在 AppLayout 下
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
@@ -30,6 +31,7 @@ export const router = createRouter({
           props: true,
         },
         { path: "knowledge", name: "knowledge", component: KnowledgeView },
+        { path: "styles", name: "styles", component: StyleView },
       ],
     },
     { path: "/:pathMatch(.*)*", redirect: { name: "tasks" } },

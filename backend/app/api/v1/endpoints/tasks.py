@@ -15,12 +15,14 @@
 from __future__ import annotations
 
 from typing import Annotated
+from urllib.parse import quote
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import FileResponse, Response
 
 from app.api.deps import get_current_active_user
+from app.core.exceptions import ValidationException
 from app.db.models.user import User
 from app.orchestration.contracts import TaskSnapshot, TaskStatus
 from app.orchestration.services.task_execution import TaskExecution
@@ -155,3 +157,52 @@ async def download_artifact(
         else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
     return FileResponse(path, media_type=media_type, filename=download_name)
+
+
+@router.get(
+    "/{task_id}/references.bib",
+    summary="下载参考文献（BibTeX）",
+    response_class=Response,
+)
+async def download_references_bibtex(
+    task_id: UUID,
+    execution: ExecutionDep,
+    current_user: CurrentUserDep,
+) -> Response:
+    """把已持久化的参考文献导出为 BibTeX（Issue #4 M2，owner-scoped）。"""
+    try:
+        body, filename = await execution.export_references(current_user.id, task_id, fmt="bibtex")
+    except ValidationException as exc:
+        raise HTTPException(status_code=400, detail=exc.message) from exc
+    return _reference_response(body, filename, "application/x-bibtex; charset=utf-8")
+
+
+@router.get(
+    "/{task_id}/references.ris",
+    summary="下载参考文献（RIS）",
+    response_class=Response,
+)
+async def download_references_ris(
+    task_id: UUID,
+    execution: ExecutionDep,
+    current_user: CurrentUserDep,
+) -> Response:
+    """把已持久化的参考文献导出为 RIS（Issue #4 M2，owner-scoped）。"""
+    try:
+        body, filename = await execution.export_references(current_user.id, task_id, fmt="ris")
+    except ValidationException as exc:
+        raise HTTPException(status_code=400, detail=exc.message) from exc
+    return _reference_response(body, filename, "application/x-research-info-systems; charset=utf-8")
+
+
+def _reference_response(body: str, filename: str, media_type: str) -> Response:
+    """构造带附件头的文本响应（UTF-8，中文原样输出）。"""
+    # RFC 5987：非 ASCII 文件名走 filename*，同时保留 ASCII 兜底
+    quoted = quote(filename, safe="")
+    return Response(
+        content=body,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f"attachment; filename=\"references\"; filename*=UTF-8''{quoted}"
+        },
+    )

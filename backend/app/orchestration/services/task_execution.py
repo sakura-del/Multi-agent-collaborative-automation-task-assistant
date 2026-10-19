@@ -14,10 +14,11 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import ValidationError as PydanticValidationError
@@ -60,6 +61,14 @@ from app.orchestration.workflows.literature_review import (
 )
 
 logger = get_logger(__name__)
+
+
+def _safe_download_stem(title: str) -> str:
+    """任务标题 → 安全的下载文件名主干（保留中文，去掉路径分隔符与控制字符）。"""
+    cleaned = re.sub(r'[\\/:*?"<>|\x00-\x1f]', " ", title or "")
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return (cleaned or "literature")[:60]
+
 
 # 可被 recover() 重新调度的执行中状态
 _RECOVERABLE_STATUSES = frozenset({TaskStatus.RUNNING, TaskStatus.REVIEWING})
@@ -848,7 +857,10 @@ class TaskExecution:
         from app.orchestration.contracts import ReviewReport
         from app.tools.literature.exporter import LiteratureExporter
 
-        exporter = LiteratureExporter(get_settings().app.artifact_root)
+        exporter = LiteratureExporter(
+            get_settings().app.artifact_root,
+            style_resolver=getattr(self.container, "style_registry", None),
+        )
         # 复盘报告可能带 summary 等附加键，导出前只取 ReviewReport 字段
         known_fields = set(ReviewReport.model_fields)
         report = ReviewReport.model_validate(
@@ -862,6 +874,46 @@ class TaskExecution:
                 user_id, task_id, report, citation_style=citation_style
             ).model_dump(mode="json"),
         ]
+
+    async def export_references(
+        self,
+        user_id: UUID,
+        task_id: UUID,
+        *,
+        fmt: Literal["bibtex", "ris"],
+    ) -> tuple[str, str]:
+        """把任务已持久化的参考文献导出为 BibTeX / RIS（Issue #4 M2）。
+
+        返回 `(正文, 下载文件名)`；**不重新跑检索**，只消费 `review_report.bibliography`。
+        owner-scoped：跨用户/不存在一律 404；无参考文献时 400（不返回空文件）。
+        """
+        from app.core.exceptions import ValidationException
+        from app.tools.csl.exporters import to_bibtex, to_ris
+        from app.tools.csl.models import csl_item_from_bibliography_entry
+
+        async with self._session_factory() as session:
+            task = await TaskRepository(session).get_for_user(user_id, task_id)
+            if task is None:
+                raise NotFoundException("任务不存在")
+            report = task.review_report if isinstance(task.review_report, dict) else {}
+            bibliography = report.get("bibliography")
+            title = task.title
+
+        entries = bibliography if isinstance(bibliography, list) else []
+        items = []
+        for entry in entries:
+            if not isinstance(entry, Mapping):
+                continue
+            item = csl_item_from_bibliography_entry(entry)
+            if item is not None:
+                items.append(item)
+        if not items:
+            raise ValidationException("该任务暂无参考文献，无法导出")
+
+        body = to_bibtex(items) if fmt == "bibtex" else to_ris(items)
+        stem = _safe_download_stem(title)
+        suffix = "bib" if fmt == "bibtex" else "ris"
+        return body, f"{stem}-references.{suffix}"
 
     async def resolve_artifact(
         self,

@@ -73,8 +73,11 @@ def _verification_line(summary: Mapping[str, Any]) -> str:
 class LiteratureExporter:
     """把 `ReviewReport` 落地为受控目录下的 Markdown / DOCX 产物。"""
 
-    def __init__(self, root: str | Path) -> None:
+    def __init__(self, root: str | Path, *, style_resolver: Any | None = None) -> None:
         self.root = Path(root).resolve()
+        #: 样式解析器（Issue #4 M2）：传入共享 `StyleRegistry` 才能渲染用户上传的样式；
+        #: 缺省时渲染器会自行构造一个只含预置样式的注册表。
+        self._style_resolver = style_resolver
 
     # ===== 导出 =====
 
@@ -201,8 +204,7 @@ class LiteratureExporter:
 
     # ===== Issue #4：CSL 渲染（懒导入，避免 tools 包之间的循环依赖）=====
 
-    @staticmethod
-    def _render_bibliography(report: ReviewReport, citation_style: str) -> list[str]:
+    def _render_bibliography(self, report: ReviewReport, citation_style: str) -> list[str]:
         """用 CSL 渲染器产出参考文献行；未知样式由渲染器抛 ValidationException。"""
         from app.tools.csl.models import csl_item_from_bibliography_entry
         from app.tools.csl.renderer import CitationRenderer
@@ -212,11 +214,13 @@ class LiteratureExporter:
             item = csl_item_from_bibliography_entry(entry)
             if item is not None:
                 items.append(item)
-        rendered = CitationRenderer().render(items, style_id=citation_style)
+        renderer = CitationRenderer(resolver=self._style_resolver)
+        rendered = renderer.render(items, style_id=citation_style)
         return list(rendered.entries)
 
-    @staticmethod
-    def _substitute_inline_citations(body: str, report: ReviewReport, citation_style: str) -> str:
+    def _substitute_inline_citations(
+        self, body: str, report: ReviewReport, citation_style: str
+    ) -> str:
         """把正文 `[[cite:ref_id]]` 替换为样式对应的正文标记（无占位时原样返回）。"""
         from app.tools.csl.models import csl_item_from_bibliography_entry
         from app.tools.csl.renderer import INLINE_PATTERN, CitationRenderer
@@ -228,7 +232,7 @@ class LiteratureExporter:
             item = csl_item_from_bibliography_entry(entry)
             if item is not None:
                 items.append(item)
-        renderer = CitationRenderer()
+        renderer = CitationRenderer(resolver=self._style_resolver)
         rendered = renderer.render(items, style_id=citation_style)
         return renderer.substitute_inline(body, rendered)
 
