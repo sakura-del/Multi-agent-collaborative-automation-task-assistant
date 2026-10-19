@@ -52,6 +52,21 @@ REFERENCE_CHECK = "reference_authenticity"
 #: 核验模式：off=不检查；report=advisory（不影响通过与否）；enforce=不通过则校验失败
 ReferenceCheckMode = Literal["off", "report", "enforce"]
 
+#: 内容角色（Issue #6）：
+#: - authored：由模型创作的正文（extract/write 节点），作者级文本质量检查照常生效；
+#: - aggregated：search/validate/review 等节点的**机械汇总**内容（依赖输出拼接或检索结果列表），
+#:   跨节点复述是这类内容的固有形态、重试无法修复，故不做作者级判定。
+ContentRole = Literal["authored", "aggregated"]
+
+#: 仅对作者级内容有意义的检查（Issue #6）
+AUTHORED_ONLY_CHECKS: tuple[str, ...] = (
+    "formal_claims_have_evidence",
+    "duplicate_paragraph_ratio",
+)
+
+#: 汇总内容上这些检查的说明文案（必须显式出现，不得静默变成通过）
+_AGGREGATED_SKIP_NOTE = "机器汇总内容（依赖输出拼接/检索结果），不做作者级判定"
+
 #: 判定态 → 中文标签（进入校验报告 message）
 _VERDICT_LABELS: tuple[tuple[str, str], ...] = (
     ("verified", "已验证"),
@@ -115,16 +130,22 @@ class CitationValidator:
         *,
         evidence_pool: Sequence[Evidence] | None = None,
         reference_verifications: Sequence[ReferenceVerification] | None = None,
+        content_role: ContentRole = "authored",
     ) -> ValidationReport:
         """校验引用可追溯性；`evidence_pool` 缺省时使用 `result.evidence`。
 
         `reference_verifications` 为外部引用核验结论：
         仅当 `reference_mode != "off"` 且传入非 None 时才追加 `reference_authenticity` 检查。
+
+        `content_role`（Issue #6）：`aggregated` 表示这是 search/validate/review 节点的机械汇总内容，
+        `AUTHORED_ONLY_CHECKS` 记为「不适用」而非失败——跨节点复述不是模型缺陷，
+        且重试无法修复（实测约 40% 运行因此转人工）。报告形状（检查名与顺序）保持不变。
         """
         pool = list(evidence_pool if evidence_pool is not None else result.evidence)
         content = result.content or ""
         markers = [int(match) for match in MARKER_PATTERN.findall(content)]
         used = set(markers)
+        authored = content_role != "aggregated"
 
         checks: list[ValidationCheck] = []
         retryable = False
@@ -165,7 +186,9 @@ class CitationValidator:
             checks.append(_ok("evidence_is_cited", f"{len(pool)} 条证据均被引用"))
 
         bare_claims = self._bare_claims(content)
-        if bare_claims:
+        if not authored:
+            checks.append(_ok("formal_claims_have_evidence", f"{_AGGREGATED_SKIP_NOTE}（不适用）"))
+        elif bare_claims:
             checks.append(
                 _fail(
                     "formal_claims_have_evidence",
@@ -184,7 +207,14 @@ class CitationValidator:
             checks.append(_ok("required_sections_present", "必需章节齐全"))
 
         ratio = self._duplicate_ratio(content)
-        if ratio > self._threshold:
+        if not authored:
+            checks.append(
+                _ok(
+                    "duplicate_paragraph_ratio",
+                    f"{_AGGREGATED_SKIP_NOTE}（不适用，重复比例 {ratio:.2f}）",
+                )
+            )
+        elif ratio > self._threshold:
             checks.append(
                 _fail(
                     "duplicate_paragraph_ratio",

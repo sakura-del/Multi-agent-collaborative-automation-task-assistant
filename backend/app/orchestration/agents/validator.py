@@ -18,7 +18,7 @@ from typing import Any
 from pydantic import ValidationError as PydanticValidationError
 
 from app.core.logging import get_logger
-from app.knowledge.services.citation_validator import CitationValidator
+from app.knowledge.services.citation_validator import CitationValidator, ContentRole
 from app.llm.models import Message, MessageRole
 from app.orchestration.base_agent import BaseAgent
 from app.orchestration.contracts import (
@@ -161,7 +161,14 @@ class ValidatorAgent(BaseAgent):
             self._required_sections,
             evidence_pool=evidence_pool,
             reference_verifications=self._reference_verifications(input_data),
+            content_role=self._content_role(input_data),
         )
+
+    @staticmethod
+    def _content_role(input_data: dict[str, Any]) -> ContentRole:
+        """解析内容角色（Issue #6）；缺失或非法一律回落到 `authored`（从严，不放宽检查）。"""
+        value = input_data.get("content_role")
+        return "aggregated" if value == "aggregated" else "authored"
 
     @staticmethod
     def _reference_verifications(input_data: dict[str, Any]) -> list[ReferenceVerification] | None:

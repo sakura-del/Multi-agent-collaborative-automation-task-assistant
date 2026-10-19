@@ -25,6 +25,7 @@ from pydantic import ValidationError as PydanticValidationError
 
 from app.core.exceptions import HumanActionRequiredError
 from app.core.logging import get_logger
+from app.knowledge.services.citation_validator import ContentRole
 from app.knowledge.services.reference_verifier import candidates_from_artifacts
 from app.orchestration.agents.planner import PlannerAgent, PlannerPlanInvalidError
 from app.orchestration.base_agent import BaseAgent
@@ -49,6 +50,24 @@ logger = get_logger(__name__)
 REQUIRED_NODE_TYPES = frozenset({"search", "extract", "write", "validate", "review"})
 #: 需要证据上下文的节点类型
 EVIDENCE_NODE_TYPES = frozenset({"extract", "write"})
+
+#: 输出为机械汇总/检索结果的节点类型（Issue #6）：其 content 不是作者文本
+AGGREGATE_NODE_TYPES = frozenset({"search", "validate", "review"})
+
+
+def content_role_for_node(node_type: str) -> ContentRole:
+    """节点类型 → 内容角色（Issue #6）。
+
+    `extract` / `write` 由模型在有证据约束下创作正文，属 `authored`；
+    `search`（检索结果列表）与 `validate` / `review`（依赖输出机械汇总）都不是作者文本，
+    作者级文本质量检查（裸断言、重复段落比例）对它们没有意义——跨节点复述是固有形态，
+    且重试无法修复（实测约 40% 运行因此转人工）。
+
+    未知类型（含空串）一律按 **authored** 从严处理：宁可多查，不可在无法判定时静默放宽。
+    """
+    return "authored" if node_type not in AGGREGATE_NODE_TYPES else "aggregated"
+
+
 #: 研究问题数量区间
 MIN_RESEARCH_QUESTIONS = 3
 MAX_RESEARCH_QUESTIONS = 10
@@ -104,6 +123,22 @@ class LiteratureReviewWorkflow:
             if node.id == node_id:
                 return node.title
         return node_id
+
+    def _node_type(self, node_id: str) -> str:
+        """取节点类型：先查已备好的上下文，再查绑定计划；都查不到返回空串。
+
+        （Issue #6 用：`validate`/`review` 节点在 `execute_node` 里不会走 `prepare_node`，
+        故不能只依赖 `prepared_for`。）
+        """
+        prepared = self.prepared_for(node_id) or {}
+        node_type = str(prepared.get("node_type") or "")
+        if node_type:
+            return node_type
+        if self._plan is not None:
+            for node in self._plan.nodes:
+                if node.id == node_id:
+                    return node.type
+        return ""
 
     def require_node(self, node_id: str) -> PlanNode:
         """按 node_id 取计划节点；计划缺失时要求人工介入。"""
@@ -369,6 +404,9 @@ class LiteratureReviewWorkflow:
             "execution_result": result.model_dump(mode="json"),
             "task_id": str(getattr(task, "id", "")),
             "trace_id": self._trace_id(task),
+            # Issue #6：search/validate/review 的 content 是机械汇总（依赖输出拼接），
+            # 跨节点复述属固有形态，须与作者正文区分，否则会触发无法通过重试修复的失败
+            "content_role": content_role_for_node(self._node_type(result.node_id)),
         }
         verifications = await self._verify_artifacts(result)
         if verifications:

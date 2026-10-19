@@ -797,6 +797,57 @@ M1 提交不含 `validator.py` / `literature_review.py`，而该失败发生在*
 复跑一次即 `completed`。**这会影响演示可靠性**，建议单列任务排查（疑似 `formal_claims_have_evidence`
 或章节缺失导致的可重试失败），当前先记录不修。
 
+---
+
+## Issue #6 执行记录：修复「校验转人工」死循环（2026-10-19）
+
+**Issue**：[#6](https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant/issues/6)（P0，bug）
+
+### 1. 根因（用生产数据定位，非猜测）
+
+从服务器 `subtask.output_data` 取回失败任务 n5 的校验报告：
+
+```
+[FAIL] duplicate_paragraph_ratio: 重复段落比例 0.22 超过阈值 0.20   ← 唯一失败项
+（其余 8 项检查全部通过，含 LLM 语义检查 semantic_consistency）
+```
+
+段落级取证：
+
+| 节点 | 段落数 | 完全重复 | 比例 |
+| --- | --- | --- | --- |
+| n3（extract） | 4 | 0 | 0.000 |
+| n4（write） | 6 | 0 | 0.000 |
+| **n5（validate）** | **9** | **2** | **0.222 → 失败** |
+
+**机制**：`validate`/`review` 节点的内容不是自己写的，而是 `_summarize_dependencies()`
+把每个依赖节点的输出机械拼接（`"[{dep_id}] {text}"`）→ n5 的内容 = n3 全文 + n4 全文。
+write 节点复述 extract 节点原文是**正常写法**，但拼接后必然出现跨节点重复；
+`duplicate_paragraph_ratio`（阈值 0.20）是**作者级**文本质量检查，用在这里属范畴错误：
+它不是模型自重复，**重试不可能修复** → 3 次重试后转人工（实测约 40% 运行）。
+
+### 2. 修复（先红后绿）
+
+引入**内容角色**，把「作者正文」与「机械汇总」区分开：
+
+| 改动 | 说明 |
+| --- | --- |
+| `citation_validator.py` | 新增 `ContentRole = Literal["authored","aggregated"]`、`AUTHORED_ONLY_CHECKS`；`validate(..., content_role=)` 在 `aggregated` 下把 `formal_claims_have_evidence` / `duplicate_paragraph_ratio` 记为**「不适用」通过**（message 必须出现「机器汇总内容…不做作者级判定」），**报告形状（检查名与顺序）不变** |
+| `literature_review.py` | 新增 `AGGREGATE_NODE_TYPES = {"search","validate","review"}` 与 `content_role_for_node()`；`validate_node` 从**已备好上下文或绑定计划**解析节点类型并随请求下发 `content_role`（新增 `_node_type()`，因为 validate 节点在 `execute_node` 里不走 `prepare_node`） |
+| `validator.py` | `ValidatorAgent` 解析并转发 `content_role`；缺失/非法一律回落 `authored`（从严，不放宽） |
+
+**不可退让的三条性质**（`tests/test_validation_content_role.py`，14 例）：
+
+1. 同一段 33% 重复文本：`authored` 下**仍然失败**（守卫：没把检查整体关掉）；
+2. `aggregated` 下通过，且两项检查以「不适用」形态出现在报告里（不静默删除）；
+3. `aggregated` 下**完整性失败仍然失败**（如 `[E9]` 不可解析仍判失败）。
+
+### 3. 范围外（已记入 Issue #6 后续项）
+
+聚合文本的**跨节点冗余本身**未解决：`ReviewerAgent` 正文是各节点 `content` 拼接，
+最终 Markdown 会出现同一段落多次。建议单列任务：复盘以 write 节点为主干、其余节点仅作上下文。
+
+
 
 
 
