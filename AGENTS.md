@@ -21,12 +21,12 @@
 | 项 | 值 |
 | --- | --- |
 | 分支 | `main`（工作分支 `codex/plan3-literature-workflow` 与 main 同点） |
-| HEAD | Issue #3 `42b5e54` → Issue #5 ADR `cde9592` → Issue #4 M1 `ce86c57` → Issue #6 `f1c9f78` → **Issue #7 `cdbcd8d`** |
+| HEAD | Issue #3 `42b5e54` → #5 ADR `cde9592` → #4 M1 `ce86c57` → #6 `f1c9f78` → #7 `cdbcd8d` → **#4 M2 `f0123d4`** |
 | 冻结 tag | `defense-v1` |
 | Plan 状态 | Plan 2 / 3 / 4 / 5 **全部 Exit Gate PASSED** |
-| 产品化进度 | **Issue #3 已交付**；**Issue #5 已关闭**；**Issue #4 M1 已交付**（M2 遗留见 §6.1）；**Issue #6 已修复关闭**（转人工 40% → 5/5 成功）；**Issue #7 已修复关闭**（正文重复 45% → 0%） |
-| 后端测试 | **1474 passed**, 8 skipped；覆盖率 **89.58%**；`mypy` 0 错误（136 文件） |
-| 前端测试 | Vitest **69 passed**；Playwright E2E **4 passed**（桌面 + 移动双视口） |
+| 产品化进度 | **Issue #3 已交付**；**Issue #5 已关闭**；**Issue #4 M1+M2 已交付**；**Issue #6 已修复关闭**（转人工 40% → 5/5 成功）；**Issue #7 已修复关闭**（正文重复 45% → 0%） |
+| 后端测试 | **1549 passed**, 8 skipped；覆盖率 **89.60%**；`mypy` 0 错误（141 文件） |
+| 前端测试 | Vitest **84 passed**；Playwright E2E **4 passed**（桌面 + 移动双视口） |
 | 服务器 | 已同步，五容器 healthy，`curl http://127.0.0.1:48080/api/v1/health/ready` → `{"status":"ready"}` |
 
 **演示账号**：`demo` / `demo12345`（知识库已有 10 篇冻结语料 / 2834 分块）
@@ -136,7 +136,7 @@ docker compose build backend && docker compose up -d backend
 | Issue | 标题 | 优先级 | 说明 |
 | --- | --- | --- | --- |
 | [#3](https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant/issues/3) | ✅ 引用真实性校验（CrossRef/OpenAlex） | **P0** | **已交付**（`42b5e54`，2026-10-19）：四态核验 + 导出统计 + 拦截开关；计划与实测见 [2026-10-18-03-reference-authenticity-plan.md](docs/superpowers/plans/2026-10-18-03-reference-authenticity-plan.md)。**遗留**：前端展示核验结果；`contact_email` 受配置优先级缺陷限制只能改 yaml |
-| [#4](https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant/issues/4) | CSL 引用引擎 + GB/T 7714—2025 默认 | P0 | **M1 已交付**（2026-10-19）：`app/tools/csl/`（models/renderer/styles/exporters + 自研 2025 样式 + 4 份 vendored + 署名）、5 种预置样式、golden 快照、准入校验（显式拒绝 CSL-M）、BibTeX/RIS 导出、导出链路渲染期生效。计划与实测见 [2026-10-19-04-csl-engine-plan.md](docs/superpowers/plans/2026-10-19-04-csl-engine-plan.md)。**M2 待做**：`CitationStyle` 实体 + Alembic、`.csl` 上传 API、前端样式选择器、GB/T 2025 著者-出版年制、`CslItem.medium`（`MM` 载体标识）、拼音排序、作者全大写归一（citeproc-py 限制） |
+| [#4](https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant/issues/4) | CSL 引用引擎 + GB/T 7714—2025 默认 | P0 | **M1+M2 已交付**（2026-10-19）：M1 `ce86c57`（`app/tools/csl/` 渲染核心 + 自研 2025 样式 + 5 预置 + golden + 准入）；M2 `f0123d4`（`citation_style` 表 + Alembic `a4c9e1d7b2f8` + 上传/列表/删除 API + `.bib`/`.ris` 下载 + 前端样式选择器与管理页 + 自定义样式渲染接线）。计划见 [M1](docs/superpowers/plans/2026-10-19-04-csl-engine-plan.md) / [M2](docs/superpowers/plans/2026-10-19-04b-csl-m2-plan.md)。**遗留**：GB/T 2025 著者-出版年制、`CslItem.medium`（`MM`）、拼音排序、全大写姓名归一（citeproc-py 限制）、`created_at` 秒级精度排序 |
 | [#5](https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant/issues/5) | ✅ CSL-M 双语策略架构决策（ADR） | P1 | **已完成**（2026-10-19）：决策 = **Option C**（标准 CSL 1.0.2 + 应用层逐条 locale 切换），否决 Option B（citeproc-js 为 CPAL-1.0 OR AGPL-1.0，CPAL §15 把网络部署视为分发；且双语样式非 1.0.2 合法却被 citeproc-js **静默**接受）。证据：[ADR 0001](docs/adr/0001-csl-bilingual-strategy.md) + 3 份 research 文档 |
 | [#6](https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant/issues/6) | ✅ 校验转人工（约 40%） | **P0** | **已修复并关闭**（2026-10-19，`94de098` + `f1c9f78`）：两处成因——① `validate`/`review` 的**机器汇总内容**被施加作者级检查（`duplicate_paragraph_ratio` 跨节点复述必然超阈值，且重试无法修复）→ 引入内容角色 `authored`/`aggregated`；② **语义判定失败被当作不可重试** → `waiting_human`（一次有噪声的 LLM 判断即致命）→ 并入 `retryable`（完整性失败仍不可重试）。验证：原始失败载荷回放 + 连续 **5/5 completed**。**遗留**：`ReviewerAgent` 正文是各节点 `content` 拼接，最终 Markdown 存在跨节点重复段落，建议单列任务（复盘以 write 节点为主干） |
 | [#7](https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant/issues/7) | ✅ 复盘正文冗余 | **P1** | **已修复并关闭**（2026-10-19，`cdbcd8d`）：根因是复盘对**每个**节点无条件 `body_parts.append(content)` 后拼接，而 validate/review 的内容本身又是上游输出的拼接（拼接的拼接）。修法：`ExecutionResult` 增 `node_type`（工作流标注、随执行结果回流）+ `content_role`；只有 `extract`/`write`（作者正文）进正文，`search`/`validate`/`review` 不进；段落按首次出现去重（只去完全相同，不做模糊合并）；剔除作者节点自带的 `## 参考文献`/`## 局限性`/`## 引用核验`（由复盘统一生成）。**实测：正文重复段落 45.6%/47.1% → 0%；`## 参考文献` 3 次 → 1 次**。**遗留**：extract 与 write 仍各输出一遍条目清单（内容层合理重复，非逐字），如需进一步压缩应让 write 不复述清单 |

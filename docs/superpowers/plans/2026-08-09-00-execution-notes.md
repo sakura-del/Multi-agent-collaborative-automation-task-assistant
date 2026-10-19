@@ -947,6 +947,58 @@ legacy 路径同语义。
 属内容层面的合理重复（非逐字重复）。本次只去重**完全相同**的段落，不做模糊合并，
 以免误删不同内容；若要进一步压缩，应让 `write` 节点不再复述条目清单（另立任务）。
 
+---
+
+## Issue #4 M2 执行记录：样式实体 + 上传 API + 前端选择器（2026-10-19）
+
+**计划**：[2026-10-19-04b-csl-m2-plan.md](2026-10-19-04b-csl-m2-plan.md)
+**提交**：`f0123d4`（30 文件，+3611）
+
+M1 让 `citation_style` 在**渲染期**生效；M2 把它变成**用户可选、可上传**的一等实体。
+
+### 1. 交付
+
+| 层 | 内容 |
+| --- | --- |
+| 数据层 | `citation_style` 表（`user_id` 可空 = 系统预置；`UNIQUE(user_id, style_id)` + `WHERE user_id IS NULL` 部分唯一索引）、Repository（全 owner-scoped）、Alembic `a4c9e1d7b2f8` |
+| 服务/API | `CitationStyleService`（256KB 上限、UTF-8 校验、**复用 M1 准入**、style_id 服务端派生、冲突加 `-2/-3`、内容哈希幂等、防穿越）；`GET/POST/DELETE /api/v1/citation-styles` |
+| 渲染接线 | `StyleRegistry.register_custom/unregister_custom`（与预置走同一套准入，预置不可被覆盖）；`LiteratureExporter(style_resolver=...)` + `RuntimeContainer.style_registry` 共用实例；启动时从 DB 重新登记（重启后仍可用） |
+| 下载 | `GET /tasks/{id}/references.bib\|.ris`（复用 M1 exporters，owner-scoped，无参考文献 → 400，RFC 5987 文件名） |
+| 前端 | `StyleView` + `/styles` 路由与导航、`TaskCreateForm` 动态下拉（**失败降级为内置两项**）、`package.json` 补 `test` 脚本 |
+
+### 2. 服务器验证（真实 PostgreSQL + 真实 API + 真实模型）
+
+1. **迁移**：`alembic current` → `a4c9e1d7b2f8 (head)`；实测表结构 12 列、`user_id` 可空、
+   索引含 `uq_citation_style_preset_style_id ... WHERE (user_id IS NULL)` 与 `uq_citation_style_user_style_id`。
+2. **端到端**（任务 `79c68c5c`，`citation_style` = 上传的 `https-example-org-styles-lab-m2`）：
+   - 列表 5 个预置 + 默认 `gbt7714-2025-numeric`；
+   - 上传 → `201`，`source=custom`；
+   - **CSL-M 样式 → `400`**，detail：`…:8: 检测到 CSL-M 私有构造 `institution`…已拒绝`（未静默接受）；
+   - 任务 `completed`，参考文献按**自定义样式**渲染（`Ali, Nurshat Fateh, … (2024)` 形态），
+     GB/T 类型标识 `[J` 出现 = **False**（证明样式真的切换了，不是回退到默认）；
+   - `.bib` 200 / 2719 字节、`.ris` 200 / 2490 字节；
+   - 删除自定义样式 → `204`，列表剩余自定义 = `[]`。
+
+### 3. 过程中发现并修复的真实集成缺口
+
+`LiteratureExporter` 原先自行 `CitationRenderer()` 构造注册表 → **看不到已上传的样式**
+（端到端测试 `test_citation_style_e2e.py` 先红暴露）。修法：
+`LiteratureExporter(style_resolver=...)` + `RuntimeContainer.style_registry` + 启动时重新登记，
+使上传入口与渲染期共用**同一**注册表实例。
+
+### 4. 门禁
+
+black/ruff 干净；`mypy` 0 错误（**141 文件**）；`pytest` **1549 passed / 8 skipped**；
+覆盖率 **89.60%**（新增模块 89–100%）；前端 `pnpm test` **84 passed**、`pnpm build` 通过。
+
+### 5. 遗留（下一轮）
+
+- GB/T 7714—2025 **著者-出版年制**样式（需新样式资产 + golden）
+- `CslItem.medium`（`MM` 载体标识）、author-date 拼音排序、全大写姓名归一（`citeproc-py` 限制）
+- `citation_style` 的 DB 行 `created_at` 为秒级精度，同秒多次上传时 `created_at DESC` 顺序不确定
+  （可在 repository 加 `style_id` 次键）
+
+
 
 
 
