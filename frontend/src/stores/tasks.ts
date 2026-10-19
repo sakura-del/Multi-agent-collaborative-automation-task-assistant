@@ -75,6 +75,41 @@ export const useTaskStore = defineStore("tasks", () => {
    */
   const REFRESH_ON_STATUS = new Set(["waiting_approval", "waiting_human", "completed", "failed"]);
 
+  /** 事件名本身即代表"快照里有新内容"，必须重拉（Issue #2） */
+  const REFRESH_ON_EVENT_TYPE = new Set(["plan_ready", "task_completed"]);
+
+  /** 这些状态下界面应已能展示规划；若 `plan` 仍为空则说明快照过期（Issue #2） */
+  const PLAN_VISIBLE_STATUS = new Set(["waiting_approval", "running", "reviewing", "completed"]);
+
+  /**
+   * 是否需要重新拉快照（Issue #2）。
+   *
+   * 原实现只判断「状态是否变化」，漏掉了生产上的竞态：快照的 `status` 已经是
+   * `waiting_approval`，但 `plan` 仍是 `null`（快照与规划写入有时序差）；随后到达的
+   * `plan_ready` 事件因 `nextStatus === previousStatus` 被跳过 → 界面永远停在
+   * 「暂无规划」，只能手动刷新。
+   *
+   * 判据（任一成立即重拉）：
+   * 1. 事件类型本身代表新内容（`plan_ready` / `task_completed`）——与状态无关；
+   * 2. 状态发生变化且新状态值得刷新（既有行为）；
+   * 3. 当前快照**缺少规划内容**（`plan === null`）而状态已要求展示规划
+   *    （`waiting_approval` / `running` / `reviewing` / `completed`）——补拉兜底。
+   */
+  function needsSnapshotRefresh(
+    previousStatus: TaskSnapshot["status"],
+    nextStatus: TaskSnapshot["status"],
+    eventType: string,
+    current: TaskSnapshot
+  ): boolean {
+    if (REFRESH_ON_EVENT_TYPE.has(eventType)) {
+      return true;
+    }
+    if (nextStatus !== previousStatus && REFRESH_ON_STATUS.has(nextStatus)) {
+      return true;
+    }
+    return current.plan == null && PLAN_VISIBLE_STATUS.has(nextStatus);
+  }
+
   function applyEvent(event: TaskEvent): void {
     if (event.event_id <= lastEventId.value) {
       return;
@@ -86,9 +121,10 @@ export const useTaskStore = defineStore("tasks", () => {
     }
     const previousStatus = snapshot.value.status;
     const nextStatus = event.status as TaskSnapshot["status"];
-    snapshot.value = { ...snapshot.value, status: nextStatus };
-    if (nextStatus !== previousStatus && REFRESH_ON_STATUS.has(nextStatus)) {
-      const taskId = snapshot.value.task_id;
+    const merged = { ...snapshot.value, status: nextStatus };
+    snapshot.value = merged;
+    if (needsSnapshotRefresh(previousStatus, nextStatus, event.event_type, merged)) {
+      const taskId = merged.task_id;
       void load(taskId).catch(() => undefined);
     }
   }

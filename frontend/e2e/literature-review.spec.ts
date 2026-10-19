@@ -80,7 +80,18 @@ test.describe("文献综述工作台全流程", () => {
     await page.goto(`/tasks/${taskId}`);
 
     // 规划确认：等规划生成完毕（规划是异步的），再确认当前版本
+    // Issue #2 回归：这里**全程不得 reload**——规划就绪必须由事件驱动自动呈现。
+    // 旧缺陷下快照 status 已是 waiting_approval 但 plan 为 null，plan_ready 事件被
+    // 「状态未变化」守卫跳过，只能手动 F5 才能看到规划。
+    const navigationCount = await page.evaluate(
+      () => performance.getEntriesByType("navigation").length
+    );
     await expect(page.locator('[data-test="plan-approve"]')).toBeVisible({ timeout: 240_000 });
+    // 断言期间没有发生整页重载（性能条目仍是首次导航）
+    expect(
+      await page.evaluate(() => performance.getEntriesByType("navigation").length)
+    ).toBe(navigationCount);
+    await expect(page.locator('[data-test="plan-panel"]')).toBeVisible();
     await capture(page, "2-plan-approval", project);
     await expectNoHorizontalOverflow(page);
     await page.locator('[data-test="plan-approve"]').click();
