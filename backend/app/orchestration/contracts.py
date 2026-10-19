@@ -176,7 +176,10 @@ class LiteratureReviewRequest(BaseModel):
     date_to: date | None = None
     max_documents: int = Field(default=20, ge=1, le=50)
     output_language: Literal["zh", "en"] = "zh"
-    citation_style: Literal["gbt7714", "apa"] = "gbt7714"
+    # Issue #4：引用样式在**渲染期**生效（不再只是提示词）。取值由
+    # `app.tools.csl.styles.StyleRegistry` 提供（含 "gbt7714" 别名 → "gbt7714-2025-numeric"）；
+    # 这里放宽为字符串以便新增样式不必改契约，未知样式在渲染时给出明确错误。
+    citation_style: str = Field(default="gbt7714", min_length=1, max_length=64)
     document_ids: list[UUID] = Field(default_factory=list, max_length=50)
     offline_dataset: bool = False
 

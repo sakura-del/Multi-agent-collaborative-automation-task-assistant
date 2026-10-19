@@ -240,7 +240,7 @@ RenderJob(id, project_id, status, output_uri, error, trace)
 | 优先级 | 功能 | 价值 | 依赖 |
 | --- | --- | --- | --- |
 | **P0** | ✅ 引用真实性校验（CrossRef/OpenAlex）——**已完成**（`42b5e54`，见 [实施计划](../superpowers/plans/2026-10-18-03-reference-authenticity-plan.md)） | ⭐ 核心护城河，唯一对抗知网的差异点 | 无 |
-| **P0** | CSL 引用引擎 + **GB/T 7714—2025 默认** | 用户点名 + 新国标先发 | 无 |
+| **P0** | 🟡 CSL 引用引擎 + **GB/T 7714—2025 默认**（**M1 已交付**：确定性渲染核心 + 自研 2025 样式 + 5 预置样式 + golden；M2：样式实体/上传 API/前端选择器） | 用户点名 + 新国标先发 | ✅ 已解除（ADR 0001） |
 | **P0** | Word 模板导入 + 一键切换 | 用户点名；生成即合规 | CSL 引擎 |
 | **P0** | 检索源扩展（OpenAlex + S2 + PubMed） | 摆脱 arXiv 单一源 | 无 |
 | P1 | 账号体系（邮箱验证/密码重置） | 才能开放注册 | 无 |

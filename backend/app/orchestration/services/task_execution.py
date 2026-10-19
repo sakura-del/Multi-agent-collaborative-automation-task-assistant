@@ -700,6 +700,9 @@ class TaskExecution:
             task_type = task.task_type
             user_id = task.user_id
             title = task.title
+            # Issue #4：引用样式在**渲染期**生效（此前只拼进提示词）；缺省 None 表示沿用既有渲染
+            task_config = task.config if isinstance(task.config, dict) else {}
+            citation_style = str(task_config.get("citation_style") or "").strip() or None
             event_count = int(
                 (
                     await session.execute(
@@ -725,7 +728,9 @@ class TaskExecution:
                     "event_stats": {"event_count": event_count, "task_id": str(task_id)},
                 }
             )
-            artifacts = self._export_literature_artifacts(user_id, task_id, review_report)
+            artifacts = self._export_literature_artifacts(
+                user_id, task_id, review_report, citation_style=citation_style
+            )
         else:
             review_report = await reviewer.execute(
                 {
@@ -814,10 +819,14 @@ class TaskExecution:
         user_id: UUID,
         task_id: UUID,
         review_report: dict[str, Any],
+        *,
+        citation_style: str | None = None,
     ) -> list[dict[str, Any]]:
         """导出 Markdown/DOCX；复盘输出不符合 ReviewReport 时退化为摘要产物。"""
         try:
-            return self._export_artifacts(user_id, task_id, review_report)
+            return self._export_artifacts(
+                user_id, task_id, review_report, citation_style=citation_style
+            )
         except PydanticValidationError:
             logger.warning("literature_review_report_invalid", task_id=str(task_id))
             return [
@@ -832,6 +841,8 @@ class TaskExecution:
         user_id: UUID,
         task_id: UUID,
         review_report: dict[str, Any],
+        *,
+        citation_style: str | None = None,
     ) -> list[dict[str, Any]]:
         """把 ReviewReport 导出为 Markdown/DOCX，返回可持久化的 artifact 元数据。"""
         from app.orchestration.contracts import ReviewReport
@@ -844,8 +855,12 @@ class TaskExecution:
             {key: value for key, value in review_report.items() if key in known_fields}
         )
         return [
-            exporter.export_markdown(user_id, task_id, report).model_dump(mode="json"),
-            exporter.export_docx(user_id, task_id, report).model_dump(mode="json"),
+            exporter.export_markdown(
+                user_id, task_id, report, citation_style=citation_style
+            ).model_dump(mode="json"),
+            exporter.export_docx(
+                user_id, task_id, report, citation_style=citation_style
+            ).model_dump(mode="json"),
         ]
 
     async def resolve_artifact(

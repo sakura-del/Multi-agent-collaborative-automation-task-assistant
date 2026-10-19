@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 故意损坏的 CSL（根元素不是 cs:style，且缺失必需结构）：
+     用于验证渲染器「渲染失败 → 记 warning + 回退内置极简格式化器」的兜底路径。 -->
+<style version="1.0">
+  <info>
+    <title>M1-2 Broken Style (test fixture)</title>
+  </info>

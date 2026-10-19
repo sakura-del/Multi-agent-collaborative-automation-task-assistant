@@ -74,6 +74,43 @@ def _verification_line(summary: Mapping[str, Any]) -> str:
     )
 
 
+def _enrich_reference_entry(entry: dict[str, Any], artifact: Mapping[str, Any]) -> None:
+    """把检索结果元数据补进参考文献条目（Issue #4 / 计划 §1.5）。
+
+    设计约束：
+    - **只在缺键时补**，不覆盖 reviewer 已有取值；
+    - 条目若来自证据片段（没有作者）而同 URL 有真实检索记录，则用**真实题名**替换摘录标题
+      （否则 CSL 渲染出的参考文献会把 60 字摘录当题名）；
+    - `language` 必须落库：缺失会让逐条 locale 退化（英文条目被渲染成「等」）。
+    仅依赖 `app.tools.csl.models` 的纯函数，不触发任何网络。
+    """
+    from app.tools.csl.models import detect_language, parse_year
+
+    title = str(artifact.get("title") or "").strip()
+    authors = [str(item).strip() for item in (artifact.get("authors") or []) if str(item).strip()]
+
+    if title and not entry.get("authors") and entry.get("title") != title:
+        entry["title"] = title
+    if authors and not entry.get("authors"):
+        entry["authors"] = authors
+    if entry.get("year") is None:
+        year = parse_year(artifact.get("published_at") or artifact.get("issued"))
+        if year is not None:
+            entry["year"] = year
+    if not entry.get("language"):
+        entry["language"] = detect_language(
+            title=str(entry.get("title") or title),
+            authors=[str(item) for item in (entry.get("authors") or authors)],
+        )
+    for key in ("doi", "DOI"):
+        value = artifact.get(key)
+        if value and not entry.get("doi"):
+            entry["doi"] = str(value)
+            break
+    if artifact.get("type") and not entry.get("type"):
+        entry["type"] = str(artifact["type"])
+
+
 _ATTRIBUTION_PROMPT = """请分析以下任务执行日志，定位失败根因并给出改进建议。
 
 执行日志（JSON）：
@@ -232,6 +269,9 @@ class ReviewerAgent(BaseAgent):
                         "source_url": url,
                         "source_id": artifact.get("source_id"),
                     }
+                if url:
+                    # Issue #4：补齐 CSL 渲染所需的元数据（作者/年份/语言/DOI/类型）
+                    _enrich_reference_entry(citations[url], artifact)
 
         bibliography = [
             {"index": index, **entry} for index, entry in enumerate(citations.values(), start=1)

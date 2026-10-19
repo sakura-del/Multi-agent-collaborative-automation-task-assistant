@@ -714,4 +714,64 @@ EXPORT_MD_SECTION True | EXPORT_DOCX bytes 37043
 6. 顺带修复文档断链 1 处（`2026-10-17-00-combined-delivery-roadmap.md` 的 runbooks 链接少了一层 `../`），
    用一次性链接校验脚本扫描 `docs/**/*.md` 的相对链接：修复后 **0 断链**。
 
+---
+
+## Issue #4 M1 执行记录：确定性 CSL 渲染核心 + GB/T 7714—2025（2026-10-19）
+
+**计划**：[2026-10-19-04-csl-engine-plan.md](2026-10-19-04-csl-engine-plan.md)（含冻结接口与裁决 R-M1-1/2/3）
+**ADR**：[0001-csl-bilingual-strategy.md](../adr/0001-csl-bilingual-strategy.md)（Option C：标准 CSL 1.0.2 + 逐条 locale）
+
+### 1. 交付能力（M1 范围：渲染核心，无 DB 改动）
+
+`citation_style` 从「只拼进提示词」变成**渲染期确定性能力**：
+
+| 交付物 | 说明 |
+| --- | --- |
+| `app/tools/csl/models.py` | CSL-JSON 契约（`CslItem`/`CslName`）、`LiteratureRecord`/bibliography 条目映射、`detect_language`、GB/T 类型标识映射、`StyleMeta` + `StyleResolver` 协议 |
+| `app/tools/csl/renderer.py` | `CitationRenderer`：归一 → 排序 → 编号 → **按条目语言分组逐条 locale 渲染** → 剥离引擎编号 → 合并；`substitute_inline` 处理 `[[cite:ref_id]]`；ADR §4.1 运行时兜底 |
+| `app/tools/csl/styles.py` | `StyleRegistry`（5 个预置样式 + `gbt7714` 别名）、`validate_csl_file` 准入（结构 + CSL-M 扫描，**显式拒绝并列构造名与行号**） |
+| `app/tools/csl/exporters.py` | `to_bibtex` / `to_ris`（纯字符串、零新依赖、中文 UTF-8 原样） |
+| `app/tools/csl/styles/**` | 自研 `gbt7714-2025-numeric.csl` + vendored `gbt7714-2015-numeric/apa/ieee/nature` + `ATTRIBUTION.md`（CC BY-SA 3.0 署名） |
+| 集成 | `LiteratureExporter(..., citation_style=...)` 替换 `## 参考文献` 段落、保留 `## 引用核验`、`[E{n}]` 不受影响；`task_execution` 从 `task.config` 读取样式；reviewer 为条目补齐 CSL 元数据（authors/year/language，并在同 URL 有真实检索记录时用真实题名替换摘录） |
+
+### 2. 实测证据
+
+**双语（ADR Option C 的落地验证）** —— 同一批冻结语料、逐条 locale：
+
+```
+[1] Es S, James J, Espinosa-Anke L, et al. Ragas: ... [J/OL]. Proceedings of ..., 2023, 12(3): 150-160. DOI:10.18653/v1/2023.evalnlp-1.16.
+[2] 牛耕田, 李泽, 张三, 等. 面向学位论文的中文参考文献著录规则研究[J/OL]. 中国科技期刊研究, 2024, 35(2): 100-110. DOI:10.1234/zh.journal.2024.001.
+```
+
+**GB/T 7714—2025 变化项坐实**：英文作者 `Es S / Smith J / Garcia M`（**非** 2015 的全大写）；
+类型标识 `[J/OL] [M] [C/OL] [D] [PP/OL]`；`medium:"MM"` 探针 → `[J/MM]`。
+
+**样式切换（头号验收项）**：同一篇综述用 `gbt7714` / `gbt7714-2015-numeric` / `apa` / `ieee` / `nature`
+渲染，5 份产物**互不相同**、均保留 `[E1]`/`[E2]`、均替换旧手写参考文献；顺序编码制有条目编号、APA 无编号。
+
+**golden 快照**：`tests/fixtures/csl/golden/{gb2025-numeric,apa,ieee,nature}.expected.md`（逐行逐字断言，缺文件即 `fail` 不 skip）。
+
+**门禁**：见 §4。CSL 相关测试 284 项全绿（+ 集成 13 项）。
+
+### 3. 过程中的 3 处冻结接口缺陷（均由实现方按「缺陷先行 + 报裁决」上报，Lead 裁决后落地）
+
+| 裁决 | 缺陷 | 修法 |
+| --- | --- | --- |
+| R-M1-1 | 样式文件名与 `test_csl_styles` 的注册表断言冲突 | 唯一规则：文件名 = `{style_id}.csl`；`default_locale` 按样式文件实际声明（GB/T=zh-CN、nature=en-GB，**不统一**） |
+| R-M1-2 | `INLINE_PATTERN` 字符类不含 `/`，DOI 型 ref_id（`doi:10.1234/...`）永远替换不了 | 放宽为 `\[\[cite:([^\s\]]+)\]\]` |
+| R-M1-3① | 剥离规则只覆盖 `[n]`，`nature` 的裸 `1.` 导致**双重编号** | 放宽为 `^(?:\[\d+\]\s*|\d+[.)]\s*)`，仅行首、仅一次 |
+| R-M1-3② | 自研样式把「必备类型标识」与「可选载体标识」绑在同一条件 → 专著/学位论文缺 `[M]`/`[D]` | 判为**样式缺陷**（GB/T 类型标识为必备项）：类型标识恒输出、`/OL` 载体标识按条件 |
+
+另记录两条 citeproc-py 0.11.1 实测限制（写入样式头注释与 ATTRIBUTION）：
+① `cs:group` 变量判定只看子元素**静态**声明，故「恒输出字面值 + 可选载体标识」同组会被整组抑制；
+② `<name-part text-case="capitalize-first">` 直接抛 `AttributeError` → 2025「仅首字母大写」以**不施加 uppercase** 实现，
+**若上游给出全大写姓名需在 `models.py` 归一（M2 待办）**。
+
+### 4. 范围与遗留（M2）
+
+本轮**不含**：`CitationStyle` 实体与 Alembic 迁移、`.csl` 上传 API、前端样式选择器、GB/T 2025 著者-出版年制样式、
+`CslItem.medium` 字段（用于 `MM` 等载体标识）、author-date 的中文拼音排序（当前按 Unicode 码位）、
+Markdown 斜体 formatter（当前 `plain`）。以上已列入计划 §0 的 M2 列。
+
+
 

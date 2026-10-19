@@ -190,13 +190,19 @@ def bibliography_indexes(markdown: str) -> list[int]:
 
 
 def expected_bibliography() -> list[dict[str, Any]]:
-    """未注入核验器时 bibliography 的历史形状（不得新增任何键）。"""
+    """未注入核验器时 bibliography 的既有形状 + Issue #4 的 CSL 元数据键。
+
+    - **不得出现核验键**（`verification_status` / `verification_reason`）——本文件的原始意图；
+    - Issue #4（M1）起，条目会补齐 CSL 渲染所需元数据：这些 artifact 无 authors/published_at，
+      故只补 `language`（英文题名 → `en-US`）。
+    """
     return [
         {
             "index": index,
             "title": artifact["title"],
             "source_url": artifact["source_url"],
             "source_id": artifact["source_id"],
+            "language": "en-US",
         }
         for index, artifact in enumerate(ARTIFACTS, start=1)
     ]

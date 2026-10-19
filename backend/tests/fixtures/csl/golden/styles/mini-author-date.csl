@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  M1-2 单元测试用 mini 样式（著者-出版年制）。
+
+  用途：验证 `numbering="none"` + `ordering="author-date"` 的路径：
+    - 行内 marker 由 citeproc 渲染（`(牛耕田 等, 2024)` / `(Es et al., 2023)`）；
+    - bibliography 不编号（引擎也不会输出 `[n]`）；
+    - et-al 术语同样走逐条 locale（「等」/「et al.」）。
+  这不是产品样式，仅供 tests/test_csl_renderer.py 使用。
+-->
+<style xmlns="http://purl.org/net/xbiblio/csl" class="in-text" version="1.0" default-locale="en-US">
+  <info>
+    <title>M1-2 Mini Author-Date (test fixture)</title>
+    <id>http://example.invalid/csl/mini-author-date</id>
+    <updated>2026-10-19T00:00:00+00:00</updated>
+  </info>
+  <citation>
+    <layout prefix="(" suffix=")" delimiter="; ">
+      <group delimiter=", ">
+        <names variable="author">
+          <name form="short" et-al-min="4" et-al-use-first="1" and="text" delimiter=", " delimiter-precedes-last="always"/>
+          <substitute>
+            <text variable="title"/>
+          </substitute>
+        </names>
+        <date variable="issued">
+          <date-part name="year"/>
+        </date>
+      </group>
+    </layout>
+  </citation>
+  <bibliography entry-spacing="0">
+    <layout suffix=".">
+      <names variable="author" suffix=". ">
+        <name et-al-min="4" et-al-use-first="3" initialize-with=". " and="text" delimiter=", " delimiter-precedes-last="always"/>
+        <substitute>
+          <text variable="title"/>
+        </substitute>
+      </names>
+      <date variable="issued" suffix=". ">
+        <date-part name="year"/>
+      </date>
+      <text variable="title" suffix=". "/>
+      <text variable="container-title" suffix=", "/>
+      <text variable="volume" suffix="("/>
+      <text variable="issue" suffix=")"/>
+      <text variable="page" prefix=": "/>
+      <text variable="publisher" suffix=", "/>
+      <text variable="publisher-place"/>
+    </layout>
+  </bibliography>
+</style>

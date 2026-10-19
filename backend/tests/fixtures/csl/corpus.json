@@ -1,0 +1,97 @@
+{
+  "_comment": "Issue #4 M1 冻结测试语料（CSL-JSON）。实现方不得修改本文件；如需新增用例请提给 lead。覆盖：中文/英文 × 期刊/专著/会议/学位论文/预印本，以及 2025 版两条关键变化（英文作者仅首字母大写、新增类型标识 PP）。",
+  "items": [
+    {
+      "id": "src:2309.15217v2",
+      "type": "article-journal",
+      "title": "Ragas: Automated Evaluation of Retrieval Augmented Generation",
+      "author": [
+        { "family": "Es", "given": "Shahul" },
+        { "family": "James", "given": "Jithin" },
+        { "family": "Espinosa-Anke", "given": "Luis" },
+        { "family": "Schockaert", "given": "Steven" }
+      ],
+      "container-title": "Proceedings of the 1st Workshop on Evaluation and Comparison of NLP Systems",
+      "volume": "12",
+      "issue": "3",
+      "page": "150-160",
+      "issued": { "date-parts": [[2023, 9, 26]] },
+      "DOI": "10.18653/v1/2023.evalnlp-1.16",
+      "URL": "https://arxiv.org/abs/2309.15217v2",
+      "language": "en-US"
+    },
+    {
+      "id": "doi:10.1234/zh.journal.2024.001",
+      "type": "article-journal",
+      "title": "面向学位论文的中文参考文献著录规则研究",
+      "author": [
+        { "literal": "牛耕田" },
+        { "literal": "李泽" },
+        { "literal": "张三" },
+        { "literal": "王五" }
+      ],
+      "container-title": "中国科技期刊研究",
+      "volume": "35",
+      "issue": "2",
+      "page": "100-110",
+      "issued": { "date-parts": [[2024, 3, 1]] },
+      "DOI": "10.1234/zh.journal.2024.001",
+      "language": "zh-CN"
+    },
+    {
+      "id": "src:book-multi-agent-2022",
+      "type": "book",
+      "title": "多智能体系统导论",
+      "author": [
+        { "literal": "陈国强" },
+        { "literal": "刘洋" }
+      ],
+      "publisher": "科学出版社",
+      "publisher-place": "北京",
+      "issued": { "date-parts": [[2022, 5, 1]] },
+      "language": "zh-CN"
+    },
+    {
+      "id": "src:conf-orchestration-2024",
+      "type": "paper-conference",
+      "title": "A Survey of Multi-Agent Task Orchestration",
+      "author": [
+        { "family": "Smith", "given": "John" },
+        { "family": "Johnson", "given": "Emily" },
+        { "family": "Williams", "given": "Mark" },
+        { "family": "Brown", "given": "Alice" }
+      ],
+      "container-title": "Proceedings of the 2024 International Conference on Autonomous Agents",
+      "publisher": "ACM",
+      "publisher-place": "New York",
+      "page": "55-70",
+      "issued": { "date-parts": [[2024, 6, 15]] },
+      "DOI": "10.1145/3612345.3612399",
+      "language": "en-US"
+    },
+    {
+      "id": "src:thesis-evidence-tracing-2025",
+      "type": "thesis",
+      "title": "证据可追溯的自动文献综述方法研究",
+      "author": [{ "literal": "赵敏" }],
+      "publisher": "清华大学",
+      "publisher-place": "北京",
+      "issued": { "date-parts": [[2025, 6, 1]] },
+      "language": "zh-CN"
+    },
+    {
+      "id": "src:arxiv-fair-rag-2025",
+      "type": "manuscript",
+      "title": "FAIR-RAG: Faithful Adaptive Iterative Refinement for Retrieval-Augmented Generation",
+      "author": [
+        { "family": "Garcia", "given": "Maria" },
+        { "family": "Lee", "given": "Kevin" },
+        { "family": "Wang", "given": "Wei" }
+      ],
+      "container-title": "arXiv",
+      "issued": { "date-parts": [[2025, 2, 10]] },
+      "URL": "https://arxiv.org/abs/2502.01234v1",
+      "language": "en-US"
+    }
+  ]
+}

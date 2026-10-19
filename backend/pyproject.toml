@@ -60,6 +60,13 @@ dependencies = [
     # HTTP 客户端 / 工具
     "httpx>=0.26.0",
     "tenacity>=8.2.3",
+
+    # CSL 引用渲染（Issue #4 / ADR 0001 Option C）
+    # 选型理由与许可证核实见 docs/adr/0001-csl-bilingual-strategy.md：
+    # citeproc-py 为 BSD-2-Clause-Views、纯 Python；双语靠应用层逐条 locale 切换实现。
+    # 上游自述 CSL 覆盖率约 60% + Alpha，故必须用 golden 测试兜住我们真正用到的构造；
+    # 失败时的路线内逃生通道是 pandoc --citeproc（不回到 citeproc-js）。
+    "citeproc-py==0.11.1",
 ]
 
 [project.optional-dependencies]

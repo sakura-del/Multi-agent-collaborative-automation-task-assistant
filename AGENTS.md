@@ -21,13 +21,13 @@
 | 项 | 值 |
 | --- | --- |
 | 分支 | `main`（工作分支 `codex/plan3-literature-workflow` 与 main 同点） |
-| HEAD | `ed5f2cc`（Issue #3 功能提交 `42b5e54`） |
+| HEAD | Issue #3 `42b5e54` → ADR `cde9592` → **Issue #4 M1（见下方提交）** |
 | 冻结 tag | `defense-v1` |
 | Plan 状态 | Plan 2 / 3 / 4 / 5 **全部 Exit Gate PASSED** |
-| 产品化进度 | **Issue #3 引用真实性校验已交付**（CrossRef/OpenAlex 四态核验 + 导出统计 + 拦截开关） |
-| 后端测试 | **1159 passed**, 8 skipped；覆盖率 **88.83%**；`mypy` 0 错误（131 文件） |
+| 产品化进度 | **Issue #3 已交付**（引用真实性校验）；**Issue #5 已关闭**（ADR 0001）；**Issue #4 M1 已交付**（确定性 CSL 渲染核心 + GB/T 7714—2025，M2 遗留见 §6.1） |
+| 后端测试 | **1444 passed**, 8 skipped；覆盖率 **89.53%**；`mypy` 0 错误（136 文件） |
 | 前端测试 | Vitest **69 passed**；Playwright E2E **4 passed**（桌面 + 移动双视口） |
-| 服务器 | 已同步至 `ed5f2cc`，五容器 healthy，`curl http://127.0.0.1:48080/api/v1/health/ready` → `{"status":"ready"}` |
+| 服务器 | 已同步，五容器 healthy，`curl http://127.0.0.1:48080/api/v1/health/ready` → `{"status":"ready"}` |
 
 **演示账号**：`demo` / `demo12345`（知识库已有 10 篇冻结语料 / 2834 分块）
 
@@ -136,7 +136,7 @@ docker compose build backend && docker compose up -d backend
 | Issue | 标题 | 优先级 | 说明 |
 | --- | --- | --- | --- |
 | [#3](https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant/issues/3) | ✅ 引用真实性校验（CrossRef/OpenAlex） | **P0** | **已交付**（`42b5e54`，2026-10-19）：四态核验 + 导出统计 + 拦截开关；计划与实测见 [2026-10-18-03-reference-authenticity-plan.md](docs/superpowers/plans/2026-10-18-03-reference-authenticity-plan.md)。**遗留**：前端展示核验结果；`contact_email` 受配置优先级缺陷限制只能改 yaml |
-| [#4](https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant/issues/4) | CSL 引用引擎 + GB/T 7714—2025 默认 | P0 | **双语阻塞已解除**（ADR [0001](docs/adr/0001-csl-bilingual-strategy.md)，2026-10-19）。技术栈已定：**标准 CSL 1.0.2 + 逐条 locale 切换（纯 Python，citeproc-py）**，不引入 citeproc-js/Node。⚠️ 更正两条旧结论：npm 包名是 **`citeproc`**（`citeproc-js` 不存在）；`citeproc-py` **并未停滞**（0.11.1 / 2026-09-01），真实短板是 CSL 覆盖率约 60% + Alpha。GB/T 7714—2025 样式需自研（官方仓库未收录；社区库有 9 个变体可参考，CC BY-SA 3.0）。**建议下一个做** |
+| [#4](https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant/issues/4) | CSL 引用引擎 + GB/T 7714—2025 默认 | P0 | **M1 已交付**（2026-10-19）：`app/tools/csl/`（models/renderer/styles/exporters + 自研 2025 样式 + 4 份 vendored + 署名）、5 种预置样式、golden 快照、准入校验（显式拒绝 CSL-M）、BibTeX/RIS 导出、导出链路渲染期生效。计划与实测见 [2026-10-19-04-csl-engine-plan.md](docs/superpowers/plans/2026-10-19-04-csl-engine-plan.md)。**M2 待做**：`CitationStyle` 实体 + Alembic、`.csl` 上传 API、前端样式选择器、GB/T 2025 著者-出版年制、`CslItem.medium`（`MM` 载体标识）、拼音排序、作者全大写归一（citeproc-py 限制） |
 | [#5](https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant/issues/5) | ✅ CSL-M 双语策略架构决策（ADR） | P1 | **已完成**（2026-10-19）：决策 = **Option C**（标准 CSL 1.0.2 + 应用层逐条 locale 切换），否决 Option B（citeproc-js 为 CPAL-1.0 OR AGPL-1.0，CPAL §15 把网络部署视为分发；且双语样式非 1.0.2 合法却被 citeproc-js **静默**接受）。证据：[ADR 0001](docs/adr/0001-csl-bilingual-strategy.md) + 3 份 research 文档 |
 | [#2](https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant/issues/2) | 规划生成后页面不自动显示，需刷新 | P2 | **用户要求暂缓**；演示绕过已写入 `docs/runbooks/defense-demo.md` 第 5 步 |
 | — | 配置优先级缺陷（YAML 无法被 `.env`/环境变量覆盖） | P1 | `get_settings()` 用 `Settings(**yaml_defaults)`，init 参数优先级最高。已阻塞 Issue #3 的 `contact_email` 注入（只能改 yaml）；建议改 `settings_customise_sources` 并补覆盖顺序测试 |

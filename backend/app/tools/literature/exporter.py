@@ -78,15 +78,33 @@ class LiteratureExporter:
 
     # ===== 导出 =====
 
-    def export_markdown(self, user_id: UUID, task_id: UUID, report: ReviewReport) -> Artifact:
-        """写出生成的 Markdown（HTML 已转义、链接已校验）。"""
-        raw = self._compose_document(report)
+    def export_markdown(
+        self,
+        user_id: UUID,
+        task_id: UUID,
+        report: ReviewReport,
+        *,
+        citation_style: str | None = None,
+    ) -> Artifact:
+        """写出生成的 Markdown（HTML 已转义、链接已校验）。
+
+        给出 `citation_style` 时，参考文献由 CSL 渲染器**确定性渲染**（Issue #4）；
+        `[[cite:ref_id]]` 占位替换为样式对应的正文标记；`[E{n}]` 证据标记不受影响。
+        """
+        raw = self._compose_document(report, citation_style=citation_style)
         payload = self._escape_html(raw).encode("utf-8")
         return self._write(user_id, task_id, kind="markdown", suffix=".md", payload=payload)
 
-    def export_docx(self, user_id: UUID, task_id: UUID, report: ReviewReport) -> Artifact:
-        """按同一标题层级写出 DOCX（python-docx）。"""
-        raw = self._compose_document(report)
+    def export_docx(
+        self,
+        user_id: UUID,
+        task_id: UUID,
+        report: ReviewReport,
+        *,
+        citation_style: str | None = None,
+    ) -> Artifact:
+        """按同一标题层级写出 DOCX（python-docx）；`citation_style` 语义同 Markdown。"""
+        raw = self._compose_document(report, citation_style=citation_style)
         payload = self._build_docx_bytes(raw)
         return self._write(user_id, task_id, kind="docx", suffix=".docx", payload=payload)
 
@@ -133,13 +151,23 @@ class LiteratureExporter:
             created_at=datetime.now(UTC),
         )
 
-    def _compose_document(self, report: ReviewReport) -> str:
-        """组装完整文档：标题 → 摘要 → 正文 → 局限性 → 参考文献 → 引用核验。"""
+    def _compose_document(self, report: ReviewReport, *, citation_style: str | None = None) -> str:
+        """组装完整文档：标题 → 摘要 → 正文 → 局限性 → 参考文献 → 引用核验。
+
+        给出 `citation_style` 时（Issue #4）：正文里的 `[[cite:ref_id]]` 先替换为样式标记，
+        再用 CSL 渲染结果**替换**既有的 `## 参考文献` 段落（幂等，不受复盘侧文本影响）；
+        未给出时完全保持既有行为。
+        """
         body = (report.final_markdown or "").strip()
         stats = report.stats or {}
         title = str(stats.get("title") or self._first_heading(body) or "文献综述")
         abstract = str(stats.get("abstract") or self._first_paragraph(body))
         limitations = stats.get("limitations") or report.issues or []
+
+        rendered_lines: list[str] | None = None
+        if citation_style and report.bibliography:
+            rendered_lines = self._render_bibliography(report, citation_style)
+            body = self._substitute_inline_citations(body, report, citation_style)
 
         parts = [f"# {title}"]
         if abstract and "## 摘要" not in body:
@@ -149,19 +177,75 @@ class LiteratureExporter:
         if limitations and "## 局限性" not in body:
             items = limitations if isinstance(limitations, list) else [limitations]
             parts.append("## 局限性\n" + "\n".join(f"- {item}" for item in items))
-        if report.bibliography and "## 参考文献" not in body:
-            lines = [
-                self._bibliography_line(index, entry)
-                for index, entry in enumerate(report.bibliography, start=1)
-            ]
-            parts.append("## 参考文献\n" + "\n".join(lines))
-        verification = stats.get("reference_verification")
-        if isinstance(verification, dict) and _REFERENCE_SECTION not in body:
-            parts.append(f"{_REFERENCE_SECTION}\n{_verification_line(verification)}")
+        if rendered_lines is not None:
+            # CSL 渲染结果优先：替换既有「参考文献」段落（保留其后的「引用核验」段落）
+            document = "\n\n".join(parts)
+            document = self._replace_bibliography_section(
+                document, "## 参考文献\n" + "\n".join(rendered_lines)
+            )
+        else:
+            if report.bibliography and "## 参考文献" not in body:
+                lines = [
+                    self._bibliography_line(index, entry)
+                    for index, entry in enumerate(report.bibliography, start=1)
+                ]
+                parts.append("## 参考文献\n" + "\n".join(lines))
+            document = "\n\n".join(parts)
 
-        document = "\n\n".join(parts)
+        verification = stats.get("reference_verification")
+        if isinstance(verification, dict) and _REFERENCE_SECTION not in document:
+            document = f"{document}\n\n{_REFERENCE_SECTION}\n{_verification_line(verification)}"
+
         self._validate_links(document)
         return document
+
+    # ===== Issue #4：CSL 渲染（懒导入，避免 tools 包之间的循环依赖）=====
+
+    @staticmethod
+    def _render_bibliography(report: ReviewReport, citation_style: str) -> list[str]:
+        """用 CSL 渲染器产出参考文献行；未知样式由渲染器抛 ValidationException。"""
+        from app.tools.csl.models import csl_item_from_bibliography_entry
+        from app.tools.csl.renderer import CitationRenderer
+
+        items = []
+        for entry in report.bibliography:
+            item = csl_item_from_bibliography_entry(entry)
+            if item is not None:
+                items.append(item)
+        rendered = CitationRenderer().render(items, style_id=citation_style)
+        return list(rendered.entries)
+
+    @staticmethod
+    def _substitute_inline_citations(body: str, report: ReviewReport, citation_style: str) -> str:
+        """把正文 `[[cite:ref_id]]` 替换为样式对应的正文标记（无占位时原样返回）。"""
+        from app.tools.csl.models import csl_item_from_bibliography_entry
+        from app.tools.csl.renderer import INLINE_PATTERN, CitationRenderer
+
+        if not INLINE_PATTERN.search(body):
+            return body
+        items = []
+        for entry in report.bibliography:
+            item = csl_item_from_bibliography_entry(entry)
+            if item is not None:
+                items.append(item)
+        renderer = CitationRenderer()
+        rendered = renderer.render(items, style_id=citation_style)
+        return renderer.substitute_inline(body, rendered)
+
+    @staticmethod
+    def _replace_bibliography_section(document: str, section: str) -> str:
+        """替换 `## 参考文献` 段落（到下一个 `## ` 标题为止）；不存在则追加。"""
+        match = re.search(r"^## 参考文献[ \t]*$", document, re.MULTILINE)
+        if match is None:
+            return f"{document}\n\n{section}"
+        start = match.start()
+        rest = document[match.end() :]
+        following = re.search(r"^## ", rest, re.MULTILINE)
+        end = match.end() + following.start() if following else len(document)
+        prefix = document[:start].rstrip()
+        suffix = document[end:].strip()
+        combined = f"{prefix}\n\n{section}" if prefix else section
+        return f"{combined}\n\n{suffix}" if suffix else combined
 
     @staticmethod
     def _bibliography_line(index: int, entry: dict) -> str:

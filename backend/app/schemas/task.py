@@ -48,7 +48,9 @@ class TaskCreate(BaseModel):
     date_to: date | None = None
     max_documents: int = Field(default=20, ge=1, le=50)
     output_language: Literal["zh", "en"] = "zh"
-    citation_style: Literal["gbt7714", "apa"] = "gbt7714"
+    # Issue #4：样式在渲染期生效；ID 集合由 `app.tools.csl.styles.StyleRegistry` 管理
+    # （预置：gbt7714-2025-numeric（默认，别名 "gbt7714"）/ gbt7714-2015-numeric / apa / ieee / nature）。
+    citation_style: str = Field(default="gbt7714", min_length=1, max_length=64)
     document_ids: list[UUID] = Field(default_factory=list, max_length=50)
     offline_dataset: bool = False
 

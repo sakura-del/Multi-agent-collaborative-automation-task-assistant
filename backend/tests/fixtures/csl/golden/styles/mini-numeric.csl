@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  M1-2 单元测试用 mini 样式（顺序编码制）。
+
+  用途：在 task-11 的自研 GB/T 7714—2025 样式落地前，为渲染器提供一份
+  完全可控的 CSL 1.0.2 样式；它刻意包含：
+    - bibliography 行首的 citation-number（用于验证「剥离引擎自带编号」）；
+    - et-al-min=4 / et-al-use-first=3（用于验证「等」/「et al.」逐条 locale）；
+    - 不含任何 CSL-M 构造（标准 1.0.2）。
+  这不是产品样式，仅供 tests/test_csl_renderer.py 使用。
+-->
+<style xmlns="http://purl.org/net/xbiblio/csl" class="in-text" version="1.0" default-locale="en-US">
+  <info>
+    <title>M1-2 Mini Numeric (test fixture)</title>
+    <id>http://example.invalid/csl/mini-numeric</id>
+    <updated>2026-10-19T00:00:00+00:00</updated>
+  </info>
+  <citation collapse="citation-number">
+    <sort>
+      <key variable="citation-number"/>
+    </sort>
+    <layout prefix="[" suffix="]" delimiter=",">
+      <text variable="citation-number"/>
+    </layout>
+  </citation>
+  <bibliography entry-spacing="0">
+    <layout suffix=".">
+      <text variable="citation-number" prefix="[" suffix="] "/>
+      <names variable="author" suffix=". ">
+        <name et-al-min="4" et-al-use-first="3" initialize-with=". " and="text" delimiter=", " delimiter-precedes-last="always"/>
+        <substitute>
+          <text variable="title"/>
+        </substitute>
+      </names>
+      <text variable="title" suffix=". "/>
+      <text variable="container-title" suffix=", "/>
+      <date variable="issued">
+        <date-part name="year"/>
+      </date>
+      <text variable="page" prefix=": "/>
+    </layout>
+  </bibliography>
+</style>

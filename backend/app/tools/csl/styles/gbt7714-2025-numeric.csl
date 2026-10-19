@@ -1,0 +1,372 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  GB/T 7714—2025《信息与文献 参考文献著录规则》顺序编码制样式（自研实现）。
+
+  标准与约束
+  - 目标规范：CSL 1.0.2（version="1.0"），**零 CSL-M 专有构造**：
+    没有多语言布局的 locale 属性、没有 institution 元素、没有 has-day 条件、
+    没有引用范围分隔符术语、术语文本中没有百分号-s 占位符。
+    准入扫描规则见 docs/superpowers/plans/2026-10-19-04-csl-engine-plan.md §1.2。
+  - 双语方案：样式自身不区分输出语言；由应用层按条目 language 逐条切换 locale
+    （中文条目 locale="zh-CN" → 截断术语「等」；英文条目 locale="en-US" → "et al."）。
+    决策见 docs/adr/0001-csl-bilingual-strategy.md（Option C）。
+  - 编号与排序：顺序编码制的方括号序号由应用层负责（引擎会忽略预设 citation-number）；
+    本样式仍按 numeric 样式惯例输出 citation-number，供 Zotero/Word 等处理器直接使用。
+
+  2025 版相对 2015 版的关键变化（本样式体现）
+  1. 英文著者**仅首字母大写**（2015 版为整体大写）：由 name-part 的 capitalize-first 声明；
+     若上游数据本身是全大写（如 "SMITH"），需由上层做大小写归一（CSL 1.0.2 无链式大小写变换）。
+  2. 文献类型标识（附录 A.1）新增/明确：预印本 PP、数据集 DS、网站网页 EB、汇编 G；
+     载体标识（附录 A.2）新增缩微资料 MM（与 MT/DK/CD/OL 并列），由条目 medium 字段提供。
+  3. 文献类型标识在 2025 版为**必备项**，故本样式始终在题名后输出 [文献类型标识/载体标识]
+     （如 [J/OL]、[M]、[PP/OL]、[EB/OL]）。
+
+  参考实现（仅阅读比对，未整段复制；两者均为 CC BY-SA 3.0）
+  - citation-style-language/styles：
+    china-national-standard-gb-t-7714-2015-numeric.csl（作者：牛耕田；贡献者：Zeping Lee）
+  - zotero-chinese/styles：
+    「GB/T 7714—2025（顺序编码，双语）」变体（作者：Zeping Lee）
+  本文件由本项目独立编写，并以 CC BY-SA 3.0 发布；完整署名与来源见同目录 ATTRIBUTION.md。
+-->
+<style xmlns="http://purl.org/net/xbiblio/csl" version="1.0" class="in-text" default-locale="zh-CN" name-as-sort-order="all" sort-separator=" " initialize-with=" " initialize-with-hyphen="false" demote-non-dropping-particle="never" page-range-format="expanded">
+  <info>
+    <title>GB/T 7714—2025 信息与文献 参考文献著录规则（顺序编码制）</title>
+    <title-short>GB/T 7714—2025（顺序编码制）</title-short>
+    <id>https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant/blob/main/backend/app/tools/csl/styles/gbt7714-2025-numeric.csl</id>
+    <link href="https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant" rel="self"/>
+    <link href="https://std.samr.gov.cn/gb/search/gbDetailed?id=4507EFE13D37CB6AE06397BE0A0A601F" rel="documentation"/>
+    <link href="https://www.zotero.org/styles/china-national-standard-gb-t-7714-2015-numeric" rel="template"/>
+    <author>
+      <name>多智能体协作自动化任务助手（自研实现）</name>
+    </author>
+    <category citation-format="numeric"/>
+    <category field="generic-base"/>
+    <summary>GB/T 7714—2025 顺序编码制（自研 CSL 1.0.2 实现）：英文著者仅首字母大写；文献类型标识为必备项，含 2025 新增的预印本 PP、数据集 DS、网站网页 EB、汇编 G 与载体标识缩微资料 MM；中文「等」/英文 et al. 由应用层逐条切换 locale 产生。</summary>
+    <updated>2026-10-19T00:00:00+08:00</updated>
+    <rights license="http://creativecommons.org/licenses/by-sa/3.0/">This work is licensed under a Creative Commons Attribution-ShareAlike 3.0 License</rights>
+  </info>
+
+  <!-- 中文语境术语：仅覆盖 in-style 需要改写的术语，其余走 citeproc 内置 locale 文件 -->
+  <locale xml:lang="zh">
+    <terms>
+      <term name="edition" form="short">版</term>
+    </terms>
+  </locale>
+
+  <!-- 与语言无关的公共术语/日期格式 -->
+  <locale>
+    <date form="numeric">
+      <date-part name="year"/>
+      <date-part name="month" form="numeric-leading-zeros" prefix="-"/>
+      <date-part name="day" form="numeric-leading-zeros" prefix="-"/>
+    </date>
+    <terms>
+      <term name="page-range-delimiter">-</term>
+    </terms>
+  </locale>
+
+  <!-- 主要责任者（2025 变化①：英文著者仅首字母大写）。
+       CSL 1.0.2 的姓名部分没有「先整体小写再首字母大写」的链式变换，且 citeproc-py 0.11.1
+       在 name-part 上使用 capitalize-first 会抛 AttributeError（其对 name-part 的入参是普通 str）。
+       因此本样式**不对 family 施加任何大小写变换**——2015 版正是用 uppercase 造成全大写的偏差；
+       英文姓名的「仅首字母大写」由数据层保证（上游若给全大写，需在上层归一）。
+       中文姓名由数据以 literal 提供，不受影响。 -->
+  <macro name="contributors">
+    <names variable="author">
+      <name/>
+      <substitute>
+        <names variable="composer"/>
+        <names variable="director"/>
+        <names variable="editor"/>
+        <names variable="translator"/>
+      </substitute>
+    </names>
+  </macro>
+
+  <!-- 文献类型标识（GB/T 7714—2025 附录 A.1；2025 版为必备项） -->
+  <macro name="type-identifier">
+    <choose>
+      <if type="manuscript article" match="any">
+        <!-- 预印本：2025 版新增 PP（CSL 的 article 亦按预印本著录） -->
+        <text value="PP"/>
+      </if>
+      <else-if type="article-journal article-magazine periodical" match="any">
+        <text value="J"/>
+      </else-if>
+      <else-if type="article-newspaper">
+        <text value="N"/>
+      </else-if>
+      <else-if type="book chapter classic entry-dictionary entry-encyclopedia" match="any">
+        <text value="M"/>
+      </else-if>
+      <else-if type="paper-conference">
+        <text value="C"/>
+      </else-if>
+      <else-if type="thesis">
+        <text value="D"/>
+      </else-if>
+      <else-if type="report">
+        <text value="R"/>
+      </else-if>
+      <else-if type="standard">
+        <text value="S"/>
+      </else-if>
+      <else-if type="patent">
+        <text value="P"/>
+      </else-if>
+      <else-if type="dataset">
+        <text value="DS"/>
+      </else-if>
+      <else-if type="post post-weblog webpage" match="any">
+        <text value="EB"/>
+      </else-if>
+      <else-if type="map">
+        <text value="CM"/>
+      </else-if>
+      <else-if type="software">
+        <text value="CP"/>
+      </else-if>
+      <else-if type="collection">
+        <text value="G"/>
+      </else-if>
+      <else-if type="bill hearing legal_case legislation regulation treaty personal_communication" match="any">
+        <text value="A"/>
+      </else-if>
+      <else-if variable="archive">
+        <text value="A"/>
+      </else-if>
+      <else>
+        <text value="Z"/>
+      </else>
+    </choose>
+  </macro>
+
+  <!-- 文献载体标识（GB/T 7714—2025 附录 A.2：MT/DK/CD/OL，2025 新增缩微资料 MM）。
+       medium 字段承载附录 A.2 的代码；缺省时按「有 URL/DOI 即联机网络 OL」处理。 -->
+  <macro name="carrier-identifier">
+    <choose>
+      <if variable="medium">
+        <text variable="medium"/>
+      </if>
+      <else-if variable="URL DOI" match="any">
+        <text value="OL"/>
+      </else-if>
+    </choose>
+  </macro>
+
+  <!-- 卷次（多卷书等；期刊文章的卷号在出处项中输出） -->
+  <macro name="volume">
+    <choose>
+      <if type="article article-journal article-magazine article-newspaper periodical manuscript" match="none">
+        <choose>
+          <if is-numeric="volume">
+            <group delimiter=" ">
+              <label variable="volume" form="short"/>
+              <text variable="volume"/>
+            </group>
+          </if>
+          <else>
+            <text variable="volume"/>
+          </else>
+        </choose>
+      </if>
+    </choose>
+  </macro>
+
+  <!-- 版本项 -->
+  <macro name="edition">
+    <choose>
+      <if is-numeric="edition">
+        <group delimiter=" ">
+          <number variable="edition" form="ordinal"/>
+          <label variable="edition" form="short"/>
+        </group>
+      </if>
+      <else>
+        <text variable="edition"/>
+      </else>
+    </choose>
+  </macro>
+
+  <!-- 标识组合：文献类型标识/载体标识（如 J/OL、PP/OL、J/MM、M） -->
+  <macro name="entry-identifier">
+    <group delimiter="/">
+      <text macro="type-identifier"/>
+      <text macro="carrier-identifier"/>
+    </group>
+  </macro>
+
+  <!-- 题名项：题名 + [文献类型标识/载体标识]。
+       文献类型标识（[J]/[M]/[D]/[PP]…）在 2025 版为**必备项，恒输出**；
+       载体标识（/OL、/MM 等）仅在可判定时追加，无 URL/DOI/medium 时为纯类型标识。
+       citeproc-py 0.11.1 对 group 的「变量调用」判定只看子元素的静态声明
+       （If 自身的 variable 属性不计入），若把恒输出的字面值与载体标识放进同一个 group，
+       无 URL/DOI 的条目会被整组抑制（实测：[M]/[D] 丢失）。故此处分流为两个分支。 -->
+  <macro name="title">
+    <group delimiter=": ">
+      <text variable="title"/>
+      <choose>
+        <if variable="container-title" type="chapter entry-dictionary entry-encyclopedia paper-conference" match="none">
+          <text macro="volume"/>
+        </if>
+      </choose>
+    </group>
+    <choose>
+      <if variable="medium URL DOI" match="any">
+        <text macro="entry-identifier" prefix="[" suffix="]"/>
+      </if>
+      <else>
+        <text macro="type-identifier" prefix="[" suffix="]"/>
+      </else>
+    </choose>
+  </macro>
+
+  <!-- 出版年（无法确定时置于方括号内，与 2015 版一致） -->
+  <macro name="issued-year">
+    <choose>
+      <if variable="issued">
+        <choose>
+          <if is-uncertain-date="issued">
+            <date variable="issued" form="numeric" date-parts="year" prefix="[" suffix="]"/>
+          </if>
+          <else>
+            <date variable="issued" form="numeric" date-parts="year"/>
+          </else>
+        </choose>
+      </if>
+      <else-if variable="accessed">
+        <date variable="accessed" form="numeric" date-parts="year" prefix="[" suffix="]"/>
+      </else-if>
+    </choose>
+  </macro>
+
+  <!-- 出版日期（报纸、专利等需要完整日期的场合） -->
+  <macro name="issued-date">
+    <date variable="issued" form="numeric"/>
+  </macro>
+
+  <!-- 连续出版物中的析出文献出处项：刊名, 年, 卷(期): 页码 -->
+  <macro name="container-periodical">
+    <choose>
+      <if type="article-newspaper">
+        <group delimiter=", ">
+          <text variable="container-title"/>
+          <text macro="issued-date"/>
+        </group>
+        <text variable="page" prefix="(" suffix=")"/>
+      </if>
+      <else>
+        <group delimiter=": ">
+          <group>
+            <group delimiter=", ">
+              <text variable="container-title"/>
+              <text macro="issued-year"/>
+              <text variable="volume"/>
+            </group>
+            <text variable="issue" prefix="(" suffix=")"/>
+          </group>
+          <text variable="page"/>
+        </group>
+      </else>
+    </choose>
+  </macro>
+
+  <!-- 出版项：出版地: 出版者, 出版年: 页码 -->
+  <macro name="publishing-info">
+    <group delimiter=": ">
+      <group delimiter=", ">
+        <group delimiter=": ">
+          <text variable="publisher-place"/>
+          <text variable="publisher"/>
+        </group>
+        <text macro="issued-year"/>
+      </group>
+      <text variable="page"/>
+    </group>
+  </macro>
+
+  <!-- 专著/会议录中的析出文献的容器项 -->
+  <macro name="container-item">
+    <group delimiter=". ">
+      <choose>
+        <if variable="container-title">
+          <text variable="container-title"/>
+        </if>
+        <else-if type="paper-conference">
+          <text variable="event-title"/>
+        </else-if>
+      </choose>
+      <text macro="publishing-info"/>
+    </group>
+  </macro>
+
+  <!-- 获取和访问路径、数字对象唯一标识符 -->
+  <macro name="access">
+    <group delimiter=". ">
+      <text variable="URL"/>
+      <text variable="DOI" prefix="DOI:"/>
+    </group>
+  </macro>
+
+  <!-- 参考文献表条目 -->
+  <macro name="entry">
+    <group delimiter=". ">
+      <text macro="contributors"/>
+      <choose>
+        <if type="article-journal article-magazine article-newspaper periodical" match="any">
+          <!-- 连续出版物中的析出文献 -->
+          <text macro="title"/>
+          <text macro="container-periodical"/>
+        </if>
+        <else-if type="manuscript article" match="any">
+          <!-- 预印本：题名[PP/OL]. 发布平台, 发布年. 获取和访问路径 -->
+          <text macro="title"/>
+          <group delimiter=", ">
+            <text variable="container-title"/>
+            <text macro="issued-year"/>
+          </group>
+        </else-if>
+        <else-if type="dataset webpage post post-weblog" match="any">
+          <!-- 数据集、网站网页：题名[DS/OL]. 出版者, 年. 获取和访问路径 -->
+          <text macro="title"/>
+          <group delimiter=", ">
+            <text variable="publisher"/>
+            <text macro="issued-year"/>
+          </group>
+        </else-if>
+        <else-if type="chapter entry-dictionary entry-encyclopedia paper-conference" variable="container-title" match="any">
+          <!-- 专著/会议录中的析出文献：题名[C/OL]//出版物题名. 出版地: 出版者, 年: 页码 -->
+          <group delimiter="//">
+            <text macro="title"/>
+            <text macro="container-item"/>
+          </group>
+        </else-if>
+        <else>
+          <!-- 专著、学位论文、报告、标准、专利等：题名[M]. 版本. 出版地: 出版者, 年: 页码 -->
+          <text macro="title"/>
+          <text macro="edition"/>
+          <text macro="publishing-info"/>
+        </else>
+      </choose>
+      <text macro="access"/>
+    </group>
+  </macro>
+
+  <citation collapse="citation-number" after-collapse-delimiter=",">
+    <sort>
+      <key variable="citation-number"/>
+    </sort>
+    <layout prefix="[" suffix="]" delimiter="," vertical-align="sup">
+      <text variable="citation-number"/>
+    </layout>
+  </citation>
+
+  <bibliography et-al-min="4" et-al-use-first="3" entry-spacing="0" second-field-align="flush">
+    <layout suffix=".">
+      <group delimiter=" ">
+        <text variable="citation-number" prefix="[" suffix="]"/>
+        <text macro="entry"/>
+      </group>
+    </layout>
+  </bibliography>
+</style>
