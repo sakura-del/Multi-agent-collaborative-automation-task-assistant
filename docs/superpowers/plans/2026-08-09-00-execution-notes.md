@@ -998,6 +998,55 @@ black/ruff 干净；`mypy` 0 错误（**141 文件**）；`pytest` **1549 passed
 - `citation_style` 的 DB 行 `created_at` 为秒级精度，同秒多次上传时 `created_at DESC` 顺序不确定
   （可在 repository 加 `style_id` 次键）
 
+---
+
+## Issue #3 遗留项执行记录：前端引用核验展示（2026-10-19）
+
+**计划**：[2026-10-19-03b-frontend-verification-plan.md](2026-10-19-03b-frontend-verification-plan.md)
+**提交**：`c270348`（13 文件，+2731）
+
+### 1. 先摸清的关键约束（否则做出来是空壳）
+
+后端数据**早已**返回（`review_report.stats.reference_verification` +
+`bibliography[].verification_status`），无需新增 API。但实测 3 个 completed 离线任务发现：
+**核验数据根本不存在**——因为 `offline_dataset=true` 的任务默认被摘掉核验器
+（R6：避免 CrossRef/OpenAlex 429 拖垮任务）。
+
+**所以本任务必须同时做两件事**：前端能展示 + **让数据在演示路径上真实存在**。
+
+决策：**不改全局默认**（离线零外呼是可复现性保证），改为**任务级可选开关**
+`verify_references: bool | None`。
+
+### 2. 交付
+
+| 层 | 内容 |
+| --- | --- |
+| 后端开关 | `LiteratureReviewRequest.verify_references`（HTTP `TaskCreate` 同名）；三态优先级 `True` 强制核验（含离线）/ `False` 强制跳过 / `None` 沿用 R6；校验节点与复盘路径共用 `_should_verify_references()`；`task.config` 落库故重试/恢复一致 |
+| 展示组件 | `ReferenceVerificationPanel.vue`：四态计数 + 拦截开关（开启显示已剔除条数）+ 缓存命中 + 逐条徽标；`summary === null` → **明确空态**「本次任务未做外部引用核验」，不渲染任何 0 值数字 |
+| 集成 | `TaskResult.vue` 安全解析 `stats.reference_verification`（7 计数须为有限 number、`intercepted` 须为 boolean，否则整体 `null`；不抛错/不臆造 0）；`verification_status` 非四态 → `null` |
+| 表单 | 「引用核验」开关，**默认关闭**，文案说明会与 CrossRef/OpenAlex 比对并增加耗时 |
+
+### 3. 服务器端到端验收（真实 API + 真实模型 + 真实 CrossRef/OpenAlex）
+
+| 场景 | 任务 | 结果 |
+| --- | --- | --- |
+| **A 默认（不开核验）** | `212f814f` → completed | `stats` **不含** `reference_verification`；10 条参考文献 **0 条**带状态 → **R6 零外呼未回归** |
+| **B 显式开启** | `15afbdb8` → completed | `{total:10, verified:7, metadata_mismatch:0, not_found:3, unverified:0, cached_hits:10, dropped:0, intercepted:false}`；10 条**全部**带合法四态状态 |
+
+逐条示例（B）：`[1] AR-RAG… verified`、`[4] Intelligent Interaction Strategies… not_found`。
+`cached_hits=10` 说明缓存生效（重复核验零额外外呼）。
+
+### 4. 门禁
+
+black/ruff 干净；`mypy` 0 错误（141 文件）；`pytest` **1562 passed / 8 skipped**；
+覆盖率 **89.58%**；前端 `pnpm test` **106 passed**（基线 84，+22）、`pnpm build` 通过。
+后端新增 13 例（`tests/test_reference_verify_switch.py`）。
+
+### 5. 顺带修复
+
+`frontend/pnpm-lock.yaml` 此前是 untracked（依赖锁文件未入库），本次一并纳入版本管理。
+
+
 
 
 
