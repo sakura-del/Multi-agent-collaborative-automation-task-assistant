@@ -191,7 +191,11 @@ class ValidatorAgent(BaseAgent):
         rule_report: dict[str, Any],
         semantic_report: dict[str, Any] | None,
     ) -> dict[str, Any]:
-        """非文献场景：保持原有「规则 40% + 语义 60%」评分语义。"""
+        """非文献场景：保持原有「规则 40% + 语义 60%」评分语义。
+
+        重试语义（Issue #6）：这条路径没有完整性检查，失败都属于「内容可重写」，
+        故一律 `retryable`——避免一次有噪声的 LLM 判断直接转人工。
+        """
         semantic = semantic_report or {"score": 0, "issues": [], "suggestions": []}
         overall = int(rule_report["score"] * 0.4 + semantic["score"] * 0.6)
         passed = overall >= 60 and rule_report["passed"]
@@ -210,7 +214,7 @@ class ValidatorAgent(BaseAgent):
                     message="; ".join(rule_report["issues"]) or "规则校验通过",
                 ).model_dump()
             ],
-            "retryable": not rule_report["passed"],
+            "retryable": not passed,
             "feedback": "; ".join(issues),
         }
 
@@ -220,7 +224,13 @@ class ValidatorAgent(BaseAgent):
         citation_report: ValidationReport,
         semantic_report: dict[str, Any] | None,
     ) -> dict[str, Any]:
-        """文献场景：确定性检查优先，语义校验只作为补充。"""
+        """文献场景：确定性检查优先，语义校验只作为补充。
+
+        重试语义（Issue #6）：**可修复的失败必须可重试**。
+        语义判定失败意味着「模型可以重写改好」（重试会把 feedback 作为 `validation_feedback`
+        交给重新生成的节点，语义检查本身也产出 suggestions），因此并入 `retryable`；
+        只有确定性完整性失败（证据越权/标识非法等，重试无意义）才不可重试。
+        """
         checks = list(citation_report.checks)
         checks.append(
             ValidationCheck(
@@ -230,11 +240,13 @@ class ValidatorAgent(BaseAgent):
             )
         )
 
+        semantic_failed = False
         if semantic_report is None:
             passed = False
             score = round(citation_report.score * 0.6 + rule_report["score"] * 0.4, 2)
         else:
             semantic_passed = semantic_report["score"] >= 60
+            semantic_failed = not semantic_passed
             checks.append(
                 ValidationCheck(
                     name="semantic_consistency",
@@ -255,7 +267,9 @@ class ValidatorAgent(BaseAgent):
             "passed": passed,
             "score": score,
             "checks": [check.model_dump() for check in checks],
-            "retryable": bool(citation_report.retryable or not rule_report["passed"]),
+            "retryable": bool(
+                citation_report.retryable or not rule_report["passed"] or semantic_failed
+            ),
             "feedback": "; ".join(issues),
             "rule_check": rule_report,
             "semantic_check": semantic_report or {},

@@ -847,6 +847,40 @@ write 节点复述 extract 节点原文是**正常写法**，但拼接后必然�
 聚合文本的**跨节点冗余本身**未解决：`ReviewerAgent` 正文是各节点 `content` 拼接，
 最终 Markdown 会出现同一段落多次。建议单列任务：复盘以 write 节点为主干、其余节点仅作上下文。
 
+### 4. 第二轮：发现并修复**第二处成因**（同一症状，不同机制）
+
+修复上线后连续复跑 3 次：`completed / completed / waiting_human` —— 仍有 1/3 失败，
+但这次失败节点是 **n4（write，作者正文）**，与第一处成因无关（该节点本就该走作者的严格检查）。
+
+取回该任务（`be0b5553`）n4 的校验报告：
+
+```
+passed=False retryable=False score=90
+[PASS] citation_markers_resolve / evidence_is_cited / formal_claims_have_evidence /
+       required_sections_present / duplicate_paragraph_ratio(0.00) / evidence_ids_valid /
+       evidence_ownership / rules
+[FAIL] semantic_consistency: 现有材料未提供一致性或可解释水平的定义，现有材料不足以支持该结论
+```
+
+**根因**：`ValidatorAgent._citation_report()` 里
+`retryable = citation_report.retryable or not rule_report["passed"]` —— **语义判定结果没有参与**。
+于是「确定性检查与规则全过、只有 LLM 语义自检判不通过」时得到 `retryable=False` →
+调度器**不重试**、直接 `waiting_human`：一次有噪声的 LLM 判断就能让整篇综述失败。
+而语义失败恰恰是**模型可以重写修好**的失败：重试会把 `feedback` 作为 `validation_feedback`
+交给重生成节点，语义检查本身也产出 `suggestions`。
+
+**修复**：
+
+| 改动 | 说明 |
+| --- | --- |
+| `_citation_report` | `retryable` 并入 `semantic_failed`：确定性可重试失败 / 规则失败 / 语义失败 任一 → 可重试；**跨用户证据等完整性失败仍不可重试**（重试无意义） |
+| `_legacy_report` | 同一语义：非文献路径没有完整性检查，失败都属于「内容可重写」→ `retryable = not passed` |
+
+**测试**（`tests/test_validation_retry_semantics.py`，6 例）：语义失败→可重试且 feedback 含可执行意见；
+语义通过→不可重试；**跨用户证据→仍不可重试且不调 LLM**（守卫）；确定性可重试失败→仍会跑语义校验；
+legacy 路径同语义。
+
+
 
 
 
