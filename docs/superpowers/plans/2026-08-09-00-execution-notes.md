@@ -1046,6 +1046,66 @@ black/ruff 干净；`mypy` 0 错误（141 文件）；`pytest` **1562 passed / 8
 
 `frontend/pnpm-lock.yaml` 此前是 untracked（依赖锁文件未入库），本次一并纳入版本管理。
 
+---
+
+## Issue #2 执行记录：规划就绪后详情页自动展示（2026-10-19）
+
+**提交**：`a715398`（3 文件，+237）
+
+### 1. 根因（与 Issue 里的 H1 假设一致）
+
+`frontend/src/stores/tasks.ts::applyEvent` 只在**状态发生变化**时重拉快照：
+
+```ts
+if (nextStatus !== previousStatus && REFRESH_ON_STATUS.has(nextStatus)) { void load(...) }
+```
+
+生产竞态：`load()` 拉到的快照 `status` 已是 `waiting_approval`，但 `plan` 仍为 `null`
+（快照与规划写入有时序差）；随后回放/推送到达 `plan_ready` 事件时
+`nextStatus === previousStatus` → **刷新被跳过** → 界面永远停在 `plan === null` 的旧快照。
+这与 Issue 里「WS 已消费 seq=2 的 plan_ready 却不渲染」的记录完全吻合。
+
+### 2. 修复
+
+抽出 `needsSnapshotRefresh()`，**三条判据任一成立即重拉**：
+
+1. 事件类型本身代表新内容（`plan_ready` / `task_completed`）——**与状态无关**；
+2. 状态变化且新状态值得刷新（**既有行为，不回归**）；
+3. 快照 `plan == null` 而状态已应展示规划（`waiting_approval/running/reviewing/completed`）
+   ——补拉兜底，覆盖「状态早就看起来对了但内容缺失」。
+
+### 3. 测试
+
+- **新增** `src/stores/tasks.plan-refresh.test.ts`（6 例）：`plan_ready` 无条件重拉、
+  `plan` 为空时非 `plan_ready` 也重拉、`plan` 已有且状态未变**不重拉**（守卫）、
+  状态变化仍重拉（守卫）、重复 `event_id` 忽略（守卫）、重拉失败不破坏快照
+- **E2E** `literature-review.spec.ts`：规划确认断言期间校验
+  `performance.getEntriesByType("navigation")` 数量未变（**证明全程未整页重载**），
+  并额外断言 `plan-panel` 可见
+
+### 4. 服务器真实浏览器验证（Playwright + 真实后端）
+
+```
+1. 注册并登录成功：i293452392
+2. 任务已创建并停在详情页：1d98fa4c（此后不再导航/刷新）
+3. plan-approve 自动出现，用时 21.1s
+   navigation 条目数 before=1 after=1（相等=未整页重载）
+   规划面板可见: true
+   规划面板文本片段: 检索增强生成（RAG）评估方法综述…规划版本 v1 · 5 个节点 / 重新生成 / 确认规划 / 研究问题 …
+RESULT: PASS
+```
+
+### 5. 门禁
+
+前端 `pnpm test` **112 passed**（+6）、`pnpm build` 通过；
+后端 `pytest` **1562 passed / 8 skipped**（无回归）。
+
+### 6. 演示手册
+
+`docs/runbooks/defense-demo.md` 第 5 步的「如规划未自动出现，按 F5 刷新」绕过说明**可以删除**
+（该缺陷已修复，且服务器实测通过）。
+
+
 
 
 
