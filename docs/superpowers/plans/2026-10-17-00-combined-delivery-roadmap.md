@@ -203,7 +203,7 @@ npm run build
 - Compose：五容器全部 healthy；nginx 48080 返回 200（Vue 构建）与
   `{"status":"ready","checks":{"database":"ok","redis":"ok","chroma":"ok"}}`
 - 详细命令、端口表与 Windows ↔ 服务器同步流程见
-  [development-environment.md](../runbooks/development-environment.md)
+  [development-environment.md](../../runbooks/development-environment.md)
 
 ---
 

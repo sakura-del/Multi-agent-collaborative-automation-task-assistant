@@ -136,8 +136,8 @@ docker compose build backend && docker compose up -d backend
 | Issue | 标题 | 优先级 | 说明 |
 | --- | --- | --- | --- |
 | [#3](https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant/issues/3) | ✅ 引用真实性校验（CrossRef/OpenAlex） | **P0** | **已交付**（`42b5e54`，2026-10-19）：四态核验 + 导出统计 + 拦截开关；计划与实测见 [2026-10-18-03-reference-authenticity-plan.md](docs/superpowers/plans/2026-10-18-03-reference-authenticity-plan.md)。**遗留**：前端展示核验结果；`contact_email` 受配置优先级缺陷限制只能改 yaml |
-| [#4](https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant/issues/4) | CSL 引用引擎 + GB/T 7714—2025 默认 | P0 | 双语部分**被 #5 阻塞**。⚠️ `citeproc-py` 维护停滞不要用；GB/T 7714—2025 的 CSL 需自行编写（官方仓库未收录）。**建议下一个做** |
-| [#5](https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant/issues/5) | CSL-M 双语策略架构决策（写 ADR） | P1 | **0.5 天，但决定 #4 的技术栈**（是否引入 Node 跑 citeproc-js）。⚠️ citeproc-js 的 SPDX 许可未确认 |
+| [#4](https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant/issues/4) | CSL 引用引擎 + GB/T 7714—2025 默认 | P0 | **双语阻塞已解除**（ADR [0001](docs/adr/0001-csl-bilingual-strategy.md)，2026-10-19）。技术栈已定：**标准 CSL 1.0.2 + 逐条 locale 切换（纯 Python，citeproc-py）**，不引入 citeproc-js/Node。⚠️ 更正两条旧结论：npm 包名是 **`citeproc`**（`citeproc-js` 不存在）；`citeproc-py` **并未停滞**（0.11.1 / 2026-09-01），真实短板是 CSL 覆盖率约 60% + Alpha。GB/T 7714—2025 样式需自研（官方仓库未收录；社区库有 9 个变体可参考，CC BY-SA 3.0）。**建议下一个做** |
+| [#5](https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant/issues/5) | ✅ CSL-M 双语策略架构决策（ADR） | P1 | **已完成**（2026-10-19）：决策 = **Option C**（标准 CSL 1.0.2 + 应用层逐条 locale 切换），否决 Option B（citeproc-js 为 CPAL-1.0 OR AGPL-1.0，CPAL §15 把网络部署视为分发；且双语样式非 1.0.2 合法却被 citeproc-js **静默**接受）。证据：[ADR 0001](docs/adr/0001-csl-bilingual-strategy.md) + 3 份 research 文档 |
 | [#2](https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant/issues/2) | 规划生成后页面不自动显示，需刷新 | P2 | **用户要求暂缓**；演示绕过已写入 `docs/runbooks/defense-demo.md` 第 5 步 |
 | — | 配置优先级缺陷（YAML 无法被 `.env`/环境变量覆盖） | P1 | `get_settings()` 用 `Settings(**yaml_defaults)`，init 参数优先级最高。已阻塞 Issue #3 的 `contact_email` 注入（只能改 yaml）；建议改 `settings_customise_sources` 并补覆盖顺序测试 |
 
@@ -169,6 +169,7 @@ backend/app/llm/
   base.py                           # _is_retryable（5xx 判定）
 backend/evaluation/                 # 实验框架（120-run 矩阵、图表）
 docs/product/                       # ★ 产品化路线图 + 竞品调研
+docs/adr/                           # ★ 架构决策记录（0001 = CSL 双语策略）
 docs/runbooks/                      # 部署/恢复/答辩/复现 手册
 docs/superpowers/plans/             # 计划 + 执行记录（execution-notes）
 ```

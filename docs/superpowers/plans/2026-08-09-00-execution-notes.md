@@ -674,3 +674,44 @@ EXPORT_MD_SECTION True | EXPORT_DOCX bytes 37043
 5. **服务器全量套件未跑完**（原因见上：主机单核吞吐 1/28，非代码问题）；已在服务器完成
    健康检查、真实 API 验收 6/6、容器内真实核验（含 Redis 缓存命中）、容器内复盘→导出端到端。
 
+---
+
+## Issue #5 CSL-M 双语策略 ADR 执行记录（2026-10-19）
+
+**交付**：[docs/adr/0001-csl-bilingual-strategy.md](../adr/0001-csl-bilingual-strategy.md)（**Accepted**）
+＋ 3 份一手证据文档（许可证 / 标准管线实测 / citeproc-js 实测）＋ 路线图与 AGENTS 更正。结论已回帖
+[#5](https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant/issues/5#issuecomment-6257825219)
+与 [#4](https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant/issues/4#issuecomment-6257825640)。
+
+### 决策
+
+**Option C（本次调研新增的第三条路）：标准 CSL 1.0.2 + 应用层「按条目语言逐条切换 locale」**，
+纯 Python（`citeproc-py` 0.11.1，BSD-2），**不引入 citeproc-js / Node**。否决 Option B。
+
+### 关键实测证据（全部一手，含原始输出）
+
+| # | 事实 | 意义 |
+| --- | --- | --- |
+| 1 | 社区 2025 双语样式的两个 `<layout>` **除 `locale="en"` 外逐字节相同** | CSL-M 在此样式中唯一作用是"英文条目走英文 locale"，应用层可等价替代 |
+| 2 | 归一版样式（删 1 个 CSL-M 块）+ 逐条 locale → 中文「等」/ 英文 "et al." **实测成立**（官方 2015 与社区 2025 样式、顺序编码与著者-出版年两制式均验证） | Option C 的双语能力**不依赖** CSL-M |
+| 3 | 官方 CSL 1.0.2 RELAX NG：双语样式 **invalid**（5 处错误），而 citeproc-js **不报错不告警** | Option B 把"非法样式"变成静默常态，违背 issue「不能静默吞掉」的要求 |
+| 4 | citeproc-js 许可 = **CPAL-1.0 OR AGPL-1.0**（仓库正文 CPAL 1.0+/AGPL 3.0+，元数据自相矛盾）；CPAL §15 把网络部署**明文视为分发**（不以"是否修改"为前提）；§14 署名因上游 Exhibit B 已填写而无豁免 | 「SPDX 未确认」已核实，且风险落在商用主路径 |
+| 5 | CSL 引擎**忽略**预设 `citation-number`（实测） | Option C 必须应用层编号——而顺序编码制本就按引用顺序编号，属应有职责 |
+| 6 | `citeproc-py` **0.11.1 / 2026-09-01**，2026 年 ≥12 个版本 | 更正既有结论「维护停滞」；真实短板是 CSL 覆盖率约 60% + Alpha |
+| 7 | 社区库 **343 个 .csl / GB/T 7714—2025 共 9 个变体**（官方仓库无 2025） | #4 自研样式时可参考，但需注意 CC BY-SA 3.0 署名 |
+
+### 偏差与更正
+
+1. **更正既有调研 2 处**：npm 包名是 `citeproc`（`citeproc-js` 在 npm E404）；
+   「citeproc-py 维护停滞、不建议生产使用」与一手证据不符（真实短板是规格覆盖率）。
+2. **Issue 前提被修正**：issue 把选择限定在 A/B，实测证明存在**更优的第三条路 C**；
+   issue 原文「标准 1.0.2 处理器会直接拒绝社区样式」也不准确——**citeproc-js 恰恰是静默接受**，
+   真正拒绝的是官方 schema 校验器（该行为差异已写入 ADR，供选型判断）。
+3. **法律适用性仍标「未确认」**：ADR 只陈述条款事实，未给法律意见；将来若要走 B 路线须先过法务。
+4. 未做：`citeproc-py` 对全部官方样式元数据的兼容面测试（仅验证 GB/T 7714 系列 3 份样式）——
+   属 #4 的 golden 测试范围。
+5. 本次为**决策任务、无代码改动**，故服务器侧不重建容器（仅同步 git 状态）。
+6. 顺带修复文档断链 1 处（`2026-10-17-00-combined-delivery-roadmap.md` 的 runbooks 链接少了一层 `../`），
+   用一次性链接校验脚本扫描 `docs/**/*.md` 的相对链接：修复后 **0 断链**。
+
+
