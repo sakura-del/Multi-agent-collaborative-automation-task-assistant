@@ -1624,6 +1624,44 @@ alembic current → b8e5f1c3d9a2 (head)
 **门禁**：black/ruff 干净；mypy 0 错误（164 文件）；pytest **2075 passed / 8 skipped**
 （2063 → 2075，+12 例，先红后绿）；全新库 `alembic upgrade head` 全链通过。
 
+### Task 2：Repository 层 + 一个真实缺陷（`09729da` + `11f46ca`）
+
+**交付**：`ScreeningRepository` —— 检索日志查询、候选记录按阶段过滤、**追加式**决策、
+按筛选者取最新决策、**双人分歧识别**（`Conflict` dataclass）。
+
+**TDD 抓到的真实缺陷（重要）**
+
+`latest_decision` 测试失败：取到的是旧决策。根因是**不能用 `created_at` 排序**——
+同一事务内多行的 `server_default` 时间精度不足会并列，`ORDER BY created_at DESC`
+取到的是任意一条。这对「最新决策派生」与「双人分歧判定」是**致命**的
+（会误报或漏报冲突，而分歧判定正是 PRISMA 双人筛选的核心）。
+
+修法：新增 `screening_decision.seq`（决策先后顺序的稳定排序依据），由 Repository
+在追加时按「该记录当前最大 seq + 1」赋值；所有排序改用 `seq`。
+
+**配套的幂等迁移 `c9f6a2d4e1b7`**
+
+`b8e5f1c3d9a2` 已直接修正（全新部署一次到位），但**服务器已执行过旧版**，故补一个
+独立迁移：
+
+- **幂等**：列已存在则跳过（否则全新库会重复加列——Phase 1 的教训）；
+- 补列时**按记录分组回填**：`ROW_NUMBER() OVER (PARTITION BY record_id ORDER BY created_at, id)`；
+- 收紧 `NOT NULL` 用 **`batch_alter_table`**：SQLite 不支持
+  `ALTER COLUMN ... SET NOT NULL`，batch 会走「建新表 + 拷数据」等价路径
+  （PostgreSQL 上透传 ALTER）。
+
+**生产验证（真实 PostgreSQL）**
+
+```
+alembic current → c9f6a2d4e1b7 (head)；screening_decision.seq 存在且 NOT NULL
+追加 3 条决策 → seq = 1, 2, 3（顺序稳定，追加语义正确，3 行并存）
+seq = NULL → ERROR: null value in column "seq" ... violates not-null constraint
+探针数据已清理
+```
+
+**门禁**：black/ruff 干净；mypy 0 错误（165 文件）；pytest **2100 passed / 8 skipped**
+（2075 → 2100，+25 例）；全新库 `alembic upgrade head` 全链通过。
+
 
 
 

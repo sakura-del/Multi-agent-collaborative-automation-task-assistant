@@ -21,11 +21,11 @@
 | 项 | 值 |
 | --- | --- |
 | 分支 | `main`（工作分支 `codex/plan3-literature-workflow` 与 main 同点） |
-| HEAD | … → P1-D 缺口补齐 `63b1d95` → Phase 2 规划 `8f1b60f` → **PRISMA Task 1 `67c6c30`** |
+| HEAD | … → Phase 2 规划 `8f1b60f` → PRISMA Task 1 `67c6c30` → **Task 2 `09729da` + seq 迁移 `11f46ca`** |
 | 冻结 tag | `defense-v1` |
-| Plan 状态 | Plan 2 / 3 / 4 / 5 **全部 Exit Gate PASSED**；**Phase 1 五项全部端到端可用且遗留清零**；**Phase 2 进行中**（PRISMA 子计划 Task 1/7 已完成） |
-| 产品化进度 | **Issue #2 / #3 / #4 / #5 / #6 / #7 全部关闭且遗留项清零**；配置优先级缺陷已修复；Phase 1 五项端到端可用（后端 + HTTP 端点 + 前端页面 + 限流全覆盖 + 配额真扣减）；**Phase 2 PRISMA 数据层已就位**（search_log / screening_record / screening_decision，迁移 `b8e5f1c3d9a2`） |
-| 后端测试 | **2075 passed**, 8 skipped；覆盖率 **90.00%**；`mypy` 0 错误（164 文件） |
+| Plan 状态 | Plan 2 / 3 / 4 / 5 **全部 Exit Gate PASSED**；**Phase 1 五项全部端到端可用且遗留清零**；**Phase 2 进行中**（PRISMA 子计划 Task 2/7 已完成） |
+| 产品化进度 | **Issue #2 / #3 / #4 / #5 / #6 / #7 全部关闭且遗留项清零**；配置优先级缺陷已修复；Phase 1 五项端到端可用；**Phase 2 PRISMA 数据层 + Repository 已就位**（三张表 + 迁移 `c9f6a2d4e1b7`；追加式决策、`seq` 稳定排序、双人分歧识别） |
+| 后端测试 | **2100 passed**, 8 skipped；覆盖率 **90.00%**；`mypy` 0 错误（165 文件） |
 | 前端测试 | Vitest **156 passed**；Playwright E2E **20 passed**（Phase 1 三页 × 桌面 + 移动双视口） |
 | CI | **6/6 作业全绿**（2026-10-19 修复；此前自 08-03 起连续失败） |
 | 服务器 | 已同步，五容器 healthy，`curl http://127.0.0.1:48080/api/v1/health/ready` → `{"status":"ready"}` |
