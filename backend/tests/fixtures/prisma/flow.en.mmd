@@ -1,0 +1,7 @@
+flowchart TD
+    A["Identified n=137"] --> B["Duplicates removed n=135"]
+    B --> C["Screened n=2"]
+    C -->|"excluded n=1"| X1["Title/abstract excluded"]
+    C --> D["Full-text assessed n=1"]
+    D -->|"excluded n=0"| X2["Full-text excluded"]
+    D --> E["Included n=1"]
