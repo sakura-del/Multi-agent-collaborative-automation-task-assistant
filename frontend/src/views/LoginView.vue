@@ -1,10 +1,17 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import { Loader2 } from "lucide-vue-next";
 
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Card } from "@/components/ui/card";
+import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import { useAuthStore } from "@/stores/auth";
 
 // 登录/注册页：成功后回到 redirect 指向的页面（默认任务列表）
+// 样式走 shadcn-vue / Nova 规范（AGENTS.md §6.5），不再写 scoped CSS。
 const auth = useAuthStore();
 const route = useRoute();
 const router = useRouter();
@@ -17,9 +24,7 @@ const password = ref("");
 const loading = ref(false);
 const errorMessage = ref("");
 
-const submitLabel = computed(() =>
-  mode.value === "login" ? "登录" : "注册并登录"
-);
+const submitLabel = computed(() => (mode.value === "login" ? "登录" : "注册并登录"));
 
 async function handleSubmit() {
   loading.value = true;
@@ -45,157 +50,90 @@ async function handleSubmit() {
 </script>
 
 <template>
-  <div class="login-page">
-    <form class="login-card" @submit.prevent="handleSubmit">
-      <h1>多智能体协作自动化任务助手</h1>
-      <p class="login-card__subtitle">文献综述工作台</p>
+  <div class="flex min-h-screen items-center justify-center bg-background p-4">
+    <Card class="w-full max-w-sm p-6">
+      <form class="flex flex-col gap-4" @submit.prevent="handleSubmit">
+        <div class="space-y-1">
+          <h1 class="text-lg font-semibold tracking-tight">多智能体协作自动化任务助手</h1>
+          <p class="text-sm text-muted-foreground">文献综述工作台</p>
+        </div>
 
-      <div class="tabs">
-        <button
-          type="button"
-          :class="{ active: mode === 'login' }"
-          @click="mode = 'login'"
-        >
-          登录
-        </button>
-        <button
-          type="button"
-          :class="{ active: mode === 'register' }"
-          @click="mode = 'register'"
-        >
-          注册
-        </button>
-      </div>
+        <!-- 模式切换：用分段控件，而不是两个裸按钮 -->
+        <div class="grid grid-cols-2 gap-1 rounded-lg bg-muted p-1" role="tablist">
+          <button
+            v-for="option in [
+              { value: 'login', label: '登录' },
+              { value: 'register', label: '注册' },
+            ] as const"
+            :key="option.value"
+            type="button"
+            role="tab"
+            :aria-selected="mode === option.value"
+            :class="[
+              'rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+              mode === option.value
+                ? 'bg-background text-foreground shadow-xs'
+                : 'text-muted-foreground hover:text-foreground',
+            ]"
+            @click="mode = option.value"
+          >
+            {{ option.label }}
+          </button>
+        </div>
 
-      <div v-if="mode === 'login'" class="field">
-        <label for="account">用户名 / 邮箱</label>
-        <input id="account" v-model="account" class="input" type="text" required />
-      </div>
-      <template v-else>
-        <div class="field">
-          <label for="username">用户名</label>
-          <input
-            id="username"
-            v-model="username"
-            class="input"
-            type="text"
+        <div v-if="mode === 'login'" class="grid gap-1.5">
+          <Label for="account">用户名 / 邮箱</Label>
+          <Input id="account" v-model="account" type="text" required autocomplete="username" />
+        </div>
+        <template v-else>
+          <div class="grid gap-1.5">
+            <Label for="username">用户名</Label>
+            <Input
+              id="username"
+              v-model="username"
+              type="text"
+              required
+              minlength="3"
+              autocomplete="username"
+            />
+          </div>
+          <div class="grid gap-1.5">
+            <Label for="email">邮箱</Label>
+            <Input id="email" v-model="email" type="email" required autocomplete="email" />
+          </div>
+        </template>
+
+        <div class="grid gap-1.5">
+          <Label for="password">密码</Label>
+          <Input
+            id="password"
+            v-model="password"
+            type="password"
             required
-            minlength="3"
+            minlength="8"
+            placeholder="至少 8 位"
+            :autocomplete="mode === 'login' ? 'current-password' : 'new-password'"
           />
         </div>
-        <div class="field">
-          <label for="email">邮箱</label>
-          <input id="email" v-model="email" class="input" type="email" required />
-        </div>
-      </template>
 
-      <div class="field">
-        <label for="password">密码</label>
-        <input
-          id="password"
-          v-model="password"
-          class="input"
-          type="password"
-          required
-          minlength="8"
-          placeholder="至少 8 位"
-        />
-      </div>
+        <ErrorBanner :message="errorMessage" />
 
-      <p v-if="errorMessage" class="banner banner--error" role="alert">
-        {{ errorMessage }}
-      </p>
+        <Button type="submit" :disabled="loading" class="w-full">
+          <Loader2 v-if="loading" class="animate-spin" aria-hidden="true" />
+          <span>{{ loading ? "处理中…" : submitLabel }}</span>
+        </Button>
 
-      <button class="btn btn--primary login-card__submit" type="submit" :disabled="loading">
-        {{ loading ? "处理中…" : submitLabel }}
-      </button>
-
-      <!-- 账号生命周期入口（Phase 1 P1-C）：登录模式才展示忘记密码 -->
-      <p v-if="mode === 'login'" class="login-card__links">
-        <RouterLink :to="{ name: 'password-reset' }" data-test="forgot-password">
-          忘记密码？
-        </RouterLink>
-      </p>
-    </form>
+        <!-- 账号生命周期入口（Phase 1 P1-C）：登录模式才展示忘记密码 -->
+        <p v-if="mode === 'login'" class="text-center text-sm">
+          <RouterLink
+            :to="{ name: 'password-reset' }"
+            data-test="forgot-password"
+            class="text-primary underline-offset-4 hover:underline"
+          >
+            忘记密码？
+          </RouterLink>
+        </p>
+      </form>
+    </Card>
   </div>
 </template>
-
-<style scoped>
-.login-page {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1rem;
-}
-
-.login-card__links {
-  margin-top: 0.6rem;
-  text-align: center;
-  font-size: 0.82rem;
-}
-
-.login-card__links a {
-  color: #1d4ed8;
-  text-decoration: none;
-}
-
-.login-card__links a:hover {
-  text-decoration: underline;
-}
-
-.login-card {
-  width: 100%;
-  max-width: 400px;
-  background: var(--color-card);
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
-  padding: 2rem;
-}
-
-.login-card h1 {
-  font-size: 1.15rem;
-}
-
-.login-card__subtitle {
-  color: #6b7280;
-  font-size: 0.875rem;
-  margin: 0.25rem 0 1.5rem;
-}
-
-.login-card__submit {
-  width: 100%;
-  margin-top: 0.5rem;
-}
-
-.tabs {
-  display: flex;
-  gap: 0.5rem;
-  margin-bottom: 1.25rem;
-}
-
-.tabs button {
-  flex: 1;
-  padding: 0.5rem;
-  border: 1px solid var(--color-border);
-  background: transparent;
-  border-radius: 8px;
-  font-size: 0.9rem;
-}
-
-.tabs button.active {
-  background: var(--color-primary);
-  border-color: var(--color-primary);
-  color: #fff;
-}
-
-.field {
-  margin-bottom: 1rem;
-}
-
-.field label {
-  display: block;
-  font-size: 0.85rem;
-  margin-bottom: 0.25rem;
-}
-</style>

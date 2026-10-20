@@ -162,6 +162,103 @@ docker compose build backend && docker compose up -d backend
 
 ---
 
+## 6.5 前端技术栈与设计规范（**强制**）
+
+> 目标：**统一设计语言 + 技术栈锁定**，让任何一次改动（甚至 oneshot）都产出风格一致的界面。
+> 新增页面/组件前必须先读本节；不按本节的写法一律视为不合格。
+
+### 6.5.1 四条铁律（优先级最高）
+
+| # | 规则 | 含义 |
+| --- | --- | --- |
+| 1 | **优先复用成熟库** | 不自研基础交互（弹窗、下拉、日期、拖拽、动画）。库能做的就不要手写 |
+| 2 | **组件源代码可控** | 用**复制源码到仓库**的模式（shadcn 风格），组件代码进 `src/components/ui/`，可随时改，不做黑盒 npm 依赖 |
+| 3 | **统一设计语言** | 只用本节定义的 tokens 与组件；不写一次性颜色/间距/字号；不引入第二套设计体系 |
+| 4 | **严格限制重复依赖** | 同一能力只允许一个库（见 §6.5.2）；新增依赖前先确认现有库能否满足；**禁止**同时引入两个图标库/两个动画库/两个状态库 |
+
+### 6.5.2 技术栈（**已锁定，不得擅自替换**）
+
+| 能力 | 选型 | 说明 |
+| --- | --- | --- |
+| 框架 | **Vue 3.4+**（`<script setup>` + TS） | 本项目是 Vue，**不是 React** |
+| 构建 | Vite 5 | — |
+| 样式 | **Tailwind CSS v4** | 原子类 + design tokens；**禁止**新增手写 CSS 文件（除 `main.css` 的 token 定义） |
+| UI 组件 | **shadcn-vue**（Reka UI 无头层 + CVA 变体） | 源码进 `src/components/ui/`，风格为 **Nova** 预设（中性灰 + 紧凑；见 §6.5.3） |
+| 图标 | **Lucide**（`lucide-vue-next`） | 唯一图标库；禁止混用其他图标集 |
+| 动画 | **motion-v**（Motion 官方 Vue 移植） | 统一过渡/入场；**禁止**再引入 GSAP/animate.css 等第二套 |
+| 布局 | **splitpanes** | 可调整分栏（React 版 `react-resizable-panels` 的 Vue 对应物） |
+| 拖拽 | **vue-draggable-plus** | React 版 `dnd-kit` 的 Vue 对应物 |
+| 状态管理 | **Pinia** | Vue 官方方案（React 版 `Zustand` 的对应物）；**禁止**再引入 Vuex/其他状态库 |
+| 表单校验 | **vee-validate + zod** | 只在复杂表单用；简单表单可直接绑 ref |
+| 通知 | **vue-sonner** | 统一 toast；禁止 `alert()` / 自研 toast |
+| 测试 | Vitest + @vue/test-utils + Playwright | 既有，不变 |
+
+**为什么不是用户最初列的库**：`shadcn/ui`、`react-resizable-panels`、`dnd-kit`、`Zustand` 均为
+React 专属，无法在 Vue 项目安装。上表是**逐项对应的 Vue 生态等价物**，设计理念一致
+（源码可控、无头组件、原子样式）。**不要**为了「照抄清单」而强行引入 React 运行时。
+
+### 6.5.3 设计语言（Nova 预设）
+
+**基调**：中性、紧凑、安静。工作是读文献和写综述，界面不能抢注意力。
+
+| Token | 值（OKLCH/HSL） | 用途 |
+| --- | --- | --- |
+| `--background` | 中性白/近黑（随主题） | 页面底色 |
+| `--foreground` | 中性深灰 | 正文 |
+| `--muted` / `--muted-foreground` | 浅灰 / 中灰 | 次要文本、禁用态 |
+| `--border` | 极浅灰 | 分隔线、卡片描边 |
+| `--primary` | 蓝（`oklch(0.55 0.2 255)` 附近） | 主操作、选中态 |
+| `--destructive` | 红 | 删除、错误 |
+| `--ring` | primary 半透明 | 焦点环 |
+| 圆角 | `--radius: 0.5rem`（sm 0.375 / lg 0.625） | 统一圆角 |
+| 间距 | 4px 基准（Tailwind 默认刻度） | 禁止 0.3rem 这类非标值 |
+| 字号 | `text-sm` 为主（0.875rem），标题 `text-lg`/`text-xl` | 工作台信息密度高 |
+
+**组件使用规则**
+- 按钮一律 `<Button variant="default|secondary|ghost|destructive" size="sm|default|icon">`；
+  不再手写 `.btn` / `.icon-button`。
+- 状态徽标用 `<Badge variant="...">`；不再手写 `.badge`。
+- 卡片用 `<Card>` 系列（`CardHeader/CardTitle/CardContent`）。
+- 错误提示用 `<Alert variant="destructive">`；**不再自研 banner**。
+- 空态用统一 `<EmptyState>`（项目自建，基于 shadcn 风格）。
+
+**无障碍（硬要求）**
+- 所有可交互元素键盘可达，焦点环用 `--ring`；
+- 图标按钮**必须**有 `aria-label`；
+- 颜色对比度 ≥ WCAG AA（4.5:1）；
+- 动效尊重 `prefers-reduced-motion`。
+
+### 6.5.4 目录约定
+
+```
+frontend/src/
+  assets/main.css              # 唯一全局样式：tokens + @theme（不写业务类）
+  components/ui/               # shadcn-vue 组件源码（可控、可改）
+  components/common/           # 项目级通用件（ErrorBanner→改造成 Alert 包装、EmptyState）
+  components/<domain>/         # 业务组件（tasks / knowledge / screening）
+  lib/utils.ts                 # cn() 等工具
+  views/                       # 路由页面
+  stores/                      # Pinia
+  api/                         # HTTP 层
+```
+
+### 6.5.5 迁移状态（进行中）
+
+> Phase 1 的前端页面是**手写 CSS**（`main.css` 8 个 token）。正在迁移到本规范。
+
+| 阶段 | 内容 | 状态 |
+| --- | --- | --- |
+| M0 | 基础设施：Tailwind v4 + shadcn-vue + tokens + `cn()` | 🚧 进行中 |
+| M1 | 基础组件：Button / Input / Card / Badge / Alert / Dialog 等 | 待做 |
+| M2 | 页面迁移：Login → TaskList → TaskDetail → Knowledge → Style → Template → Import → 账号两页 | 待做 |
+| M3 | 新页面直接用新规范（Phase 2 的 PRISMA 工作台等） | 待做 |
+| M4 | 删除 `main.css` 里的旧 `.btn`/`.badge`/`.input` 类，确认无引用 | 待做 |
+
+**迁移期间规则**：旧页面允许暂时保留手写类，但**新代码一律用新规范**；
+不得在迁移中途引入第三套写法。
+
+---
+
 ## 7. 关键文件地图
 
 ```
