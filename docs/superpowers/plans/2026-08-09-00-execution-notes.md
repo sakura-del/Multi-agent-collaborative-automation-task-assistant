@@ -1373,6 +1373,55 @@ CI 的 `Compose Release Smoke` 用**全新库**，因此暴露；**已部署的�
 **教训**：修复类迁移一旦同时修正历史迁移，就必须**幂等**；否则全新部署（CI smoke）必炸，
 而本地与已部署环境都发现不了。
 
+### 7. 端点接线：让已交付能力真正可用（`fe56a67`）
+
+Phase 1 五项里有两项**只有领域模块、用户碰不到**（计划 §5 遗留）。本轮补齐 HTTP 端点。
+
+**新增端点**
+
+| 模块 | 端点 |
+| --- | --- |
+| Word 模板（P1-A） | `GET/POST /api/v1/templates`、`GET/DELETE /api/v1/templates/{id}`、`POST /api/v1/templates/{id}/render` |
+| 参考文献导入（P1-E） | `POST /api/v1/references/import`（BibTeX/RIS → 条目预览） |
+
+**关键设计**
+
+- 上传准入**全部委托** `templates.inspector`（拒 `.docm`/宏/OLE/zip 炸弹/路径穿越），
+  5 MB 上限；失败 → 400 且 `detail` 可读；新增 `user_template` 表 + 迁移 `a7d4e2f9c1b8`；
+- 同用户同内容重复上传**幂等**（`template_id` 由内容 sha256 派生）；
+- **渲染不碰引用引擎**：`bibliography` 由调用方传入已 CSL 渲染的行——切换引用样式
+  只需换上游结果，模板层完全不动（这是「一键切换」的架构前提）；
+- 导入**纯解析、不落库**（避免半成品污染引用库，便于前端做导入前预览）；
+  `format` 用 `str` 而非 `Literal`——`Literal` 会被 Pydantic 拦成 422，
+  与「准入失败 → 400」的约定不一致。
+
+**踩坑（已写入测试注释）**
+
+- **`Base` 的 `created_at`/`updated_at` 必须在迁移里显式建**：新建 `user_template` 迁移
+  时两列都写了；`test_migration_schema_consistency.py` 的通用不变量会兜住这类遗漏
+  （正是 `email_token` 生产 500 的教训）；
+- **测试 fixture 不能用 `asyncio.get_event_loop()`**：单跑通过、全量运行报
+  `RuntimeError: There is no current event loop in thread 'MainThread'`
+  （pytest-asyncio 会接管/关闭事件循环）→ 改用 `asyncio.run()` 建独立循环。
+
+**服务器端到端验收**（真实 PostgreSQL + Redis）
+
+```
+模板：上传 201（tpl-9e961b86377bb8b1，占位符 [body,references,title]，
+      style_map {Heading1:h1, Normal:body}）→ 列表 200 → 详情 200
+      → 渲染 200（3499 字节，含标题/正文/参考文献）→ 宏模板被拒 400 → 删除 204
+导入：BibTeX 200（format=bibtex, count=1）
+      RIS 200（中文标题原样、作者 [牛耕田,李泽]、页码 100-110）
+      无法识别内容 400
+迁移：a7d4e2f9c1b8 (head)
+```
+
+**门禁**：black/ruff 干净；mypy 0 错误（163 文件）；pytest **2023 passed / 8 skipped**。
+新增 21 例（模板 11 + 导入 10），全部先红后绿。
+
+**本轮仍遗留**：前端页面未接（模板管理/导入预览/账号生命周期均为后端能力）；
+限流未覆盖全部写接口；`quota` 未在任务执行期真正扣减 token。
+
 
 
 
