@@ -13,8 +13,10 @@ from app.api.v1.endpoints import (
     auth_lifecycle,
     citation_styles,
     health,
+    references,
     task_ws,
     tasks,
+    templates,
     ws,
 )
 from app.knowledge.api.endpoints import router as knowledge_router
@@ -26,5 +28,7 @@ api_router.include_router(auth_lifecycle.router)
 api_router.include_router(ws.router)
 api_router.include_router(knowledge_router)
 api_router.include_router(citation_styles.router)
+api_router.include_router(templates.router)
+api_router.include_router(references.router)
 api_router.include_router(tasks.router)
 api_router.include_router(task_ws.router)

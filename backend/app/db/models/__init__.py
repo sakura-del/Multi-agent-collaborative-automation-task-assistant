@@ -12,6 +12,7 @@
   knowledge.py:   KNOWLEDGE_DOC / DOC_CHUNK / VECTOR_INDEX
   citation_style.py: CITATION_STYLE（Issue #4 M2：用户自定义 CSL 样式）
   email_token.py: EMAIL_TOKEN（Phase 1 P1-C：邮箱验证/密码重置令牌）
+  user_template.py: USER_TEMPLATE（Phase 1 P1-A：用户上传的 Word 模板）
 """
 
 from app.db.models.agent import Agent, AgentInteraction
@@ -22,6 +23,7 @@ from app.db.models.knowledge import DocChunk, KnowledgeDoc, VectorIndex
 from app.db.models.log import ExecutionLog, FailureCase, ValidationResult
 from app.db.models.task import Subtask, Task, TaskDag
 from app.db.models.user import User
+from app.db.models.user_template import UserTemplate
 
 __all__ = [
     "Agent",
@@ -37,6 +39,7 @@ __all__ = [
     "Task",
     "TaskDag",
     "User",
+    "UserTemplate",
     "ValidationResult",
     "VectorIndex",
 ]
