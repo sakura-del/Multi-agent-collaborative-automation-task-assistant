@@ -285,11 +285,23 @@ class TestSanitizeTemplate:
         Document(io.BytesIO(sanitized))
 
     def test_sanitize_is_idempotent(self) -> None:
+        """幂等性按**语义**断言，不按压缩字节。
+
+        ⚠️ 不能写 `assert once == twice`：`sanitize_template_bytes` 会重新打包 zip，
+        而 zip 条目头含**时间戳**、且不同 zlib 版本/平台的压缩输出可能不同 →
+        逐字节比较在 CI 上失败而本地通过（实测：GitHub runner 上 `assert once == twice`
+        报 `b'PK\\x03\\x04...' != b'PK\\x03\\x04...'`）。
+        正确口径：**条目名集合与每个条目的解压后内容**都相同。
+        """
         sample = TEMPLATE.read_bytes()
         once = sanitize_template_bytes(sample)
         twice = sanitize_template_bytes(once)
 
-        assert once == twice
+        def entries(data: bytes) -> dict[str, bytes]:
+            with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                return {name: archive.read(name) for name in archive.namelist()}
+
+        assert entries(once) == entries(twice), "二次清洗改变了包内容（不幂等）"
 
     def test_sanitize_keeps_internal_hyperlinks(self, tmp_path: Path) -> None:
         """内部关系（styles / numbering / image）不得被误删。"""
