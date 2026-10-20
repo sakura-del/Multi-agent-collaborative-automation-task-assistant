@@ -169,6 +169,15 @@ class ScreeningDecision(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4, comment="决策ID")
+    seq: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        comment=(
+            "决策先后顺序（稳定排序依据）。"
+            "⚠️ 不能用 created_at 排序：同一事务内的多行 server_default 精度不足会并列，"
+            "导致「最新决策」取错。本列由 Repository 在追加时按当前最大值 +1 赋值。"
+        ),
+    )
     record_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("screening_record.id", ondelete="CASCADE"),
         index=True,

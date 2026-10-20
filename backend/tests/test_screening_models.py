@@ -186,6 +186,7 @@ class TestScreeningDecision:
             session.add(
                 ScreeningDecision(
                     record_id=record.id,
+                    seq=1,
                     stage=DecisionStage.TITLE_ABSTRACT.value,
                     verdict=ScreeningVerdict.EXCLUDE.value,
                     reviewer_id=uuid.uuid4(),
@@ -206,10 +207,13 @@ class TestScreeningDecision:
             record = _record(log.id, task_id)
             session.add(record)
             session.flush()
-            for verdict in (ScreeningVerdict.MAYBE, ScreeningVerdict.INCLUDE):
+            for seq, verdict in enumerate(
+                (ScreeningVerdict.MAYBE, ScreeningVerdict.INCLUDE), start=1
+            ):
                 session.add(
                     ScreeningDecision(
                         record_id=record.id,
+                        seq=seq,
                         stage=DecisionStage.TITLE_ABSTRACT.value,
                         verdict=verdict.value,
                         reviewer_id=reviewer,

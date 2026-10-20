@@ -131,6 +131,12 @@ def upgrade() -> None:
     op.create_table(
         "screening_decision",
         sa.Column("id", sa.Uuid(), nullable=False, comment="决策ID"),
+        sa.Column(
+            "seq",
+            sa.Integer(),
+            nullable=False,
+            comment="决策先后顺序（稳定排序依据；由应用层按最大值+1 赋值）",
+        ),
         sa.Column("record_id", sa.Uuid(), nullable=False, comment="候选记录"),
         sa.Column("stage", sa.String(length=16), nullable=False, comment="筛选阶段"),
         sa.Column("verdict", sa.String(length=16), nullable=False, comment="结论"),
