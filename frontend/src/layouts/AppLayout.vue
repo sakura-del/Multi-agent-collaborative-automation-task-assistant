@@ -2,11 +2,25 @@
 import { FileInput, FileText, ListChecks, Library, LogOut, Palette } from "lucide-vue-next";
 import { useRouter } from "vue-router";
 
+import { Button } from "@/components/ui/button";
 import { useAuthStore } from "@/stores/auth";
 
-// 工作台布局：安静左侧导航 + 当前用户 + 图标登出，不做装饰性卡片
+// 工作台布局：安静左侧导航 + 当前用户 + 图标登出，不做装饰性卡片。
+// 样式走 shadcn-vue / Nova 规范（AGENTS.md §6.5）。
+//
+// ⚠️ 契约：窄屏导航容器必须保留 `app-nav__links` 类名——
+// `e2e/phase1-pages.spec.ts` 的 resetScroll 依赖它把导航的横向滚动归位。
 const auth = useAuthStore();
 const router = useRouter();
+
+// 导航项集中定义：新增页面只改这一处，避免模板里重复结构
+const NAV_ITEMS = [
+  { name: "tasks", label: "任务", icon: ListChecks },
+  { name: "knowledge", label: "知识库", icon: Library },
+  { name: "styles", label: "引用样式", icon: Palette },
+  { name: "templates", label: "Word 模板", icon: FileText },
+  { name: "reference-import", label: "导入文献", icon: FileInput },
+] as const;
 
 function handleLogout() {
   auth.logout();
@@ -15,168 +29,50 @@ function handleLogout() {
 </script>
 
 <template>
-  <div class="app-shell">
-    <aside class="app-nav">
-      <div class="app-nav__brand">文献综述工作台</div>
-      <nav class="app-nav__links">
-        <RouterLink class="app-nav__link" :to="{ name: 'tasks' }">
-          <ListChecks :size="16" />
-          <span>任务</span>
-        </RouterLink>
-        <RouterLink class="app-nav__link" :to="{ name: 'knowledge' }">
-          <Library :size="16" />
-          <span>知识库</span>
-        </RouterLink>
-        <RouterLink class="app-nav__link" :to="{ name: 'styles' }">
-          <Palette :size="16" />
-          <span>引用样式</span>
-        </RouterLink>
-        <RouterLink class="app-nav__link" :to="{ name: 'templates' }">
-          <FileText :size="16" />
-          <span>Word 模板</span>
-        </RouterLink>
-        <RouterLink class="app-nav__link" :to="{ name: 'reference-import' }">
-          <FileInput :size="16" />
-          <span>导入文献</span>
+  <div class="grid min-h-screen grid-cols-1 md:grid-cols-[13rem_1fr]">
+    <!-- 侧栏（窄屏折成顶部横向导航） -->
+    <aside
+      class="flex flex-col gap-5 border-b border-border bg-card px-3 py-3 md:border-b-0 md:border-r md:py-5"
+    >
+      <div class="hidden px-2 text-sm font-semibold md:block">文献综述工作台</div>
+
+      <nav
+        class="app-nav__links flex min-w-0 flex-1 flex-wrap items-center gap-1 md:flex-col md:items-stretch"
+        aria-label="主导航"
+      >
+        <RouterLink
+          v-for="item in NAV_ITEMS"
+          :key="item.name"
+          :to="{ name: item.name }"
+          class="flex items-center gap-2 whitespace-nowrap rounded-md px-2.5 py-2 text-sm text-foreground transition-colors hover:bg-muted"
+          active-class="bg-muted font-medium"
+        >
+          <component :is="item.icon" :size="16" aria-hidden="true" />
+          <span>{{ item.label }}</span>
         </RouterLink>
       </nav>
-      <div class="app-nav__footer">
-        <span class="app-nav__user" :title="auth.user?.email">
+
+      <div class="flex items-center justify-between gap-2 px-2 md:mt-auto">
+        <span
+          class="hidden truncate text-xs text-muted-foreground md:block"
+          :title="auth.user?.email"
+        >
           {{ auth.user?.username ?? "未登录" }}
         </span>
-        <button
-          class="icon-button"
-          type="button"
-          title="退出登录"
+        <Button
+          variant="ghost"
+          size="icon-sm"
           aria-label="退出登录"
+          title="退出登录"
           @click="handleLogout"
         >
           <LogOut :size="16" />
-        </button>
+        </Button>
       </div>
     </aside>
-    <main class="app-main">
+
+    <main class="min-w-0 p-4 md:px-8 md:py-6">
       <RouterView />
     </main>
   </div>
 </template>
-
-<style scoped>
-.app-shell {
-  display: grid;
-  grid-template-columns: 208px 1fr;
-  min-height: 100vh;
-}
-
-.app-nav {
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
-  padding: 1.25rem 0.75rem;
-  background: var(--color-card);
-  border-right: 1px solid var(--color-border);
-}
-
-.app-nav__brand {
-  font-size: 0.95rem;
-  font-weight: 600;
-  padding: 0 0.5rem;
-}
-
-.app-nav__links {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.app-nav__link {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 0.625rem;
-  border-radius: 8px;
-  color: var(--color-text);
-  text-decoration: none;
-  font-size: 0.9rem;
-}
-
-.app-nav__link:hover {
-  background: var(--color-bg);
-}
-
-.app-nav__link.router-link-active {
-  background: var(--color-bg);
-  font-weight: 600;
-}
-
-.app-nav__footer {
-  margin-top: auto;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0 0.5rem;
-}
-
-.app-nav__user {
-  font-size: 0.85rem;
-  color: #6b7280;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.app-main {
-  padding: 1.5rem 2rem;
-  min-width: 0;
-}
-
-/* 移动端：左侧导航折成顶部横向导航，内容占满宽度（Plan 4 Exit Gate 移动视口要求） */
-@media (max-width: 720px) {
-  .app-shell {
-    grid-template-columns: 1fr;
-  }
-
-  .app-nav {
-    flex-direction: row;
-    align-items: center;
-    flex-wrap: nowrap;
-    gap: 0.5rem;
-    padding: 0.55rem 0.75rem;
-    border-right: none;
-    border-bottom: 1px solid var(--color-border);
-  }
-
-  /* 窄屏只留导航与登出，避免文字被挤成竖排 */
-  .app-nav__brand,
-  .app-nav__user {
-    display: none;
-  }
-
-  /* 窄屏导航：允许换行而非横向滚动。
-     ⚠️ 曾用 `overflow-x: auto`，但导航项增加到 5 个后，最右的「导入文献」
-     在 393px 视口下被挤出可视区、必须横向滚动才能点到——这是真实可用性缺陷
-     （E2E 实测点击超时）。换行让所有入口始终可见。 */
-  .app-nav__links {
-    flex-direction: row;
-    flex-wrap: wrap;
-    gap: 0.25rem;
-    flex: 1 1 auto;
-    min-width: 0;
-  }
-
-  .app-nav__link {
-    flex: 0 0 auto;
-    white-space: nowrap;
-  }
-
-  .app-nav__footer {
-    margin-top: 0;
-    padding: 0;
-  }
-
-  .app-main {
-    padding: 1rem;
-  }
-}
-</style>

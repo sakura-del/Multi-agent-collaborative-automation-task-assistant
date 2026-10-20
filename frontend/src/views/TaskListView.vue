@@ -4,13 +4,19 @@ import { useRouter } from "vue-router";
 import { Plus } from "lucide-vue-next";
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
+import EmptyState from "@/components/common/EmptyState.vue";
 import StatusBadge from "@/components/common/StatusBadge.vue";
 import TaskCreateForm from "@/components/tasks/TaskCreateForm.vue";
+import { Button } from "@/components/ui/button";
 import { useTaskStore } from "@/stores/tasks";
 import type { TaskCreate } from "@/api/types";
 import { formatDateTime, taskProgress } from "@/utils/task-status";
 
 // 任务列表：创建入口 + 列表（桌面表格 / 移动单列）；创建成功后进入详情页
+// 样式走 shadcn-vue / Nova 规范（AGENTS.md §6.5）。
+//
+// ⚠️ 测试契约（不要改）：`data-test="new-task"` / `data-test="empty-state"` /
+// `data-test="task-row-<id>"`。
 const store = useTaskStore();
 const router = useRouter();
 
@@ -51,170 +57,112 @@ function openTask(taskId: string) {
 </script>
 
 <template>
-  <section class="page">
-    <header class="page__header page__header--row">
+  <section>
+    <header class="mb-4 flex flex-wrap items-start justify-between gap-3">
       <div>
-        <h1>任务</h1>
-        <p class="page__hint">共 {{ store.items.length }} 个任务</p>
+        <h1 class="text-lg font-semibold tracking-tight">任务</h1>
+        <p class="mt-0.5 text-sm text-muted-foreground">共 {{ store.items.length }} 个任务</p>
       </div>
-      <button
-        class="btn btn--primary"
-        data-test="new-task"
-        type="button"
-        @click="showForm = !showForm"
-      >
-        <Plus :size="16" />
+      <Button data-test="new-task" @click="showForm = !showForm">
+        <Plus :size="16" aria-hidden="true" />
         <span>{{ showForm ? "收起" : "新建任务" }}</span>
-      </button>
+      </Button>
     </header>
 
     <ErrorBanner :message="errorMessage" />
 
     <TaskCreateForm
       v-if="showForm"
-      class="page__form"
+      class="mb-6"
       :pending="submitting"
       :error="errorMessage"
       @submit="handleCreate"
     />
 
-    <p v-if="store.listLoading && !store.items.length" class="page__hint">加载中…</p>
+    <p v-if="store.listLoading && !store.items.length" class="text-sm text-muted-foreground">
+      加载中…
+    </p>
 
-    <div v-else-if="!store.items.length" class="empty" data-test="empty-state">
-      <p>还没有任务。</p>
-      <button class="btn btn--primary" type="button" @click="showForm = true">新建任务</button>
+    <EmptyState
+      v-else-if="!store.items.length"
+      testid="empty-state"
+      title="还没有任务"
+      description="新建一个文献综述任务，系统会先规划再执行，可随时确认与干预。"
+    >
+      <template #icon>
+        <Plus class="mb-1 size-6 text-muted-foreground" aria-hidden="true" />
+      </template>
+    </EmptyState>
+
+    <div v-else class="overflow-hidden rounded-lg border border-border bg-card">
+      <!-- 桌面：表格。窄屏：改成卡片式（thead 隐藏，每行用 data-label 打标签） -->
+      <table class="w-full border-collapse text-sm max-md:block">
+        <thead class="max-md:hidden">
+          <tr class="border-b border-border bg-muted/40 text-left">
+            <th scope="col" class="px-3 py-2 font-medium text-muted-foreground">标题</th>
+            <th scope="col" class="px-3 py-2 font-medium text-muted-foreground">状态</th>
+            <th scope="col" class="px-3 py-2 font-medium text-muted-foreground">进度</th>
+            <th scope="col" class="px-3 py-2 font-medium text-muted-foreground">更新时间</th>
+            <th scope="col" class="px-3 py-2">
+              <span class="sr-only">操作</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody class="max-md:block">
+          <tr
+            v-for="task in store.items"
+            :key="task.task_id"
+            :data-test="`task-row-${task.task_id}`"
+            class="border-b border-border last:border-b-0 hover:bg-muted/30 max-md:block max-md:px-3 max-md:py-2"
+          >
+            <td
+              class="px-3 py-2 font-medium max-md:flex max-md:justify-between max-md:gap-3 max-md:px-0 max-md:py-1"
+              data-label="标题"
+            >
+              {{ task.title }}
+            </td>
+            <td
+              class="px-3 py-2 max-md:flex max-md:justify-between max-md:gap-3 max-md:px-0 max-md:py-1"
+              data-label="状态"
+            >
+              <span class="hidden text-xs text-muted-foreground max-md:inline">状态</span>
+              <StatusBadge :status="task.status" />
+            </td>
+            <td
+              class="px-3 py-2 max-md:flex max-md:justify-between max-md:gap-3 max-md:px-0 max-md:py-1"
+              data-label="进度"
+            >
+              <span class="hidden text-xs text-muted-foreground max-md:inline">进度</span>
+              <div
+                class="h-1.5 w-24 overflow-hidden rounded-full bg-secondary"
+                role="progressbar"
+                :aria-valuenow="taskProgress(task.status)"
+                aria-valuemin="0"
+                aria-valuemax="100"
+                :title="`${taskProgress(task.status)}%`"
+              >
+                <div
+                  class="h-full rounded-full bg-primary transition-[width] duration-300"
+                  :style="{ width: `${taskProgress(task.status)}%` }"
+                />
+              </div>
+            </td>
+            <td
+              class="px-3 py-2 text-muted-foreground max-md:flex max-md:justify-between max-md:gap-3 max-md:px-0 max-md:py-1"
+              data-label="更新时间"
+            >
+              <span class="hidden text-xs text-muted-foreground max-md:inline">更新时间</span>
+              <span>{{ formatDateTime(task.updated_at ?? task.created_at) }}</span>
+            </td>
+            <td
+              class="px-3 py-2 text-right max-md:flex max-md:justify-end max-md:px-0 max-md:py-2"
+              data-label="操作"
+            >
+              <Button variant="outline" size="sm" @click="openTask(task.task_id)">打开</Button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </div>
-
-    <table v-else class="task-table">
-      <thead>
-        <tr>
-          <th scope="col">标题</th>
-          <th scope="col">状态</th>
-          <th scope="col">进度</th>
-          <th scope="col">更新时间</th>
-          <th scope="col"><span class="sr-only">操作</span></th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="task in store.items" :key="task.task_id" :data-test="`task-row-${task.task_id}`">
-          <td data-label="标题" class="task-table__title">{{ task.title }}</td>
-          <td data-label="状态"><StatusBadge :status="task.status" /></td>
-          <td data-label="进度">
-            <div class="progress" :title="`${taskProgress(task.status)}%`">
-              <div class="progress__bar" :style="{ width: `${taskProgress(task.status)}%` }" />
-            </div>
-          </td>
-          <td data-label="更新时间">{{ formatDateTime(task.updated_at ?? task.created_at) }}</td>
-          <td data-label="操作">
-            <button class="btn" type="button" @click="openTask(task.task_id)">打开</button>
-          </td>
-        </tr>
-      </tbody>
-    </table>
   </section>
 </template>
-
-<style scoped>
-.page__header--row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-.page__form {
-  margin-bottom: 1.5rem;
-}
-
-.empty {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.75rem;
-  padding: 1.5rem;
-  border: 1px dashed var(--color-border);
-  border-radius: 12px;
-  color: #475569;
-}
-
-.task-table {
-  width: 100%;
-  border-collapse: collapse;
-  background: var(--color-card);
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
-  overflow: hidden;
-}
-
-.task-table th,
-.task-table td {
-  text-align: left;
-  padding: 0.625rem 0.75rem;
-  border-bottom: 1px solid var(--color-border);
-  font-size: 0.9rem;
-}
-
-.task-table thead th {
-  background: #f8fafc;
-  font-weight: 600;
-  color: #475569;
-}
-
-.task-table__title {
-  font-weight: 500;
-}
-
-.progress {
-  width: 96px;
-  height: 6px;
-  background: #e2e8f0;
-  border-radius: 999px;
-  overflow: hidden;
-}
-
-.progress__bar {
-  height: 100%;
-  background: var(--color-primary);
-}
-
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-}
-
-@media (max-width: 720px) {
-  .task-table,
-  .task-table tbody,
-  .task-table tr,
-  .task-table td {
-    display: block;
-    width: 100%;
-  }
-
-  .task-table thead {
-    display: none;
-  }
-
-  .task-table tr {
-    border-bottom: 1px solid var(--color-border);
-    padding: 0.5rem 0.25rem;
-  }
-
-  .task-table td {
-    border: none;
-    padding: 0.25rem 0.75rem;
-    display: flex;
-    justify-content: space-between;
-    gap: 1rem;
-  }
-
-  .task-table td::before {
-    content: attr(data-label);
-    color: #64748b;
-    font-size: 0.8rem;
-  }
-}
-</style>
