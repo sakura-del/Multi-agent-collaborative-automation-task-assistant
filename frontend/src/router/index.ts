@@ -3,12 +3,15 @@ import { createRouter, createWebHistory } from "vue-router";
 import AppLayout from "@/layouts/AppLayout.vue";
 import KnowledgeView from "@/views/KnowledgeView.vue";
 import LoginView from "@/views/LoginView.vue";
+import ReferenceImportView from "@/views/ReferenceImportView.vue";
 import StyleView from "@/views/StyleView.vue";
 import TaskDetailView from "@/views/TaskDetailView.vue";
 import TaskListView from "@/views/TaskListView.vue";
+import TemplateView from "@/views/TemplateView.vue";
 import { useAuthStore } from "@/stores/auth";
 
-// 五个页面：登录、任务列表、任务详情、知识库、引用样式；工作台页面统一挂在 AppLayout 下
+// 七个页面：登录、任务列表、任务详情、知识库、引用样式、Word 模板、参考文献导入；
+// 工作台页面统一挂在 AppLayout 下
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
@@ -32,6 +35,8 @@ export const router = createRouter({
         },
         { path: "knowledge", name: "knowledge", component: KnowledgeView },
         { path: "styles", name: "styles", component: StyleView },
+        { path: "templates", name: "templates", component: TemplateView },
+        { path: "references/import", name: "reference-import", component: ReferenceImportView },
       ],
     },
     { path: "/:pathMatch(.*)*", redirect: { name: "tasks" } },

@@ -245,6 +245,65 @@ export interface CitationStyleList {
   default_style_id: string;
 }
 
+// ===== Word 模板契约（与后端 app/api/v1/endpoints/templates.py 对齐，Phase 1 P1-A）=====
+
+/** 模板中的一个 `{{ key }}` 占位符（UI 上映射到综述章节） */
+export interface TemplatePlaceholder {
+  key: string;
+  label: string;
+  required: boolean;
+  sample: string;
+}
+
+export interface TemplateOut {
+  template_id: string;
+  name: string;
+  /** 源 docx 字节的 sha256（完整性/去重） */
+  checksum: string;
+  size: number;
+  placeholders: TemplatePlaceholder[];
+  /** Word **styleId** → 语义角色（`h1`/`body`/`reference` 等） */
+  style_map: Record<string, string>;
+}
+
+export interface TemplateListResponse {
+  items: TemplateOut[];
+}
+
+/** 渲染请求：章节内容 + **已 CSL 渲染好的**参考文献行 */
+export interface TemplateRenderRequest {
+  sections: Record<string, string>;
+  bibliography: string[];
+  filename?: string;
+}
+
+// ===== 参考文献导入契约（与后端 app/api/v1/endpoints/references.py 对齐，Phase 1 P1-E）=====
+
+export type ReferenceImportFormat = "bibtex" | "ris" | "auto";
+
+export interface ImportedReferenceItem {
+  id: string | null;
+  type: string;
+  title: string;
+  authors: string[];
+  year: number | null;
+  container_title: string | null;
+  volume: string | null;
+  issue: string | null;
+  page: string | null;
+  publisher: string | null;
+  doi: string | null;
+  url: string | null;
+}
+
+export interface ReferenceImportResponse {
+  /** 实际采用的解析格式（`auto` 会被解析成具体值） */
+  format: Exclude<ReferenceImportFormat, "auto">;
+  count: number;
+  items: ImportedReferenceItem[];
+}
+
+
 // ===== 引用真实性核验契约（Issue #3 前端展示；计划 2026-10-19-03b §1.2）=====
 
 /** 单条参考文献的核验结论（与后端 `ReferenceVerdict` 对齐）。 */

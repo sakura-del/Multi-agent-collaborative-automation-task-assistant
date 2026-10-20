@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ListChecks, Library, LogOut, Palette } from "lucide-vue-next";
+import { FileInput, FileText, ListChecks, Library, LogOut, Palette } from "lucide-vue-next";
 import { useRouter } from "vue-router";
 
 import { useAuthStore } from "@/stores/auth";
@@ -30,6 +30,14 @@ function handleLogout() {
         <RouterLink class="app-nav__link" :to="{ name: 'styles' }">
           <Palette :size="16" />
           <span>引用样式</span>
+        </RouterLink>
+        <RouterLink class="app-nav__link" :to="{ name: 'templates' }">
+          <FileText :size="16" />
+          <span>Word 模板</span>
+        </RouterLink>
+        <RouterLink class="app-nav__link" :to="{ name: 'reference-import' }">
+          <FileInput :size="16" />
+          <span>导入文献</span>
         </RouterLink>
       </nav>
       <div class="app-nav__footer">
