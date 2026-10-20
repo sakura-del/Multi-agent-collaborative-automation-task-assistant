@@ -49,7 +49,8 @@ def resolve_literature_source(
     """按任务配置选择文献源。
 
     - `offline_dataset=True` 且冻结清单存在 → `ManifestLiteratureSource`（完全不访问网络）
-    - 否则使用容器注入的源（测试/CLI 可覆盖），缺失时回退到 arXiv 适配器
+    - 否则使用容器注入的源（测试/CLI 可覆盖），缺失时按 `literature_sources` 构造多源
+      （Phase 1 P1-B：默认 arXiv + OpenAlex，可用任务 config 覆盖）
     """
     config = getattr(task, "config", None) or {}
     path = manifest_path or MANIFEST_PATH
@@ -60,7 +61,25 @@ def resolve_literature_source(
         return ManifestLiteratureSource(path)
     if config.get("offline_dataset"):
         logger.warning("literature_source_offline_manifest_missing", manifest=str(path))
-    return fallback if fallback is not None else ArxivLiteratureSource()
+    if fallback is not None:
+        return fallback
+
+    # Phase 1 P1-B：多源检索。任务 config 可指定 `literature_sources`（如 ["openalex","pubmed"]）；
+    # 未指定时用注册表默认（arXiv + OpenAlex），失败则退回单 arXiv 源，保证任务可跑。
+    from app.tools.literature.source_registry import (
+        DEFAULT_SOURCE_NAMES,
+        build_multi_source,
+    )
+
+    names = config.get("literature_sources")
+    if not isinstance(names, list) or not names:
+        names = list(DEFAULT_SOURCE_NAMES)
+    try:
+        logger.info("literature_source_multi", sources=names)
+        return build_multi_source(names)
+    except Exception as exc:
+        logger.warning("literature_source_multi_failed", sources=names, error=str(exc))
+        return ArxivLiteratureSource()
 
 
 def is_offline_literature_task(task: Any, *, manifest_path: Path | None = None) -> bool:

@@ -26,6 +26,7 @@ from app.core.security import (
     create_refresh_token,
     decode_token,
     hash_password,
+    utc_timestamp,
     verify_password,
 )
 from app.db.models.user import User
@@ -77,6 +78,13 @@ async def register(
         # 并发场景下唯一索引兜底
         await db.rollback()
         raise ValidationException("用户名或邮箱已被注册") from exc
+
+    # Phase 1 P1-C：注册后自动发验证邮件。
+    # 未配置 SMTP 时走 LoggingEmailSender（只记日志），**绝不阻塞注册**；
+    # 发信失败也只记 warning，不能让"已成功建号"的用户看到 500。
+    from app.api.v1.endpoints.auth_lifecycle import issue_verification_email
+
+    await issue_verification_email(db, user)
     return user
 
 
@@ -121,7 +129,8 @@ async def refresh_token(
 
     # 强制下线检查：refresh_token 同样受 token_invalid_before 约束
     if user.token_invalid_before is not None and "iat" in token_data:
-        if token_data["iat"] < user.token_invalid_before.timestamp():
+        # 同 deps.get_current_user：naive datetime 必须按 UTC 解释
+        if token_data["iat"] < utc_timestamp(user.token_invalid_before):
             raise UnauthorizedException("刷新令牌已被失效，请重新登录")
 
     return TokenOut(

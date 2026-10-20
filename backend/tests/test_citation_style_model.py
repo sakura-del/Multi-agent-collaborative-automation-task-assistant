@@ -418,9 +418,14 @@ class TestCitationStyleMigration:
             if module.down_revision is not None:
                 down_revisions.append(module.down_revision)
 
+        # 本迁移必须在链上：它的 revision 被登记，且它引用的上一版存在
+        assert migration.revision in revisions
+        assert PREVIOUS_HEAD in revisions
+        # 迁移链**无分叉**（恰好一个 head）。注意：后续新增迁移会把 head 前移，
+        # 因此这里断言「唯一 head 存在」而不是「head 就是本迁移」——否则每加一版迁移都会误报。
         referenced = set(down_revisions)
         heads = [revision for revision in revisions if revision not in referenced]
-        assert heads == [migration.revision], f"迁移链 head 不唯一：{heads}"
+        assert len(heads) == 1, f"迁移链存在分叉（多个 head）：{heads}"
 
     def test_upgrade_creates_table_indexes_and_constraints_on_sqlite(self, tmp_path: Path) -> None:
         migration = _citation_style_migration()

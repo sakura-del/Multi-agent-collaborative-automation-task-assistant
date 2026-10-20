@@ -21,7 +21,7 @@ from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ForbiddenException, UnauthorizedException
-from app.core.security import TOKEN_TYPE_ACCESS, decode_token
+from app.core.security import TOKEN_TYPE_ACCESS, decode_token, utc_timestamp
 from app.db.models.user import User
 from app.db.session import get_db
 
@@ -64,8 +64,9 @@ async def get_current_user(
 
     # 强制下线检查：令牌签发时间早于 token_invalid_before 则失效
     if user.token_invalid_before is not None and token_iat is not None:
-        # token_invalid_before 是 timezone-aware datetime，转 Unix 秒比较
-        if token_iat < user.token_invalid_before.timestamp():
+        # ⚠️ 必须用 utc_timestamp：SQLite 读回的 datetime 是 naive，
+        # 直接 `.timestamp()` 会按**本地时区**解释（UTC+8 下少算 8 小时 → 强制下线失效）
+        if token_iat < utc_timestamp(user.token_invalid_before):
             raise UnauthorizedException("令牌已被强制失效，请重新登录")
 
     # 把用户对象挂到 request.state，后续 service 层可直接取用

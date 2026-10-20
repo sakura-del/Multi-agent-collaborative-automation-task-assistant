@@ -54,6 +54,11 @@ dependencies = [
     "python-docx>=1.1.0",
     "markdown>=3.5.2",
 
+    # Word 模板导入（Phase 1 P1-A）：docx 当模板渲染。
+    # ⚠️ docxtpl 是 **LGPL-2.1-only**（不是 MIT）：以库形式 import 使用可接受，
+    # 但打包分发/修改其源码前须做许可证评审（见路线图 §4.2）。
+    "docxtpl==0.20.2",
+
     # NOTE: beautifulsoup4 / openpyxl / pandoc 同样未被代码引用，已移除；
     # 若后续新增网页抓取或表格导出功能，请按需加回并补测试。
 

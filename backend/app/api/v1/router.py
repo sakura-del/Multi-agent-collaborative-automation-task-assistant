@@ -8,12 +8,21 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import auth, citation_styles, health, task_ws, tasks, ws
+from app.api.v1.endpoints import (
+    auth,
+    auth_lifecycle,
+    citation_styles,
+    health,
+    task_ws,
+    tasks,
+    ws,
+)
 from app.knowledge.api.endpoints import router as knowledge_router
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(health.router)
 api_router.include_router(auth.router)
+api_router.include_router(auth_lifecycle.router)
 api_router.include_router(ws.router)
 api_router.include_router(knowledge_router)
 api_router.include_router(citation_styles.router)

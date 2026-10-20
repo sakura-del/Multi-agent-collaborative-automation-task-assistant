@@ -73,10 +73,31 @@ class TestResolveLiteratureSource:
 
         assert source is marker
 
-    def test_defaults_to_arxiv_source_when_nothing_injected(self, tmp_path: Path) -> None:
+    def test_defaults_to_multi_source_when_nothing_injected(self, tmp_path: Path) -> None:
+        """Phase 1 P1-B：未注入源时默认走多源聚合（arXiv + OpenAlex），不再只有 arXiv。"""
+        from app.tools.literature.source_registry import MultiSourceLiteratureSource
+
         source = resolve_literature_source(
             _Task(offline_dataset=False), manifest_path=tmp_path / "missing.json"
         )
+
+        assert isinstance(source, MultiSourceLiteratureSource)
+
+    def test_task_config_can_select_sources(self, tmp_path: Path) -> None:
+        """任务 config 的 `literature_sources` 决定用哪些源。"""
+        from app.tools.literature.source_registry import MultiSourceLiteratureSource
+
+        task = _Task(offline_dataset=False, literature_sources=["openalex", "pubmed"])
+
+        source = resolve_literature_source(task, manifest_path=tmp_path / "missing.json")
+
+        assert isinstance(source, MultiSourceLiteratureSource)
+
+    def test_unknown_source_name_falls_back_to_arxiv(self, tmp_path: Path) -> None:
+        """未知源名不得让任务失败：退回单 arXiv 源（可跑优先）。"""
+        task = _Task(offline_dataset=False, literature_sources=["not-a-source"])
+
+        source = resolve_literature_source(task, manifest_path=tmp_path / "missing.json")
 
         assert isinstance(source, ArxivLiteratureSource)
 

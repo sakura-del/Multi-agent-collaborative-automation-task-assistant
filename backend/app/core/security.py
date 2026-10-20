@@ -29,6 +29,21 @@ TOKEN_TYPE_ACCESS = "access"
 TOKEN_TYPE_REFRESH = "refresh"
 
 
+def utc_timestamp(value: datetime) -> float:
+    """把数据库读回的 datetime 转成 Unix 秒，**naive 一律按 UTC 解释**。
+
+    为什么需要它：`token_invalid_before` 列是 `DateTime(timezone=True)`，但
+    **SQLite 不保留 tzinfo**——读回来是 naive datetime。直接调 `naive.timestamp()`
+    会让 Python 按**本地时区**解释：
+    - UTC 容器里恰好正确（本地=UTC）；
+    - UTC+8 机器上会少算 28800 秒，导致「重置密码后旧 token 应立即失效」被绕过。
+
+    写入端用的是 UTC（`datetime.now(UTC)`），所以读回值也应按 UTC 解释，
+    这样行为与部署时区无关。
+    """
+    return (value.replace(tzinfo=UTC) if value.tzinfo is None else value).timestamp()
+
+
 def _truncate_pwd(password: str) -> bytes:
     """bcrypt 限制密码最长 72 字节，超出截断（与 passlib 默认行为一致）。"""
     return password.encode("utf-8")[:72]

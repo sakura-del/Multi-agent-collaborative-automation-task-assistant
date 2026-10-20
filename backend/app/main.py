@@ -185,6 +185,14 @@ def create_app() -> FastAPI:
         allow_methods=settings.cors.allow_methods,
         allow_headers=settings.cors.allow_headers,
     )
+    # 限流中间件（Phase 1 P1-D）。
+    # ⚠️ Starlette 的 add_middleware 是**后注册者先执行**（洋葱模型外层先跑），
+    # 限流需要 request.state.user_id（由 AuthContextMiddleware 注入），
+    # 因此必须在 AuthContext **之前**注册，才能在链路上排在它之后执行。
+    # 内部 fail-open：组件故障绝不拦业务请求。
+    from app.api.rate_limit_middleware import RateLimitMiddleware
+
+    app.add_middleware(RateLimitMiddleware)
     app.add_middleware(RequestIDMiddleware)
     # 鉴权上下文中间件：预解析 token 注入 request.state，不强制拦截
     app.add_middleware(AuthContextMiddleware)
@@ -199,6 +207,11 @@ def create_app() -> FastAPI:
             message=exc.message,
             details=exc.details,
         )
+        # 429（配额/限流）必须带 Retry-After，客户端才知道何时可重试
+        headers: dict[str, str] = {}
+        retry_after = getattr(exc, "retry_after", None)
+        if retry_after is not None:
+            headers["Retry-After"] = str(max(1, int(retry_after)))
         return JSONResponse(
             status_code=exc.status_code,
             content={
@@ -206,6 +219,7 @@ def create_app() -> FastAPI:
                 "message": exc.message,
                 "details": exc.details,
             },
+            headers=headers or None,
         )
 
     # 路由挂载

@@ -50,4 +50,9 @@ class User(Base):
         DateTime(timezone=True), nullable=True, comment="token 失效时间戳"
     )
 
+    # 邮箱验证（Phase 1 P1-C）：NULL = 未验证。历史用户保持 NULL，不阻塞登录。
+    email_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, comment="邮箱验证时间"
+    )
+
     # Base 已提供 created_at / updated_at，此处不重复声明

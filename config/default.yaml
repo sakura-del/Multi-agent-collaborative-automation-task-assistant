@@ -94,3 +94,40 @@ reference_verification:
   contact_email: ""
   user_agent: "maa-literature-review/0.1 (+https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant)"
   max_retries: 1              # 429/5xx 重试次数，重试耗尽后降级为「未核验」
+
+# ===== 邮件与账号生命周期（Phase 1 P1-C）=====
+# 设计原则：默认 sender=logging 只把验证/重置链接写日志，**不阻塞注册**；
+# 配好 SMTP（建议写 .env，不要提交密码）后自动切换真实投递。
+email:
+  sender: "logging"                  # logging | smtp
+  from_address: "no-reply@localhost"
+  smtp_host: ""                      # 空 = 未配置 → 只记日志，不抛错
+  smtp_port: 587
+  smtp_username: ""
+  smtp_password: ""                  # ⚠️ 只进 .env：EMAIL__SMTP_PASSWORD=...
+  smtp_use_tls: true
+  verify_token_ttl_hours: 24
+  reset_token_ttl_hours: 24
+  frontend_base_url: "http://localhost:5173"
+
+# ===== 速率限制与按用户配额（Phase 1 P1-D）=====
+# 各动作独立限额；Redis 不可用时全部 fail-open（放行），限流组件故障不得拖垮服务。
+rate_limit:
+  enabled: true
+  backend: "redis"                   # redis 多进程共享；memory 单进程（测试/单机）
+  key_prefix: "ratelimit"
+  trust_proxy: false                 # 是否信任 X-Forwarded-For（默认 False 防伪造）
+  rules:
+    auth_login: { limit: 10, window_seconds: 60 }
+    auth_register: { limit: 5, window_seconds: 3600 }
+    task_create: { limit: 30, window_seconds: 3600 }
+    upload: { limit: 20, window_seconds: 3600 }
+    search: { limit: 60, window_seconds: 60 }
+    verify: { limit: 30, window_seconds: 60 }
+
+quota:
+  enabled: true
+  daily_token_limit: 1000000         # -1 = 不限制；0 = 全拒；与 llm.cost_budget 对齐
+  window_seconds: 86400              # 按 UTC 日重置
+  key_prefix: "quota"
+

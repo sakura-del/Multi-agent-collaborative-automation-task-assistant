@@ -170,6 +170,78 @@ class AgentConfig(BaseModel):
     message_timeout: int = 60
 
 
+class EmailConfig(BaseModel):
+    """邮件发送与账号生命周期配置（Phase 1 P1-C）。
+
+    设计原则：**未配置 SMTP 时绝不阻塞注册**——`sender="logging"`（默认）只把
+    验证/重置链接写进日志，前端仍可用；配置 SMTP 后自动切换到真实投递。
+    """
+
+    sender: Literal["logging", "smtp"] = "logging"
+    from_address: str = "no-reply@localhost"
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""  # 只进 .env，不要写进 yaml
+    smtp_use_tls: bool = True
+    verify_token_ttl_hours: int = 24
+    reset_token_ttl_hours: int = 24
+    """token 有效期（小时）。过期 token 一律拒绝。"""
+    frontend_base_url: str = "http://localhost:5173"
+    """用于拼接前端确认页链接（`{base}/verify-email?token=...`）。"""
+
+
+class RateLimitRule(BaseModel):
+    """单条限流规则（Phase 1 P1-D）：窗口内允许次数 + 窗口长度。"""
+
+    limit: int = Field(default=60, ge=0)
+    """窗口内允许请求数；``0`` = 全部拒绝。"""
+
+    window_seconds: int = Field(default=60, ge=1)
+
+
+class RateLimitRules(BaseModel):
+    """各动作独立限额。字段固定（便于用 `RATE_LIMIT__RULES__AUTH_LOGIN__LIMIT` 覆盖）。"""
+
+    auth_login: RateLimitRule = RateLimitRule(limit=10, window_seconds=60)
+    auth_register: RateLimitRule = RateLimitRule(limit=5, window_seconds=3600)
+    task_create: RateLimitRule = RateLimitRule(limit=30, window_seconds=3600)
+    upload: RateLimitRule = RateLimitRule(limit=20, window_seconds=3600)
+    search: RateLimitRule = RateLimitRule(limit=60, window_seconds=60)
+    verify: RateLimitRule = RateLimitRule(limit=30, window_seconds=60)
+
+
+class RateLimitConfig(BaseModel):
+    """速率限制与按用户配额（Phase 1 P1-D）。
+
+    设计原则：**Redis 不可用时全部 fail-open 放行**——限流是旁路能力，
+    组件故障绝不能拖垮业务请求。
+    """
+
+    enabled: bool = True
+    backend: Literal["redis", "memory"] = "redis"
+    """`redis` 多进程共享；`memory` 单进程（测试/单机）。"""
+
+    key_prefix: str = "ratelimit"
+    trust_proxy: bool = False
+    """是否信任 `X-Forwarded-For` 作为客户端 IP。默认 False（防伪造）。"""
+
+    rules: RateLimitRules = RateLimitRules()
+
+
+class QuotaConfig(BaseModel):
+    """按用户 token 配额（Phase 1 P1-D）。"""
+
+    enabled: bool = True
+    daily_token_limit: int = Field(default=1_000_000, ge=-1)
+    """每日 token 上限；``-1`` = 不限制，``0`` = 全拒。与 llm.cost_budget 数值对齐。"""
+
+    window_seconds: int = Field(default=86_400, ge=1)
+    """配额窗口长度；默认 86400 = 按 **UTC 日** 重置。"""
+
+    key_prefix: str = "quota"
+
+
 class OrchestrationConfig(BaseModel):
     """调度器配置（阶段4填充）"""
 
@@ -266,6 +338,9 @@ class Settings(BaseSettings):
     agent: AgentConfig = AgentConfig()
     orchestration: OrchestrationConfig = OrchestrationConfig()
     reference_verification: ReferenceVerificationConfig = ReferenceVerificationConfig()
+    email: EmailConfig = EmailConfig()
+    rate_limit: RateLimitConfig = RateLimitConfig()
+    quota: QuotaConfig = QuotaConfig()
     cors: CORSConfig = CORSConfig()
 
     # ===== JWT 鉴权（阶段0任务3） =====
@@ -305,6 +380,9 @@ class Settings(BaseSettings):
         "agent",
         "orchestration",
         "reference_verification",
+        "email",
+        "rate_limit",
+        "quota",
         "cors",
         mode="before",
     )
