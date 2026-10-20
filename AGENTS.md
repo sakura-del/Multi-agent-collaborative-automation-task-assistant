@@ -242,6 +242,25 @@ frontend/src/
   api/                         # HTTP 层
 ```
 
+### 6.5.6 包管理器：**npm（唯一）**
+
+**前端只用 npm，不要用 pnpm/yarn。**
+
+| 场合 | 命令 |
+| --- | --- |
+| 装依赖 | `cd frontend && npm install <pkg>` |
+| 按锁文件安装 | `npm ci`（CI 与 Dockerfile 都用它） |
+| 跑测试/构建 | `npm run test` / `npm run build` |
+
+**为什么**：`nginx/Dockerfile` 与 `.github/workflows/ci.yml` 都用 `npm ci` + `package-lock.json`。
+历史上仓库同时存在 `pnpm-lock.yaml` 与 `package-lock.json`，导致
+「本地 pnpm 装完、Docker 的 npm ci 失败」（2026-10-20 实际踩到：镜像构建报
+`process "/bin/sh -c npm ci" did not complete successfully`）。
+已删除 pnpm 锁文件，**不要重新引入**。
+
+装完依赖必须把 `package-lock.json` 一起提交，否则 CI/Docker 会因锁文件与
+`package.json` 不同步而失败。
+
 ### 6.5.5 迁移状态（进行中）
 
 > Phase 1 的前端页面是**手写 CSS**（`main.css` 8 个 token）。正在迁移到本规范。
