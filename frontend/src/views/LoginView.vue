@@ -109,6 +109,13 @@ async function handleSubmit() {
       <button class="btn btn--primary login-card__submit" type="submit" :disabled="loading">
         {{ loading ? "处理中…" : submitLabel }}
       </button>
+
+      <!-- 账号生命周期入口（Phase 1 P1-C）：登录模式才展示忘记密码 -->
+      <p v-if="mode === 'login'" class="login-card__links">
+        <RouterLink :to="{ name: 'password-reset' }" data-test="forgot-password">
+          忘记密码？
+        </RouterLink>
+      </p>
     </form>
   </div>
 </template>
@@ -120,6 +127,21 @@ async function handleSubmit() {
   align-items: center;
   justify-content: center;
   padding: 1rem;
+}
+
+.login-card__links {
+  margin-top: 0.6rem;
+  text-align: center;
+  font-size: 0.82rem;
+}
+
+.login-card__links a {
+  color: #1d4ed8;
+  text-decoration: none;
+}
+
+.login-card__links a:hover {
+  text-decoration: underline;
 }
 
 .login-card {
