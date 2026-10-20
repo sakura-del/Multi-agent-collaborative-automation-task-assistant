@@ -1662,6 +1662,55 @@ seq = NULL → ERROR: null value in column "seq" ... violates not-null constrain
 **门禁**：black/ruff 干净；mypy 0 错误（165 文件）；pytest **2100 passed / 8 skipped**
 （2075 → 2100，+25 例）；全新库 `alembic upgrade head` 全链通过。
 
+### Task 3：服务层（`db2e3b6`）
+
+**交付**：`ScreeningService` —— 检索落库（日志 + 快照）、跨源去重、决策推进、
+PRISMA 计数派生。
+
+**两处对计划初稿的修正（都是必要修正）**
+
+1. **去重口径改为对齐既有实现**。计划初稿的 `_dedupe` 只做 source_id + 题名两级，
+   **缺 DOI**；而 `source_registry._merge_deduped` 早已实现成熟的三级去重
+   （DOI → source_id → 归一化题名）。两处口径不一致会让 PRISMA 的
+   「去重后记录数」与实际筛选对象矛盾（检索层去重 5 条、快照层只去重 3 条，
+   流程图数字就是错的）。
+   故 `dedupe_records` 严格对齐同口径，并新增 **7 例口径一致性测试**：
+   同一输入同时喂两条路径，断言结果集合相同。
+
+2. **新增 `hits_total` 显式参数**。原实现 `hits_total = len(records)`，
+   但上游只回传样本（分页/限流/只取前 N 条）时该值远小于真实命中数，
+   会让 PRISMA「识别」阶段数字偏低。现支持显式传入，未传时按
+   `sum(hits_by_source)` 或 `len(records)` 推断。
+
+**已知语义局限（显式记录并用测试锁定）**
+
+`prisma_counts.duplicates_removed` 在**样本场景**下混合了「真正去重」与
+「未落库差额」两义。之所以这样选：对用户而言「137 命中 → 1 条进入筛选」的差额
+必须有去处，否则流程图数字无法闭合（审稿人只会问「剩下 136 条呢」）。
+另锁定 `identified_total == records_screened + duplicates_removed`（流程闭合）。
+
+**容器内真实 PostgreSQL 验证**
+
+```
+[1] 检索落库: hits_total=137 hits_deduped=2（3 条原始记录，含同 DOI 跨源重复）
+[2] 候选快照: 2 条 -> ['RAG Survey', 'Another Paper']
+[3] 纳入后阶段: fulltext（期望 fulltext）✅
+[4] 排除无理由被拒: ✅ 排除决策必须提供 exclusion_reason（PRISMA 2020 要求…）
+[5] PRISMA 计数:
+    identified_total = 137
+    duplicates_removed = 135
+    records_screened = 2
+    title_abstract = {'screened': 2, 'excluded': 1}
+    exclusion_reasons = {'not relevant': 1}
+[6] 各源合计与识别总数自洽 ✅
+[7] 流程闭合（识别 = 去重后 + 去除）✅
+[8] 探针数据已清理 ✅
+RESULT: PASS
+```
+
+**门禁**：black/ruff 干净；mypy 0 错误（166 文件）；pytest **2132 passed / 8 skipped**
+（2100 → 2132，+32 例）。
+
 
 
 
