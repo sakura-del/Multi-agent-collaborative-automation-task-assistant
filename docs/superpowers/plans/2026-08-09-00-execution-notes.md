@@ -1757,6 +1757,92 @@ RESULT: PASS
 **门禁**：black/ruff 干净；mypy 0 错误（168 文件）；pytest **2159 passed / 8 skipped**
 （2132 → 2159，+27 例）。
 
+---
+
+## 前端设计系统改造（2026-10-20）
+
+**目标**：统一设计语言 + 技术栈锁定，让任何一次改动（甚至 oneshot）都产出风格一致的界面。
+规范写入 [AGENTS.md §6.5](../../AGENTS.md)。
+
+### 0. 先做的范围校正
+
+用户给出的是 React 生态清单（`shadcn/ui` / `react-resizable-panels` / `dnd-kit` / `Zustand`），
+但**本项目是 Vue 3**，这四个库无法安装。改为逐项对应的 Vue 等价物
+（设计理念一致：源码可控、无头组件、原子样式）：
+
+| 用户指定 | 实际采用 | 说明 |
+| --- | --- | --- |
+| shadcn/ui Nova | **shadcn-vue**（Reka UI + CVA） | Vue 官方对应物 |
+| Lucide | **lucide-vue-next** | ✅ 本来就在用 |
+| Motion | **motion-v** | Motion 官方 Vue 移植 |
+| react-resizable-panels | **splitpanes** | 已声明，待需时启用 |
+| dnd-kit | **vue-draggable-plus** | 已声明，待需时启用 |
+| Zustand | **Pinia** | Vue 官方方案（已用） |
+
+### 1. M0 基础设施（`ae90d5b`）
+
+- Tailwind CSS **v4.3.3**（Vite 插件模式，无需 postcss/tailwind.config）；
+- 依赖：`reka-ui` / `class-variance-authority` / `tailwind-merge` / `clsx` /
+  `motion-v` / `vue-sonner` / `@vueuse/core`；
+- `main.css` 重写为设计 tokens：**Nova 预设**（纯中性灰 oklch + 单一蓝主色 + 紧凑尺寸），
+  经 `@theme inline` 映射后可用 `bg-background` / `text-foreground` 等语义类；
+- 全局：统一焦点环、尊重 `prefers-reduced-motion`、中文字体栈；
+- `lib/utils.ts` 的 `cn()`（clsx + tailwind-merge）。
+
+### 2. M1 基础组件（源码在仓库内，可改）
+
+`src/components/ui/`：Button / Input / Label / Card(+Header/Title/Content) / Badge / Alert
+全部用 **CVA 变体**，调用方只传 `variant`/`size`，不再手写颜色间距。
+`ErrorBanner` 改造为基于 `Alert` 的包装（**保留 `testid` 默认值与 `role=alert` 契约**）。
+新增 `EmptyState`（空列表必须给明确引导，不能只说「暂无数据」）。
+
+结构与技巧：每个组件目录 `variants.ts`（CVA 定义）+ `Xxx.vue`（结构）+ `index.ts`（barrel）。
+避免 `index.ts` 被 `.vue` 反向 import 造成循环。
+
+### 3. M2 首个页面迁移：LoginView
+
+分段控件式模式切换、语义化 `Label`/`Input`、加载态用 `Loader2` 旋转。
+**严格保留 `id` / `data-test` 契约** → 156 项前端测试与 20 项 E2E 全部通过。
+
+浏览器实测确认（`oklch(1 0 0)` 背景、input 带 `border-input` 类）：
+设计 token 与 Tailwind 类**真的生效**，不是「看起来像」。
+
+### 4. 两个真实踩坑（均已写入 AGENTS.md）
+
+**① 双锁文件导致 Docker 构建失败**（`7a7a4f1`）
+
+`nginx/Dockerfile` 与 CI 都用 `npm ci` + `package-lock.json`，但本次新增依赖时用了 pnpm
+→ `package-lock.json` 未同步 → 镜像构建报
+`process "/bin/sh -c npm ci" did not complete successfully`。
+**修法**：用 npm 重新生成锁文件，**删除 `pnpm-lock.yaml` / `pnpm-workspace.yaml`**，
+统一到 npm（AGENTS.md §6.5.6 记录约束与原因）。
+
+**② 根 `.gitignore` 的 `lib/` 误伤前端源码**（`bf57e15`）
+
+`lib/utils.ts` 从未入库：根 `.gitignore` 有一条 `lib/`（与 `eggs/` `lib64/` 同组的
+**Python 打包**规则），它是通用模式，连带忽略了 `frontend/src/lib/`。
+本地有实体文件所以能构建，Docker 从 git 检出的工作区里没有它 →
+`TS2307: Cannot find module '@/lib/utils'`。
+**修法**：`frontend/.gitignore` 加 `!src/lib/` + `!src/lib/**`；
+根 `.gitignore` 给 `dist/` `lib/` 加注释说明是通用模式且曾误伤前端；
+父目录被排除时反忽略需 `git add -f` 才进索引。
+
+### 5. 当前状态与剩余工作
+
+| 阶段 | 内容 | 状态 |
+| --- | --- | --- |
+| M0 | Tailwind v4 + tokens + `cn()` | ✅ |
+| M1 | Button/Input/Label/Card/Badge/Alert/EmptyState | ✅ |
+| M2 | 页面迁移 | 🚧 **1/8**（Login 完成；TaskList/TaskDetail/Knowledge/Style/Template/Import/账号两页待迁） |
+| M3 | 新页面直接用新规范 | 待做 |
+| M4 | 删除 `main.css` 旧 `.btn`/`.badge`/`.input` | 待做 |
+
+**视觉现状**：登录页已是新风格；工作台侧栏与表格仍是旧手写 CSS——
+两张风格并存的过渡期，按 M2 逐页迁移即可收敛。
+
+**验证**：Vitest **156 passed**；`npm ci` + `npm run build` 成功；
+nginx 镜像重建成功（`--no-cache`），服务器已部署。
+
 
 
 
