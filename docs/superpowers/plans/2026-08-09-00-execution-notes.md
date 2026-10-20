@@ -1349,6 +1349,30 @@ black/ruff 干净；`mypy` 0 错误（**159 文件**）；`pytest` **1999 passed
 - 限流/配额已就绪但**未挂到全部写接口**（当前覆盖登录/注册/建任务/上传/搜索/校验）；
 - `quota.daily_token_limit` 尚未在任务执行期真正扣减 token（当前只具备服务能力）。
 
+### 6. 修复迁移自身的 CI 失败（`f817990`）
+
+补 `updated_at` 的提交同时做了两件事，二者叠加导致**全新部署重复加列**：
+
+1. 新增修复迁移 `f5c2a8d1b3e7`（为**已部署库**补列）；
+2. 直接修正 `e3b8c4d9a2f1`（让全新部署一次到位，该迁移本身已含此列）。
+
+于是全新部署时 `e3b8c4d9a2f1` 建出该列 → `f5c2a8d1b3e7` 再无条件 `ADD COLUMN` → 失败：
+
+```
+ProgrammingError: column "updated_at" of relation "email_token" already exists
+```
+
+CI 的 `Compose Release Smoke` 用**全新库**，因此暴露；**已部署的生产库与本地 SQLite 测试
+都碰不到**（生产已跑到 `f5c2a8d1b3e7`；本地测试走 `create_all` 不经迁移）。
+
+修法：`upgrade()`/`downgrade()` 都先 `sa.inspect(...)` 判断列是否存在，已存在/已不存在则跳过
+——**修复迁移必须幂等**，才能同时服务「已部署库」与「全新库」两条路径。
+回归测试 `TestFixMigrationIsIdempotent`（3 例）覆盖两条路径 + 幂等回滚；并实测
+「空库 → `alembic upgrade head`」全链 5 个迁移无错。
+
+**教训**：修复类迁移一旦同时修正历史迁移，就必须**幂等**；否则全新部署（CI smoke）必炸，
+而本地与已部署环境都发现不了。
+
 
 
 
