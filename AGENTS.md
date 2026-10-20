@@ -21,11 +21,11 @@
 | 项 | 值 |
 | --- | --- |
 | 分支 | `main`（工作分支 `codex/plan3-literature-workflow` 与 main 同点） |
-| HEAD | … → 端点接线 `fe56a67` → 前端模板/导入 `08b7378` → **账号生命周期前端 `f7323ff`（Phase 1 收尾）** |
+| HEAD | … → 账号生命周期前端 `f7323ff`（Phase 1 收尾）→ **P1-D 缺口补齐 `63b1d95`** |
 | 冻结 tag | `defense-v1` |
 | Plan 状态 | Plan 2 / 3 / 4 / 5 **全部 Exit Gate PASSED** |
-| 产品化进度 | **Issue #2 / #3 / #4 / #5 / #6 / #7 全部关闭且遗留项清零**；配置优先级缺陷已修复；**Phase 1 打地基五项全部端到端可用**（后端 + HTTP 端点 + 前端页面） |
-| 后端测试 | **2023 passed**, 8 skipped；覆盖率 **90.00%**；`mypy` 0 错误（163 文件） |
+| 产品化进度 | **Issue #2 / #3 / #4 / #5 / #6 / #7 全部关闭且遗留项清零**；配置优先级缺陷已修复；**Phase 1 打地基五项全部端到端可用且遗留清零**（后端 + HTTP 端点 + 前端页面 + 限流全覆盖 + 配额真扣减） |
+| 后端测试 | **2063 passed**, 8 skipped；覆盖率 **90.00%**；`mypy` 0 错误（163 文件） |
 | 前端测试 | Vitest **156 passed**；Playwright E2E **20 passed**（Phase 1 三页 × 桌面 + 移动双视口） |
 | CI | **6/6 作业全绿**（2026-10-19 修复；此前自 08-03 起连续失败） |
 | 服务器 | 已同步，五容器 healthy，`curl http://127.0.0.1:48080/api/v1/health/ready` → `{"status":"ready"}` |
@@ -141,7 +141,7 @@ docker compose build backend && docker compose up -d backend
 | P1-A Word 模板导入 + 一键切换 | ✅ 已交付 `d44282a` + 端点 `fe56a67` + **前端 `08b7378`/`049f1a8`/`2828a5f`** | 领域模块 + HTTP 端点 + `user_template` 表（迁移 `a7d4e2f9c1b8`）+ **`/templates` 管理页**（占位符展示/上传/渲染下载/删除）；上传准入拒 `.docm`/宏/OLE/zip 炸弹。**遗留**：无 |
 | P1-B 检索源扩展 | ✅ 已交付 `d44282a` | OpenAlex + S2 + PubMed + 多源聚合（三级去重、单源失败隔离、各源节流）。**遗留**：S2 需注入 `SEMANTIC_SCHOLAR_API_KEY`（公共档持续 429） |
 | P1-C 账号体系 | ✅ 已交付 `d44282a` + 修复 `112c398` + **前端 `f7323ff`** | 邮箱验证 + 密码重置（只存哈希/单次使用/恒定响应）；未配 SMTP 不阻塞注册 + **`/verify-email`、`/password-reset`、`/account/verify` 三页** + 登录页「忘记密码」入口。**遗留**：无 |
-| P1-D 限流 + 配额 | ✅ 已交付 `d44282a` | 中间件 + Redis/内存实现 + fail-open + 熔断；429 带 Retry-After。**遗留**：未覆盖全部写接口；token 配额未在执行期扣减 |
+| P1-D 限流 + 配额 | ✅ 已交付 `d44282a` + **缺口补齐 `63b1d95`** | 中间件 + Redis/内存实现 + fail-open + 熔断；429 带 Retry-After；**限流覆盖全部 19 条写端点**（新增 task_control/template_write/template_render）；**配额真扣减**（提交时预扣 100k、完成时按实际用量退还差额，`refund()` 原子且不扣到负数）。**遗留**：无 |
 | P1-E RIS/BibTeX 导入 | ✅ 已交付 `d44282a` + 端点 `fe56a67` + **前端 `08b7378`** | round-trip 与导出严格一致 + `POST /references/import` + **`/references/import` 预览页**。**遗留**：无 |
 
 **Issue 清单**（全部已关闭）：

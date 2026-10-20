@@ -1517,6 +1517,63 @@ Phase 1 五项里有两项**只有领域模块、用户碰不到**（计划 §5 
 **Phase 1 状态**：五项全部端到端可用（后端 + HTTP 端点 + 前端页面）。
 剩余非阻塞遗留见 §5。
 
+### 10. P1-D 缺口补齐：限流全覆盖 + 配额真扣减（`63b1d95`）
+
+补齐 P1-D 的两处已知缺口（§5 遗留）。
+
+**缺口 1：限流未覆盖全部写接口**
+
+此前只有 9 条路由受限，遗漏了模板上传/渲染、样式上传/删除、文档删除、
+任务规划确认/人工控制、WS ticket、邮箱验证与密码重置的 confirm 端点。
+
+这不是纸面问题——这些端点同样是**写操作或外部调用**，不设限就能被单客户端无限刷，
+其中模板渲染（docxtpl + python-docx 重打包）与上传（解压校验 zip）开销最大。
+
+修法：规则表补齐到 **19 条**，新增 `task_control` / `template_write` /
+`template_render` 三个独立限额（渲染最严 10 次/分钟；上传/删除 20 次/小时；
+确认/控制 60 次/小时）；新增**双向校验**测试（所有写端点有规则 + 所有规则标签
+在配置里存在），防止「加了路由忘配限额」与「配了标签却没有字段导致运行期
+AttributeError」两类漂移。
+
+**缺口 2：`quota.daily_token_limit` 形同虚设**
+
+`QuotaService.check_and_consume` 此前只实现了服务能力、**没有任何调用点**。
+
+修法（两阶段扣减）：
+1. **提交时预扣**：`POST /tasks` 在 `execution.submit` **之前**按
+   `ESTIMATED_TOKENS_PER_TASK`（100k）扣减——超限直接 429，**任务不创建**
+   （先建后拒会留下注定失败的僵尸任务，且用户已消耗一次建任务限额）；
+2. **完成时校正**：任务完成按各节点 `ExecutionResult.prompt_tokens +
+   completion_tokens` 汇总**实际用量**，退还 `max(0, 预估 - 实际)`。
+
+**实际超过预估时不补扣**：预估值本身是保守上限，补扣会让用户下一个任务莫名失败，
+且钱已花掉、事后拒绝没有意义。
+
+`QuotaService` 新增 `refund()`：Lua 原子实现且**不扣到负数**（否则并发/重复退还
+可把额度刷成正收益）；`tokens<=0`、配额关闭、Redis 故障均为空操作（fail-open）。
+
+配额服务在 lifespan 构造一次复用（避免每请求建 Redis 连接），同时注入
+`TaskExecution`（完成时退还）与 `POST /tasks` 依赖（提交时预扣），保证两侧同一份配置。
+
+**服务器端到端验收（真实 Redis + PostgreSQL）**
+
+```
+模板渲染连续 14 次: [200×10, 429] → 第 11 次触发，Retry-After: 60（限额 10/60s，精确）
+创建任务: HTTP 201
+Redis 实际 key:
+  quota:1e9ff26b-…:2026-10-20 = 100000  (TTL=58901s，UTC 日结束)
+  ratelimit:60:template_render:user:…
+  ratelimit:3600:template_write:user:…
+  ratelimit:3600:task_create:user:…
+  ratelimit:60:auth_login:ip:…
+```
+
+**门禁**：black/ruff 干净；mypy 0 错误（163 文件）；pytest **2063 passed / 8 skipped**
+（2023 → 2063，+40 例，先红后绿）。
+
+**踩到铁律 #1**：用 PowerShell `-replace` 改测试文件导致中文变 mojibake（含不可打印
+字符 → 文件 SyntaxError），改用 `write` 工具整体重写该文件。
+
 
 
 
