@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import { X } from "lucide-vue-next";
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { listCitationStyles } from "@/api/citation-styles";
 import type { CitationStyleSource, TaskCreate } from "@/api/types";
 
@@ -149,14 +153,16 @@ function handleSubmit() {
 </script>
 
 <template>
-  <form class="task-form" @submit.prevent="handleSubmit">
-    <div class="field">
-      <label for="task-topic">主题</label>
-      <input
+  <form
+    class="flex max-w-3xl flex-col gap-4 rounded-lg border border-border bg-card p-4"
+    @submit.prevent="handleSubmit"
+  >
+    <div class="grid gap-1.5">
+      <Label for="task-topic">主题</Label>
+      <Input
         id="task-topic"
         v-model="topic"
         data-test="topic"
-        class="input"
         type="text"
         :minlength="TOPIC_MIN"
         :maxlength="TOPIC_MAX"
@@ -164,100 +170,112 @@ function handleSubmit() {
       />
     </div>
 
-    <div class="field">
-      <label for="task-keyword">关键词（回车添加，1–10 个）</label>
-      <input
+    <div class="grid gap-1.5">
+      <Label for="task-keyword">关键词（回车添加，1–10 个）</Label>
+      <Input
         id="task-keyword"
         v-model="keywordDraft"
         data-test="keyword-input"
-        class="input"
         type="text"
+        placeholder="输入关键词后按回车"
         @keydown.enter.prevent="addKeyword"
         @blur="addKeyword"
       />
-      <ul v-if="keywords.length" class="chips">
-        <li v-for="keyword in keywords" :key="keyword" class="chip">
+      <ul v-if="keywords.length" class="flex flex-wrap gap-1.5 pt-1">
+        <li
+          v-for="keyword in keywords"
+          :key="keyword"
+          class="inline-flex items-center gap-1 rounded-md bg-secondary px-2 py-0.5 text-xs text-secondary-foreground"
+        >
           <span>{{ keyword }}</span>
-          <button type="button" :aria-label="`移除 ${keyword}`" @click="removeKeyword(keyword)">
-            ×
+          <button
+            type="button"
+            class="rounded-sm text-muted-foreground transition-colors hover:text-foreground"
+            :aria-label="`移除 ${keyword}`"
+            @click="removeKeyword(keyword)"
+          >
+            <X :size="12" aria-hidden="true" />
           </button>
         </li>
       </ul>
     </div>
 
-    <div class="field-row">
-      <div class="field">
-        <label for="task-documents">文献数（1–50）</label>
-        <input
+    <div class="grid gap-3 sm:grid-cols-3">
+      <div class="grid gap-1.5">
+        <Label for="task-documents">文献数（1–50）</Label>
+        <Input
           id="task-documents"
           v-model="maxDocuments"
           data-test="max-documents"
-          class="input"
           type="number"
           min="1"
           max="50"
         />
       </div>
-      <div class="field">
-        <label for="task-date-from">起始日期</label>
-        <input
-          id="task-date-from"
-          v-model="dateFrom"
-          data-test="date-from"
-          class="input"
-          type="date"
-        />
+      <div class="grid gap-1.5">
+        <Label for="task-date-from">起始日期</Label>
+        <Input id="task-date-from" v-model="dateFrom" data-test="date-from" type="date" />
       </div>
-      <div class="field">
-        <label for="task-date-to">结束日期</label>
-        <input id="task-date-to" v-model="dateTo" data-test="date-to" class="input" type="date" />
+      <div class="grid gap-1.5">
+        <Label for="task-date-to">结束日期</Label>
+        <Input id="task-date-to" v-model="dateTo" data-test="date-to" type="date" />
       </div>
     </div>
 
-    <div class="field-row">
-      <div class="field">
-        <span class="field__label">输出语言</span>
-        <div class="segmented">
+    <div class="grid gap-3 sm:grid-cols-2">
+      <div class="grid gap-1.5">
+        <span class="text-sm font-medium leading-none">输出语言</span>
+        <div class="inline-flex w-fit gap-1 rounded-lg bg-muted p-1" role="group">
           <button
+            v-for="option in [
+              { value: 'zh', label: '中文' },
+              { value: 'en', label: '英文' },
+            ] as const"
+            :key="option.value"
             type="button"
-            data-test="lang-zh"
-            :class="{ active: language === 'zh' }"
-            @click="language = 'zh'"
+            :data-test="`lang-${option.value}`"
+            :aria-pressed="language === option.value"
+            :class="[
+              'rounded-md px-3 py-1 text-sm font-medium transition-colors',
+              language === option.value
+                ? 'bg-background text-foreground shadow-xs'
+                : 'text-muted-foreground hover:text-foreground',
+            ]"
+            @click="language = option.value"
           >
-            中文
-          </button>
-          <button
-            type="button"
-            data-test="lang-en"
-            :class="{ active: language === 'en' }"
-            @click="language = 'en'"
-          >
-            英文
+            {{ option.label }}
           </button>
         </div>
       </div>
-      <div class="field">
-        <label v-if="styleOptions" for="task-citation-style" class="field__label">引用格式</label>
-        <span v-else class="field__label">引用格式</span>
+
+      <div class="grid gap-1.5">
+        <Label v-if="styleOptions" for="task-citation-style">引用格式</Label>
+        <span v-else class="text-sm font-medium leading-none">引用格式</span>
         <!-- 列表可用：动态下拉（预置 + 自定义）；不可用：内置两项降级 -->
         <select
           v-if="styleOptions"
           id="task-citation-style"
           v-model="citationStyle"
           data-test="style-select"
-          class="input"
+          class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
         >
           <option v-for="style in styleOptions" :key="style.style_id" :value="style.style_id">
             {{ style.title }}{{ style.source === "custom" ? "（自定义）" : "" }}
           </option>
         </select>
-        <div v-else class="segmented">
+        <div v-else class="inline-flex w-fit gap-1 rounded-lg bg-muted p-1" role="group">
           <button
             v-for="style in BUILT_IN_STYLES"
             :key="style.style_id"
             type="button"
             :data-test="`style-${style.style_id}`"
-            :class="{ active: citationStyle === style.style_id }"
+            :aria-pressed="citationStyle === style.style_id"
+            :class="[
+              'rounded-md px-3 py-1 text-sm font-medium transition-colors',
+              citationStyle === style.style_id
+                ? 'bg-background text-foreground shadow-xs'
+                : 'text-muted-foreground hover:text-foreground',
+            ]"
             @click="citationStyle = style.style_id"
           >
             {{ style.title }}
@@ -266,22 +284,39 @@ function handleSubmit() {
       </div>
     </div>
 
-    <label class="checkbox">
-      <input v-model="offlineDataset" data-test="offline" type="checkbox" />
-      <span>使用离线演示语料（冻结 10 篇，不访问 arXiv）</span>
-    </label>
+    <div class="grid gap-2">
+      <label class="flex items-center gap-2 text-sm">
+        <input
+          v-model="offlineDataset"
+          data-test="offline"
+          type="checkbox"
+          class="size-4 rounded border-input accent-primary"
+        />
+        <span>使用离线演示语料（冻结 10 篇，不访问 arXiv）</span>
+      </label>
 
-    <label class="checkbox" data-test="verify-references-label">
-      <input v-model="verifyReferences" data-test="verify-references" type="checkbox" />
-      <span>引用核验：与 CrossRef/OpenAlex 比对文献元数据，可能增加任务耗时</span>
-    </label>
+      <label class="flex items-start gap-2 text-sm" data-test="verify-references-label">
+        <input
+          v-model="verifyReferences"
+          data-test="verify-references"
+          type="checkbox"
+          class="mt-0.5 size-4 rounded border-input accent-primary"
+        />
+        <span>引用核验：与 CrossRef/OpenAlex 比对文献元数据，可能增加任务耗时</span>
+      </label>
+    </div>
 
-    <fieldset v-if="props.documents.length" class="documents">
-      <legend>指定知识库文档（可选）</legend>
-      <label v-for="document in props.documents" :key="document.id" class="checkbox">
+    <fieldset v-if="props.documents.length" class="grid gap-2 rounded-lg border border-border p-3">
+      <legend class="px-1 text-sm font-medium">指定知识库文档（可选）</legend>
+      <label
+        v-for="document in props.documents"
+        :key="document.id"
+        class="flex items-center gap-2 text-sm"
+      >
         <input
           type="checkbox"
           :data-test="`doc-${document.id}`"
+          class="size-4 rounded border-input accent-primary"
           @change="toggleDocument(document.id, ($event.target as HTMLInputElement).checked)"
         />
         <span>{{ document.title }}</span>
@@ -295,107 +330,10 @@ function handleSubmit() {
     />
     <ErrorBanner :message="props.error" testid="form-error" />
 
-    <div class="actions">
-      <button class="btn btn--primary" data-test="submit" type="submit" :disabled="!canSubmit">
-        {{ props.pending ? "创建中…" : "创建任务" }}
-      </button>
+    <div class="flex gap-2">
+      <Button data-test="submit" type="submit" :disabled="!canSubmit">
+        <span>{{ props.pending ? "创建中…" : "创建任务" }}</span>
+      </Button>
     </div>
   </form>
 </template>
-
-<style scoped>
-.task-form {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  max-width: 720px;
-}
-
-.field__label {
-  display: block;
-  font-size: 0.85rem;
-  margin-bottom: 0.25rem;
-}
-
-.field-row {
-  display: flex;
-  gap: 1rem;
-  flex-wrap: wrap;
-}
-
-.field-row .field {
-  flex: 1 1 160px;
-}
-
-.chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.375rem;
-  list-style: none;
-  margin-top: 0.5rem;
-}
-
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  padding: 0.1rem 0.5rem;
-  background: #eff6ff;
-  color: #1d4ed8;
-  border-radius: 999px;
-  font-size: 0.82rem;
-}
-
-.chip button {
-  border: none;
-  background: transparent;
-  color: inherit;
-  font-size: 0.9rem;
-  line-height: 1;
-}
-
-.segmented {
-  display: inline-flex;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-.segmented button {
-  padding: 0.4rem 0.75rem;
-  border: none;
-  background: var(--color-card);
-  font-size: 0.88rem;
-}
-
-.segmented button.active {
-  background: var(--color-primary);
-  color: #fff;
-}
-
-.checkbox {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.88rem;
-}
-
-.documents {
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  padding: 0.75rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.375rem;
-}
-
-.documents legend {
-  font-size: 0.85rem;
-  padding: 0 0.25rem;
-}
-
-.actions {
-  display: flex;
-  gap: 0.5rem;
-}
-</style>
