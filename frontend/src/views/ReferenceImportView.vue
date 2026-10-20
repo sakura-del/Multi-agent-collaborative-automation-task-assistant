@@ -1,8 +1,13 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { FileInput, RotateCcw } from "lucide-vue-next";
+import { CircleCheck, FileInput, Loader2, RotateCcw } from "lucide-vue-next";
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
+import EmptyState from "@/components/common/EmptyState.vue";
+import { Alert } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 import { importReferences } from "@/api/references";
 import type {
   ImportedReferenceItem,
@@ -78,208 +83,93 @@ function metaText(item: ImportedReferenceItem): string {
 </script>
 
 <template>
-  <section class="page">
-    <header class="page__header">
-      <h1>导入参考文献</h1>
-      <p class="page__hint">
+  <section>
+    <header class="mb-4">
+      <h1 class="text-lg font-semibold tracking-tight">导入参考文献</h1>
+      <p class="mt-0.5 text-sm text-muted-foreground">
         粘贴 BibTeX 或 RIS 文本即可解析预览；支持从 Zotero / EndNote 直接导出。导入仅解析，不会写入引用库。
       </p>
     </header>
 
-    <form class="import" data-test="import-form" @submit.prevent="handleImport">
-      <label class="import__field">
-        <span>引用文本</span>
+    <form
+      class="mb-3 flex flex-col gap-3 rounded-lg border border-border bg-card p-4"
+      data-test="import-form"
+      @submit.prevent="handleImport"
+    >
+      <div class="grid gap-1.5">
+        <Label for="import-content">引用文本</Label>
         <textarea
+          id="import-content"
           v-model="content"
           data-test="import-content"
           rows="10"
+          class="w-full resize-y rounded-md border border-input bg-background px-3 py-2 font-mono text-xs shadow-xs transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
           placeholder="粘贴 BibTeX（@article{...}）或 RIS（TY  - JOUR ... ER  - ）"
         />
-      </label>
-      <div class="import__row">
-        <label class="import__field import__field--inline">
-          <span>格式</span>
-          <select v-model="format" data-test="import-format">
+      </div>
+      <div class="flex flex-wrap items-end gap-3">
+        <div class="grid gap-1.5">
+          <Label for="import-format">格式</Label>
+          <select
+            id="import-format"
+            v-model="format"
+            data-test="import-format"
+            class="flex h-9 rounded-md border border-input bg-background px-3 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+          >
             <option v-for="option in FORMAT_OPTIONS" :key="option.value" :value="option.value">
               {{ option.label }}
             </option>
           </select>
-        </label>
-        <button
-          class="btn btn--primary"
-          data-test="import-submit"
-          type="submit"
-          :disabled="importing"
-        >
-          <FileInput :size="15" />
+        </div>
+        <Button data-test="import-submit" type="submit" :disabled="importing">
+          <Loader2 v-if="importing" class="animate-spin" aria-hidden="true" />
+          <FileInput v-else :size="15" aria-hidden="true" />
           <span>{{ importing ? "解析中…" : "解析预览" }}</span>
-        </button>
-        <button
-          v-if="hasResult"
-          class="btn btn--ghost"
-          data-test="import-reset"
-          type="button"
-          @click="handleReset"
-        >
-          <RotateCcw :size="15" />
+        </Button>
+        <Button v-if="hasResult" variant="ghost" data-test="import-reset" type="button" @click="handleReset">
+          <RotateCcw :size="15" aria-hidden="true" />
           <span>重新开始</span>
-        </button>
+        </Button>
       </div>
     </form>
 
     <ErrorBanner :message="error" testid="import-error" />
 
-    <p v-if="hasResult" class="banner banner--ok" data-test="import-summary">
-      识别为 {{ formatLabel }}，共 {{ result?.count }} 条
-    </p>
+    <Alert v-if="hasResult" variant="success" class="mb-3" data-test="import-summary">
+      <CircleCheck />
+      <span>识别为 {{ formatLabel }}，共 {{ result?.count }} 条</span>
+    </Alert>
 
-    <p v-if="isEmpty" class="page__hint" data-test="import-empty">
-      未解析出任何条目——请检查内容是否为合法 BibTeX / RIS。
-    </p>
+    <EmptyState
+      v-if="isEmpty"
+      testid="import-empty"
+      title="未解析出任何条目"
+      description="请检查内容是否为合法 BibTeX / RIS 格式。"
+    />
 
-    <ul v-if="hasResult && !isEmpty" class="preview" data-test="import-preview">
+    <ul
+      v-if="hasResult && !isEmpty"
+      class="space-y-2"
+      data-test="import-preview"
+    >
       <li
         v-for="(item, index) in result?.items"
         :key="item.id ?? index"
-        class="preview__row"
+        class="rounded-lg border border-border bg-card px-3 py-2.5"
         :data-test="`import-item-${index}`"
       >
-        <div class="preview__title">{{ item.title || "（无标题）" }}</div>
-        <div class="preview__authors">{{ authorText(item) }}</div>
-        <div class="preview__meta">
-          <span class="badge">{{ item.type }}</span>
+        <div class="text-sm font-medium">{{ item.title || "（无标题）" }}</div>
+        <div class="mt-0.5 text-xs text-muted-foreground">{{ authorText(item) }}</div>
+        <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <Badge variant="muted">{{ item.type }}</Badge>
           <span v-if="metaText(item)">{{ metaText(item) }}</span>
         </div>
-        <div v-if="item.doi" class="preview__doi">
-          <code>{{ item.doi }}</code>
+        <div v-if="item.doi" class="mt-1">
+          <code class="rounded bg-muted px-1 py-0.5 text-xs text-muted-foreground">
+            {{ item.doi }}
+          </code>
         </div>
       </li>
     </ul>
   </section>
 </template>
-
-<style scoped>
-.page__header {
-  margin-bottom: 1rem;
-}
-
-.import {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  margin-bottom: 0.75rem;
-}
-
-.import__field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  font-size: 0.85rem;
-}
-
-.import__field textarea {
-  padding: 0.5rem 0.625rem;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.82rem;
-  resize: vertical;
-}
-
-.import__row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 0.75rem;
-}
-
-.import__field--inline {
-  flex-direction: row;
-  align-items: center;
-  gap: 0.4rem;
-}
-
-.import__field select {
-  padding: 0.3rem 0.5rem;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  font-size: 0.85rem;
-}
-
-.banner--ok {
-  padding: 0.5rem 0.75rem;
-  border-radius: 8px;
-  background: #ecfdf5;
-  color: #047857;
-  font-size: 0.88rem;
-}
-
-.preview {
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  margin-top: 0.75rem;
-}
-
-.preview__row {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  padding: 0.625rem 0.75rem;
-  border: 1px solid var(--color-border);
-  border-radius: 10px;
-}
-
-.preview__title {
-  font-size: 0.92rem;
-  font-weight: 500;
-}
-
-.preview__authors {
-  font-size: 0.82rem;
-  color: #374151;
-}
-
-.preview__meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.4rem;
-  font-size: 0.78rem;
-  color: #6b7280;
-}
-
-.preview__doi code {
-  font-size: 0.75rem;
-  color: #6b7280;
-  overflow-wrap: anywhere;
-}
-
-/* 窄屏：动作行纵向堆叠，避免横向溢出 */
-@media (max-width: 720px) {
-  .import__row {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .import__field--inline {
-    justify-content: space-between;
-  }
-
-  .preview__meta {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.2rem;
-  }
-}
-
-.badge {
-  padding: 0.05rem 0.45rem;
-  border-radius: 999px;
-  background: #eff6ff;
-  color: #1d4ed8;
-  font-size: 0.72rem;
-  white-space: nowrap;
-}
-</style>

@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
+import EmptyState from "@/components/common/EmptyState.vue";
 import StatusBadge from "@/components/common/StatusBadge.vue";
 import NodeDetail from "@/components/tasks/NodeDetail.vue";
 import PlanPanel from "@/components/tasks/PlanPanel.vue";
@@ -134,13 +135,15 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="page">
-    <header class="page__header page__header--row">
+  <section>
+    <header class="mb-4 flex flex-wrap items-start justify-between gap-3">
       <div>
-        <h1>{{ store.snapshot?.title ?? "任务详情" }}</h1>
-        <p class="page__hint">
+        <h1 class="text-lg font-semibold tracking-tight">
+          {{ store.snapshot?.title ?? "任务详情" }}
+        </h1>
+        <p class="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
           <StatusBadge :status="store.snapshot?.status ?? 'created'" />
-          <span class="detail__meta">
+          <span>
             revision {{ store.snapshot?.revision ?? "—" }} · 更新于
             {{ formatDateTime(store.snapshot?.updated_at) }}
           </span>
@@ -150,12 +153,20 @@ onBeforeUnmount(() => {
 
     <ErrorBanner :message="errorMessage" />
 
-    <nav class="tabs" role="tablist">
+    <!-- 选项卡：下划线式，窄屏可横向滚动 -->
+    <nav
+      class="mb-4 flex gap-1 overflow-x-auto border-b border-border"
+      role="tablist"
+    >
       <button
         v-for="tab in TABS"
         :key="tab"
-        class="tabs__item"
-        :class="{ active: activeTab === tab }"
+        class="-mb-px shrink-0 whitespace-nowrap border-b-2 px-3 py-2 text-sm transition-colors"
+        :class="
+          activeTab === tab
+            ? 'border-primary font-medium text-primary'
+            : 'border-transparent text-muted-foreground hover:text-foreground'
+        "
         :data-test="`tab-${tab}`"
         role="tab"
         type="button"
@@ -168,7 +179,7 @@ onBeforeUnmount(() => {
     </nav>
 
     <TaskToolbar
-      class="detail__toolbar"
+      class="mb-3"
       :status="store.snapshot?.status ?? 'created'"
       :pending="pending"
       :selected-node-id="selectedNodeId"
@@ -176,7 +187,7 @@ onBeforeUnmount(() => {
       @command="handleControl"
     />
 
-    <div v-if="activeTab === 'plan'" class="detail__panel">
+    <div v-if="activeTab === 'plan'">
       <PlanPanel
         :plan="store.snapshot?.plan ?? null"
         :pending="pending"
@@ -187,7 +198,10 @@ onBeforeUnmount(() => {
       />
     </div>
 
-    <div v-else-if="activeTab === 'execution'" class="detail__split">
+    <div
+      v-else-if="activeTab === 'execution'"
+      class="grid gap-3 lg:grid-cols-[minmax(0,1fr)_20rem]"
+    >
       <TaskDag
         v-if="store.snapshot?.plan"
         :nodes="store.snapshot.plan.nodes"
@@ -195,106 +209,26 @@ onBeforeUnmount(() => {
         :selected="selectedNodeId"
         @select="selectedNodeId = $event"
       />
-      <p v-else class="page__hint">暂无规划，无法展示 DAG。</p>
+      <p v-else class="text-sm text-muted-foreground">暂无规划，无法展示 DAG。</p>
       <NodeDetail :node="selectedNode" :subtask="selectedSubtask" @close="selectedNodeId = null" />
     </div>
 
-    <div v-else-if="activeTab === 'logs'" class="detail__panel">
+    <div v-else-if="activeTab === 'logs'">
       <TaskLog :events="store.events" />
     </div>
 
-    <div v-else class="detail__panel">
+    <div v-else>
       <TaskResult
         v-if="store.snapshot?.review_report"
         :task-id="props.taskId"
         :report="store.snapshot.review_report"
         :artifacts="artifacts"
       />
-      <p v-else class="page__hint">任务尚未产出复盘报告。</p>
+      <EmptyState
+        v-else
+        title="任务尚未产出复盘报告"
+        description="任务执行完成后，这里会展示复盘结论、引用核验与导出入口。"
+      />
     </div>
   </section>
 </template>
-
-<style scoped>
-.page__header--row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-.detail__meta {
-  margin-left: 0.5rem;
-  color: #64748b;
-}
-
-.tabs {
-  display: flex;
-  gap: 0.25rem;
-  border-bottom: 1px solid var(--color-border);
-  margin-bottom: 1rem;
-  overflow-x: auto;
-}
-
-.tabs__item {
-  padding: 0.45rem 0.85rem;
-  border: none;
-  background: transparent;
-  font-size: 0.9rem;
-  color: #475569;
-  border-bottom: 2px solid transparent;
-  flex: 0 0 auto;
-  white-space: nowrap;
-}
-
-.tabs__item.active {
-  color: var(--color-primary);
-  border-bottom-color: var(--color-primary);
-  font-weight: 600;
-}
-
-.tabs__item:disabled {
-  color: #cbd5e1;
-  cursor: not-allowed;
-}
-
-.detail__split {
-  display: grid;
-  /* minmax(0, 1fr)：允许内容收缩，避免固定宽度的 DAG 画布把栅格撑宽 */
-  grid-template-columns: minmax(0, 1fr) 300px;
-  gap: 1rem;
-  align-items: start;
-  min-width: 0;
-}
-
-.detail__panel {
-  min-width: 0;
-}
-
-@media (max-width: 900px) {
-  .detail__split {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-.result {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.result__markdown pre {
-  white-space: pre-wrap;
-  word-break: break-word;
-  background: var(--color-card);
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
-  padding: 1rem;
-  font-size: 0.88rem;
-}
-
-.result__artifacts ul {
-  list-style: none;
-  font-size: 0.9rem;
-}
-</style>

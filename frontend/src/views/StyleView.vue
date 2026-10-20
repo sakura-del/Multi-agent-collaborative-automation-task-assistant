@@ -1,8 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { Trash2, Upload } from "lucide-vue-next";
+import { CircleCheck, Loader2, Trash2, Upload } from "lucide-vue-next";
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
+import EmptyState from "@/components/common/EmptyState.vue";
+import { Alert } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 import {
   deleteCitationStyle,
   listCitationStyles,
@@ -122,176 +127,89 @@ async function handleDelete(styleId: string) {
 </script>
 
 <template>
-  <section class="page">
-    <header class="page__header">
-      <h1>引用样式</h1>
-      <p class="page__hint">{{ hint }}</p>
+  <section>
+    <header class="mb-4">
+      <h1 class="text-lg font-semibold tracking-tight">引用样式</h1>
+      <p class="mt-0.5 text-sm text-muted-foreground">{{ hint }}</p>
     </header>
 
     <ErrorBanner :message="loadError" testid="style-load-error" />
 
-    <form class="upload" data-test="style-upload-form" @submit.prevent="handleUpload">
-      <div class="upload__row">
-        <label class="upload__field">
-          <span>样式文件</span>
-          <input
-            ref="fileInput"
-            data-test="style-file"
-            type="file"
-            :accept="ACCEPTED.join(',')"
-            @change="onFileChange"
-          />
-        </label>
-        <button
-          class="btn btn--primary"
-          data-test="style-upload-submit"
-          type="submit"
-          :disabled="uploading"
-        >
-          <Upload :size="15" />
-          <span>{{ uploading ? "上传中…" : "上传样式" }}</span>
-        </button>
+    <form
+      class="mb-3 flex flex-wrap items-end gap-3 rounded-lg border border-border bg-card p-4"
+      data-test="style-upload-form"
+      @submit.prevent="handleUpload"
+    >
+      <div class="grid gap-1.5">
+        <Label for="style-file">样式文件</Label>
+        <input
+          id="style-file"
+          ref="fileInput"
+          data-test="style-file"
+          type="file"
+          :accept="ACCEPTED.join(',')"
+          class="block w-full text-xs text-muted-foreground file:mr-2 file:rounded-md file:border file:border-border file:bg-background file:px-2 file:py-1 file:text-xs file:font-medium file:text-foreground hover:file:bg-muted"
+          @change="onFileChange"
+        />
       </div>
+      <Button data-test="style-upload-submit" type="submit" :disabled="uploading">
+        <Loader2 v-if="uploading" class="animate-spin" aria-hidden="true" />
+        <Upload v-else :size="15" aria-hidden="true" />
+        <span>{{ uploading ? "上传中…" : "上传样式" }}</span>
+      </Button>
     </form>
 
     <ErrorBanner :message="uploadError" testid="style-upload-error" />
-    <p v-if="successMessage" class="banner banner--ok" data-test="style-upload-success">
-      {{ successMessage }}
-    </p>
+    <Alert
+      v-if="successMessage"
+      variant="success"
+      class="mb-3"
+      data-test="style-upload-success"
+    >
+      <CircleCheck />
+      <span>{{ successMessage }}</span>
+    </Alert>
 
-    <p v-if="loading && !styles.length" class="page__hint">加载中…</p>
-    <p v-else-if="!styles.length" class="page__hint" data-test="style-empty">
-      还没有可用样式，先上传一个 .csl 文件。
-    </p>
-    <ul v-else class="style-list">
+    <p v-if="loading && !styles.length" class="text-sm text-muted-foreground">加载中…</p>
+    <EmptyState
+      v-else-if="!styles.length"
+      testid="style-empty"
+      title="还没有可用样式"
+      description="上传一个 .csl 文件即可作为自定义引用样式使用。"
+    />
+    <ul v-else class="space-y-2">
       <li
         v-for="style in styles"
         :key="style.style_id"
-        class="style-row"
+        class="flex items-start justify-between gap-3 rounded-lg border border-border bg-card px-3 py-2.5"
         :data-test="`style-row-${style.style_id}`"
       >
-        <div class="style-row__main">
-          <span class="style-row__title">{{ style.title }}</span>
-          <span class="badge" :class="{ 'badge--custom': style.source === 'custom' }">
-            {{ style.source === "custom" ? "自定义" : "预置" }}
-          </span>
-          <span v-if="style.style_id === defaultStyleId" class="badge badge--accent">默认</span>
+        <div class="min-w-0">
+          <div class="flex flex-wrap items-center gap-1.5">
+            <span class="text-sm font-medium">{{ style.title }}</span>
+            <Badge :variant="style.source === 'custom' ? 'outline' : 'muted'">
+              {{ style.source === "custom" ? "自定义" : "预置" }}
+            </Badge>
+            <Badge v-if="style.style_id === defaultStyleId" variant="default">默认</Badge>
+          </div>
+          <div class="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <code class="rounded bg-muted px-1 py-0.5">{{ style.style_id }}</code>
+            <span>{{ style.numbering }} · {{ style.ordering }} · {{ style.default_locale }}</span>
+          </div>
         </div>
-        <div class="style-row__meta">
-          <code>{{ style.style_id }}</code>
-          <span>{{ style.numbering }} · {{ style.ordering }} · {{ style.default_locale }}</span>
-        </div>
-        <button
+        <Button
           v-if="style.source === 'custom'"
-          class="icon-button"
-          type="button"
+          variant="ghost"
+          size="icon-sm"
           :data-test="`style-delete-${style.style_id}`"
           :disabled="deletingId === style.style_id"
           :title="`删除 ${style.title}`"
+          :aria-label="`删除 ${style.title}`"
           @click="handleDelete(style.style_id)"
         >
           <Trash2 :size="15" />
-        </button>
+        </Button>
       </li>
     </ul>
   </section>
 </template>
-
-<style scoped>
-.page__header {
-  margin-bottom: 1rem;
-}
-
-.upload {
-  margin-bottom: 0.5rem;
-}
-
-.upload__row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 0.75rem;
-}
-
-.upload__field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  font-size: 0.85rem;
-}
-
-.upload__field input[type="file"] {
-  font-size: 0.82rem;
-}
-
-.banner--ok {
-  padding: 0.5rem 0.75rem;
-  border-radius: 8px;
-  background: #ecfdf5;
-  color: #047857;
-  font-size: 0.88rem;
-}
-
-.style-list {
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  margin-top: 1rem;
-}
-
-.style-row {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.625rem 0.75rem;
-  border: 1px solid var(--color-border);
-  border-radius: 10px;
-}
-
-.style-row__main {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  min-width: 0;
-}
-
-.style-row__title {
-  font-size: 0.92rem;
-  font-weight: 500;
-}
-
-.style-row__meta {
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
-  margin-left: auto;
-  text-align: right;
-  font-size: 0.78rem;
-  color: #6b7280;
-  min-width: 0;
-}
-
-.style-row__meta code {
-  color: #374151;
-}
-
-.badge {
-  padding: 0.05rem 0.45rem;
-  border-radius: 999px;
-  background: #eff6ff;
-  color: #1d4ed8;
-  font-size: 0.75rem;
-  white-space: nowrap;
-}
-
-.badge--custom {
-  background: #f5f3ff;
-  color: #6d28d9;
-}
-
-.badge--accent {
-  background: #ecfdf5;
-  color: #047857;
-}
-</style>

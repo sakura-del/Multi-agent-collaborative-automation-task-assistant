@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 
+import { Button } from "@/components/ui/button";
 import type { PlanNode, SubtaskStatus } from "@/api/types";
 import {
   DAG_NODE_HEIGHT,
@@ -24,6 +25,28 @@ const props = withDefaults(
 );
 
 const emit = defineEmits<{ select: [nodeId: string] }>();
+
+/**
+ * 语义色调 → Tailwind 类（DAG 边与节点）。
+ *
+ * ⚠️ 必须用**字面量**类名，不能拼字符串：Tailwind 靠静态扫描生成样式，
+ * `stroke-${color}` 这类动态拼接不会被识别，样式会静默丢失。
+ */
+const EDGE_TONE_CLASS: Record<string, string> = {
+  neutral: "stroke-border",
+  active: "stroke-primary/50",
+  success: "stroke-success/60",
+  attention: "stroke-warning/60",
+  danger: "stroke-destructive/50",
+};
+
+const NODE_TONE_CLASS: Record<string, string> = {
+  neutral: "border-l-border",
+  active: "border-l-primary",
+  success: "border-l-success",
+  attention: "border-l-warning",
+  danger: "border-l-destructive",
+};
 
 const positions = computed(() => layoutDag(props.nodes));
 const bounds = computed(() => dagBounds(positions.value));
@@ -84,22 +107,24 @@ function statusOf(nodeId: string): SubtaskStatus | undefined {
 
 <template>
   <div
-    class="dag"
+    class="flex min-w-0 flex-col gap-2"
     data-test="dag"
     data-draggable="false"
     data-connectable="false"
     :style="{ height: `${bounds.height + 24}px` }"
   >
-    <div class="dag__toolbar">
-      <button class="btn" data-test="dag-fit" type="button" @click="toggleFit">
+    <div class="flex items-center gap-3">
+      <Button variant="outline" size="sm" data-test="dag-fit" type="button" @click="toggleFit">
         {{ scale === 1 ? "适应窗口" : "原始大小" }}
-      </button>
-      <span class="dag__hint">共 {{ nodes.length }} 个节点</span>
+      </Button>
+      <span class="text-xs text-muted-foreground">共 {{ nodes.length }} 个节点</span>
     </div>
 
-    <div class="dag__viewport">
+    <div
+      class="max-h-[420px] max-w-full min-w-0 overflow-auto rounded-lg border border-border bg-background"
+    >
       <div
-        class="dag__canvas"
+        class="relative"
         :style="{
           width: `${bounds.width}px`,
           height: `${bounds.height}px`,
@@ -107,22 +132,32 @@ function statusOf(nodeId: string): SubtaskStatus | undefined {
           transformOrigin: 'top left',
         }"
       >
-        <svg class="dag__edges" :width="bounds.width" :height="bounds.height" aria-hidden="true">
+        <svg
+          class="pointer-events-none absolute inset-0"
+          :width="bounds.width"
+          :height="bounds.height"
+          aria-hidden="true"
+        >
           <path
             v-for="edge in edges"
             :key="edge.id"
             :data-test="`dag-edge-${edge.id}`"
             :d="edge.d"
-            class="dag__edge"
-            :class="`dag__edge--${edge.tone}`"
+            class="fill-none stroke-[1.6]"
+            :class="EDGE_TONE_CLASS[edge.tone]"
           />
         </svg>
 
         <div
           v-for="node in nodes"
           :key="node.id"
-          class="dag-node"
-          :class="[`dag-node--${nodeStatusTone(statusOf(node.id))}`, { 'dag-node--selected': selected === node.id }]"
+          class="absolute flex cursor-pointer flex-col justify-center gap-0.5 rounded-lg border border-l-4 border-border bg-card px-2.5 py-2 text-left"
+          :class="[
+            NODE_TONE_CLASS[nodeStatusTone(statusOf(node.id))],
+            selected === node.id
+              ? 'ring-2 ring-primary/35'
+              : '',
+          ]"
           :data-test="`dag-node-${node.id}`"
           :style="{
             left: `${positions[node.id]?.x ?? 0}px`,
@@ -136,8 +171,8 @@ function statusOf(nodeId: string): SubtaskStatus | undefined {
           @click="emit('select', node.id)"
           @keydown.enter.prevent="emit('select', node.id)"
         >
-          <span class="dag-node__title">{{ node.title }}</span>
-          <span class="dag-node__meta">
+          <span class="text-sm font-semibold">{{ node.title }}</span>
+          <span class="text-xs text-muted-foreground">
             {{ node.type }} · {{ nodeStatusLabel(statusOf(node.id)) }}
           </span>
         </div>
@@ -145,114 +180,3 @@ function statusOf(nodeId: string): SubtaskStatus | undefined {
     </div>
   </div>
 </template>
-
-<style scoped>
-.dag {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  min-width: 0;
-}
-
-.dag__toolbar {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.dag__hint {
-  font-size: 0.82rem;
-  color: #64748b;
-}
-
-.dag__viewport {
-  overflow: auto;
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
-  background: #fcfdff;
-  max-height: 420px;
-  max-width: 100%;
-  min-width: 0;
-}
-
-.dag__canvas {
-  position: relative;
-}
-
-.dag__edges {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-
-.dag__edge {
-  fill: none;
-  stroke: #cbd5e1;
-  stroke-width: 1.6;
-}
-
-.dag__edge--active {
-  stroke: #93c5fd;
-}
-
-.dag__edge--success {
-  stroke: #6ee7b7;
-}
-
-.dag__edge--attention {
-  stroke: #fcd34d;
-}
-
-.dag__edge--danger {
-  stroke: #fca5a5;
-}
-
-.dag-node {
-  position: absolute;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 0.15rem;
-  padding: 0.5rem 0.65rem;
-  border: 1px solid var(--color-border);
-  border-left-width: 4px;
-  border-radius: 10px;
-  background: var(--color-card);
-  cursor: pointer;
-  text-align: left;
-}
-
-.dag-node--neutral {
-  border-left-color: #cbd5e1;
-}
-
-.dag-node--active {
-  border-left-color: var(--color-primary);
-}
-
-.dag-node--success {
-  border-left-color: var(--color-success);
-}
-
-.dag-node--attention {
-  border-left-color: var(--color-warning);
-}
-
-.dag-node--danger {
-  border-left-color: var(--color-error);
-}
-
-.dag-node--selected {
-  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.35);
-}
-
-.dag-node__title {
-  font-size: 0.88rem;
-  font-weight: 600;
-}
-
-.dag-node__meta {
-  font-size: 0.76rem;
-  color: #64748b;
-}
-</style>

@@ -1,7 +1,17 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { Pause, Play, RotateCcw, Square, MessageSquarePlus } from "lucide-vue-next";
+import {
+  CircleAlert,
+  MessageSquarePlus,
+  Pause,
+  Play,
+  RotateCcw,
+  Square,
+} from "lucide-vue-next";
 
+import { Alert } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 import type { SubtaskStatus, TaskControl, TaskStatus } from "@/api/types";
 
 // 人工干预工具栏：只渲染当前状态允许的命令；取消需二次确认；补充输入用弹窗收集必填文本
@@ -68,124 +78,109 @@ function submitSupplyInput() {
 </script>
 
 <template>
-  <div class="toolbar" data-test="task-toolbar">
-    <button
+  <div class="flex flex-wrap items-center gap-2" data-test="task-toolbar">
+    <Button
       v-if="canPause"
-      class="btn"
+      variant="outline"
+      size="sm"
       data-test="control-pause"
       type="button"
       :disabled="busy"
       @click="send({ command: 'pause' })"
     >
-      <Pause :size="15" /> 暂停
-    </button>
+      <Pause :size="15" aria-hidden="true" /> 暂停
+    </Button>
 
-    <button
+    <Button
       v-if="canResume"
-      class="btn"
+      variant="outline"
+      size="sm"
       data-test="control-resume"
       type="button"
       :disabled="busy"
       @click="send({ command: 'resume' })"
     >
-      <Play :size="15" /> 恢复
-    </button>
+      <Play :size="15" aria-hidden="true" /> 恢复
+    </Button>
 
-    <button
+    <Button
       v-if="canRetryNode"
-      class="btn"
+      variant="outline"
+      size="sm"
       data-test="control-retry-node"
       type="button"
       :disabled="busy"
       @click="send({ command: 'retry_node', node_id: selectedNodeId })"
     >
-      <RotateCcw :size="15" /> 重试节点
-    </button>
+      <RotateCcw :size="15" aria-hidden="true" /> 重试节点
+    </Button>
 
-    <button
+    <Button
       v-if="canSupplyInput"
-      class="btn"
+      variant="outline"
+      size="sm"
       data-test="control-supply-input"
       type="button"
       :disabled="busy"
       @click="supplyingInput = true"
     >
-      <MessageSquarePlus :size="15" /> 补充输入
-    </button>
+      <MessageSquarePlus :size="15" aria-hidden="true" /> 补充输入
+    </Button>
 
-    <button
+    <Button
       v-if="canCancel"
-      class="btn btn--danger"
+      variant="destructive"
+      size="sm"
       data-test="control-cancel"
       type="button"
       :disabled="busy"
       @click="requestCancel"
     >
-      <Square :size="15" /> {{ confirmingCancel ? "确认取消？" : "取消" }}
-    </button>
-    <button
+      <Square :size="15" aria-hidden="true" /> {{ confirmingCancel ? "确认取消？" : "取消" }}
+    </Button>
+    <Button
       v-if="confirmingCancel"
-      class="btn"
+      variant="ghost"
+      size="sm"
       data-test="control-cancel-abort"
       type="button"
       @click="confirmingCancel = false"
     >
       放弃
-    </button>
+    </Button>
 
-    <div v-if="supplyingInput" class="toolbar__modal" data-test="supply-input-modal">
-      <label for="supply-input">补充内容（必填）</label>
-      <textarea id="supply-input" v-model="supplyText" data-test="supply-input-text" rows="3" />
-      <p v-if="supplyError" class="banner banner--error">{{ supplyError }}</p>
-      <div class="toolbar__modal-actions">
-        <button class="btn" type="button" @click="supplyingInput = false">取消</button>
-        <button class="btn btn--primary" data-test="supply-input-submit" type="button" @click="submitSupplyInput">
+    <div
+      v-if="supplyingInput"
+      class="basis-full rounded-lg border border-border bg-card p-3"
+      data-test="supply-input-modal"
+    >
+      <div class="grid gap-1.5">
+        <Label for="supply-input">补充内容（必填）</Label>
+        <textarea
+          id="supply-input"
+          v-model="supplyText"
+          data-test="supply-input-text"
+          rows="3"
+          class="w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+        />
+      </div>
+      <Alert v-if="supplyError" variant="destructive" class="mt-2">
+        <CircleAlert />
+        <span>{{ supplyError }}</span>
+      </Alert>
+      <div class="mt-2 flex justify-end gap-1.5">
+        <Button variant="ghost" size="sm" type="button" @click="supplyingInput = false">
+          取消
+        </Button>
+        <Button
+          data-test="supply-input-submit"
+          size="sm"
+          type="button"
+          @click="submitSupplyInput"
+        >
           提交
-        </button>
+        </Button>
       </div>
     </div>
   </div>
 </template>
-
-<style scoped>
-.toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.btn--danger {
-  color: var(--color-error);
-  border-color: #fecaca;
-}
-
-.toolbar__modal {
-  flex-basis: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  padding: 0.75rem;
-  border: 1px solid var(--color-border);
-  border-radius: 10px;
-  background: var(--color-card);
-}
-
-.toolbar__modal label {
-  font-size: 0.85rem;
-}
-
-.toolbar__modal textarea {
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  padding: 0.5rem;
-  font-family: inherit;
-  font-size: 0.9rem;
-}
-
-.toolbar__modal-actions {
-  display: flex;
-  gap: 0.5rem;
-  justify-content: flex-end;
-}
-</style>

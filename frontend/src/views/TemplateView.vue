@@ -1,8 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { Download, FileText, Trash2, Upload } from "lucide-vue-next";
+import { CircleCheck, Download, FileText, Loader2, Trash2, Upload } from "lucide-vue-next";
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
+import EmptyState from "@/components/common/EmptyState.vue";
+import { Alert } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { deleteTemplate, listTemplates, renderTemplate, uploadTemplate } from "@/api/templates";
 import type { TemplateOut } from "@/api/types";
 
@@ -163,243 +169,130 @@ function placeholderKeys(template: TemplateOut): string[] {
 </script>
 
 <template>
-  <section class="page">
-    <header class="page__header">
-      <h1>Word 模板</h1>
-      <p class="page__hint">{{ hint }}</p>
+  <section>
+    <header class="mb-4">
+      <h1 class="text-lg font-semibold tracking-tight">Word 模板</h1>
+      <p class="mt-0.5 text-sm text-muted-foreground">{{ hint }}</p>
     </header>
 
     <ErrorBanner :message="loadError" testid="template-load-error" />
 
-    <form class="upload" data-test="template-upload-form" @submit.prevent="handleUpload">
-      <div class="upload__row">
-        <label class="upload__field">
-          <span>模板文件（.docx）</span>
-          <input
-            ref="fileInput"
-            data-test="template-file"
-            type="file"
-            :accept="ACCEPTED.join(',')"
-            @change="onFileChange"
-          />
-        </label>
-        <label class="upload__field">
-          <span>显示名称</span>
-          <input
-            v-model="templateName"
-            data-test="template-name"
-            type="text"
-            placeholder="如：学院毕业论文模板"
-          />
-        </label>
-        <button
-          class="btn btn--primary"
-          data-test="template-upload-submit"
-          type="submit"
-          :disabled="uploading"
-        >
-          <Upload :size="15" />
-          <span>{{ uploading ? "上传中…" : "上传模板" }}</span>
-        </button>
+    <form
+      class="mb-3 flex flex-wrap items-end gap-3 rounded-lg border border-border bg-card p-4"
+      data-test="template-upload-form"
+      @submit.prevent="handleUpload"
+    >
+      <div class="grid gap-1.5">
+        <Label for="template-file">模板文件（.docx）</Label>
+        <input
+          id="template-file"
+          ref="fileInput"
+          data-test="template-file"
+          type="file"
+          :accept="ACCEPTED.join(',')"
+          class="block w-full text-xs text-muted-foreground file:mr-2 file:rounded-md file:border file:border-border file:bg-background file:px-2 file:py-1 file:text-xs file:font-medium file:text-foreground hover:file:bg-muted"
+          @change="onFileChange"
+        />
       </div>
+      <div class="grid min-w-48 flex-1 gap-1.5">
+        <Label for="template-name">显示名称</Label>
+        <Input
+          id="template-name"
+          v-model="templateName"
+          data-test="template-name"
+          type="text"
+          placeholder="如：学院毕业论文模板"
+        />
+      </div>
+      <Button data-test="template-upload-submit" type="submit" :disabled="uploading">
+        <Loader2 v-if="uploading" class="animate-spin" aria-hidden="true" />
+        <Upload v-else :size="15" aria-hidden="true" />
+        <span>{{ uploading ? "上传中…" : "上传模板" }}</span>
+      </Button>
     </form>
 
     <ErrorBanner :message="uploadError" testid="template-upload-error" />
     <ErrorBanner :message="renderError" testid="template-render-error" />
-    <p v-if="successMessage" class="banner banner--ok" data-test="template-upload-success">
-      {{ successMessage }}
-    </p>
+    <Alert
+      v-if="successMessage"
+      variant="success"
+      class="mb-3"
+      data-test="template-upload-success"
+    >
+      <CircleCheck />
+      <span>{{ successMessage }}</span>
+    </Alert>
 
-    <p v-if="loading && !templates.length" class="page__hint">加载中…</p>
-    <p v-else-if="!templates.length" class="page__hint" data-test="template-empty">
-      还没有模板，先上传一个 .docx 文件。
-    </p>
-    <ul v-else class="template-list">
+    <p v-if="loading && !templates.length" class="text-sm text-muted-foreground">加载中…</p>
+    <EmptyState
+      v-else-if="!templates.length"
+      testid="template-empty"
+      title="还没有模板"
+      description="上传一个 .docx 文件，Markdown 成稿就能套用它的版式导出。"
+    />
+    <ul v-else class="space-y-2">
       <li
         v-for="template in templates"
         :key="template.template_id"
-        class="template-row"
+        class="rounded-lg border border-border bg-card px-3 py-2.5"
         :data-test="`template-row-${template.template_id}`"
       >
-        <div class="template-row__main">
-          <FileText :size="15" />
-          <span class="template-row__title">{{ template.name }}</span>
-          <span class="badge">{{ template.placeholders.length }} 个占位符</span>
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="flex min-w-0 flex-wrap items-center gap-2">
+            <FileText :size="15" class="shrink-0 text-muted-foreground" aria-hidden="true" />
+            <span class="text-sm font-medium">{{ template.name }}</span>
+            <Badge variant="muted">{{ template.placeholders.length }} 个占位符</Badge>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <Button
+              variant="outline"
+              size="sm"
+              :data-test="`template-render-${template.template_id}`"
+              :disabled="renderingId === template.template_id"
+              title="用此模板渲染成稿并下载"
+              @click="handleRender(template)"
+            >
+              <Loader2
+                v-if="renderingId === template.template_id"
+                class="animate-spin"
+                aria-hidden="true"
+              />
+              <Download v-else :size="15" aria-hidden="true" />
+              <span>{{ renderingId === template.template_id ? "渲染中…" : "渲染" }}</span>
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              :data-test="`template-delete-${template.template_id}`"
+              :disabled="deletingId === template.template_id"
+              :title="`删除 ${template.name}`"
+              :aria-label="`删除 ${template.name}`"
+              @click="handleDelete(template)"
+            >
+              <Trash2 :size="15" />
+            </Button>
+          </div>
         </div>
-        <div class="template-row__placeholders">
+
+        <div v-if="placeholderKeys(template).length" class="mt-1.5 flex flex-wrap gap-1">
           <code
             v-for="key in placeholderKeys(template)"
             :key="key"
-            class="chip"
+            class="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground"
             :data-test="`template-placeholder-${key}`"
           >
             {{ key }}
           </code>
         </div>
-        <div class="template-row__meta">
-          <code>{{ template.template_id }}</code>
-          <span>{{ Math.round(template.size / 1024) }} KB · {{ Object.keys(template.style_map).length }} 个样式映射</span>
-        </div>
-        <div class="template-row__actions">
-          <button
-            class="btn btn--ghost"
-            type="button"
-            :data-test="`template-render-${template.template_id}`"
-            :disabled="renderingId === template.template_id"
-            title="用此模板渲染成稿并下载"
-            @click="handleRender(template)"
-          >
-            <Download :size="15" />
-            <span>{{ renderingId === template.template_id ? "渲染中…" : "渲染" }}</span>
-          </button>
-          <button
-            class="icon-button"
-            type="button"
-            :data-test="`template-delete-${template.template_id}`"
-            :disabled="deletingId === template.template_id"
-            :title="`删除 ${template.name}`"
-            @click="handleDelete(template)"
-          >
-            <Trash2 :size="15" />
-          </button>
+
+        <div class="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <code class="rounded bg-muted px-1 py-0.5">{{ template.template_id }}</code>
+          <span>
+            {{ Math.round(template.size / 1024) }} KB ·
+            {{ Object.keys(template.style_map).length }} 个样式映射
+          </span>
         </div>
       </li>
     </ul>
   </section>
 </template>
-
-<style scoped>
-.page__header {
-  margin-bottom: 1rem;
-}
-
-.upload {
-  margin-bottom: 0.5rem;
-}
-
-.upload__row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 0.75rem;
-}
-
-.upload__field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  font-size: 0.85rem;
-}
-
-.upload__field input[type="file"] {
-  font-size: 0.82rem;
-}
-
-.upload__field input[type="text"] {
-  padding: 0.35rem 0.5rem;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  font-size: 0.85rem;
-}
-
-.banner--ok {
-  padding: 0.5rem 0.75rem;
-  border-radius: 8px;
-  background: #ecfdf5;
-  color: #047857;
-  font-size: 0.88rem;
-}
-
-.template-list {
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  margin-top: 1rem;
-}
-
-.template-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.625rem 0.75rem;
-  border: 1px solid var(--color-border);
-  border-radius: 10px;
-}
-
-.template-row__main {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  min-width: 0;
-}
-
-.template-row__title {
-  font-size: 0.92rem;
-  font-weight: 500;
-}
-
-.template-row__placeholders {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem;
-}
-
-.chip {
-  padding: 0.05rem 0.4rem;
-  border-radius: 6px;
-  background: #f3f4f6;
-  color: #374151;
-  font-size: 0.72rem;
-}
-
-.template-row__meta {
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
-  margin-left: auto;
-  text-align: right;
-  font-size: 0.78rem;
-  color: #6b7280;
-  min-width: 0;
-}
-
-.template-row__meta code {
-  color: #374151;
-}
-
-.template-row__actions {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-
-/* 窄屏：模板行改为纵向堆叠，避免 `margin-left: auto` 把内容推出视口造成横向溢出 */
-@media (max-width: 720px) {
-  .template-row {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 0.5rem;
-  }
-
-  .template-row__meta {
-    margin-left: 0;
-    text-align: left;
-    overflow-wrap: anywhere;
-  }
-
-  .template-row__actions {
-    justify-content: flex-end;
-  }
-}
-
-.badge {
-  padding: 0.05rem 0.45rem;
-  border-radius: 999px;
-  background: #eff6ff;
-  color: #1d4ed8;
-  font-size: 0.75rem;
-  white-space: nowrap;
-}
-</style>

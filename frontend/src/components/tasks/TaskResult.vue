@@ -4,6 +4,8 @@ import { Download, FileText } from "lucide-vue-next";
 
 import { taskApi } from "@/api/tasks";
 import ReferenceVerificationPanel from "@/components/tasks/ReferenceVerificationPanel.vue";
+import { Alert } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import type {
   Artifact,
   BibliographyEntry,
@@ -154,155 +156,92 @@ async function download(kind: "markdown" | "docx") {
 </script>
 
 <template>
-  <section class="result" data-test="task-result">
-    <article class="result__document">
-      <h2>最终综述</h2>
-      <pre class="result__markdown" data-test="result-markdown">{{ props.report.final_markdown }}</pre>
+  <section class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_16rem]" data-test="task-result">
+    <article class="min-w-0">
+      <h2 class="mb-2 text-base font-semibold tracking-tight">最终综述</h2>
+      <pre
+        class="max-h-[70vh] overflow-auto rounded-lg border border-border bg-card p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap"
+        data-test="result-markdown"
+        >{{ props.report.final_markdown }}</pre
+      >
     </article>
 
-    <aside class="result__sidebar">
+    <aside class="flex flex-col gap-4">
       <section>
-        <h3>下载</h3>
-        <div class="result__downloads">
-          <button
-            class="btn"
+        <h3 class="mb-1.5 text-sm font-medium">下载</h3>
+        <div class="flex flex-wrap gap-1.5">
+          <Button
+            variant="outline"
+            size="sm"
             data-test="download-markdown"
             type="button"
             :disabled="!findArtifact('markdown') || downloading !== null"
             @click="download('markdown')"
           >
-            <Download :size="15" /> Markdown
-          </button>
-          <button
-            class="btn"
+            <Download :size="15" aria-hidden="true" /> Markdown
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             data-test="download-docx"
             type="button"
             :disabled="!findArtifact('docx') || downloading !== null"
             @click="download('docx')"
           >
-            <Download :size="15" /> DOCX
-          </button>
+            <Download :size="15" aria-hidden="true" /> DOCX
+          </Button>
         </div>
-        <p v-if="errorMessage" class="banner banner--error">{{ errorMessage }}</p>
+        <Alert v-if="errorMessage" variant="destructive" class="mt-2">
+          <span>{{ errorMessage }}</span>
+        </Alert>
       </section>
 
       <section>
-        <h3>质量评分</h3>
-        <ul class="result__scores" data-test="result-scores">
-          <li v-for="score in scores" :key="score.key">
-            <span>{{ score.label }}</span>
-            <span class="result__score">{{ score.percent }}</span>
+        <h3 class="mb-1.5 text-sm font-medium">质量评分</h3>
+        <ul class="flex flex-col gap-1 text-sm" data-test="result-scores">
+          <li v-for="score in scores" :key="score.key" class="flex justify-between gap-2">
+            <span class="text-muted-foreground">{{ score.label }}</span>
+            <span class="font-medium tabular-nums">{{ score.percent }}</span>
           </li>
         </ul>
       </section>
 
       <section v-if="props.report.issues?.length">
-        <h3>待改进</h3>
-        <ul class="result__issues" data-test="result-issues">
+        <h3 class="mb-1.5 text-sm font-medium">待改进</h3>
+        <ul
+          class="list-disc space-y-1 pl-4 text-sm text-muted-foreground"
+          data-test="result-issues"
+        >
           <li v-for="issue in props.report.issues" :key="issue">{{ issue }}</li>
         </ul>
       </section>
 
       <section>
-        <h3>参考文献</h3>
+        <h3 class="mb-1.5 text-sm font-medium">参考文献</h3>
         <!-- 核验统计 + 逐条结论（逐条徽标由 Panel 渲染，列表项只提供数据） -->
         <ReferenceVerificationPanel :summary="verificationSummary" :entries="bibliography" />
-        <ol class="result__bibliography">
+        <ol class="mt-2 flex flex-col gap-1" data-test="result-bibliography">
           <li
             v-for="entry in bibliography"
             :key="entry.index"
+            class="flex items-start gap-1.5 text-sm"
             :data-test="`bibliography-item-${entry.index}`"
           >
-            <FileText :size="13" />
+            <FileText :size="13" class="mt-1 shrink-0 text-muted-foreground" aria-hidden="true" />
             <a
               v-if="entry.url"
               :data-test="`bibliography-link-${entry.index}`"
               :href="entry.url"
               target="_blank"
               rel="noopener noreferrer"
+              class="break-words text-primary underline-offset-4 hover:underline"
             >
               {{ entry.title }}
             </a>
-            <span v-else>{{ entry.title }}</span>
+            <span v-else class="break-words">{{ entry.title }}</span>
           </li>
         </ol>
       </section>
     </aside>
   </section>
 </template>
-
-<style scoped>
-.result {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 260px;
-  gap: 1.5rem;
-  align-items: start;
-}
-
-@media (max-width: 900px) {
-  .result {
-    grid-template-columns: 1fr;
-  }
-}
-
-.result__document h2,
-.result__sidebar h3 {
-  font-size: 0.95rem;
-  margin-bottom: 0.4rem;
-}
-
-.result__markdown {
-  white-space: pre-wrap;
-  word-break: break-word;
-  background: var(--color-card);
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
-  padding: 1rem;
-  font-size: 0.88rem;
-  line-height: 1.7;
-}
-
-.result__sidebar {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  font-size: 0.85rem;
-}
-
-.result__downloads {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.result__scores,
-.result__issues,
-.result__bibliography {
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.result__scores li {
-  display: flex;
-  justify-content: space-between;
-  border-bottom: 1px solid #f1f5f9;
-  padding-bottom: 0.15rem;
-}
-
-.result__score {
-  font-variant-numeric: tabular-nums;
-  color: #475569;
-}
-
-.result__issues {
-  color: var(--color-warning);
-}
-
-.result__bibliography li {
-  display: flex;
-  gap: 0.35rem;
-  align-items: flex-start;
-  color: #475569;
-}
-</style>

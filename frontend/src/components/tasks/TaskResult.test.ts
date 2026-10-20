@@ -178,7 +178,8 @@ describe("TaskResult · 引用核验集成", () => {
     });
 
     const panelElement = wrapper.findComponent(ReferenceVerificationPanel).element;
-    const listElement = wrapper.find("ol.result__bibliography").element;
+    // 用 data-test 而非样式类定位：类名属于实现细节，改版式不应弄坏测试
+    const listElement = wrapper.find('[data-test="result-bibliography"]').element;
     expect(
       panelElement.compareDocumentPosition(listElement) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();

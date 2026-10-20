@@ -1,13 +1,19 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
-import { MailCheck } from "lucide-vue-next";
+import { CircleCheck, Loader2, MailCheck } from "lucide-vue-next";
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
+import { Alert } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import { confirmEmailVerification, requestEmailVerification } from "@/api/account";
 
 // 邮箱验证页（Phase 1 P1-C）：
 //   - 带 token（从邮件链接进入）→ 自动确认
 //   - 无 token → 展示「重发验证邮件」（需登录态）
+// 样式走 shadcn-vue / Nova 规范（AGENTS.md §6.5）。
+//
+// ⚠️ 测试契约（不要改）：data-test="verify-error" / "verify-success" /
+// "verify-message" / "verify-request"。
 const props = withDefaults(defineProps<{ token?: string }>(), { token: "" });
 
 const confirming = ref(false);
@@ -52,50 +58,45 @@ async function handleRequest() {
 </script>
 
 <template>
-  <section class="page">
-    <header class="page__header">
-      <h1>邮箱验证</h1>
-      <p class="page__hint">
+  <section class="max-w-xl">
+    <header class="mb-4">
+      <h1 class="text-lg font-semibold tracking-tight">邮箱验证</h1>
+      <p class="mt-0.5 text-sm text-muted-foreground">
         验证邮箱后即可完整使用账号功能。邮件里的链接有效期 24 小时，过期可重新发送。
       </p>
     </header>
 
     <ErrorBanner :message="error" testid="verify-error" />
 
-    <p v-if="message && confirmed" class="banner banner--ok" data-test="verify-success">
-      {{ message }}
-    </p>
-    <p v-else-if="message" class="banner banner--ok" data-test="verify-message">
-      {{ message }}
+    <Alert
+      v-if="message && confirmed"
+      variant="success"
+      class="mb-3"
+      data-test="verify-success"
+    >
+      <CircleCheck />
+      <span>{{ message }}</span>
+    </Alert>
+    <Alert v-else-if="message" variant="success" class="mb-3" data-test="verify-message">
+      <CircleCheck />
+      <span>{{ message }}</span>
+    </Alert>
+
+    <p v-if="confirming" class="flex items-center gap-2 text-sm text-muted-foreground">
+      <Loader2 class="size-4 animate-spin" aria-hidden="true" />
+      <span>正在验证…</span>
     </p>
 
-    <p v-if="confirming" class="page__hint">正在验证…</p>
-
-    <button
+    <Button
       v-if="!props.token"
-      class="btn btn--primary"
       type="button"
       data-test="verify-request"
       :disabled="requesting"
       @click="handleRequest"
     >
-      <MailCheck :size="15" />
+      <Loader2 v-if="requesting" class="animate-spin" aria-hidden="true" />
+      <MailCheck v-else :size="15" aria-hidden="true" />
       <span>{{ requesting ? "发送中…" : "重发验证邮件" }}</span>
-    </button>
+    </Button>
   </section>
 </template>
-
-<style scoped>
-.page__header {
-  margin-bottom: 1rem;
-}
-
-.banner--ok {
-  padding: 0.5rem 0.75rem;
-  border-radius: 8px;
-  background: #ecfdf5;
-  color: #047857;
-  font-size: 0.88rem;
-  margin-bottom: 0.75rem;
-}
-</style>

@@ -29,9 +29,12 @@ describe("PlanPanel", () => {
 
   it("offers only regenerate and approve commands", () => {
     const wrapper = mount(PlanPanel, { props: { plan: PLAN } });
-    const buttons = wrapper.findAll(".plan-panel__actions button");
+    // 用 data-test 定位而非样式类：类名属于实现细节，改版式不应弄坏测试
+    const commands = wrapper.findAll(
+      '[data-test="plan-regenerate"], [data-test="plan-approve"]'
+    );
 
-    expect(buttons).toHaveLength(2);
+    expect(commands).toHaveLength(2);
     expect(wrapper.find('[data-test="plan-regenerate"]').exists()).toBe(true);
     expect(wrapper.find('[data-test="plan-approve"]').exists()).toBe(true);
   });

@@ -1,8 +1,12 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { KeyRound, Send } from "lucide-vue-next";
+import { CircleCheck, KeyRound, Loader2, Send } from "lucide-vue-next";
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
+import { Alert } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { confirmPasswordReset, requestPasswordReset } from "@/api/account";
 
 // 密码重置页（Phase 1 P1-C）：
@@ -67,10 +71,10 @@ async function handleConfirm() {
 </script>
 
 <template>
-  <section class="page">
-    <header class="page__header">
-      <h1>重置密码</h1>
-      <p class="page__hint">
+  <section class="max-w-xl">
+    <header class="mb-4">
+      <h1 class="text-lg font-semibold tracking-tight">重置密码</h1>
+      <p class="mt-0.5 text-sm text-muted-foreground">
         <template v-if="isConfirmPhase">
           设置新密码后，此前签发的登录令牌会全部失效，需要重新登录。
         </template>
@@ -81,107 +85,70 @@ async function handleConfirm() {
     </header>
 
     <ErrorBanner :message="error" testid="reset-error" />
-    <p v-if="message && isConfirmPhase" class="banner banner--ok" data-test="reset-success">
-      {{ message }}
-    </p>
-    <p v-else-if="message" class="banner banner--ok" data-test="reset-requested">
-      {{ message }}
-    </p>
+
+    <Alert
+      v-if="message && isConfirmPhase"
+      variant="success"
+      class="mb-3"
+      data-test="reset-success"
+    >
+      <CircleCheck />
+      <span>{{ message }}</span>
+    </Alert>
+    <Alert v-else-if="message" variant="success" class="mb-3" data-test="reset-requested">
+      <CircleCheck />
+      <span>{{ message }}</span>
+    </Alert>
 
     <!-- 申请阶段 -->
     <form
       v-if="!isConfirmPhase"
-      class="form"
+      class="flex max-w-sm flex-col gap-3"
       data-test="reset-request-form"
       @submit.prevent="handleRequest"
     >
-      <label class="field">
-        <span>注册邮箱</span>
-        <input
+      <div class="grid gap-1.5">
+        <Label for="reset-email">注册邮箱</Label>
+        <Input
+          id="reset-email"
           v-model="email"
           data-test="reset-email"
-          class="input"
           type="email"
           placeholder="you@example.com"
           required
         />
-      </label>
-      <button
-        class="btn btn--primary"
-        type="submit"
-        data-test="reset-request-submit"
-        :disabled="requesting"
-      >
-        <Send :size="15" />
+      </div>
+      <Button type="submit" data-test="reset-request-submit" :disabled="requesting" class="w-fit">
+        <Loader2 v-if="requesting" class="animate-spin" aria-hidden="true" />
+        <Send v-else :size="15" aria-hidden="true" />
         <span>{{ requesting ? "发送中…" : "发送重置邮件" }}</span>
-      </button>
+      </Button>
     </form>
 
     <!-- 确认阶段 -->
-    <form v-else class="form" data-test="reset-confirm-form" @submit.prevent="handleConfirm">
-      <label class="field">
-        <span>新密码（至少 {{ MIN_PASSWORD }} 位）</span>
-        <input
+    <form
+      v-else
+      class="flex max-w-sm flex-col gap-3"
+      data-test="reset-confirm-form"
+      @submit.prevent="handleConfirm"
+    >
+      <div class="grid gap-1.5">
+        <Label for="reset-password">新密码（至少 {{ MIN_PASSWORD }} 位）</Label>
+        <Input
+          id="reset-password"
           v-model="password"
           data-test="reset-password"
-          class="input"
           type="password"
           :minlength="MIN_PASSWORD"
           placeholder="至少 8 位"
           required
         />
-      </label>
-      <button
-        class="btn btn--primary"
-        type="submit"
-        data-test="reset-confirm-submit"
-        :disabled="confirming"
-      >
-        <KeyRound :size="15" />
+      </div>
+      <Button type="submit" data-test="reset-confirm-submit" :disabled="confirming" class="w-fit">
+        <Loader2 v-if="confirming" class="animate-spin" aria-hidden="true" />
+        <KeyRound v-else :size="15" aria-hidden="true" />
         <span>{{ confirming ? "提交中…" : "设置新密码" }}</span>
-      </button>
+      </Button>
     </form>
   </section>
 </template>
-
-<style scoped>
-.page__header {
-  margin-bottom: 1rem;
-}
-
-.form {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  max-width: 24rem;
-}
-
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  font-size: 0.85rem;
-}
-
-.field .input {
-  padding: 0.4rem 0.55rem;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  font-size: 0.88rem;
-}
-
-.banner--ok {
-  padding: 0.5rem 0.75rem;
-  border-radius: 8px;
-  background: #ecfdf5;
-  color: #047857;
-  font-size: 0.88rem;
-  margin-bottom: 0.75rem;
-}
-
-@media (max-width: 720px) {
-  .form {
-    max-width: none;
-  }
-}
-</style>

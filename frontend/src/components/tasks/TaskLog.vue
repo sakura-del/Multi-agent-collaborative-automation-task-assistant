@@ -1,8 +1,20 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 
+import { Badge } from "@/components/ui/badge";
+import type { BadgeVariants } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 import type { TaskEvent } from "@/api/types";
 import { formatDateTime } from "@/utils/task-status";
+
+/** 日志级别 → Badge 语义变体（不直接写颜色，保持全站语义色一致）。 */
+const LEVEL_TONE: Record<string, NonNullable<BadgeVariants["variant"]>> = {
+  info: "muted",
+  warning: "warning",
+  error: "destructive",
+  debug: "muted",
+};
 
 // 结构化日志查看器：按 Agent / 节点 / 级别过滤，默认分页 100 行；一律文本插值（不用 v-html）
 const props = withDefaults(
@@ -110,134 +122,94 @@ watch(pageCount, (count) => {
 </script>
 
 <template>
-  <section class="log" data-test="task-log">
-    <div class="log__filters">
-      <label>
-        Agent
-        <select v-model="agentFilter" data-test="log-filter-agent">
+  <section class="flex flex-col gap-2.5" data-test="task-log">
+    <div class="flex flex-wrap items-end gap-3">
+      <div class="grid gap-1">
+        <Label for="log-filter-agent">Agent</Label>
+        <select
+          id="log-filter-agent"
+          v-model="agentFilter"
+          data-test="log-filter-agent"
+          class="flex h-8 rounded-md border border-input bg-background px-2 text-xs shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+        >
           <option value="">全部</option>
           <option v-for="agent in agents" :key="agent" :value="agent">{{ agent }}</option>
         </select>
-      </label>
-      <label>
-        节点
-        <select v-model="nodeFilter" data-test="log-filter-node">
+      </div>
+      <div class="grid gap-1">
+        <Label for="log-filter-node">节点</Label>
+        <select
+          id="log-filter-node"
+          v-model="nodeFilter"
+          data-test="log-filter-node"
+          class="flex h-8 rounded-md border border-input bg-background px-2 text-xs shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+        >
           <option value="">全部</option>
           <option v-for="node in nodes" :key="node" :value="node">{{ node }}</option>
         </select>
-      </label>
-      <label>
-        级别
-        <select v-model="levelFilter" data-test="log-filter-level">
+      </div>
+      <div class="grid gap-1">
+        <Label for="log-filter-level">级别</Label>
+        <select
+          id="log-filter-level"
+          v-model="levelFilter"
+          data-test="log-filter-level"
+          class="flex h-8 rounded-md border border-input bg-background px-2 text-xs shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+        >
           <option value="">全部</option>
           <option value="info">info</option>
           <option value="warning">warning</option>
           <option value="error">error</option>
         </select>
-      </label>
-      <span class="log__count" data-test="log-count">{{ filtered.length }} 条</span>
+      </div>
+      <span class="ml-auto text-xs text-muted-foreground" data-test="log-count">
+        {{ filtered.length }} 条
+      </span>
     </div>
 
-    <ol class="log__rows">
-      <li v-for="row in visible" :key="row.eventId" class="log__row" :data-test="`log-row-${row.eventId}`">
-        <span class="log__time">{{ row.occurredAt }}</span>
-        <span class="log__level" :class="`log__level--${row.level}`">{{ row.level }}</span>
-        <span class="log__type">{{ row.eventType }}</span>
-        <span class="log__status">{{ row.status }}</span>
-        <span class="log__agent">{{ row.agent }}</span>
-        <span class="log__node">{{ row.node }}</span>
-        <span class="log__message">{{ row.message }}</span>
+    <ol class="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
+      <li
+        v-for="row in visible"
+        :key="row.eventId"
+        class="grid grid-cols-[auto_auto_auto_auto_auto_auto_1fr] items-center gap-2 px-2.5 py-1.5 text-xs"
+        :data-test="`log-row-${row.eventId}`"
+      >
+        <span class="tabular-nums text-muted-foreground">{{ row.occurredAt }}</span>
+        <Badge :variant="LEVEL_TONE[row.level] ?? 'muted'">{{ row.level }}</Badge>
+        <span class="text-muted-foreground">{{ row.eventType }}</span>
+        <span class="text-muted-foreground">{{ row.status }}</span>
+        <span>{{ row.agent }}</span>
+        <span class="text-muted-foreground">{{ row.node }}</span>
+        <span class="truncate" :title="row.message">{{ row.message }}</span>
       </li>
     </ol>
 
-    <p v-if="!visible.length" class="page__hint">没有匹配的事件。</p>
+    <p v-if="!visible.length" class="text-sm text-muted-foreground">没有匹配的事件。</p>
 
-    <div v-if="pageCount > 1" class="log__pager">
-      <button class="btn" type="button" :disabled="page === 1" @click="page -= 1">上一页</button>
-      <span data-test="log-page">{{ page }} / {{ pageCount }}</span>
-      <button class="btn" type="button" :disabled="page === pageCount" @click="page += 1">下一页</button>
+    <div v-if="pageCount > 1" class="flex items-center gap-2">
+      <Button
+        variant="outline"
+        size="sm"
+        type="button"
+        data-test="log-prev"
+        :disabled="page === 1"
+        @click="page -= 1"
+      >
+        上一页
+      </Button>
+      <span class="text-xs text-muted-foreground" data-test="log-page">
+        {{ page }} / {{ pageCount }}
+      </span>
+      <Button
+        variant="outline"
+        size="sm"
+        type="button"
+        data-test="log-next"
+        :disabled="page === pageCount"
+        @click="page += 1"
+      >
+        下一页
+      </Button>
     </div>
   </section>
 </template>
-
-<style scoped>
-.log {
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-}
-
-.log__filters {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.75rem;
-  font-size: 0.85rem;
-}
-
-.log__filters select {
-  margin-left: 0.3rem;
-  padding: 0.2rem 0.4rem;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  background: var(--color-card);
-}
-
-.log__count {
-  color: #64748b;
-}
-
-.log__rows {
-  list-style: none;
-  border: 1px solid var(--color-border);
-  border-radius: 10px;
-  background: var(--color-card);
-  max-height: 420px;
-  overflow: auto;
-}
-
-.log__row {
-  display: grid;
-  grid-template-columns: 150px 64px 200px 96px 90px 70px minmax(0, 1fr);
-  gap: 0.5rem;
-  padding: 0.35rem 0.6rem;
-  border-bottom: 1px solid #f1f5f9;
-  font-size: 0.82rem;
-  align-items: center;
-}
-
-.log__time,
-.log__agent,
-.log__node {
-  color: #64748b;
-}
-
-.log__level {
-  text-transform: uppercase;
-  font-size: 0.72rem;
-  font-weight: 600;
-}
-
-.log__level--info {
-  color: #1d4ed8;
-}
-
-.log__level--warning {
-  color: var(--color-warning);
-}
-
-.log__level--error {
-  color: var(--color-error);
-}
-
-.log__message {
-  overflow-wrap: anywhere;
-}
-
-.log__pager {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.85rem;
-}
-</style>
