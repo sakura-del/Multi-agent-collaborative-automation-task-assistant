@@ -1422,6 +1422,47 @@ Phase 1 五项里有两项**只有领域模块、用户碰不到**（计划 §5 
 **本轮仍遗留**：前端页面未接（模板管理/导入预览/账号生命周期均为后端能力）；
 限流未覆盖全部写接口；`quota` 未在任务执行期真正扣减 token。
 
+### 8. 前端页面：模板管理 + 导入预览（`08b7378` + `049f1a8` + `2828a5f` + `ed24c55`）
+
+把两个后端能力接到界面——此前它们「只有 API，用户在页面上碰不到」。
+
+**新增页面**
+
+| 页面 | 路由 | 能力 |
+| --- | --- | --- |
+| Word 模板管理 | `/templates` | 列表展示**占位符清单**（用户据此做字段→章节映射）与样式映射数；上传 `.docx`（前端先按扩展名拦截）；渲染下载（Blob → `createObjectURL` + `<a download>`）；删除 |
+| 参考文献导入 | `/references/import` | 粘贴 BibTeX/RIS → 解析预览（标题/作者/类型/年卷期页/DOI）；格式可显式指定或自动识别；**明确空态**；页面写明「仅解析不写入引用库」 |
+
+**API 层**（`api/templates.ts` / `api/references.ts` + 类型）
+沿用 `citation-styles.ts` 的既有模式，两处关键处理：
+- **400 当正常响应解析后手工抛出**：`client.ts` 的错误归一化只保留 `message`，
+  会吞掉 FastAPI 的 `detail`（含逐条 reasons），用户就看不到「为什么被拒」；
+- **`renderTemplate` 用 `responseType: "blob"`**，错误体也是 blob，需读回文本再解析 JSON。
+
+**真实浏览器验收抓到的两个真实缺陷**
+
+1. **移动端横向溢出**（`049f1a8`）：模板行的 `margin-left: auto` 把内容推出视口，
+   截图显示左侧文字被裁切。窄屏改为纵向堆叠 + 长文本 `overflow-wrap: anywhere`。
+2. **移动端导航项被挤出可视区**（`2828a5f`）：导航项增至 5 个后，393px 视口下最右的
+   「导入文献」必须横向滚动才能点到（E2E 点击超时实证）。窄屏改为 `flex-wrap: wrap`
+   换行，所有入口始终可见。
+
+**E2E 测试里的两处「模拟器怪异行为」（已写入注释）**
+
+- 溢出判断用 `scrollWidth - innerWidth`：设备模拟下 `documentElement.clientWidth`
+  与 `window.innerWidth` 不一致（实测 393 vs 554），拿前者做基准会误报；
+- 按钮点击用 `force`：Playwright 的可操作性检查同样以 `clientWidth` 为基准，
+  会把实际可点的按钮判为不可见。
+
+**验证**
+
+- Vitest **142 passed**（112 → 142，+30 例，先红后绿）；`vue-tsc` 无错误；`vite build` 成功
+- Playwright E2E **8 passed**（4 例 × 桌面 chromium / 移动 mobile-chrome，对着真实服务器）：
+  模板上传→占位符→渲染下载、BibTeX/RIS 解析（中文原样）、非法内容错误提示、无横向溢出
+- 截图产物：`frontend/e2e/screenshots/phase1-{templates,import}-{chromium,mobile-chrome}.png`
+
+**本轮仍遗留**：账号生命周期前端页（邮箱验证/密码重置）未接。
+
 
 
 

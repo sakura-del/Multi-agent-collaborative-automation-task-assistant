@@ -21,12 +21,12 @@
 | 项 | 值 |
 | --- | --- |
 | 分支 | `main`（工作分支 `codex/plan3-literature-workflow` 与 main 同点） |
-| HEAD | … → CI 修复 `f6ba56e`/`7c73cd4`/`3cfc60e` → Phase 1 打地基 `d44282a` → 迁移修复 `112c398`/`f817990` → **端点接线 `fe56a67`** |
+| HEAD | … → Phase 1 打地基 `d44282a` → 迁移修复 `112c398`/`f817990` → 端点接线 `fe56a67` → **前端页面 `08b7378`/`049f1a8`/`2828a5f`/`ed24c55`** |
 | 冻结 tag | `defense-v1` |
 | Plan 状态 | Plan 2 / 3 / 4 / 5 **全部 Exit Gate PASSED** |
-| 产品化进度 | **Issue #2 / #3 / #4 / #5 / #6 / #7 全部关闭且遗留项清零**；配置优先级缺陷已修复；**Phase 1 打地基五项已交付**（Word 模板 / 多源检索 / 账号体系 / 限流配额 / 参考文献导入），其中**模板与导入的 HTTP 端点已接线** |
+| 产品化进度 | **Issue #2 / #3 / #4 / #5 / #6 / #7 全部关闭且遗留项清零**；配置优先级缺陷已修复；**Phase 1 打地基五项已交付**（Word 模板 / 多源检索 / 账号体系 / 限流配额 / 参考文献导入），其中**模板与导入已端到端可用**（后端 + HTTP 端点 + 前端页面） |
 | 后端测试 | **2023 passed**, 8 skipped；覆盖率 **90.00%**；`mypy` 0 错误（163 文件） |
-| 前端测试 | Vitest **112 passed**；Playwright E2E **4 passed**（桌面 + 移动双视口） |
+| 前端测试 | Vitest **142 passed**；Playwright E2E **8 passed**（Phase 1 两页 × 桌面 + 移动双视口）+ 既有 4 passed |
 | CI | **6/6 作业全绿**（2026-10-19 修复；此前自 08-03 起连续失败） |
 | 服务器 | 已同步，五容器 healthy，`curl http://127.0.0.1:48080/api/v1/health/ready` → `{"status":"ready"}` |
 
@@ -138,11 +138,11 @@ docker compose build backend && docker compose up -d backend
 
 | 项 | 状态 | 说明 |
 | --- | --- | --- |
-| P1-A Word 模板导入 + 一键切换 | ✅ 已交付 `d44282a` + **端点接线 `fe56a67`** | 领域模块 + **HTTP 端点**（上传/列表/详情/删除/渲染）+ `user_template` 表（迁移 `a7d4e2f9c1b8`）；上传准入拒 `.docm`/宏/OLE/zip 炸弹；渲染的参考文献由调用方传入已 CSL 渲染行。**遗留**：前端页面未接 |
+| P1-A Word 模板导入 + 一键切换 | ✅ 已交付 `d44282a` + 端点 `fe56a67` + **前端 `08b7378`/`049f1a8`/`2828a5f`** | 领域模块 + HTTP 端点 + `user_template` 表（迁移 `a7d4e2f9c1b8`）+ **`/templates` 管理页**（占位符展示/上传/渲染下载/删除）；上传准入拒 `.docm`/宏/OLE/zip 炸弹。**遗留**：无 |
 | P1-B 检索源扩展 | ✅ 已交付 `d44282a` | OpenAlex + S2 + PubMed + 多源聚合（三级去重、单源失败隔离、各源节流）。**遗留**：S2 需注入 `SEMANTIC_SCHOLAR_API_KEY`（公共档持续 429） |
 | P1-C 账号体系 | ✅ 已交付 `d44282a` + 修复 `112c398` | 邮箱验证 + 密码重置（只存哈希/单次使用/恒定响应）；未配 SMTP 不阻塞注册。**遗留**：前端页面未接 |
 | P1-D 限流 + 配额 | ✅ 已交付 `d44282a` | 中间件 + Redis/内存实现 + fail-open + 熔断；429 带 Retry-After。**遗留**：未覆盖全部写接口；token 配额未在执行期扣减 |
-| P1-E RIS/BibTeX 导入 | ✅ 已交付 `d44282a` + **端点接线 `fe56a67`** | round-trip 与导出严格一致 + `POST /references/import`（纯解析不落库、格式自动探测、400 可读原因）。**遗留**：前端导入预览页未接 |
+| P1-E RIS/BibTeX 导入 | ✅ 已交付 `d44282a` + 端点 `fe56a67` + **前端 `08b7378`** | round-trip 与导出严格一致 + `POST /references/import` + **`/references/import` 预览页**。**遗留**：无 |
 
 **Issue 清单**（全部已关闭）：
 | Issue | 标题 | 优先级 | 说明 |
