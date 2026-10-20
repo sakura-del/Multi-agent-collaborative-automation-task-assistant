@@ -375,6 +375,25 @@ function placeholderKeys(template: TemplateOut): string[] {
   gap: 0.4rem;
 }
 
+/* 窄屏：模板行改为纵向堆叠，避免 `margin-left: auto` 把内容推出视口造成横向溢出 */
+@media (max-width: 720px) {
+  .template-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+
+  .template-row__meta {
+    margin-left: 0;
+    text-align: left;
+    overflow-wrap: anywhere;
+  }
+
+  .template-row__actions {
+    justify-content: flex-end;
+  }
+}
+
 .badge {
   padding: 0.05rem 0.45rem;
   border-radius: 999px;

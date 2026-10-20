@@ -253,6 +253,25 @@ function metaText(item: ImportedReferenceItem): string {
 .preview__doi code {
   font-size: 0.75rem;
   color: #6b7280;
+  overflow-wrap: anywhere;
+}
+
+/* 窄屏：动作行纵向堆叠，避免横向溢出 */
+@media (max-width: 720px) {
+  .import__row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .import__field--inline {
+    justify-content: space-between;
+  }
+
+  .preview__meta {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.2rem;
+  }
 }
 
 .badge {
