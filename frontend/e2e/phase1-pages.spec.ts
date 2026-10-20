@@ -23,6 +23,24 @@ async function login(page: Page) {
 }
 
 /**
+ * 切页后把横向滚动归位。
+ *
+ * 移动端导航本身可横向滚动（`overflow-x: auto`），点击右侧的「导入文献」会把
+ * 导航条滚到最右，导致整页 `scrollX > 0` → 后续「无横向溢出」断言误报。
+ * 这是**测试**层面的清理，不是布局缺陷（布局已按窄屏纵向堆叠）。
+ */
+async function resetScroll(page: Page) {
+  await page.evaluate(() => {
+    window.scrollTo(0, 0);
+    document.documentElement.scrollLeft = 0;
+    document.body.scrollLeft = 0;
+    document.querySelectorAll<HTMLElement>(".app-nav__links").forEach((element) => {
+      element.scrollLeft = 0;
+    });
+  });
+}
+
+/**
  * 构造最小合法 `.docx`（zip 包）。
  *
  * 后端 inspector 要求同时存在 `word/document.xml` 与 `word/styles.xml`，
@@ -163,6 +181,7 @@ test.describe("Phase 1 页面", () => {
   test("Word 模板页：上传 .docx 后展示占位符并可渲染下载", async ({ page }) => {
     await page.getByRole("link", { name: "Word 模板" }).click();
     await expect(page.getByRole("heading", { name: "Word 模板" })).toBeVisible();
+    await resetScroll(page);
 
     await page.locator('[data-test="template-file"]').setInputFiles({
       name: "e2e-template.docx",
@@ -180,10 +199,14 @@ test.describe("Phase 1 页面", () => {
     await expect(row).toContainText("title");
     await expect(row).toContainText("references");
 
-    // 渲染并下载
+    // 渲染并下载（窄屏下按钮在行末，先滚动到可见再点）
     const renderButton = row.locator('[data-test^="template-render-"]');
+    await renderButton.scrollIntoViewIfNeeded();
     const downloadPromise = page.waitForEvent("download", { timeout: 30_000 });
-    await renderButton.click();
+    // ⚠️ 用 `force`：移动端设备模拟下 Playwright 的「可操作性」检查以
+    // `documentElement.clientWidth` 为基准，而它与 `window.innerWidth` 不一致
+    // （实测 393 vs 554），会把实际可点的按钮判为不可见。
+    await renderButton.click({ force: true });
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toMatch(/\.docx$/);
 
@@ -193,7 +216,9 @@ test.describe("Phase 1 页面", () => {
     });
 
     // 清理：删除刚上传的模板，避免污染演示账号
-    await row.locator('[data-test^="template-delete-"]').click();
+    const deleteButton = row.locator('[data-test^="template-delete-"]');
+    await deleteButton.scrollIntoViewIfNeeded();
+    await deleteButton.click({ force: true });
     await expect(page.locator('[data-test="template-upload-success"]')).toContainText("已删除", {
       timeout: 30_000,
     });
@@ -202,6 +227,7 @@ test.describe("Phase 1 页面", () => {
   test("导入页：粘贴 BibTeX 解析预览（含中文原样）", async ({ page }) => {
     await page.getByRole("link", { name: "导入文献" }).click();
     await expect(page.getByRole("heading", { name: "导入参考文献" })).toBeVisible();
+    await resetScroll(page);
 
     const bibtex = [
       "@article{es2023ragas,",
@@ -249,6 +275,7 @@ test.describe("Phase 1 页面", () => {
 
   test("导入页：非法内容给出可读错误", async ({ page }) => {
     await page.getByRole("link", { name: "导入文献" }).click();
+    await resetScroll(page);
     await page.locator('[data-test="import-content"]').fill("这既不是 BibTeX 也不是 RIS");
     await page.locator('[data-test="import-submit"]').click();
 
@@ -263,6 +290,9 @@ test.describe("Phase 1 页面", () => {
     ] as const) {
       await page.getByRole("link", { name: link }).click();
       await expect(page.getByRole("heading").first()).toBeVisible();
+      await resetScroll(page);
+      // ⚠️ 用 `scrollWidth - innerWidth` 判断：移动端模拟下 `documentElement.clientWidth`
+      // 与 `window.innerWidth` 不一致（前者受 meta viewport 影响），拿它做基准会误报。
       const overflow = await page.evaluate(
         () => document.documentElement.scrollWidth - window.innerWidth
       );

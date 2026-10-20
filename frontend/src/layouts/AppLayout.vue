@@ -153,11 +153,16 @@ function handleLogout() {
     display: none;
   }
 
+  /* 窄屏导航：允许换行而非横向滚动。
+     ⚠️ 曾用 `overflow-x: auto`，但导航项增加到 5 个后，最右的「导入文献」
+     在 393px 视口下被挤出可视区、必须横向滚动才能点到——这是真实可用性缺陷
+     （E2E 实测点击超时）。换行让所有入口始终可见。 */
   .app-nav__links {
     flex-direction: row;
+    flex-wrap: wrap;
     gap: 0.25rem;
     flex: 1 1 auto;
-    overflow-x: auto;
+    min-width: 0;
   }
 
   .app-nav__link {
