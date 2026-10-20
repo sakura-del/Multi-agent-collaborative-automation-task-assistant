@@ -1711,6 +1711,52 @@ RESULT: PASS
 **门禁**：black/ruff 干净；mypy 0 错误（166 文件）；pytest **2132 passed / 8 skipped**
 （2100 → 2132，+32 例）。
 
+### Task 4：PRISMA 流程图渲染器（`3c8aa53`）
+
+**交付**：`app/tools/prisma/flow.py`（纯函数、无 IO）——
+`render_prisma_markdown`（可直接进论文「方法」章节的计数表）+
+`render_prisma_mermaid`（前端流程图），均支持 `language="zh"|"en"`
+（对应系统契约 `output_language`）。
+
+**为什么做了三层验证（只靠「字符串里含 60」不够）**
+
+1. **真实 Mermaid 解析器验证**：用 `mermaid.parse()`（v11 + Node + jsdom）
+   实测 6 种输入的语法正确性——典型数据、空数据、全零、大数字 137000、
+   中文标签、英文标签，全部 `PARSE_OK`。
+   这一步必要：节点标签含中文全角括号与冒号时，**未加引号会被 Mermaid 拒绝**；
+   当前一律 `["..."]` 双引号包裹（官方推荐的特殊字符安全写法）。
+2. **golden 文件锁定全量输出**：`tests/fixtures/prisma/` 4 个文件
+   （flow.{zh,en}.mmd + report.{zh,en}.md）。功能测试只断言「含 60」，
+   但真实渲染可能已不可用（多空格、口径变了、文案改了）——golden 让任何
+   输出变化都必须显式更新并 review diff。
+3. **自洽性断言**：中英数字必须完全相同；`identified_total == records_screened +
+   duplicates_removed`；标题阶段 `screened == excluded + fulltext.assessed`；
+   来源排序稳定（按名升序，否则 golden 会反复漂移）。
+
+**防御性设计**：缺字段/非数字/嵌套缺失一律按 0（流程图永远能出，不会因某个
+计数缺失就崩）；`bool` 显式排除（`True` 是 `int` 子类，不排除会渲染成 1）；
+未知 `language` 回退中文。
+
+**容器内实测输出**
+
+```
+中文 Mermaid:
+flowchart TD
+    A["识别：各源命中 n=137"] --> B["去除重复 n=135"]
+    B --> C["标题/摘要筛查 n=2"]
+    C -->|"排除 n=1"| X1["标题/摘要阶段排除"]
+    C --> D["全文评估 n=1"]
+    D -->|"排除 n=0"| X2["全文阶段排除"]
+    D --> E["纳入综述 n=1"]
+
+英文 Mermaid: 同结构，标签为 Identified / Screened / Included
+[OK] 中英数字一致  [OK] 流程闭合：137 = 2 + 135  [OK] Mermaid 结构完整
+RESULT: PASS
+```
+
+**门禁**：black/ruff 干净；mypy 0 错误（168 文件）；pytest **2159 passed / 8 skipped**
+（2132 → 2159，+27 例）。
+
 
 
 
