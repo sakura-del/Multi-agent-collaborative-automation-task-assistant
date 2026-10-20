@@ -201,14 +201,26 @@ class RateLimitRule(BaseModel):
 
 
 class RateLimitRules(BaseModel):
-    """各动作独立限额。字段固定（便于用 `RATE_LIMIT__RULES__AUTH_LOGIN__LIMIT` 覆盖）。"""
+    """各动作独立限额。字段固定（便于用 `RATE_LIMIT__RULES__AUTH_LOGIN__LIMIT` 覆盖）。
+
+    ⚠️ 每条规则都必须有实际路由使用（`tests/test_rate_limit_coverage_and_quota.py`
+    双向校验：所有写端点有规则、所有规则标签存在）。
+    """
 
     auth_login: RateLimitRule = RateLimitRule(limit=10, window_seconds=60)
     auth_register: RateLimitRule = RateLimitRule(limit=5, window_seconds=3600)
     task_create: RateLimitRule = RateLimitRule(limit=30, window_seconds=3600)
+    task_control: RateLimitRule = RateLimitRule(limit=60, window_seconds=3600)
+    """任务确认/人工控制/WS ticket：高频交互操作，限额相对宽松。"""
+
     upload: RateLimitRule = RateLimitRule(limit=20, window_seconds=3600)
     search: RateLimitRule = RateLimitRule(limit=60, window_seconds=60)
     verify: RateLimitRule = RateLimitRule(limit=30, window_seconds=60)
+    template_write: RateLimitRule = RateLimitRule(limit=20, window_seconds=3600)
+    """模板上传/删除：要解压校验 docx（zip 解析 + XML 扫描），不宜高频。"""
+
+    template_render: RateLimitRule = RateLimitRule(limit=10, window_seconds=60)
+    """模板渲染：跑 docxtpl + python-docx 重打包，单次开销最大，限额最严。"""
 
 
 class RateLimitConfig(BaseModel):

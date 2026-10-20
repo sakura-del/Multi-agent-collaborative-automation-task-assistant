@@ -121,9 +121,12 @@ rate_limit:
     auth_login: { limit: 10, window_seconds: 60 }
     auth_register: { limit: 5, window_seconds: 3600 }
     task_create: { limit: 30, window_seconds: 3600 }
+    task_control: { limit: 60, window_seconds: 3600 }   # 确认/控制/WS ticket
     upload: { limit: 20, window_seconds: 3600 }
     search: { limit: 60, window_seconds: 60 }
     verify: { limit: 30, window_seconds: 60 }
+    template_write: { limit: 20, window_seconds: 3600 }  # 上传/删除（解压校验）
+    template_render: { limit: 10, window_seconds: 60 }   # 渲染（docxtpl 重打包，开销最大）
 
 quota:
   enabled: true

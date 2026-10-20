@@ -48,6 +48,20 @@ end
 return {1, new_used}
 """
 
+# Lua：退还（原子，**不扣到负数**）。
+# 为什么必须原子：并发退还 / 重复退还可能读到旧值后写回，导致「越退越多」——
+# 额度就变成了可刷的正收益。用 Lua 在服务端一次性判定。
+_REFUND_SCRIPT = """
+local used = tonumber(redis.call('GET', KEYS[1]) or '0')
+local amount = tonumber(ARGV[1])
+local target = used - amount
+if target < 0 then
+    target = 0
+end
+redis.call('SET', KEYS[1], target, 'KEEPTTL')
+return target
+"""
+
 
 class QuotaExceededError(AppException):
     """按用户配额耗尽（当前窗口内已用满），HTTP 429。
@@ -160,3 +174,33 @@ class QuotaService:
                 used=used,
                 limit=self._daily_limit,
             )
+
+    async def refund(self, user_id: UUID, *, tokens: int) -> None:
+        """退还配额（任务结束后按**实际用量**校正预扣）。
+
+        提交任务时按 `ESTIMATED_TOKENS_PER_TASK` 预扣——这是唯一能**事前拒绝**的位置；
+        但预估必然不准，故执行完成后按实际用量退还差额（`预估 - 实际`）。
+
+        语义：
+        - 原子且**不扣到负数**（并发/重复退还不会把额度刷成正收益）；
+        - ``tokens <= 0`` 空操作；``daily_limit < 0``（关闭配额）空操作；
+        - Redis 故障时静默跳过（fail-open，与 `check_and_consume` 一致）。
+        """
+        amount = int(tokens)
+        if amount <= 0:
+            return
+        if self._daily_limit < 0:
+            return  # 关闭配额：从未扣减，自然无需退还
+        if self._redis is None:
+            logger.warning(
+                "quota_redis_unavailable",
+                user_id=str(user_id),
+                error="未注入 Redis 客户端（退还跳过）",
+            )
+            return
+
+        redis_key, _ = self._window(user_id)
+        try:
+            await self._redis.eval(_REFUND_SCRIPT, 1, redis_key, amount)
+        except Exception as exc:
+            logger.warning("quota_redis_unavailable", user_id=str(user_id), error=str(exc))

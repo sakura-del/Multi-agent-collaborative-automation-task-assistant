@@ -90,7 +90,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         knowledge_query=KnowledgeSearchProvider(), style_registry=style_registry
     )
     await container.start()
-    task_execution = TaskExecution(container)
+    # 配额服务（P1-D）：提交任务时预扣、完成时按实际用量退还差额。
+    # 在 lifespan 里构造一次并复用（避免每个请求都建 Redis 连接）。
+    from app.api.v1.endpoints.tasks import build_quota_service
+
+    task_execution = TaskExecution(container, quota_service=build_quota_service())
     app.state.container = container
     app.state.runtime = task_execution
     try:

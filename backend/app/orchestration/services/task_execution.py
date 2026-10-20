@@ -90,6 +90,53 @@ _CANCELLABLE_STATUSES = frozenset(
 # 终态
 _TERMINAL_STATUSES = frozenset({TaskStatus.COMPLETED, TaskStatus.CANCELLED, TaskStatus.FAILED})
 
+#: 单次文献综述任务的 token 预估（提交时按此预扣配额，结束后按实际用量校正）。
+#:
+#: 取值依据：一次综述约 5 类节点 × 若干子任务，历史实测中位数量级在 10 万 token 上下；
+#: 这里取整为 100k 作为**保守预估**——宁可先扣多了再退还，也不要先扣少了超支。
+ESTIMATED_TOKENS_PER_TASK = 100_000
+
+
+def sum_actual_tokens(node_results: Mapping[str, Any]) -> int:
+    """从 DAG 各节点结果汇总**实际** token 用量。
+
+    `node_results[*].output` 是 `ExecutionResult` 的 dict 形态，含
+    `prompt_tokens` / `completion_tokens`。历史载荷可能没有这两个键
+    （字段有默认值 0），因此一律用 `.get` 读取、缺省按 0 计。
+    """
+    total = 0
+    for node_result in node_results.values():
+        output = getattr(node_result, "output", None)
+        if not isinstance(output, Mapping):
+            continue
+        total += int(output.get("prompt_tokens") or 0)
+        total += int(output.get("completion_tokens") or 0)
+    return total
+
+
+async def quota_refund_for_usage(quota: Any | None, user_id: UUID, *, actual_tokens: int) -> None:
+    """按实际用量退还预扣的配额差额。
+
+    语义：
+    - `quota is None`（配额关闭）→ 空操作；
+    - 实际 >= 预估 → **不退还也不补扣**（预估值是保守上限；补扣会让下一个任务莫名失败）；
+    - **fail-open**：配额组件故障只记 warning，绝不能让已完成的任务因此失败。
+    """
+    if quota is None:
+        return
+    refund_tokens = ESTIMATED_TOKENS_PER_TASK - max(0, int(actual_tokens))
+    if refund_tokens <= 0:
+        return
+    try:
+        await quota.refund(user_id, tokens=refund_tokens)
+    except Exception as exc:  # pragma: no cover - 防御性兜底
+        get_logger(__name__).warning(
+            "quota_refund_failed",
+            user_id=str(user_id),
+            tokens=refund_tokens,
+            error=str(exc),
+        )
+
 
 class TaskExecution:
     """任务运行时深模块：规划、确认、执行、恢复与查询。"""
@@ -99,9 +146,13 @@ class TaskExecution:
         container: RuntimeContainer,
         *,
         session_factory: Any | None = None,
+        quota_service: Any | None = None,
     ) -> None:
         self.container = container
         self._session_factory = session_factory or container.session_factory
+        # 配额服务（P1-D）：提交时预扣、完成时按实际用量退还差额。
+        # None 表示配额关闭（`quota.enabled=false`）或未接线 → 全部跳过。
+        self._quota = quota_service
 
     # ===== 对外接口 =====
 
@@ -807,6 +858,17 @@ class TaskExecution:
             await session.commit()
         await self._publish(event)
         logger.info("task_completed", task_id=str(task_id), artifacts=len(artifacts))
+
+        # P1-D：按**实际用量**校正提交时的预扣（差额退还）。
+        # fail-open——配额组件故障绝不能让已完成的任务失败。
+        actual_tokens = sum_actual_tokens(getattr(result, "node_results", {}) or {})
+        await quota_refund_for_usage(self._quota, user_id, actual_tokens=actual_tokens)
+        logger.info(
+            "quota_corrected",
+            task_id=str(task_id),
+            actual_tokens=actual_tokens,
+            estimated=ESTIMATED_TOKENS_PER_TASK,
+        )
 
     # ===== 复盘产物 =====
 

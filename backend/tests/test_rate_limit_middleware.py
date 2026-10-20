@@ -26,12 +26,17 @@ class TestRouteRuleLabel:
         assert route_rule_label("POST", "/api/v1/auth/login") == "auth_login"
         assert route_rule_label("POST", "/api/v1/auth/register") == "auth_register"
 
-    def test_task_creation_is_limited_but_subpaths_are_not(self) -> None:
-        """只有「创建任务」计入限额；确认规划/控制等子路径不重复计数。"""
+    def test_task_creation_is_limited_and_subpaths_use_control_rule(self) -> None:
+        """创建任务走 task_create；确认/控制/WS ticket 走 task_control。
+
+        （此前子路径**完全不限流**——那是 P1-D 的已知缺口：确认与控制同样是写操作，
+        可被无限刷。现已补齐，两者用不同限额。）
+        """
         assert route_rule_label("POST", "/api/v1/tasks") == "task_create"
         assert route_rule_label("POST", "/api/v1/tasks/") == "task_create"
-        assert route_rule_label("POST", "/api/v1/tasks/abc/plan/approve") is None
-        assert route_rule_label("POST", "/api/v1/tasks/abc/control") is None
+        assert route_rule_label("POST", "/api/v1/tasks/abc/plan/approve") == "task_control"
+        assert route_rule_label("POST", "/api/v1/tasks/abc/control") == "task_control"
+        assert route_rule_label("POST", "/api/v1/tasks/ws-ticket") == "task_control"
 
     def test_uploads_and_search_are_limited(self) -> None:
         assert route_rule_label("POST", "/api/v1/knowledge/documents") == "upload"

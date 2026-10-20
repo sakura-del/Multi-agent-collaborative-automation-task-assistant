@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any
 from urllib.parse import quote
 from uuid import UUID
 
@@ -22,7 +22,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response
 
 from app.api.deps import get_current_active_user
+from app.core.config import get_settings
 from app.core.exceptions import ValidationException
+from app.core.quota import QuotaService
 from app.db.models.user import User
 from app.orchestration.contracts import TaskSnapshot, TaskStatus
 from app.orchestration.services.task_execution import TaskExecution
@@ -46,8 +48,61 @@ def get_task_execution(request: Request) -> TaskExecution:
     return execution
 
 
+#: 单次文献综述任务的 token 预估（提交时先按此扣减，跑完再按实际用量校正）。
+#:
+#: 取值依据：一次综述约 5 类节点 × 若干子任务，历史实测中位数量级在 10 万 token 上下；
+#: 这里取整为 100k 作为**保守预估**——宁可先扣多了再退还，也不要先扣少了超支。
+ESTIMATED_TOKENS_PER_TASK = 100_000
+
+
+def build_quota_service() -> QuotaService | None:
+    """按配置构造配额服务；`quota.enabled=false` 时返回 None（调用方跳过检查）。
+
+    独立成函数便于测试直接验证「关闭配额时不检查」，也避免在模块导入期建 Redis 连接。
+    """
+    cfg = get_settings().quota
+    if not cfg.enabled:
+        return None
+    return QuotaService(
+        redis_client=_quota_redis_client(),
+        daily_limit=cfg.daily_token_limit,
+        window_seconds=cfg.window_seconds,
+        key_prefix=cfg.key_prefix,
+    )
+
+
+def _quota_redis_client() -> Any | None:
+    """配额专用 Redis 客户端（短超时；不可用时返回 None → `QuotaService` fail-open 放行）。"""
+    try:
+        import redis.asyncio as aioredis
+
+        return aioredis.from_url(
+            get_settings().redis.url,
+            socket_connect_timeout=1.0,
+            socket_timeout=1.0,
+            decode_responses=False,
+        )
+    except Exception:  # pragma: no cover - 依赖缺失/构造失败时的兜底
+        return None
+
+
+def get_quota_service(request: Request) -> QuotaService | None:
+    """从应用状态取配额服务（lifespan 中构造一次并复用）。
+
+    复用同一实例有两个好处：不必每请求建 Redis 连接；且与 `TaskExecution`
+    内的实例一致（提交时预扣、完成时退还作用于同一份配置）。
+    """
+    runtime = getattr(request.app.state, "runtime", None)
+    quota = getattr(runtime, "_quota", None)
+    if quota is not None:
+        return quota  # type: ignore[no-any-return]
+    # 未接线（如测试/独立构造）时按配置兜底构造；`enabled=false` 会返回 None
+    return build_quota_service()
+
+
 ExecutionDep = Annotated[TaskExecution, Depends(get_task_execution)]
 CurrentUserDep = Annotated[User, Depends(get_current_active_user)]
+QuotaDep = Annotated["QuotaService | None", Depends(get_quota_service)]
 
 
 @router.post(
@@ -60,8 +115,16 @@ async def create_task(
     payload: TaskCreate,
     execution: ExecutionDep,
     current_user: CurrentUserDep,
+    quota: QuotaDep = None,
 ) -> TaskCreateOut:
-    """创建任务：持久化后立即返回，规划在后台执行。"""
+    """创建任务：**先扣配额再落库**，规划在后台执行。
+
+    配额检查必须发生在 `execution.submit` **之前**：超限时任务不能被创建
+    （先建后拒会留下一个注定失败的僵尸任务，且用户已消耗一次建任务限额）。
+    提交时按 `ESTIMATED_TOKENS_PER_TASK` 预扣；执行完成后按实际用量校正。
+    """
+    if quota is not None:
+        await quota.check_and_consume(current_user.id, tokens=ESTIMATED_TOKENS_PER_TASK)
     task_id = await execution.submit(current_user.id, payload.to_contract())
     return TaskCreateOut(task_id=task_id, status=TaskStatus.PLANNING.value)
 

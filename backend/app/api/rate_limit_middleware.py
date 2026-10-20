@@ -42,18 +42,34 @@ _SKIP_PREFIXES: tuple[str, ...] = (
 #: 连续失败达到该次数后熔断（本进程不再尝试 Redis）
 _CIRCUIT_BREAKER_THRESHOLD = 3
 
-#: route label → (HTTP 方法, 路径匹配) 的规则选择
+#: route label → (HTTP 方法, 路径前缀) 的规则选择
 #: 顺序即优先级，先匹配者生效；未匹配的路径不参与限流（避免误伤长尾端点）。
+#:
+#: ⚠️ **所有写操作端点都必须在这里有对应规则**（`tests/test_rate_limit_coverage_and_quota.py`
+#: 会逐条校验）。遗漏的后果真实存在：上传/渲染/删除等昂贵写操作可被单客户端无限刷。
 _ROUTE_RULES: tuple[tuple[str, str, str], ...] = (
-    # (label, method, 路径前缀)
+    # ===== 认证（含账号生命周期：验证/重置都发信，必须限流）=====
     ("auth_login", "POST", "/api/v1/auth/login"),
     ("auth_register", "POST", "/api/v1/auth/register"),
     ("auth_register", "POST", "/api/v1/auth/password-reset/request"),
+    ("auth_register", "POST", "/api/v1/auth/password-reset/confirm"),
     ("auth_register", "POST", "/api/v1/auth/verify-email/request"),
+    ("auth_register", "POST", "/api/v1/auth/verify-email/confirm"),
+    # ===== 任务（创建单独限额；确认/控制/WS ticket 归 task_control）=====
     ("task_create", "POST", "/api/v1/tasks"),
+    ("task_control", "POST", "/api/v1/tasks/"),
+    # ===== 知识库（上传与删除都算「写」）=====
     ("upload", "POST", "/api/v1/knowledge/documents"),
+    ("upload", "DELETE", "/api/v1/knowledge/documents"),
     ("search", "POST", "/api/v1/knowledge/search"),
+    # ===== 引用样式（上传/删除都是外部文件解析）=====
     ("verify", "POST", "/api/v1/citation-styles"),
+    ("verify", "DELETE", "/api/v1/citation-styles"),
+    # ===== Word 模板（上传/删除；渲染单独更严的限额——它要跑 docxtpl）=====
+    ("template_render", "POST", "/api/v1/templates/"),
+    ("template_write", "POST", "/api/v1/templates"),
+    ("template_write", "DELETE", "/api/v1/templates"),
+    # ===== 参考文献导入 =====
     ("verify", "POST", "/api/v1/references/import"),
 )
 
@@ -64,9 +80,9 @@ def route_rule_label(method: str, path: str) -> str | None:
     for label, rule_method, prefix in _ROUTE_RULES:
         if upper_method != rule_method:
             continue
-        # `/api/v1/tasks` 只匹配「创建任务」，不匹配 `/tasks/{id}/approve` 等子路径
+        # `/api/v1/tasks` 精确匹配「创建任务」，其子路径归 task_control
         if prefix == "/api/v1/tasks":
-            if path.rstrip("/") == prefix:
+            if path.rstrip("/") == "/api/v1/tasks":
                 return label
             continue
         if path.startswith(prefix):
