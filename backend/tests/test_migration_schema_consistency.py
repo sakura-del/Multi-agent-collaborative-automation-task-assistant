@@ -124,3 +124,74 @@ class TestAllMigrationsMatchOrmTables:
             if f'"{name}"' not in migration_text and f"'{name}'" not in migration_text
         ]
         assert not missing, f"以下 ORM 表未被任何迁移创建：{sorted(missing)}"
+
+
+class TestFixMigrationIsIdempotent:
+    """修复类迁移必须对「全新部署」与「已部署库」同时成立。
+
+    ## 缺陷
+
+    `f5c2a8d1b3e7` 是为**已部署库**补 `email_token.updated_at` 的修复迁移；同时
+    `e3b8c4d9a2f1` 也被直接修正（已含该列）。于是全新部署时：
+    `e3b8c4d9a2f1` 建出该列 → `f5c2a8d1b3e7` 再无条件 ADD → 失败：
+
+        ProgrammingError: column "updated_at" of relation "email_token" already exists
+
+    CI 的 compose smoke 用的是全新库，因此暴露；本地 SQLite 测试与已部署生产库都碰不到。
+
+    ## 要求
+
+    修复迁移的 `upgrade()` / `downgrade()` 必须**幂等**：列已存在（或已不存在）时跳过。
+    """
+
+    FIX_MIGRATION = VERSIONS_DIR / "f5c2a8d1b3e7_add_email_token_updated_at.py"
+
+    def test_upgrade_is_idempotent_when_column_exists(self) -> None:
+        """在**已含 updated_at** 的表上跑修复迁移，必须不报错（全新部署路径）。"""
+        engine = create_engine("sqlite://")
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                "CREATE TABLE email_token ("
+                "id CHAR(32) PRIMARY KEY, token_hash VARCHAR(64) NOT NULL, "
+                "created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, "
+                "updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL)"
+            )
+            context = MigrationContext.configure(connection)
+            # 关键断言：不抛 ProgrammingError
+            with Operations.context(context):
+                _load(self.FIX_MIGRATION).upgrade()
+
+            columns = {c["name"] for c in inspect(connection).get_columns("email_token")}
+        engine.dispose()
+
+        assert "updated_at" in columns
+
+    def test_upgrade_adds_column_when_missing(self) -> None:
+        """在**缺列**的旧库上跑修复迁移，必须真的补上（已部署库路径）。"""
+        engine = create_engine("sqlite://")
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                "CREATE TABLE email_token ("
+                "id CHAR(32) PRIMARY KEY, token_hash VARCHAR(64) NOT NULL, "
+                "created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL)"
+            )
+            context = MigrationContext.configure(connection)
+            with Operations.context(context):
+                _load(self.FIX_MIGRATION).upgrade()
+
+            columns = {c["name"] for c in inspect(connection).get_columns("email_token")}
+        engine.dispose()
+
+        assert "updated_at" in columns
+
+    def test_downgrade_is_idempotent_when_column_missing(self) -> None:
+        """列已不存在时回滚也必须不报错。"""
+        engine = create_engine("sqlite://")
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                "CREATE TABLE email_token (id CHAR(32) PRIMARY KEY, token_hash VARCHAR(64))"
+            )
+            context = MigrationContext.configure(connection)
+            with Operations.context(context):
+                _load(self.FIX_MIGRATION).downgrade()
+        engine.dispose()

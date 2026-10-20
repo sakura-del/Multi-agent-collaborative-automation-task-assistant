@@ -33,6 +33,19 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    """补 `updated_at`；**幂等**——列已存在则跳过。
+
+    为什么必须幂等：本迁移用于修已部署库（其 `e3b8c4d9a2f1` 是旧版本、缺该列），
+    但全新部署会用**修正后**的 `e3b8c4d9a2f1`（已含该列），此时再无条件 ADD 会失败：
+
+        ProgrammingError: column "updated_at" of relation "email_token" already exists
+
+    （CI 的 compose smoke 就是全新库，因此暴露了这个问题。）
+    """
+    inspector = sa.inspect(op.get_bind())
+    existing = {column["name"] for column in inspector.get_columns("email_token")}
+    if "updated_at" in existing:
+        return
     # 历史行需要非空默认值：用 server_default 回填，与 Base 的自动时间戳语义一致
     op.add_column(
         "email_token",
@@ -47,5 +60,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """回滚：仅在列存在时删除（同样保持幂等，避免全新库回滚时误删）。"""
+    inspector = sa.inspect(op.get_bind())
+    existing = {column["name"] for column in inspector.get_columns("email_token")}
+    if "updated_at" not in existing:
+        return
     with op.batch_alter_table("email_token") as batch:
         batch.drop_column("updated_at")
