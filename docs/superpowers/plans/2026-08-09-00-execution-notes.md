@@ -1833,15 +1833,39 @@ RESULT: PASS
 | --- | --- | --- |
 | M0 | Tailwind v4 + tokens + `cn()` | ✅ |
 | M1 | Button/Input/Label/Card/Badge/Alert/EmptyState | ✅ |
-| M2 | 页面迁移 | 🚧 **1/8**（Login 完成；TaskList/TaskDetail/Knowledge/Style/Template/Import/账号两页待迁） |
+| M2 | 页面迁移 | 🚧 **4/8**（Login + AppLayout + TaskListView + TaskCreateForm 完成；TaskDetail/Knowledge/Style/Template/Import/账号两页待迁） |
 | M3 | 新页面直接用新规范 | 待做 |
 | M4 | 删除 `main.css` 旧 `.btn`/`.badge`/`.input` | 待做 |
 
-**视觉现状**：登录页已是新风格；工作台侧栏与表格仍是旧手写 CSS——
-两张风格并存的过渡期，按 M2 逐页迁移即可收敛。
+**视觉现状**：登录页、侧栏、任务列表、创建表单已是新风格且互相一致；
+剩余页面（任务详情/知识库/样式/模板/导入/账号两页）仍是旧手写 CSS。
 
 **验证**：Vitest **156 passed**；`npm ci` + `npm run build` 成功；
-nginx 镜像重建成功（`--no-cache`），服务器已部署。
+nginx 镜像重建成功，服务器已部署；真实浏览器截图确认。
+
+### 6. M2 页面迁移记录（`fe1c2ef` + `b4cecd3`）
+
+**AppLayout**（`fe1c2ef`）：Tailwind grid 布局、导航项收敛到 `NAV_ITEMS` 常量、
+登出改 `Button` ghost/icon-sm。
+**保留 `.app-nav__links` 类名**——`e2e/phase1-pages.spec.ts` 的 `resetScroll`
+依赖它把窄屏导航的横向滚动归位（此前修复过「导航项被挤出可视区」的真实缺陷）。
+
+**TaskListView**（`fe1c2ef`）：空态改 `EmptyState`；表格 shadcn 化
+（`bg-muted/40` 表头、`hover:bg-muted/30` 行）；进度条加 `role="progressbar"` +
+`aria-valuenow`；窄屏用 `max-md:` 把表格转卡片式。
+
+**StatusBadge**：从自研 5 色 `.status-badge` 改为 shadcn `Badge` 变体映射
+（业务状态 → variant），状态色与全站语义色统一；新增状态只加一行 `TONES`。
+
+**TaskCreateForm**（`b4cecd3`）：表单卡片化、三列日期栅格（`sm:grid-cols-3`）、
+分段控件（`aria-pressed`）、勾选框 `accent-primary`、关键词 chip 用 Lucide `X` 移除、
+提交改 `Button`。**移除 100+ 行 scoped CSS**。
+保留全部 `data-test` 契约（topic/keyword-input/max-documents/date-from/date-to/
+lang-zh/lang-en/style-select/offline/verify-references/submit/validation-error/form-error）。
+
+**截图脚本踩坑**：登录成功 ≠ 列表加载完（`loadList` 是异步的），
+早截图会拍到「加载中…」，一度误以为页面坏了。改为先等
+`[data-test^="task-row-"]` 出现再截图。
 
 
 
