@@ -1574,6 +1574,56 @@ Redis 实际 key:
 **踩到铁律 #1**：用 PowerShell `-replace` 改测试文件导致中文变 mojibake（含不可打印
 字符 → 文件 SyntaxError），改用 `write` 工具整体重写该文件。
 
+---
+
+## Phase 2 · 做闭环 执行记录（2026-10-20 起）
+
+**总纲**：[2026-10-20-00-phase2-overview.md](2026-10-20-00-phase2-overview.md)
+**PRISMA 子计划**：[2026-10-20-00b-phase2-prisma-plan.md](2026-10-20-00b-phase2-prisma-plan.md)
+
+### 范围校正
+
+用户提出的「PRISMA / 引用图谱 / 开放 API」中，**引用图谱在路线图里属于 Phase 3**（建生态），
+不在 Phase 2。Phase 2 实际是 6 项，建议顺序 `PRISMA(1+2) → 可观测性 → 团队工作区 →
+开放 API → 计费`（理由见总纲 §0）。
+
+### Task 1：PRISMA 数据模型与迁移（`67c6c30`）
+
+**交付**：三张表 + 迁移 `b8e5f1c3d9a2`
+
+| 表 | 作用 |
+| --- | --- |
+| `search_log` | 一次检索的**可复现日志**（检索式/源/命中数/去重后数/执行时间） |
+| `screening_record` | 候选文献**快照**（不实时重查，保证 PRISMA 数字可复现） |
+| `screening_decision` | **追加式**决策（不覆盖，保留审计轨迹与双人分歧追溯） |
+
+**关键设计**
+
+1. **`search_log.hits_by_source` 保存去重前各源命中数**。计划自审时发现原方案要从
+   去重后的快照反推，会让「各源合计」小于 `hits_total`、流程图数字自相矛盾
+   （PRISMA 审稿会质疑），故改为检索时就按源存原始命中数。
+2. **`screening_decision` 的 CheckConstraint**：`verdict='exclude'` 时
+   `exclusion_reason` 必须非空（PRISMA 2020 要求报告排除理由分类）。
+3. **三张表都显式建 `created_at`/`updated_at`**——`Base` 提供这两列，
+   漏建会在真实 PostgreSQL 上炸（Phase 1 `email_token` 生产 500 的教训）。
+4. `executed_at` 用 `DateTime(timezone=True)` 且带默认值（自审修正过
+   计划里 `Mapped[object]` 的错误——那会让 SQLAlchemy 无法映射）。
+
+**生产验证（真实 PostgreSQL）**
+
+```
+alembic current → b8e5f1c3d9a2 (head)
+三张表均存在；search_log 的 hits_by_source(json) / executed_at(timestamptz) 正确
+约束实测：
+  排除无理由 → ERROR: violates check constraint "ck_screening_decision_exclude_requires_reason"
+  排除带理由 → INSERT 0 1（成功）
+  纳入无理由 → INSERT 0 1（成功，约束只针对 exclude，语义正确）
+探针数据已清理
+```
+
+**门禁**：black/ruff 干净；mypy 0 错误（164 文件）；pytest **2075 passed / 8 skipped**
+（2063 → 2075，+12 例，先红后绿）；全新库 `alembic upgrade head` 全链通过。
+
 
 
 
