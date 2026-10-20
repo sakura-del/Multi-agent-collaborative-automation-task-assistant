@@ -16,3 +16,10 @@ dist
 # 日志
 *.log
 npm-debug.log*
+
+# ⚠️ 反忽略：仓库根的 .gitignore 有一条 `lib/`（本意是忽略 Python 构建产物），
+# 它会连带忽略 `frontend/src/lib/`（shadcn 的 cn() 工具目录）。
+# 曾导致「本地能构建、Docker 里 TS2307: Cannot find module '@/lib/utils'」。
+# 这里显式把源码目录重新纳入版本控制。
+!src/lib/
+!src/lib/**

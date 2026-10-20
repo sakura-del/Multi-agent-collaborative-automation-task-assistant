@@ -6,6 +6,10 @@ __pycache__/
 .Python
 build/
 develop-eggs/
+# ⚠️ 注意：`dist/` 和 `lib/` 是**通用**模式，不限于 Python 产物。
+# `lib/` 曾误伤 `frontend/src/lib/`（shadcn 的 cn() 工具目录），导致
+# 「本地能构建、Docker 里 TS2307: Cannot find module '@/lib/utils'」。
+# 前端已在其 .gitignore 里用 `!src/lib/**` 反忽略；新增前端源码目录时留意这两条。
 dist/
 downloads/
 eggs/
