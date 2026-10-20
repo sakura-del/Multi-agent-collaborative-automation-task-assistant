@@ -80,6 +80,17 @@ def upgrade() -> None:
             nullable=False,
             comment="创建时间",
         ),
+        # ⚠️ Base 提供 created_at **与** updated_at 两列；漏建 updated_at 会让
+        # `UPDATE ... SET used_at, updated_at=now()` 在真实 PostgreSQL 上 500
+        # （SQLite 测试因走 create_all 而不经迁移，发现不了）。见
+        # tests/test_migration_schema_consistency.py。
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+            comment="更新时间",
+        ),
         sa.ForeignKeyConstraint(
             ["user_id"],
             ["user.id"],

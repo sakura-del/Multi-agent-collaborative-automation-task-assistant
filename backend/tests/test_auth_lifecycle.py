@@ -480,7 +480,10 @@ class TestEmailLifecycleMigration:
 
         referenced = set(down_revisions)
         heads = [revision for revision in revisions if revision not in referenced]
-        assert heads == [migration.revision], f"迁移链 head 不唯一：{heads}"
+        # 迁移链必须**无分叉**（恰好一个 head）。注意：后续新增迁移会把 head 前移，
+        # 因此断言「唯一 head 存在」而不是「head 就是本迁移」——否则每加一版迁移都会误报。
+        assert len(heads) == 1, f"迁移链存在分叉（多个 head）：{heads}"
+        assert migration.revision in revisions
 
     def test_upgrade_adds_user_column_and_email_token_table_on_sqlite(self, tmp_path: Path) -> None:
         migration = _lifecycle_migration()
