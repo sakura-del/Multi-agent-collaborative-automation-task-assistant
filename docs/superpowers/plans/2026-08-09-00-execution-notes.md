@@ -1282,6 +1282,73 @@ CI：**Lint / Frontend / Unit Tests / Alembic / Docker Build / Compose Smoke 6 �
 - **客户端与服务端（镜像）版本必须成对锁定**，跨大版本必然不兼容；
 - **容器 healthcheck 要确认镜像里真有的工具**（1.x 的 chroma 镜像没有 python）。
 
+---
+
+## Phase 1 · 打地基 执行记录（2026-10-20）
+
+**计划**：[2026-10-20-00-phase1-foundation-plan.md](2026-10-20-00-phase1-foundation-plan.md)
+**提交**：`d44282a`（五项交付，47 文件 +8944）、`112c398`（迁移缺陷修复）
+
+### 0. 清单校正
+
+用户清单中两行状态已过期：**引用真实性校验**（`42b5e54`+`c270348`）与
+**CSL 引擎**（M1+M2+著者-出版年制+三项遗留）**均已 100% 完成**，无需重做。
+真正待做的 5 项本轮全部交付。
+
+### 1. 五项交付
+
+| 项 | 交付 | 关键设计 |
+| --- | --- | --- |
+| **P1-A Word 模板**（P0） | `app/tools/templates/`（inspector/renderer/models） | 占位符抽取 + **styleId**（非本地化 name）映射；**模板是不可信输入**（拒 .docm/宏/OLE/zip 炸弹/路径穿越，剥离外部关系）；路线图 §4.4 的 8 条工程坑逐条规避；**不碰引用引擎**（参考文献由调用方传入已 CSL 渲染行） |
+| **P1-B 检索源**（P0） | openalex_search / semantic_scholar / pubmed / source_registry | 三源统一协议；`MultiSourceLiteratureSource` 并发→**三级去重**（DOI→source_id→归一题名）→轮转→截断；**单源失败隔离**；各源独立节流（arXiv 3s / OpenAlex 0.15s+mailto / S2 1s / PubMed 0.34s）+ 短 TTL 缓存 |
+| **P1-C 账号体系**（P1） | email_token 表 + 迁移 + 4 端点 + EmailSender | **只存哈希**、单次使用、24h TTL、用途隔离；**密码重置恒定响应**（防枚举）；未配 SMTP 走 LoggingEmailSender，**不阻塞注册** |
+| **P1-D 限流配额**（P1） | rate_limit.py / quota.py / rate_limit_middleware.py | Lua 原子窗口；**fail-open 硬约束**（组件故障一律放行）+ 连续失败熔断；专用 Redis 客户端（1s 超时）；429 带 `Retry-After` |
+| **P1-E 导入**（P2） | csl/importers.py | `parse_bibtex`/`parse_ris` 与 exporters **round-trip 一致**（含中文）；非法输入给定位明确的异常，不静默返回半成品 |
+
+### 2. 过程中发现并修复的两个真实缺陷
+
+**① 强制下线时区缺陷（安全）**：`token_invalid_before` 由 SQLite 读回是 naive datetime，
+原代码 `naive.timestamp()` 按**本地时区**解释 → UTC+8 下失效时间被算成 8 小时前，
+**「重置密码后旧 token 应立即失效」被绕过**（UTC 容器恰好正确，行为随部署时区变化）。
+修法：新增 `security.utc_timestamp()`（naive 一律按 UTC 解释），deps/auth 两个消费点统一使用。
+
+**② 迁移漏列导致生产 500（严重）**：`EmailToken` 继承 `Base`，ORM 含 `created_at` **与**
+`updated_at`，但迁移只建了 `created_at`。SQLite 单测走 `Base.metadata.create_all`
+（**不经迁移**）发现不了，**只有真实 PostgreSQL 走 Alembic 才炸**：
+
+```
+ProgrammingError: column "updated_at" of relation "email_token" does not exist
+[SQL: UPDATE email_token SET used_at=..., updated_at=now() WHERE ...]
+```
+
+后果：生产上注册 / 重发验证邮件 / 密码重置申请**全部 500**（服务器端到端验收实测发现）。
+修法：补迁移 `f5c2a8d1b3e7` + 直接修正原迁移；新增
+`tests/test_migration_schema_consistency.py`（4 例）锁定**通用不变量**：
+迁移建出的列必须覆盖 ORM 全部列、每个 ORM 表都被某个迁移创建。
+
+### 3. 服务器端到端验收（真实 PostgreSQL + 真实 Redis）
+
+| 能力 | 结果 |
+| --- | --- |
+| 迁移 | `alembic current` → `f5c2a8d1b3e7 (head)`，单 head |
+| **P1-C 账号** | 注册 `201`、重发验证邮件 `200`、`/auth/me` `200`（修复前三者均 `500`） |
+| **P1-D 限流** | 连续 9 次错误登录 `401` → 第 10 次 **`429` + `Retry-After: 60`**；各动作独立限额生效（注册 5/3600s 在验收中被真实耗尽） |
+| health | `{"status":"ready","checks":{"database":"ok","redis":"ok","chroma":"ok"}}` |
+
+### 4. 门禁
+
+black/ruff 干净；`mypy` 0 错误（**159 文件**）；`pytest` **1999 passed / 8 skipped**；
+覆盖率 **90.00%**（从 89.64% 提升）。新增测试 381 例（1618 → 1999）。
+
+### 5. 遗留（不阻塞，下一轮）
+
+- 模板/导入的 **HTTP 端点**未接线（`POST /references/import`、模板上传/管理 API）——
+  本轮交付的是可复用的纯函数与领域模块；
+- S2 公共无 key 档实测持续 429（已按 R3 语义降级），**建议部署时注入
+  `SEMANTIC_SCHOLAR_API_KEY`**；
+- 限流/配额已就绪但**未挂到全部写接口**（当前覆盖登录/注册/建任务/上传/搜索/校验）；
+- `quota.daily_token_limit` 尚未在任务执行期真正扣减 token（当前只具备服务能力）。
+
 
 
 

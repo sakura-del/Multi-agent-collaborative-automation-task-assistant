@@ -21,11 +21,11 @@
 | 项 | 值 |
 | --- | --- |
 | 分支 | `main`（工作分支 `codex/plan3-literature-workflow` 与 main 同点） |
-| HEAD | #3 `42b5e54` → #5 `cde9592` → #4 M1 `ce86c57` → #6 `f1c9f78` → #7 `cdbcd8d` → #4 M2 `f0123d4` → #3 前端核验 `c270348` → #2 自动刷新 `a715398` → 配置优先级 `f943a44` → **#4 著者-出版年制 `deefaaa` + 剩余三项 `a986785`** |
+| HEAD | … → #2 自动刷新 `a715398` → 配置优先级 `f943a44` → #4 收尾 `deefaaa`/`a986785` → CI 修复 `f6ba56e`/`7c73cd4`/`3cfc60e` → **Phase 1 打地基 `d44282a` + 迁移修复 `112c398`** |
 | 冻结 tag | `defense-v1` |
 | Plan 状态 | Plan 2 / 3 / 4 / 5 **全部 Exit Gate PASSED** |
-| 产品化进度 | **Issue #2 / #3 / #4 / #5 / #6 / #7 全部关闭且遗留项清零**；配置优先级缺陷已修复 |
-| 后端测试 | **1618 passed**, 8 skipped；覆盖率 **89.64%**；`mypy` 0 错误（141 文件） |
+| 产品化进度 | **Issue #2 / #3 / #4 / #5 / #6 / #7 全部关闭且遗留项清零**；配置优先级缺陷已修复；**Phase 1 打地基五项已交付**（Word 模板 / 多源检索 / 账号体系 / 限流配额 / 参考文献导入） |
+| 后端测试 | **1999 passed**, 8 skipped；覆盖率 **90.00%**；`mypy` 0 错误（159 文件） |
 | 前端测试 | Vitest **112 passed**；Playwright E2E **4 passed**（桌面 + 移动双视口） |
 | CI | **6/6 作业全绿**（2026-10-19 修复；此前自 08-03 起连续失败） |
 | 服务器 | 已同步，五容器 healthy，`curl http://127.0.0.1:48080/api/v1/health/ready` → `{"status":"ready"}` |
@@ -134,6 +134,17 @@ docker compose build backend && docker compose up -d backend
 
 ### 6.1 产品化开发（按优先级）
 
+**Phase 1 · 打地基（2026-10-20 已交付五项）**：[计划](docs/superpowers/plans/2026-10-20-00-phase1-foundation-plan.md)
+
+| 项 | 状态 | 说明 |
+| --- | --- | --- |
+| P1-A Word 模板导入 + 一键切换 | ✅ 已交付 `d44282a` | `app/tools/templates/`：占位符抽取 + styleId 映射 + 模板安全校验（拒 .docm/宏/OLE/zip 炸弹）+ 8 条工程坑规避。**遗留**：HTTP 端点（上传/管理/渲染）未接线 |
+| P1-B 检索源扩展 | ✅ 已交付 `d44282a` | OpenAlex + S2 + PubMed + 多源聚合（三级去重、单源失败隔离、各源节流）。**遗留**：S2 需注入 `SEMANTIC_SCHOLAR_API_KEY`（公共档持续 429） |
+| P1-C 账号体系 | ✅ 已交付 `d44282a` + 修复 `112c398` | 邮箱验证 + 密码重置（只存哈希/单次使用/恒定响应）；未配 SMTP 不阻塞注册。**遗留**：前端页面未接 |
+| P1-D 限流 + 配额 | ✅ 已交付 `d44282a` | 中间件 + Redis/内存实现 + fail-open + 熔断；429 带 Retry-After。**遗留**：未覆盖全部写接口；token 配额未在执行期扣减 |
+| P1-E RIS/BibTeX 导入 | ✅ 已交付 `d44282a` | round-trip 与导出严格一致。**遗留**：`POST /references/import` 端点未接线 |
+
+**Issue 清单**（全部已关闭）：
 | Issue | 标题 | 优先级 | 说明 |
 | --- | --- | --- | --- |
 | [#3](https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant/issues/3) | ✅ 引用真实性校验（CrossRef/OpenAlex） | **P0** | **已全部交付**：后端 `42b5e54`（四态核验 + 导出统计 + 拦截开关）、**前端展示 `c270348`**（`ReferenceVerificationPanel` 四态计数/拦截状态/逐条徽标 + 明确空态；任务级 `verify_references` 开关，默认关闭以保 R6 离线零外呼）。计划：[后端](docs/superpowers/plans/2026-10-18-03-reference-authenticity-plan.md) / [前端](docs/superpowers/plans/2026-10-19-03b-frontend-verification-plan.md)。**遗留项已全部闭环**（`contact_email` 可经环境变量注入，见本表末行配置优先级修复） |
