@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import re
 import uuid
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Literal
 from uuid import UUID
@@ -477,11 +477,26 @@ class TaskExecution:
         logger.info("task_control", task_id=str(task_id), command=request.command.value)
         return snapshot
 
-    async def get_snapshot(self, user_id: UUID, task_id: UUID) -> TaskSnapshot:
-        """查询任务快照（owner-scoped；越权与不存在统一 404）。"""
+    async def get_snapshot(
+        self,
+        user_id: UUID,
+        task_id: UUID,
+        *,
+        workspace_ids: Sequence[UUID] = (),
+    ) -> TaskSnapshot:
+        """查询任务快照（**归属双轨**；越权与不存在统一 404）。
+
+        `workspace_ids` 是调用者所属的工作区 id（Phase 2 团队协作）。
+        **默认空序列 = 旧行为**（只认 owner），这样存量调用点（后台流程、
+        内部诊断脚本）不受影响。
+        """
         async with self._session_factory() as session:
             repo = TaskRepository(session)
-            task = await repo.get_for_user(user_id, task_id)
+            task = (
+                await repo.get_visible(user_id, workspace_ids, task_id)
+                if workspace_ids
+                else await repo.get_for_user(user_id, task_id)
+            )
             if task is None:
                 raise NotFoundException("任务不存在")
             return await self._build_snapshot(session, task)
@@ -492,10 +507,20 @@ class TaskExecution:
         *,
         skip: int = 0,
         limit: int = 20,
+        workspace_ids: Sequence[UUID] = (),
     ) -> list[TaskSnapshot]:
-        """分页列出当前用户的任务快照（HTTP 列表接口使用）。"""
+        """分页列出可见任务快照（HTTP 列表接口使用）。
+
+        `workspace_ids` 非空时按双轨可见性（个人 + 工作区）；为空时保持
+        旧行为（仅 owner）。
+        """
         async with self._session_factory() as session:
-            tasks = await TaskRepository(session).list_for_user(user_id, skip=skip, limit=limit)
+            repo = TaskRepository(session)
+            tasks = (
+                await repo.list_visible(user_id, workspace_ids, skip=skip, limit=limit)
+                if workspace_ids
+                else await repo.list_for_user(user_id, skip=skip, limit=limit)
+            )
             return [await self._build_snapshot(session, task) for task in tasks]
 
     async def events_after(

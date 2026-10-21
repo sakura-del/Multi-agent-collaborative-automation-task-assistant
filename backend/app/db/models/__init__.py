@@ -15,9 +15,13 @@
   user_template.py: USER_TEMPLATE（Phase 1 P1-A：用户上传的 Word 模板）
   screening.py:   SEARCH_LOG / SCREENING_RECORD / SCREENING_DECISION
                   （Phase 2：PRISMA 筛选工作台——检索日志/候选快照/追加式决策）
+  workspace.py:   WORKSPACE / WORKSPACE_MEMBER / WORKSPACE_INVITE
+                  （Phase 2：团队工作区 + 席位 + 邀请码）
+  annotation.py:  TASK_ANNOTATION（Phase 2：导师批注，段落指纹锚点）
 """
 
 from app.db.models.agent import Agent, AgentInteraction
+from app.db.models.annotation import TaskAnnotation
 from app.db.models.citation_style import CitationStyle
 from app.db.models.email_token import EmailToken
 from app.db.models.feedback import HumanFeedback
@@ -31,6 +35,7 @@ from app.db.models.screening import (
 from app.db.models.task import Subtask, Task, TaskDag
 from app.db.models.user import User
 from app.db.models.user_template import UserTemplate
+from app.db.models.workspace import Workspace, WorkspaceInvite, WorkspaceMember
 
 __all__ = [
     "Agent",
@@ -47,9 +52,13 @@ __all__ = [
     "SearchLog",
     "Subtask",
     "Task",
+    "TaskAnnotation",
     "TaskDag",
     "User",
     "UserTemplate",
     "ValidationResult",
     "VectorIndex",
+    "Workspace",
+    "WorkspaceInvite",
+    "WorkspaceMember",
 ]

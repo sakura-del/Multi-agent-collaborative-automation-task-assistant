@@ -6,12 +6,14 @@ import { ListFilter } from "lucide-vue-next";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
 import StatusBadge from "@/components/common/StatusBadge.vue";
+import AnnotationPanel from "@/components/collaboration/AnnotationPanel.vue";
 import NodeDetail from "@/components/tasks/NodeDetail.vue";
 import PlanPanel from "@/components/tasks/PlanPanel.vue";
 import TaskDag from "@/components/tasks/TaskDag.vue";
 import TaskLog from "@/components/tasks/TaskLog.vue";
 import TaskResult from "@/components/tasks/TaskResult.vue";
 import TaskToolbar from "@/components/tasks/TaskToolbar.vue";
+import { useAuthStore } from "@/stores/auth";
 import { useTaskStore } from "@/stores/tasks";
 import type { PlanNode, SubtaskStatus, TaskControl } from "@/api/types";
 import { formatDateTime } from "@/utils/task-status";
@@ -20,8 +22,12 @@ import { formatDateTime } from "@/utils/task-status";
 const props = defineProps<{ taskId: string }>();
 
 const store = useTaskStore();
+const auth = useAuthStore();
 const route = useRoute();
 const router = useRouter();
+
+/** 当前用户 id（批注面板据此决定「删除」按钮显隐；后端仍会校验）。 */
+const currentUserId = computed(() => auth.user?.id ?? undefined);
 
 const TABS = ["plan", "execution", "logs", "result"] as const;
 type TabKey = (typeof TABS)[number];
@@ -240,5 +246,12 @@ onBeforeUnmount(() => {
         description="任务执行完成后，这里会展示复盘结论、引用核验与导出入口。"
       />
     </div>
+
+    <!-- 导师批注（Phase 2）：任务级批注，与产出并列展示 -->
+    <AnnotationPanel
+      class="mt-4"
+      :task-id="props.taskId"
+      :current-user-id="currentUserId"
+    />
   </section>
 </template>

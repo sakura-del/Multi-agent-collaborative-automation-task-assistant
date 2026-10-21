@@ -7,6 +7,7 @@ import {
   Library,
   LogOut,
   Palette,
+  Users,
 } from "lucide-vue-next";
 import { useRouter } from "vue-router";
 
@@ -28,6 +29,7 @@ const NAV_ITEMS = [
   { name: "styles", label: "引用样式", icon: Palette },
   { name: "templates", label: "Word 模板", icon: FileText },
   { name: "reference-import", label: "导入文献", icon: FileInput },
+  { name: "workspaces", label: "团队", icon: Users },
   { name: "observability", label: "用量", icon: Activity },
 ] as const;
 

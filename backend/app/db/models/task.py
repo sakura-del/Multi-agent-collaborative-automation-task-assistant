@@ -1,8 +1,19 @@
 """TASK / SUBTASK / TASK_DAG 表：任务编排核心。
 
-- TASK：用户提交的顶层任务，按 user_id 隔离
+- TASK：用户提交的顶层任务，按 user_id 隔离；`workspace_id` 非空时对该工作区成员可见
 - SUBTASK：规划Agent拆解后的子任务，关联TASK与执行Agent
 - TASK_DAG：任务的DAG图结构（JSONB），与TASK 1:1
+
+## 任务归属双轨（Phase 2 团队工作区）
+
+| `workspace_id` | 含义 | 可见范围 |
+| --- | --- | --- |
+| `NULL` | 个人任务（**存量任务全部是这一类**） | 仅 `user_id` 本人 |
+| 非空 | 工作区任务 | 工作区内全部成员（按角色） |
+
+**关键不变量**：`workspace_id` 非空时 `user_id` 仍是**创建者**——配额按发起人
+扣（谁发起谁付费），不按工作区。这是有意的：本轮不改配额模型，
+否则「工作区任务谁付费」会变成需要单独设计的计费问题。
 """
 
 from __future__ import annotations
@@ -36,7 +47,13 @@ class Task(Base):
         ForeignKey("user.id", ondelete="CASCADE"),
         index=True,
         nullable=False,
-        comment="提交者ID（多用户隔离）",
+        comment="提交者ID（多用户隔离；也是配额扣减对象）",
+    )
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+        comment="工作区ID（NULL=个人任务；非空=工作区成员可见）",
     )
 
     title: Mapped[str] = mapped_column(String(256), nullable=False, comment="任务标题")

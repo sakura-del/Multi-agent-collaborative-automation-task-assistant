@@ -26,6 +26,7 @@ from app.core.config import get_settings
 from app.core.exceptions import ValidationException
 from app.core.quota import QuotaService
 from app.db.models.user import User
+from app.db.session import get_db
 from app.orchestration.contracts import TaskSnapshot, TaskStatus
 from app.orchestration.services.task_execution import TaskExecution
 from app.schemas.task import (
@@ -46,6 +47,29 @@ def get_task_execution(request: Request) -> TaskExecution:
     if not isinstance(execution, TaskExecution):
         raise RuntimeError("任务运行时未初始化")
     return execution
+
+
+async def get_visible_workspace_ids(
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    db: Annotated[Any, Depends(get_db)],
+) -> list[UUID]:
+    """当前用户所属的工作区 id 列表（任务归属双轨用）。
+
+    为什么单独抽成依赖：可见性口径要在**所有**任务读取端点一致生效
+    （列表、详情、事件、产物下载）。散落在各端点里手写查询，
+    漏一处就是一次越权。
+
+    返回空列表时，`TaskExecution` 会退化成旧的 owner-only 行为 ——
+    这也是未加入任何工作区的用户（绝大多数存量用户）走的最短路径。
+    """
+    from sqlalchemy import select
+
+    from app.db.models.workspace import WorkspaceMember
+
+    rows = await db.execute(
+        select(WorkspaceMember.workspace_id).where(WorkspaceMember.user_id == current_user.id)
+    )
+    return [row[0] for row in rows.all()]
 
 
 #: 单次文献综述任务的 token 预估（提交时先按此扣减，跑完再按实际用量校正）。
@@ -103,6 +127,7 @@ def get_quota_service(request: Request) -> QuotaService | None:
 ExecutionDep = Annotated[TaskExecution, Depends(get_task_execution)]
 CurrentUserDep = Annotated[User, Depends(get_current_active_user)]
 QuotaDep = Annotated["QuotaService | None", Depends(get_quota_service)]
+WorkspaceIdsDep = Annotated[list[UUID], Depends(get_visible_workspace_ids)]
 
 
 @router.post(
@@ -133,11 +158,14 @@ async def create_task(
 async def list_tasks(
     execution: ExecutionDep,
     current_user: CurrentUserDep,
+    workspace_ids: WorkspaceIdsDep,
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> list[TaskSummaryOut]:
-    """分页列出当前用户任务（按创建时间倒序）。"""
-    snapshots = await execution.list_tasks(current_user.id, skip=skip, limit=limit)
+    """分页列出可见任务（个人任务 + 我所属工作区的任务，按创建时间倒序）。"""
+    snapshots = await execution.list_tasks(
+        current_user.id, skip=skip, limit=limit, workspace_ids=workspace_ids
+    )
     return [
         TaskSummaryOut(
             task_id=snapshot.task_id,
@@ -157,9 +185,10 @@ async def get_task(
     task_id: UUID,
     execution: ExecutionDep,
     current_user: CurrentUserDep,
+    workspace_ids: WorkspaceIdsDep,
 ) -> TaskSnapshot:
-    """返回任务状态、规划、子任务与复盘报告。"""
-    return await execution.get_snapshot(current_user.id, task_id)
+    """返回任务状态、规划、子任务与复盘报告（个人任务或我所属工作区的任务）。"""
+    return await execution.get_snapshot(current_user.id, task_id, workspace_ids=workspace_ids)
 
 
 @router.post(

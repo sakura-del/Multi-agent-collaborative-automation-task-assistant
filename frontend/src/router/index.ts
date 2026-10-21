@@ -12,6 +12,8 @@ import TaskDetailView from "@/views/TaskDetailView.vue";
 import TaskListView from "@/views/TaskListView.vue";
 import TemplateView from "@/views/TemplateView.vue";
 import VerifyEmailView from "@/views/VerifyEmailView.vue";
+import WorkspaceDetailView from "@/views/WorkspaceDetailView.vue";
+import WorkspaceView from "@/views/WorkspaceView.vue";
 import { useAuthStore } from "@/stores/auth";
 
 // 页面：登录、任务列表、任务详情、知识库、引用样式、Word 模板、参考文献导入，
@@ -65,6 +67,13 @@ export const router = createRouter({
         { path: "references/import", name: "reference-import", component: ReferenceImportView },
         // 用量与健康看板（Phase 2 可观测性）：owner-scoped，只显示自己的任务统计
         { path: "observability", name: "observability", component: ObservabilityView },
+        // 团队工作区（Phase 2 协作）：列表 + 成员/席位管理
+        { path: "workspaces", name: "workspaces", component: WorkspaceView },
+        {
+          path: "workspaces/:id",
+          name: "workspace-detail",
+          component: WorkspaceDetailView,
+        },
         // 登录后也可从这里重发验证邮件（无 token 时展示重发按钮）
         { path: "account/verify", name: "account-verify", component: VerifyEmailView },
       ],

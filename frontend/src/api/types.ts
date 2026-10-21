@@ -431,3 +431,68 @@ export interface ObservabilityOverview {
   };
   recent: ObservabilityRecentTask[];
 }
+
+// ===== 团队工作区 + 席位（Phase 2）=====
+
+/** 工作区角色（权限从高到低） */
+export type WorkspaceRole = "owner" | "admin" | "member" | "viewer";
+
+/** 工作区 */
+export interface Workspace {
+  workspace_id: string;
+  name: string;
+  slug: string;
+  owner_id: string;
+  seat_limit: number;
+  /** 已用席位（owner 也占一个） */
+  seat_used: number;
+  /** 我在该工作区的角色；非成员时为 null */
+  my_role: WorkspaceRole | null;
+  created_at: string;
+}
+
+/** 成员 = 一个席位 */
+export interface WorkspaceMember {
+  user_id: string;
+  username: string;
+  email: string;
+  role: WorkspaceRole;
+  joined_at: string;
+}
+
+/** 一次性邀请码（只在创建时返回） */
+export interface WorkspaceInvite {
+  invite_id: string;
+  code: string;
+  role: WorkspaceRole;
+  expires_at: string;
+  workspace_id: string;
+}
+
+// ===== 导师批注（Phase 2）=====
+
+export type AnnotationAnchorType = "task" | "paragraph" | "citation";
+
+/** 批注 */
+export interface Annotation {
+  annotation_id: string;
+  task_id: string;
+  author_id: string;
+  author_name: string | null;
+  anchor_type: AnnotationAnchorType;
+  anchor_key: string | null;
+  content: string;
+  resolved_at: string | null;
+  created_at: string;
+}
+
+/** 段落批注的锚点匹配状态；matched=false 表示原文已变更 */
+export interface ParagraphMatch {
+  annotation_id: string;
+  fingerprint: string;
+  content: string;
+  author_id: string;
+  matched: boolean;
+  paragraph_index: number | null;
+  resolved: boolean;
+}

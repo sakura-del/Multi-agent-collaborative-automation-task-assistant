@@ -9,11 +9,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import and_, delete, or_, select, update
 
 from app.db.models.task import Subtask, Task, TaskDag
 from app.db.repositories.base import BaseRepository
@@ -34,18 +35,85 @@ class TaskRepository(BaseRepository[Task]):
     model = Task
 
     async def get_for_user(self, user_id: UUID, task_id: UUID) -> Task | None:
-        """查询某用户的任务；不属于该用户时返回 None（与不存在同语义）。"""
+        """查询某用户的任务；不属于该用户时返回 None（与不存在同语义）。
+
+        **语义：仅 owner**（不认工作区共享）。需要双轨可见性时用 `get_visible`。
+        """
         result = await self.db.execute(
             select(Task).where(Task.id == task_id, Task.user_id == user_id)
         )
         return result.scalar_one_or_none()
 
     async def list_for_user(self, user_id: UUID, *, skip: int = 0, limit: int = 20) -> list[Task]:
-        """分页列出某用户的任务，按创建时间倒序。"""
+        """分页列出某用户的任务，按创建时间倒序。
+
+        **语义：仅 owner**（不含工作区共享任务）。内部调用点（编排层按 task_id
+        取任务）依赖这个语义，不要改成 `list_visible`。
+        """
         safe_limit = max(1, min(limit, 100))
         result = await self.db.execute(
             select(Task)
             .where(Task.user_id == user_id)
+            .order_by(Task.created_at.desc(), Task.id.desc())
+            .offset(max(0, skip))
+            .limit(safe_limit)
+        )
+        return list(result.scalars().all())
+
+    # ===== 归属双轨（Phase 2 团队工作区）=====
+
+    @staticmethod
+    def _visible_clause(user_id: UUID, workspace_ids: Sequence[UUID]) -> Any:
+        """可见性条件：个人任务（workspace_id IS NULL 且是我的）
+        或 工作区任务（workspace_id 在我的工作区列表里）。
+
+        ## 关于 workspace_id IS NULL（重要，别当冗余删掉）
+
+        在当前 OR 结构里它**不是正确性必需**：同事的私人任务 user_id
+        不等于我、workspace_id 又是 NULL（不在我的工作区列表里），两个分支
+        都不匹配 —— 实测把 is_(None) 删掉后 9 条可见性测试**全绿**。
+
+        保留它是为了**表达意图**：这条分支的语义是「我的个人任务」，
+        不是「我创建的任何任务」。将来若引入「任务转移归属」或「工作区任务
+        也保留 owner 但需区分个人/共享」，少了这个条件就会静默泄漏。
+
+        > 已试过写一条「能区分它」的回归测试，结论是**在当前语义下不可能**
+        > （两个分支天然互斥）。按 AGENTS #13，抓不住的断言不留在测试里装门面，
+        > 改为在这里写清理由。
+        """
+        personal = and_(Task.user_id == user_id, Task.workspace_id.is_(None))
+        if not workspace_ids:
+            return personal
+        return or_(personal, Task.workspace_id.in_(list(workspace_ids)))
+
+    async def get_visible(
+        self, user_id: UUID, workspace_ids: Sequence[UUID], task_id: UUID
+    ) -> Task | None:
+        """按双轨可见性取任务；不可见返回 `None`（端点层转 404）。"""
+        result = await self.db.execute(
+            select(Task).where(
+                Task.id == task_id,
+                self._visible_clause(user_id, workspace_ids),
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def list_visible(
+        self,
+        user_id: UUID,
+        workspace_ids: Sequence[UUID],
+        *,
+        skip: int = 0,
+        limit: int = 20,
+    ) -> list[Task]:
+        """列出可见任务（个人 + 工作区），按创建时间倒序。
+
+        排序键带 `id`：同事务写入的行 `created_at` 相同（AGENTS #14）。
+        """
+        safe_limit = max(1, min(limit, 100))
+        result = await self.db.execute(
+            select(Task)
+            .where(self._visible_clause(user_id, workspace_ids))
             .order_by(Task.created_at.desc(), Task.id.desc())
             .offset(max(0, skip))
             .limit(safe_limit)

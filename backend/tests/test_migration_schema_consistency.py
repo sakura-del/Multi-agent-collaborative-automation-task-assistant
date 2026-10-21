@@ -281,3 +281,105 @@ class TestTaskQuotaSettlementMigration:
 
         assert "used_tokens" not in columns
         assert "quota_settled" not in columns
+
+
+class TestWorkspaceMigration:
+    """`e7a1c4b9f2d6`（团队工作区 + 批注）的行为与幂等。
+
+    这个迁移有三个**必须在生产上成立**的性质：
+
+    1. **幂等**：全新部署时表已由 ORM 建好；已部署库缺表。两条路径都要能跑通。
+    2. **存量任务 `workspace_id` 保持 NULL**：语义是「个人任务」，不能回填，
+       否则存量任务会突然对某些工作区可见（越权）。
+    3. **downgrade 逆序删表**：先删有外键指向 `workspace` 的表，否则约束会挡住。
+    """
+
+    MIGRATION = VERSIONS_DIR / "e7a1c4b9f2d6_add_workspace_and_annotation.py"
+
+    @staticmethod
+    def _base_ddl() -> list[str]:
+        """最小前置结构：user + task（迁移要建外键指向它们）。"""
+        return [
+            'CREATE TABLE "user" (id CHAR(32) PRIMARY KEY, username VARCHAR(64))',
+            "CREATE TABLE task (id CHAR(32) PRIMARY KEY, user_id CHAR(32), "
+            "status VARCHAR(16), title VARCHAR(256))",
+        ]
+
+    def test_creates_all_tables_and_task_column(self) -> None:
+        engine = create_engine("sqlite://")
+        with engine.begin() as connection:
+            for ddl in self._base_ddl():
+                connection.exec_driver_sql(ddl)
+            connection.exec_driver_sql("INSERT INTO task (id, status) VALUES ('t1', 'completed')")
+            context = MigrationContext.configure(connection)
+            with Operations.context(context):
+                _load(self.MIGRATION).upgrade()
+
+            tables = set(inspect(connection).get_table_names())
+            task_columns = {c["name"] for c in inspect(connection).get_columns("task")}
+            legacy = connection.exec_driver_sql(
+                "SELECT workspace_id FROM task WHERE id = 't1'"
+            ).scalar()
+        engine.dispose()
+
+        assert {"workspace", "workspace_member", "workspace_invite", "task_annotation"} <= tables
+        assert "workspace_id" in task_columns
+        # **存量任务必须保持 NULL**（= 个人任务），不能被回填成某个工作区
+        assert legacy is None
+
+    def test_upgrade_is_idempotent_when_tables_exist(self) -> None:
+        """表与列已存在（全新部署路径）时不得报错。"""
+        engine = create_engine("sqlite://")
+        with engine.begin() as connection:
+            for ddl in self._base_ddl():
+                connection.exec_driver_sql(ddl)
+            context = MigrationContext.configure(connection)
+            with Operations.context(context):
+                module = _load(self.MIGRATION)
+                module.upgrade()
+                module.upgrade()  # 第二次必须静默通过
+        engine.dispose()
+
+    def test_downgrade_removes_everything(self) -> None:
+        engine = create_engine("sqlite://")
+        with engine.begin() as connection:
+            for ddl in self._base_ddl():
+                connection.exec_driver_sql(ddl)
+            context = MigrationContext.configure(connection)
+            with Operations.context(context):
+                module = _load(self.MIGRATION)
+                module.upgrade()
+                module.downgrade()
+
+            tables = set(inspect(connection).get_table_names())
+            task_columns = {c["name"] for c in inspect(connection).get_columns("task")}
+        engine.dispose()
+
+        assert "workspace" not in tables
+        assert "workspace_member" not in tables
+        assert "workspace_invite" not in tables
+        assert "task_annotation" not in tables
+        assert "workspace_id" not in task_columns
+
+    def test_migration_matches_orm_metadata(self) -> None:
+        """迁移建出来的结构必须与 ORM 一致（`email_token` 缺陷的通用不变量）。"""
+        from app.db.models.annotation import TaskAnnotation
+        from app.db.models.workspace import Workspace, WorkspaceInvite, WorkspaceMember
+
+        engine = create_engine("sqlite://")
+        with engine.begin() as connection:
+            for ddl in self._base_ddl():
+                connection.exec_driver_sql(ddl)
+            context = MigrationContext.configure(connection)
+            with Operations.context(context):
+                _load(self.MIGRATION).upgrade()
+
+            inspector = inspect(connection)
+            for model in (Workspace, WorkspaceMember, WorkspaceInvite, TaskAnnotation):
+                migrated = {c["name"] for c in inspector.get_columns(model.__tablename__)}
+                expected = set(model.__table__.columns.keys())
+                assert migrated == expected, (
+                    f"{model.__tablename__} 迁移与 ORM 不一致："
+                    f"缺 {expected - migrated}，多 {migrated - expected}"
+                )
+        engine.dispose()

@@ -1,0 +1,347 @@
+<script setup lang="ts">
+import { computed, onMounted, ref } from "vue";
+import { Check, Copy, Plus, Users } from "lucide-vue-next";
+
+import EmptyState from "@/components/common/EmptyState.vue";
+import ErrorBanner from "@/components/common/ErrorBanner.vue";
+import { Badge, type BadgeVariants } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  acceptInvite,
+  createInvite,
+  createWorkspace,
+  listWorkspaces,
+} from "@/api/collaboration";
+import type { Workspace, WorkspaceRole } from "@/api/types";
+
+/**
+ * 团队工作区（Phase 2）：我的团队列表 + 创建 + 用邀请码加入。
+ *
+ * ## 席位是计费单位
+ *
+ * `seat_used / seat_limit` 必须显式展示 —— 机构版按席位收费，用户要能自己
+ * 看到「还能拉几个人」。这也是产品差异点（竞品常把席位藏在后台）。
+ *
+ * ## 为什么邀请码显示后要能复制
+ *
+ * SMTP 未配齐，邀请靠复制粘贴传递。码**只在生成时返回一次**（后端不提供
+ * 列表接口），所以生成后必须立刻给复制按钮，否则用户关掉弹层就丢了。
+ *
+ * ⚠️ 测试契约：`workspaces-empty` / `workspaces-error` / `workspace-row-<id>` /
+ * `workspace-create-form` / `workspace-invite-input` / `workspace-invite-submit` /
+ * `workspace-new-invite`。
+ */
+const workspaces = ref<Workspace[]>([]);
+const loading = ref(false);
+const error = ref<string | null>(null);
+const success = ref<string | null>(null);
+
+const showCreate = ref(false);
+const newName = ref("");
+const newSlug = ref("");
+const newSeatLimit = ref(5);
+const creating = ref(false);
+
+const inviteCode = ref("");
+const joining = ref(false);
+
+/** 刚生成的邀请码（只显示一次）。 */
+const generatedInvite = ref<{ workspaceId: string; code: string; role: string } | null>(null);
+const copied = ref(false);
+
+const ROLE_LABELS: Record<WorkspaceRole, string> = {
+  owner: "拥有者",
+  admin: "管理员",
+  member: "成员",
+  viewer: "只读",
+};
+
+const ROLE_TONE: Record<WorkspaceRole, NonNullable<BadgeVariants["variant"]>> = {
+  owner: "default",
+  admin: "secondary",
+  member: "muted",
+  viewer: "outline",
+};
+
+const isEmpty = computed(() => workspaces.value.length === 0);
+
+onMounted(() => {
+  void refresh();
+});
+
+async function refresh() {
+  loading.value = true;
+  error.value = null;
+  try {
+    workspaces.value = await listWorkspaces();
+  } catch (err) {
+    error.value = (err as Error).message || "工作区加载失败";
+  } finally {
+    loading.value = false;
+  }
+}
+
+/** slug 从名字自动派生（用户可改）。只保留小写字母/数字/连字符。 */
+function syncSlug() {
+  if (newSlug.value.trim()) {
+    return;
+  }
+  newSlug.value = newName.value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64);
+}
+
+async function submitCreate() {
+  if (!newName.value.trim() || !newSlug.value.trim()) {
+    error.value = "请填写团队名与标识";
+    return;
+  }
+  creating.value = true;
+  error.value = null;
+  try {
+    const workspace = await createWorkspace({
+      name: newName.value.trim(),
+      slug: newSlug.value.trim(),
+      seat_limit: newSeatLimit.value,
+    });
+    success.value = `已创建「${workspace.name}」`;
+    showCreate.value = false;
+    newName.value = "";
+    newSlug.value = "";
+    newSeatLimit.value = 5;
+    await refresh();
+  } catch (err) {
+    error.value = (err as Error).message || "创建失败";
+  } finally {
+    creating.value = false;
+  }
+}
+
+async function submitJoin() {
+  const code = inviteCode.value.trim();
+  if (!code) {
+    error.value = "请粘贴邀请码";
+    return;
+  }
+  joining.value = true;
+  error.value = null;
+  try {
+    const workspace = await acceptInvite(code);
+    success.value = `已加入「${workspace.name}」`;
+    inviteCode.value = "";
+    await refresh();
+  } catch (err) {
+    error.value = (err as Error).message || "加入失败";
+  } finally {
+    joining.value = false;
+  }
+}
+
+async function generateInvite(workspaceId: string, role: "member" | "viewer" = "member") {
+  error.value = null;
+  copied.value = false;
+  try {
+    const invite = await createInvite(workspaceId, role);
+    generatedInvite.value = {
+      workspaceId,
+      code: invite.code,
+      role: invite.role,
+    };
+  } catch (err) {
+    error.value = (err as Error).message || "生成邀请码失败";
+  }
+}
+
+async function copyCode() {
+  if (!generatedInvite.value) {
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(generatedInvite.value.code);
+    copied.value = true;
+  } catch {
+    // 剪贴板被拒（非 HTTPS / 无权限）：码已经显示在页面上，用户可以手动选中复制
+    error.value = "复制失败，请手动选中邀请码复制";
+  }
+}
+
+/** 席位用量文案：满员要显式提示，否则用户不知道为什么加不进来。 */
+function seatText(workspace: Workspace): string {
+  const full = workspace.seat_used >= workspace.seat_limit;
+  return full
+    ? `席位已满 ${workspace.seat_used}/${workspace.seat_limit}`
+    : `席位 ${workspace.seat_used}/${workspace.seat_limit}`;
+}
+</script>
+
+<template>
+  <section>
+    <header class="mb-4 flex flex-wrap items-start justify-between gap-2">
+      <div>
+        <h1 class="text-lg font-semibold tracking-tight">团队</h1>
+        <p class="mt-0.5 text-sm text-muted-foreground">
+          团队工作区内的任务对所有成员可见；导师可作为「只读」成员查看并批注。
+        </p>
+      </div>
+      <div class="flex gap-1.5">
+        <Button variant="secondary" size="sm" @click="showCreate = !showCreate">
+          <Plus />
+          创建团队
+        </Button>
+      </div>
+    </header>
+
+    <ErrorBanner :message="error" testid="workspaces-error" />
+
+    <p
+      v-if="success"
+      class="mb-3 flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-2 text-sm"
+      data-test="workspaces-success"
+    >
+      <Check class="size-4 text-primary" />
+      {{ success }}
+    </p>
+
+    <!-- 创建表单 -->
+    <form
+      v-if="showCreate"
+      class="mb-4 rounded-lg border border-border bg-card p-3"
+      data-test="workspace-create-form"
+      @submit.prevent="submitCreate"
+    >
+      <div class="grid gap-2 sm:grid-cols-3">
+        <div>
+          <Label for="ws-name">团队名</Label>
+          <Input
+            id="ws-name"
+            v-model="newName"
+            placeholder="例如：张三课题组"
+            @blur="syncSlug"
+          />
+        </div>
+        <div>
+          <Label for="ws-slug">标识（URL 用）</Label>
+          <Input id="ws-slug" v-model="newSlug" placeholder="zhangsan-lab" />
+        </div>
+        <div>
+          <Label for="ws-seat">席位上限</Label>
+          <Input id="ws-seat" v-model.number="newSeatLimit" type="number" min="1" max="500" />
+        </div>
+      </div>
+      <div class="mt-2 flex gap-1.5">
+        <Button type="submit" size="sm" :disabled="creating">
+          {{ creating ? "创建中…" : "创建" }}
+        </Button>
+        <Button type="button" variant="ghost" size="sm" @click="showCreate = false">
+          取消
+        </Button>
+      </div>
+    </form>
+
+    <!-- 用邀请码加入 -->
+    <form
+      class="mb-4 flex flex-wrap items-end gap-1.5 rounded-lg border border-border bg-card p-3"
+      @submit.prevent="submitJoin"
+    >
+      <div class="min-w-56 flex-1">
+        <Label for="ws-invite">有邀请码？粘贴加入</Label>
+        <Input
+          id="ws-invite"
+          v-model="inviteCode"
+          placeholder="邀请码（一次性）"
+          data-test="workspace-invite-input"
+        />
+      </div>
+      <Button
+        type="submit"
+        variant="secondary"
+        size="sm"
+        :disabled="joining"
+        data-test="workspace-invite-submit"
+      >
+        {{ joining ? "加入中…" : "加入" }}
+      </Button>
+    </form>
+
+    <!-- 刚生成的邀请码：只显示一次，给复制按钮 -->
+    <div
+      v-if="generatedInvite"
+      class="mb-4 rounded-lg border border-primary/40 bg-primary/8 px-3 py-2.5"
+      data-test="workspace-new-invite"
+    >
+      <p class="text-xs text-primary">邀请码（只显示这一次，请立即复制发给对方）</p>
+      <div class="mt-1 flex flex-wrap items-center gap-2">
+        <code class="rounded bg-card px-2 py-1 text-sm">{{ generatedInvite.code }}</code>
+        <Badge variant="outline">{{ ROLE_LABELS[generatedInvite.role as WorkspaceRole] }}</Badge>
+        <Button variant="ghost" size="sm" @click="copyCode">
+          <Copy />
+          {{ copied ? "已复制" : "复制" }}
+        </Button>
+      </div>
+    </div>
+
+    <p v-if="loading" class="text-sm text-muted-foreground">加载中…</p>
+
+    <EmptyState
+      v-else-if="isEmpty && !error"
+      data-test="workspaces-empty"
+      title="还没有加入任何团队"
+      description="创建一个团队并邀请同学，或粘贴导师给的邀请码加入。"
+    />
+
+    <ul v-else class="grid gap-2 sm:grid-cols-2">
+      <li
+        v-for="workspace in workspaces"
+        :key="workspace.workspace_id"
+        class="rounded-lg border border-border bg-card p-3"
+        :data-test="`workspace-row-${workspace.workspace_id}`"
+      >
+        <div class="flex flex-wrap items-start justify-between gap-2">
+          <div class="min-w-0">
+            <RouterLink
+              :to="{ name: 'workspace-detail', params: { id: workspace.workspace_id } }"
+              class="text-sm font-medium hover:underline"
+            >
+              {{ workspace.name }}
+            </RouterLink>
+            <p class="mt-0.5 text-xs text-muted-foreground">{{ workspace.slug }}</p>
+          </div>
+          <Badge v-if="workspace.my_role" :variant="ROLE_TONE[workspace.my_role]">
+            {{ ROLE_LABELS[workspace.my_role] }}
+          </Badge>
+        </div>
+        <div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <span class="inline-flex items-center gap-1 tabular-nums">
+            <Users class="size-3.5" />
+            {{ seatText(workspace) }}
+          </span>
+          <Badge v-if="workspace.seat_used >= workspace.seat_limit" variant="warning">
+            需扩容
+          </Badge>
+        </div>
+        <div class="mt-2 flex gap-1.5">
+          <Button
+            v-if="workspace.my_role === 'owner' || workspace.my_role === 'admin'"
+            variant="secondary"
+            size="sm"
+            @click="generateInvite(workspace.workspace_id)"
+          >
+            生成邀请码
+          </Button>
+          <Button variant="ghost" size="sm" as-child>
+            <RouterLink
+              :to="{ name: 'workspace-detail', params: { id: workspace.workspace_id } }"
+            >
+              管理成员
+            </RouterLink>
+          </Button>
+        </div>
+      </li>
+    </ul>
+  </section>
+</template>
