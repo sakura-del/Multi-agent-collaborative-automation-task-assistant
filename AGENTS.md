@@ -21,13 +21,13 @@
 | 项 | 值 |
 | --- | --- |
 | 分支 | `main`（工作分支 `codex/plan3-literature-workflow` 与 main 同点） |
-| HEAD | … → Task 7 验收 `d0af591`/`4b9e1c0`/`e29dc54` → 配额结算 `8794cc1` → **E2E 收尾：max_results 夹紧 `d8d8c0e` + 固定账号/超时校准 `ff97ae3`** |
+| HEAD | … → 配额结算 `8794cc1` → E2E 收尾 `d8d8c0e`/`ff97ae3` → **Phase 2 可观测性 `9f42d7a` + nginx `/metrics` 代理 `664452f`** |
 | 冻结 tag | `defense-v1` |
-| Plan 状态 | Plan 2 / 3 / 4 / 5 **全部 Exit Gate PASSED**；**Phase 1 五项全部端到端可用且遗留清零**；**Phase 2 PRISMA 子计划 Task 1-7 全部交付、端到端可用** |
-| 产品化进度 | **Issue #2 / #3 / #4 / #5 / #6 / #7 全部关闭且遗留项清零**；**P1-D 配额遗留已修复**（四类终止路径都结算）；**LLM 给的 `max_results` 已夹紧**（不再因 60>50 让任务转人工）；**Phase 2 PRISMA 完成**（三张表 + Repository（`seq` 稳定排序）+ 服务层 + 渲染器 + 4 个 HTTP 端点 + **前端筛选工作台**；服务器 API 验收 33 项全绿、浏览器双视口走查通过）；**前端已全面迁移到 Tailwind v4 + shadcn-vue / Nova 设计系统** |
+| Plan 状态 | Plan 2 / 3 / 4 / 5 **全部 Exit Gate PASSED**；**Phase 1 五项全部端到端可用且遗留清零**；**Phase 2：PRISMA ✅ + 可观测性 ✅**（剩余：团队工作区 / 开放 API / 计费） |
+| 产品化进度 | **Issue #2~#7 全部关闭且遗留清零**；**P1-D 配额遗留已修复**；**`max_results` 已夹紧**；**PRISMA 完成**（三张表 + 服务层 + 渲染器 + 4 端点 + 前端工作台，API 验收 33 项全绿）；**可观测性完成**（8 个 Prometheus 指标 + `/metrics` + `/metrics` 经 nginx 代理 + 用户看板 `/observability`；标签无 PII、路由用模板控基数）；**前端已迁移到 Tailwind v4 + shadcn-vue / Nova** |
 | 数据库迁移 head | **`d4b1e7f2a8c3`**（task 配额结算两列） |
-| 后端测试 | **2213 passed**, 8 skipped；覆盖率 **89.85%**；`mypy` 0 错误（170 文件） |
-| 前端测试 | Vitest **181 passed**；**Playwright E2E 26 passed**（`literature-review` 4 + 其余 22，桌面 + 移动双视口） |
+| 后端测试 | **2264 passed**, 8 skipped；覆盖率 **89.95%**；`mypy` 0 错误（173 文件） |
+| 前端测试 | Vitest **190 passed**；**Playwright E2E 26 passed**（双视口） |
 | CI | **6/6 作业全绿**（2026-10-21 `9c1ff08` 复验；此前 10-19 修复过一次） |
 | 服务器 | 已同步，五容器 healthy，`curl http://127.0.0.1:48080/api/v1/health/ready` → `{"status":"ready"}` |
 
