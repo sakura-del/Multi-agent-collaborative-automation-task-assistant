@@ -14,6 +14,7 @@ from app.api.v1.endpoints import (
     citation_styles,
     health,
     references,
+    screening,
     task_ws,
     tasks,
     templates,
@@ -30,5 +31,6 @@ api_router.include_router(knowledge_router)
 api_router.include_router(citation_styles.router)
 api_router.include_router(templates.router)
 api_router.include_router(references.router)
+api_router.include_router(screening.router)
 api_router.include_router(tasks.router)
 api_router.include_router(task_ws.router)

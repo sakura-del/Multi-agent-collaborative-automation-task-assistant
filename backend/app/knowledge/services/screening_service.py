@@ -3,11 +3,15 @@
 职责：
 1. `record_search`：把一次检索落成**可复现日志 + 结果快照**（跨源去重）；
 2. `decide`：追加一条决策，按结论推进 `current_stage`；
-3. `prisma_counts`：由明细**派生** PRISMA 各阶段计数（不落库）。
+3. `prisma_counts`：由明细**派生** PRISMA 各阶段计数（不落库）；
+4. `ensure_task_owned` / `get_owned_record`：筛选数据的**归属校验**。
 
 去重口径与 `app.tools.literature.source_registry._merge_deduped` **完全一致**：
 `DOI → source_id → 归一化题名`。跨源同一条文献只落一条快照，否则 PRISMA 的
 「去重后记录数」会失真。
+
+事务边界：本层负责 `commit`（Repository 只 flush），与 `citation_style_service`
+等既有服务一致——端点层不碰私有 session。
 """
 
 from __future__ import annotations
@@ -29,6 +33,7 @@ from app.db.models.screening import (
     SearchLog,
 )
 from app.db.repositories.screening import ScreeningRepository
+from app.db.repositories.task import TaskRepository
 from app.tools.literature.models import LiteratureRecord
 
 #: 从 `source_url` 提取规范 DOI 链接（与 `source_registry` 同正则）。
@@ -165,7 +170,27 @@ class ScreeningService:
                     current_stage=DecisionStage.TITLE_ABSTRACT.value,
                 )
             )
+        # 事务边界在本层（Repository 只 flush）：日志与快照必须原子落库
+        await self._db.commit()
         return log
+
+    # ===== 归属校验（筛选数据跟着任务走，任务跟着用户走）=====
+
+    async def ensure_task_owned(self, user_id: uuid.UUID, task_id: uuid.UUID) -> None:
+        """校验任务属于该用户；否则抛 `NotFoundException`。
+
+        **用 404 而不是 403**：403 等于告诉调用方「这个 id 存在」，
+        会泄漏他人任务的存在性（与既有模板/样式端点的口径一致）。
+        """
+        task = await TaskRepository(self._db).get_for_user(user_id, task_id)
+        if task is None:
+            raise NotFoundException("任务不存在")
+
+    async def get_owned_record(self, user_id: uuid.UUID, record_id: uuid.UUID) -> ScreeningRecord:
+        """取记录并校验其所属任务归该用户；不通过时 404。"""
+        record = await self.get_record(record_id)
+        await self.ensure_task_owned(user_id, record.task_id)
+        return record
 
     # ===== 查询 =====
 
@@ -216,6 +241,9 @@ class ScreeningService:
             if next_stage is not None:
                 record.current_stage = next_stage.value
                 await self._db.flush()
+        # 事务边界在本层：决策行与阶段推进必须一起落库，否则会出现
+        # 「决策已记录但阶段没前进」的不一致状态
+        await self._db.commit()
         return record
 
     # ===== PRISMA 计数（派生，不落库）=====
