@@ -2120,6 +2120,91 @@ PRISMA 验收脚本复跑 **33 项全绿**（无回归）；筛选工作台 E2E 
 
 ---
 
+## E2E 套件收尾（2026-10-21，`d8d8c0e` + `ff97ae3`）
+
+**目标**：把 `literature-review.spec.ts`（Task 7 遗留的唯一未闭环项）跑通。
+
+### 1. 暴露的真实缺陷：LLM 给的 `max_results` 未夹紧（`d8d8c0e`）
+
+首次重跑失败在「结果 Tab 一直 disabled」。查后端日志找到根因：
+
+```
+agent_execute_failed error="1 validation error for LiteratureSearch
+  max_results: Input should be less than or equal to 50, input_value=60"
+→ retry_exhausted attempts=4 → subtask n1 waiting_human
+→ 任务 d99795a1 停在 waiting_human，后续 11 个节点从未开始
+```
+
+**根因**：`_execute_search` 里 `int(node.input.get("max_results", 10))` **直接透传
+LLM 规划给的数字**，而 `LiteratureSearch.max_results` 契约是 `le=50`。
+LLM 把用户说的"找 60 篇"直接写成 60 是**常态**，不是异常。
+
+后果链：pydantic 校验错 → 执行器重试 4 次（换策略也改不了这个数字）
+→ 节点转 `waiting_human` → 任务永远跑不到 completed → 用户只看到"卡住"。
+
+**修法**：
+- `models.py` 导出 `MAX_SEARCH_RESULTS=50` / `MIN_SEARCH_RESULTS=1`（契约与调用方共用）
+- `literature_review.clamp_max_results()`：能解析成整数则夹到 `[1,50]`；
+  解析不了（None/非数字字符串/布尔）退回默认 10
+- `_execute_search` 改用它
+
+**为什么不报错而是夹紧**：LLM 不遵守契约是常态；让整篇综述因为一个
+**可安全降级**的数字失败，是可用性缺陷。"最多取 50 条"在 PRISMA 与
+用户体验上都完全可接受。
+
+**测试诚实性**：回退 clamp → 3 例变红（已验证）。
+
+### 2. E2E 自身的两个问题（`ff97ae3`）
+
+**① 账号注册撞限流**：`auth_register` 是 5 次/3600s，而 spec 有 2 用例 × 2 视口
+= 4 次注册/轮次，连跑两轮必死（实测第二轮全部卡在登录页 `remaining=0`）。
+原实现的"重试 6×10s"对 1 小时窗口毫无意义。
+→ 改 `ensureSignedIn()`：**先试登录，登不进才注册**；账号固定
+`e2efull` / `e2ereconn`（用例间隔离）；失败时抛**带页面提示原文的可读错误**。
+
+**② 阶段超时比流程本身短**：内层 `tab-result` 等 10 分钟，而整条流程在服务器上
+需要 13 分钟 → **任务明明 completed，用例却报超时**（误报）。
+实测：规划 ~1.5min、执行 ~10min、复盘 ~2min。
+→ 改为具名常量 `PLANNING_TIMEOUT` 5min / `EXECUTION_TIMEOUT` 20min /
+`STEP_TIMEOUT` 2min / `WORKFLOW_TIMEOUT` 25min，注释写明实测依据。
+
+### 3. 验证结果
+
+| 套件 | 结果 |
+| --- | --- |
+| `literature-review.spec.ts` · chromium（2 例） | **2 passed**（13.4 min） |
+| `literature-review.spec.ts` · mobile-chrome（2 例） | **2 passed**（16.3 min） |
+| `phase1-pages` + `screening-workbench` + `account-lifecycle` | **22 passed** |
+
+**最终端到端验收**（真实模型、真实 PostgreSQL，任务 `863e8e56`）：
+
+```
+规划 → waiting_approval（revision=1）
+确认执行 → HTTP 200（重新预扣生效）
+任务 → completed，6/6 节点完成
+产物 → 2/2 下载成功（Markdown 14,306 B / DOCX 42,150 B）
+PRISMA → HTTP 200，Mermaid 以 flowchart TD 开头
+```
+
+### 4. 数据清理与核对（AGENTS #11 / #15）
+
+本轮清理删除了所有 `e2e%` 账号及其任务/文档（34 个账号、35 个任务、18 篇文档），
+**演示数据零损失**：
+
+| 项 | 基准 | 清理后 |
+| --- | --- | --- |
+| demo 任务 | 27 | **27** |
+| demo 冻结语料 | 10 | **10**（另有 1 篇历史「向量入库诊断」，非本轮产生） |
+| `literature-demo*` / `gate*` 各账号文档 | 各 10 | **各 10 全部完好** |
+| e2e 账号 | — | **0** |
+| quota key | — | **0** |
+
+> 注意：`knowledge_docs` 从 118 → 104、`tasks` 从 77 → 51，删掉的全是 e2e 账号
+> 上传的样例文档与历史 E2E 任务。**判断依据不是总数而是归属**——逐账号核对后
+> demo 与 8 个 literature-* 演示账号数据完整。
+
+---
+
 ## 前端设计系统改造（2026-10-20）
 
 **目标**：统一设计语言 + 技术栈锁定，让任何一次改动（甚至 oneshot）都产出风格一致的界面。
