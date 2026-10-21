@@ -132,6 +132,7 @@ docker compose build backend && docker compose up -d backend
 | 12 | 生产库**没有** `DELETE /tasks/{id}`（返回 405），探针任务要直接清库 | 清理顺序：`screening_decision` → `screening_record` → `search_log` → `task`（外键依赖） |
 | 13 | **回归测试必须验证「回退修复就失败」** | 2026-10-21 踩到：为两个前端时序缺陷写的「回归测试」，把修复回退后**仍然全绿**（`flushPromises()` 观测不到中间帧），属于假测试。做法：临时回退修复 → 跑测试确认变红 → 恢复实现。抓不住的断言要**删掉**而不是留着装门面 |
 | 14 | **只按 `created_at` 排序 = 顺序不稳定** | `created_at` 由 `server_default now()` 生成，**同一事务写入的多行时间戳完全相同**，PostgreSQL 对并列行返回任意顺序。已踩两次：`screening_decision`（用 `seq` 修）、`screening_record`（用 `(created_at, id)` 修）。凡「同事务批量插入 + 分页/列表」的表，排序键必须带**唯一列** |
+| 15 | **删探针任务会留下未结算的配额预扣** | 配额结算靠 `task.quota_settled` 标记；**直接 `DELETE FROM task` 跳过了结算**，Redis 里预扣的 100k（`quota:{user_id}:{UTC日期}`）会残留。实测：删掉 2 个 E2E 探针后配额仍占 200k。清理脚本应额外 `redis-cli DEL` 当日 quota key，并回查 `KEYS 'quota:*'` 与 `GET` 值 |
 
 ---
 
