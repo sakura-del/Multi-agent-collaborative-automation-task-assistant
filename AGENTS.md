@@ -21,12 +21,12 @@
 | 项 | 值 |
 | --- | --- |
 | 分支 | `main`（工作分支 `codex/plan3-literature-workflow` 与 main 同点） |
-| HEAD | … → PRISMA Task 2 `09729da`/`11f46ca` → Task 3 `db2e3b6` → **Task 4 `3c8aa53`** |
+| HEAD | … → PRISMA Task 4 `3c8aa53` → **前端设计系统 M2 完成 `c89ade4` → FilePicker `1096380`** |
 | 冻结 tag | `defense-v1` |
 | Plan 状态 | Plan 2 / 3 / 4 / 5 **全部 Exit Gate PASSED**；**Phase 1 五项全部端到端可用且遗留清零**；**Phase 2 进行中**（PRISMA 子计划 Task 4/7 已完成） |
-| 产品化进度 | **Issue #2 / #3 / #4 / #5 / #6 / #7 全部关闭且遗留项清零**；配置优先级缺陷已修复；Phase 1 五项端到端可用；**Phase 2 PRISMA 数据层 + Repository + 服务层 + 渲染器已就位**（三张表 + 迁移 `c9f6a2d4e1b7`；追加式决策、`seq` 稳定排序、双人分歧识别、三级去重口径一致、PRISMA 计数派生且流程闭合、Markdown/Mermaid 渲染含 golden 与真实解析器验证） |
+| 产品化进度 | **Issue #2 / #3 / #4 / #5 / #6 / #7 全部关闭且遗留项清零**；配置优先级缺陷已修复；Phase 1 五项端到端可用；**Phase 2 PRISMA 数据层 + Repository + 服务层 + 渲染器已就位**；**前端已全面迁移到 Tailwind v4 + shadcn-vue / Nova 设计系统**（8 页 + 13 组件，`<style scoped>` 清零，CSS −34%） |
 | 后端测试 | **2159 passed**, 8 skipped；覆盖率 **90.00%**；`mypy` 0 错误（168 文件） |
-| 前端测试 | Vitest **156 passed**；Playwright E2E **20 passed**（Phase 1 三页 × 桌面 + 移动双视口） |
+| 前端测试 | Vitest **156 passed**；Playwright E2E **20 passed**（桌面 + 移动双视口，含文件上传） |
 | CI | **6/6 作业全绿**（2026-10-19 修复；此前自 08-03 起连续失败） |
 | 服务器 | 已同步，五容器 healthy，`curl http://127.0.0.1:48080/api/v1/health/ready` → `{"status":"ready"}` |
 
@@ -68,7 +68,7 @@ cd 'E:\Multi-agent collaborative automation task assistant\backend'
 .\.venv\Scripts\python.exe -m pytest tests -q --basetemp="$env:TEMP\pytest-dsh"
 ```
 
-- 前端：`cd frontend && pnpm test` / `pnpm build`
+- 前端（**只用 npm**，见 §6.5.6）：`cd frontend && npm run test` / `npm run build`
 - 本机**无法访问** `model.rhzy.ai`（直连 reset / 代理 TLS 失败）→ **真实模型实验只能在服务器跑**
 
 ### 4.2 服务器（ylin@10.0.10.2，Ubuntu 24.04）
@@ -261,20 +261,46 @@ frontend/src/
 装完依赖必须把 `package-lock.json` 一起提交，否则 CI/Docker 会因锁文件与
 `package.json` 不同步而失败。
 
-### 6.5.5 迁移状态（进行中）
-
-> Phase 1 的前端页面是**手写 CSS**（`main.css` 8 个 token）。正在迁移到本规范。
+### 6.5.5 迁移状态（**M2 已完成**）
 
 | 阶段 | 内容 | 状态 |
 | --- | --- | --- |
-| M0 | 基础设施：Tailwind v4 + shadcn-vue + tokens + `cn()` | 🚧 进行中 |
-| M1 | 基础组件：Button / Input / Card / Badge / Alert / Dialog 等 | 待做 |
-| M2 | 页面迁移：Login → TaskList → TaskDetail → Knowledge → Style → Template → Import → 账号两页 | 待做 |
-| M3 | 新页面直接用新规范（Phase 2 的 PRISMA 工作台等） | 待做 |
-| M4 | 删除 `main.css` 里的旧 `.btn`/`.badge`/`.input` 类，确认无引用 | 待做 |
+| M0 | 基础设施：Tailwind v4 + tokens + `cn()` | ✅ |
+| M1 | 基础组件：Button/Input/Label/Card/Badge/Alert/EmptyState/FilePicker | ✅ |
+| M2 | 页面迁移（8 页 + 13 业务组件） | ✅ **8/8 完成** |
+| M3 | 新页面直接用新规范（Phase 2 PRISMA 工作台） | ✅ 规则生效 |
+| M4 | 删除 `main.css` 旧工具类 | ✅ 完成（无残留引用） |
 
-**迁移期间规则**：旧页面允许暂时保留手写类，但**新代码一律用新规范**；
-不得在迁移中途引入第三套写法。
+**现状**：24 个 Vue 文件的 `<style scoped>` **已全部清零**；
+`main.css` 只剩 tokens 与 `@theme` 映射。
+**新增代码一律按本节规范，不要再写手写 CSS。**
+
+**两个必须遵守的细节**
+
+1. **绝不动态拼接 Tailwind 类名**：`stroke-${tone}`、`badge--${status}` 这类写法
+   不会被 Tailwind 的静态扫描识别，样式会**静默丢失**（不报错）。必须用查表式
+   字面量映射：
+
+   ```ts
+   const TONE_CLASS = { neutral: "stroke-border", active: "stroke-primary/50" }
+   ```
+
+2. **测试用 `data-test` 而非样式类定位**：类名是版式细节，改版式不该弄坏测试。
+   用 `[data-test="plan-approve"]`，不要用 `.plan-panel__actions button`。
+
+**组件清单**
+
+| 组件 | 用途 |
+| --- | --- |
+| `Button` | variant: default / secondary / outline / ghost / destructive / link；size: sm / default / lg / icon / icon-sm |
+| `Input` / `Label` | 表单输入与标签 |
+| `Card` + `CardHeader` / `CardTitle` / `CardContent` | 卡片容器 |
+| `Badge` | variant: default / secondary / outline / success / warning / destructive / muted |
+| `Alert` | variant: default / destructive / success / warning / muted |
+| `EmptyState`（common） | 空态（必须给「下一步做什么」的引导，不能只写「暂无数据」） |
+| `ErrorBanner`（common） | `Alert` 包装，保留 `testid` 默认值 `error-banner` |
+| `FilePicker`（common） | 文件选择（解决原生 file input 的英文文案问题） |
+| `StatusBadge`（common） | 业务状态 → Badge 变体映射 |
 
 ---
 

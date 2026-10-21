@@ -1827,21 +1827,79 @@ RESULT: PASS
 根 `.gitignore` 给 `dist/` `lib/` 加注释说明是通用模式且曾误伤前端；
 父目录被排除时反忽略需 `git add -f` 才进索引。
 
-### 5. 当前状态与剩余工作
+### 5. 当前状态（**M2 已完成**）
 
 | 阶段 | 内容 | 状态 |
 | --- | --- | --- |
 | M0 | Tailwind v4 + tokens + `cn()` | ✅ |
-| M1 | Button/Input/Label/Card/Badge/Alert/EmptyState | ✅ |
-| M2 | 页面迁移 | 🚧 **4/8**（Login + AppLayout + TaskListView + TaskCreateForm 完成；TaskDetail/Knowledge/Style/Template/Import/账号两页待迁） |
-| M3 | 新页面直接用新规范 | 待做 |
-| M4 | 删除 `main.css` 旧 `.btn`/`.badge`/`.input` | 待做 |
+| M1 | Button/Input/Label/Card/Badge/Alert/EmptyState/FilePicker | ✅ |
+| M2 | 页面迁移（8 页 + 13 组件） | ✅ **8/8 完成** |
+| M3 | 新页面直接用新规范 | ✅ 规则生效（Phase 2 PRISMA 工作台照此实现） |
+| M4 | 删除 `main.css` 旧 `.btn`/`.badge`/`.input` | ✅ **完成**（旧类已删除且无引用） |
 
-**视觉现状**：登录页、侧栏、任务列表、创建表单已是新风格且互相一致；
-剩余页面（任务详情/知识库/样式/模板/导入/账号两页）仍是旧手写 CSS。
+**成果**：24 个 Vue 文件的 `<style scoped>` **全部清零**；
+`main.css` 只剩 tokens 与 `@theme` 映射，无任何业务类；
+CSS 产物 40.03 kB → **26.56 kB（-34%）**，本轮净删 747 行
+（+880/−1627）。
 
-**验证**：Vitest **156 passed**；`npm ci` + `npm run build` 成功；
-nginx 镜像重建成功，服务器已部署；真实浏览器截图确认。
+**验证**：Vitest **156 passed**；**Playwright E2E 20 passed**（桌面 + 移动双视口，
+含「Word 模板页上传 .docx」用例，证明 `setInputFiles` 仍正常）；
+`vue-tsc` 干净；`npm run build` 成功；服务器已部署并逐页截图确认。
+
+### 5.1 剩余 5 页迁移记录（`c89ade4`）
+
+| 页面 | 要点 |
+| --- | --- |
+| TaskDetailView | 选项卡改下划线式（窄屏可横滚）；执行页改 `lg:grid-cols-[minmax(0,1fr)_20rem]` 双栏；空态 EmptyState |
+| KnowledgeView | 空态 EmptyState（保留 `knowledge-empty`）；上传表单卡片化 |
+| StyleView / TemplateView | 行改卡片 + Badge（自定义/预置/默认）；占位符 chip 化；渲染/删除改 Button |
+| ReferenceImportView | textarea 等宽字体 + 统一焦点环；预览改卡片列表 |
+| VerifyEmailView / PasswordResetView | 成功提示改 Alert success；表单 Label+Input+Button；加载态 Loader2 |
+
+**组件**：TaskToolbar / PlanPanel / NodeDetail / TaskDag / TaskLog / TaskResult /
+ReferenceVerificationPanel / DocumentTable / DocumentUpload 全部迁移。
+
+### 5.2 两个关键技术坑
+
+**① 动态类名在 Tailwind 下会静默丢样式**
+
+Tailwind 靠**静态扫描**生成样式，`stroke-${tone}`、`verify__badge--${status}`、
+`dag-node--${tone}` 这类运行时拼接**不会被识别**，样式直接消失（且不报错）。
+全部改为查表式字面量映射：
+
+```ts
+const EDGE_TONE_CLASS = { neutral: "stroke-border", active: "stroke-primary/50", ... }
+const VERDICT_TONE = { verified: "success", metadata_mismatch: "warning", ... }
+```
+
+**② 三处测试依赖样式类选择器，必须改为 data-test**
+
+- `PlanPanel.test.ts`：`.plan-panel__actions button` → `[data-test="plan-regenerate"]`
+- `TaskToolbar.test.ts`：`.log__pager button` → `[data-test="log-next"]`（为此补了
+  `log-prev` / `log-next` 的 data-test）
+- `TaskResult.test.ts`：`ol.result__bibliography` → `[data-test="result-bibliography"]`
+  （为此给文献列表补了 data-test）
+
+这不是「改测试迁就实现」：被测**行为**（按钮数量、分页、DOM 顺序）完全没变，
+只是定位手段换成了稳定契约。类名是版式细节，改版式不该弄坏测试。
+
+### 5.3 FilePicker：修掉混进中文界面的英文（`1096380`）
+
+原生 `<input type="file">` 的 "Choose File / No file chosen" 由**浏览器决定，
+无法用 CSS 或 i18n 修改**。三个上传处（知识库 / 引用样式 / Word 模板）都混着英文。
+
+做法：**保留原生 input 元素本身**，铺满容器 + `opacity-0`，下面叠自定义外观
+（"选择文件" + 回形针图标 + 文件名/占位）。
+
+关键点：`inheritAttrs: false` + `v-bind="$attrs"`，让 `data-test`/`@change`/`accept`/`id`
+仍落在**同一个 input** 上——所以 `setInputFiles` 与「设置 files + trigger(change)」
+两种测试方式都照常工作。若改成「组件内部持有 hidden input + 自定义按钮」，
+attrs 会落到组件根节点、`@change` 只能靠冒泡侥幸生效，是更脆弱的方案。
+
+`ref` 不透传（组件 ref 拿到实例），故 `defineExpose({ reset })` 替换原来的
+`fileInput.value.value = ""`。
+
+**E2E 实测**：含文件上传的用例全部通过，证明改造无回归。
 
 ### 6. M2 页面迁移记录（`fe1c2ef` + `b4cecd3`）
 
