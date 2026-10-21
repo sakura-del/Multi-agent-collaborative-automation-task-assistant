@@ -434,6 +434,35 @@ async def _wait_status(
     raise AssertionError(f"等待状态 {expected} 超时，当前 {last}")
 
 
+async def _wait_settled(
+    factory: async_sessionmaker[AsyncSession], task_id: uuid.UUID, *, timeout: float = 20.0
+) -> Task:
+    """等待任务「配额已结算」。
+
+    **为什么单独等结算而不是等状态**：状态（completed/cancelled/…）与结算
+    (`settle_quota`) 是**两步**事务——状态先提交，结算随后。全量门禁在负载高时
+    (CPU 竞争) 会出现「状态已 completed，但结算还没跑完」的中间态，
+    只断言状态就会偶发失败（2026-10-21 全量跑踩到；单独跑却通过，属于典型
+    「时序敏感测试」）。这里显式等结算落库，测试就与机器负载无关了。
+    """
+    import asyncio
+
+    deadline = asyncio.get_running_loop().time() + timeout
+    last: Task | None = None
+    while asyncio.get_running_loop().time() < deadline:
+        async with factory() as session:
+            task = await session.get(Task, task_id)
+            if task is not None:
+                last = task
+                if task.quota_settled:
+                    return task
+        await asyncio.sleep(0.05)
+    raise AssertionError(
+        f"等待配额结算超时（quota_settled={getattr(last, 'quota_settled', None)}，"
+        f"used_tokens={getattr(last, 'used_tokens', None)}）"
+    )
+
+
 def _request() -> Any:
     from app.orchestration.contracts import LiteratureReviewRequest
 
@@ -457,6 +486,8 @@ class TestSettlementOnLifecyclePaths:
         try:
             task_id = await execution.submit(user_id, _request())
             await _wait_status(execution, user_id, task_id, {TaskStatus.WAITING_APPROVAL.value})
+            # 等规划阶段的结算落库，避免与取消路径的结算抢时序（并发负载下会读到 0）
+            await _wait_settled(factory, task_id)
 
             await execution.control(
                 user_id, task_id, TaskControlRequest(command=TaskCommand.CANCEL)
@@ -530,6 +561,9 @@ class TestSettlementOnLifecyclePaths:
             waiting = await _wait_status(
                 execution, user_id, task_id, {TaskStatus.WAITING_APPROVAL.value}
             )
+            # 状态到 waiting_approval 不代表结算已落库（结算是状态提交后的第二步），
+            # 必须先等结算，否则读到的 total_refunded 可能还是 0（并发负载下必现）。
+            await _wait_settled(factory, task_id)
             refunded_on_planning = quota.total_refunded
 
             await execution.approve_plan(user_id, task_id, waiting.revision)
@@ -543,10 +577,8 @@ class TestSettlementOnLifecyclePaths:
             # 用量不写死：各节点类型（search/extract/write/validate/review）走不同 Agent，
             # 断言「结算额 == 预扣 − 落库用量」这个恒等式比硬编码数字更抗改动。
             await _wait_status(execution, user_id, task_id, {TaskStatus.COMPLETED.value})
-            async with factory() as session:
-                row = await session.get(Task, task_id)
-                assert row is not None
-                used_after = int(row.used_tokens)
+            row = await _wait_settled(factory, task_id)
+            used_after = int(row.used_tokens)
             assert used_after > 0, "完成的任务必须落库真实用量（否则无法结算）"
             final_refund = quota.total_refunded - refunded_on_planning
             assert final_refund == ESTIMATED_TOKENS_PER_TASK - used_after
@@ -570,12 +602,11 @@ class TestSettlementOnLifecyclePaths:
             await execution.approve_plan(user_id, task_id, waiting.revision)
             await _wait_status(execution, user_id, task_id, {TaskStatus.COMPLETED.value})
 
-            async with factory() as session:
-                task = await session.get(Task, task_id)
-                assert task is not None
-                # 5 个节点各报告 1000+500；不写死总数，断言「有量且已结算」
-                assert task.used_tokens > 0
-                assert task.quota_settled is True
+            # 等结算落库（状态与结算是两步事务，只等状态会偶发失败）
+            task = await _wait_settled(factory, task_id)
+            # 5 个节点各报告 1000+500；不写死总数，断言「有量且已结算」
+            assert task.used_tokens > 0
+            assert task.quota_settled is True
         finally:
             await execution.container.close()
             await engine.dispose()
