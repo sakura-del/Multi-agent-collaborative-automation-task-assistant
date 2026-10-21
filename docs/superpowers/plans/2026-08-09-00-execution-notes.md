@@ -1994,6 +1994,23 @@ shadcn **Tabs**（`role="tab"`）时漏改这个 spec。**CI 不跑 E2E**，所�
 （2182 → 2189 → 2190）；覆盖率 **89.93%**；Vitest **181 passed**；`vue-tsc` 干净；
 build 成功（CSS 27.08 kB / JS 289.95 kB）。
 
+**CI 6/6 全绿**（`9c1ff08` 之后）。中途踩到一个「本地绿、CI 红」的类型坑：
+
+```
+app/db/repositories/screening.py:97 error: Incompatible return value type
+  (got "Select[ScreeningRecord]", expected "Select[tuple[ScreeningRecord]]")
+app/db/repositories/screening.py:111 error: Argument 1 to "list" has incompatible
+  type "Sequence[tuple[ScreeningRecord]]"
+```
+
+**根因**：`Select[...]` 的泛型参数在 SQLAlchemy 不同小版本/不同 stubs 下推断不一致
+（有的 `Select[Model]`，有的 `Select[tuple[Model]]`），而 `pyproject.toml` 声明的是
+`sqlalchemy[asyncio]>=2.0.25`（**未锁版本**）——CI 装到的版本与本地 venv（2.0.51）不同，
+于是「写死任何一种泛型，另一侧就报错」。
+**修法**：`list_records_stmt` 返回 `Any`（返回值只用于执行与断言），`list_records` 里
+显式标注 `Sequence[ScreeningRecord]` 消除 `scalars().all()` 的歧义。
+→ 规则：**依赖版本未锁时，不要写死第三方库的泛型注解**；本地 mypy 绿不等于 CI 绿。
+
 **PRISMA 子计划 Task 1-7 全部交付，端到端可用。**
 
 #### Task 7 暴露的后续待办
