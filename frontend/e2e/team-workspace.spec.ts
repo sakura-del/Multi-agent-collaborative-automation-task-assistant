@@ -46,8 +46,12 @@ test("团队页：创建团队 + 席位用量展示", async ({ page }) => {
   const form = page.locator('[data-test="workspace-create-form"]');
   await expect(form).toBeVisible();
 
-  await page.locator("#ws-name").fill(teamName);
+  // **先填 slug 再填名字**：名字的 blur 会触发自动派生，
+  // 若此时 slug 还没被用户"碰过"，派生值会覆盖/拼接用户输入。
+  // 反过来先填 slug（触发 input → slugTouched=true）就完全避免了这条路径。
   await page.locator("#ws-slug").fill(slug);
+  await page.locator("#ws-name").fill(teamName);
+  await expect(page.locator("#ws-slug")).toHaveValue(slug);
   await form.getByRole("button", { name: "创建" }).click();
 
   // 用唯一名字定位，绝不会匹配到多个

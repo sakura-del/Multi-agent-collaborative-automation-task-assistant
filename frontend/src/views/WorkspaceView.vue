@@ -97,10 +97,21 @@ async function refresh() {
 }
 
 /**
- * 从名字派生 slug。
+ * 从名字派生 slug（在 name 的 `@input` 上实时触发，**不用 `@blur`**）。
  *
- * 规则：**用户手动改过 slug 就不再自动覆盖**（`slugTouched`）。
- * 否则「先填名字、再填 slug」这类操作顺序会让派生值覆盖用户输入。
+ * ## 为什么不用 `@blur`
+ *
+ * `@blur` 的派生发生在「焦点离开 name」那一刻。而自动化工具（Playwright
+ * `fill()`）与快速用户的真实操作序列是：
+ *
+ * 1. 填 name → 焦点转移 → **blur 触发派生** → slug 被写入派生值
+ * 2. 紧接着填 slug → 输入落在**已含派生值**的输入框上 → 变成两段拼接
+ *
+ * 实测把 slug 拼成 `e2e-1792584014145-mobile-chromee2e-team-...`。
+ * 改成 `@input` 后派生与用户输入同步发生，`slugTouched` 一置位就停止派生，
+ * 不存在"派生值晚到"的窗口。
+ *
+ * 规则：**用户手动改过 slug 就不再自动覆盖**。
  */
 function syncSlug() {
   if (slugTouched.value) {
@@ -245,7 +256,7 @@ function seatText(workspace: Workspace): string {
             id="ws-name"
             v-model="newName"
             placeholder="例如：张三课题组"
-            @blur="syncSlug"
+            @input="syncSlug"
           />
         </div>
         <div>
