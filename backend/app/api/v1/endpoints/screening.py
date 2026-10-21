@@ -87,7 +87,12 @@ def _to_literature_record(item: LiteratureRecordIn) -> LiteratureRecord:
     )
 
 
-def _to_record_out(row: object) -> ScreeningRecordOut:
+def _to_record_out(
+    row: object,
+    *,
+    verdict: str | None = None,
+    exclusion_reason: str | None = None,
+) -> ScreeningRecordOut:
     """ORM 行 → 响应契约（用显式字段映射，避免意外暴露内部列）。"""
     return ScreeningRecordOut(
         record_id=row.id,  # type: ignore[attr-defined]
@@ -99,6 +104,8 @@ def _to_record_out(row: object) -> ScreeningRecordOut:
         doi=row.doi,  # type: ignore[attr-defined]
         fulltext_status=row.fulltext_status,  # type: ignore[attr-defined]
         current_stage=row.current_stage,  # type: ignore[attr-defined]
+        current_verdict=verdict,
+        current_exclusion_reason=exclusion_reason,
     )
 
 
@@ -155,7 +162,18 @@ async def list_records(
                 f"未知阶段：{stage}（可选 {', '.join(item.value for item in DecisionStage)}）"
             ) from exc
     records = await service.list_records(task_id, stage=stage_enum)
-    return ScreeningRecordListOut(items=[_to_record_out(row) for row in records])
+    # 带上「当前筛选者在本阶段的最新结论」：前端据此隐藏已排除记录的决策按钮
+    verdicts = await service.latest_verdicts(records, current_user.id)
+    return ScreeningRecordListOut(
+        items=[
+            _to_record_out(
+                row,
+                verdict=verdicts[row.id][0] if row.id in verdicts else None,
+                exclusion_reason=verdicts[row.id][1] if row.id in verdicts else None,
+            )
+            for row in records
+        ]
+    )
 
 
 @router.post(

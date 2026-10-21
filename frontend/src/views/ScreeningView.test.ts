@@ -27,6 +27,8 @@ function recordRow(overrides: Record<string, unknown> = {}) {
     doi: "10.1234/rag",
     fulltext_status: "unavailable",
     current_stage: "title_abstract",
+    current_verdict: null,
+    current_exclusion_reason: null,
     ...overrides,
   };
 }
@@ -185,6 +187,39 @@ describe("ScreeningView", () => {
 
     expect(wrapper.find('[data-test="screening-include-r2"]').exists()).toBe(false);
     expect(wrapper.find('[data-test="screening-exclude-r2"]').exists()).toBe(false);
+  });
+
+  it("已被我排除的记录不再显示决策按钮，并标出排除理由", async () => {
+    // 排除是终态（后端会返回 400）：不该给用户一个注定失败的按钮。
+    vi.mocked(listScreeningRecords).mockResolvedValue([
+      recordRow({
+        record_id: "r3",
+        current_verdict: "exclude",
+        current_exclusion_reason: "not relevant",
+      }),
+    ]);
+
+    const wrapper = mount(ScreeningView, { props: { taskId: "task-1" } });
+    await flushPromises();
+
+    expect(wrapper.find('[data-test="screening-include-r3"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="screening-maybe-r3"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="screening-exclude-r3"]').exists()).toBe(false);
+    const badge = wrapper.find('[data-test="screening-excluded-badge-r3"]');
+    expect(badge.exists()).toBe(true);
+    expect(badge.text()).toContain("not relevant");
+  });
+
+  it("待定的记录仍可继续决策，并显示待定徽标", async () => {
+    vi.mocked(listScreeningRecords).mockResolvedValue([
+      recordRow({ record_id: "r4", current_verdict: "maybe" }),
+    ]);
+
+    const wrapper = mount(ScreeningView, { props: { taskId: "task-1" } });
+    await flushPromises();
+
+    expect(wrapper.find('[data-test="screening-include-r4"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="screening-maybe-badge-r4"]').exists()).toBe(true);
   });
 
   it("按阶段过滤候选记录", async () => {

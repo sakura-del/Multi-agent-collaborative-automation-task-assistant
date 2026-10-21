@@ -374,6 +374,10 @@ export interface ScreeningRecord {
   doi: string | null;
   fulltext_status: string;
   current_stage: string;
+  /** 当前筛选者在本阶段的最新结论（`null` = 还没筛过） */
+  current_verdict: string | null;
+  /** 当前筛选者给出的排除理由 */
+  current_exclusion_reason: string | null;
 }
 
 export type ScreeningStage = "title_abstract" | "fulltext" | "included";

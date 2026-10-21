@@ -308,6 +308,120 @@ class TestDecide:
             await service.get_record(uuid.uuid4())
 
 
+class TestExcludedIsTerminal:
+    """排除是**终态**：再次决策不能把「已排除」悄悄变回「待定/纳入」。
+
+    为什么重要：PRISMA 的「标题/摘要阶段排除数」与「排除理由分类」都取
+    **每位筛选者的最新决策**。若允许覆盖，一次误点「待定」就会让已排除的记录
+    从流程图里消失、排除理由一并丢失——数字凭空减少，且没有痕迹提示
+    「这条其实被排除过」。真实缺陷由 Task 7 服务器验收暴露。
+    """
+
+    async def _excluded(self, session: AsyncSession) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
+        """造一条「已被排除」的记录，返回 (task_id, record_id, reviewer_id)。"""
+        service = ScreeningService(session)
+        task_id = uuid.uuid4()
+        reviewer = uuid.uuid4()
+        await service.record_search(
+            task_id,
+            query="rag",
+            sources=["arxiv"],
+            records=[_record("a1", "T1")],
+            hits_by_source={"arxiv": 1},
+        )
+        record = (await service.list_records(task_id))[0]
+        await service.decide(
+            record.id,
+            stage=DecisionStage.TITLE_ABSTRACT,
+            verdict=ScreeningVerdict.EXCLUDE,
+            reviewer_id=reviewer,
+            exclusion_reason="not relevant",
+        )
+        return task_id, record.id, reviewer
+
+    async def test_exclude_then_maybe_is_rejected(self, session: AsyncSession) -> None:
+        _, record_id, reviewer = await self._excluded(session)
+        service = ScreeningService(session)
+
+        with pytest.raises(ValueError, match="已被你排除"):
+            await service.decide(
+                record_id,
+                stage=DecisionStage.TITLE_ABSTRACT,
+                verdict=ScreeningVerdict.MAYBE,
+                reviewer_id=reviewer,
+            )
+
+    async def test_exclude_then_include_is_rejected(self, session: AsyncSession) -> None:
+        _, record_id, reviewer = await self._excluded(session)
+        service = ScreeningService(session)
+
+        with pytest.raises(ValueError, match="已被你排除"):
+            await service.decide(
+                record_id,
+                stage=DecisionStage.TITLE_ABSTRACT,
+                verdict=ScreeningVerdict.INCLUDE,
+                reviewer_id=reviewer,
+            )
+
+    async def test_rejected_override_does_not_change_counts(self, session: AsyncSession) -> None:
+        """被拒绝的覆盖尝试**不得**改动计数。"""
+        task_id, record_id, reviewer = await self._excluded(session)
+        service = ScreeningService(session)
+
+        with pytest.raises(ValueError):
+            await service.decide(
+                record_id,
+                stage=DecisionStage.TITLE_ABSTRACT,
+                verdict=ScreeningVerdict.MAYBE,
+                reviewer_id=reviewer,
+            )
+
+        counts = await service.prisma_counts(task_id)
+        assert counts["title_abstract"] == {"screened": 1, "excluded": 1}
+        assert counts["exclusion_reasons"] == {"not relevant": 1}
+
+    async def test_include_then_maybe_is_allowed(self, session: AsyncSession) -> None:
+        """非排除结论仍可追加（include 后改主意为 maybe 是合法的复核动作）。"""
+        service = ScreeningService(session)
+        task_id = uuid.uuid4()
+        reviewer = uuid.uuid4()
+        await service.record_search(
+            task_id,
+            query="rag",
+            sources=["arxiv"],
+            records=[_record("a1", "T1")],
+            hits_by_source={"arxiv": 1},
+        )
+        record = (await service.list_records(task_id))[0]
+
+        await service.decide(
+            record.id,
+            stage=DecisionStage.TITLE_ABSTRACT,
+            verdict=ScreeningVerdict.INCLUDE,
+            reviewer_id=reviewer,
+        )
+        # 不抛错即可
+        await service.decide(
+            record.id,
+            stage=DecisionStage.TITLE_ABSTRACT,
+            verdict=ScreeningVerdict.MAYBE,
+            reviewer_id=reviewer,
+        )
+
+    async def test_other_reviewer_may_still_decide(self, session: AsyncSession) -> None:
+        """排除是**按人**的终态：双人筛选时，另一位筛选者仍可独立判断。"""
+        _, record_id, _ = await self._excluded(session)
+        service = ScreeningService(session)
+        reviewer_b = uuid.uuid4()
+
+        await service.decide(
+            record_id,
+            stage=DecisionStage.TITLE_ABSTRACT,
+            verdict=ScreeningVerdict.INCLUDE,
+            reviewer_id=reviewer_b,
+        )
+
+
 class TestPrismaCounts:
     async def _prepare(self, session: AsyncSession) -> tuple[uuid.UUID, uuid.UUID]:
         """两条记录：一条纳入到全文、一条标题阶段排除。

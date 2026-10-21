@@ -64,6 +64,21 @@ function stageFor(record: ScreeningRecord): "title_abstract" | "fulltext" {
   return record.current_stage === "fulltext" ? "fulltext" : "title_abstract";
 }
 
+/**
+ * 是否还能对该记录决策。
+ *
+ * 两种情况不能：
+ * - 已纳入（`included` 是终态）；
+ * - **本阶段已被我排除**（排除是终态，后端会返回 400，不如不显示按钮）。
+ *   双人筛选时另一位筛选者不受影响——后端按「当前筛选者」返回结论。
+ */
+function canDecide(record: ScreeningRecord): boolean {
+  if (record.current_stage === "included") {
+    return false;
+  }
+  return record.current_verdict !== "exclude";
+}
+
 onMounted(() => {
   void refresh();
 });
@@ -240,6 +255,20 @@ async function submitDecision(
               <Badge :variant="STAGE_TONE[record.current_stage] ?? 'muted'">
                 {{ STAGE_LABELS[record.current_stage] ?? record.current_stage }}
               </Badge>
+              <Badge
+                v-if="record.current_verdict === 'exclude'"
+                variant="destructive"
+                :data-test="`screening-excluded-badge-${record.record_id}`"
+              >
+                已排除{{ record.current_exclusion_reason ? `：${record.current_exclusion_reason}` : "" }}
+              </Badge>
+              <Badge
+                v-else-if="record.current_verdict === 'maybe'"
+                variant="warning"
+                :data-test="`screening-maybe-badge-${record.record_id}`"
+              >
+                待定
+              </Badge>
             </div>
             <div class="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               <span>{{ record.authors.join("；") || "（无作者）" }}</span>
@@ -253,7 +282,7 @@ async function submitDecision(
           </div>
 
           <div
-            v-if="record.current_stage !== 'included'"
+            v-if="canDecide(record)"
             class="flex flex-wrap items-center gap-1.5"
           >
             <Button

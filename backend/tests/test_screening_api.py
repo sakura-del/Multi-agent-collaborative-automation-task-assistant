@@ -391,6 +391,62 @@ def test_unknown_verdict_returns_422(client: TestClient, task_id: uuid.UUID) -> 
     assert response.status_code == 422, response.text
 
 
+def test_deciding_after_exclude_returns_400(client: TestClient, task_id: uuid.UUID) -> None:
+    """排除是终态：同一筛选者排除后不能再给别的结论（否则 PRISMA 计数会倒退）。
+
+    真实缺陷由 Task 7 服务器验收暴露：exclude → maybe 之后
+    `title_abstract.excluded` 从 1 变回 0、排除理由消失。
+    """
+    _post_search(client, task_id)
+    record_id = _first_record_id(client, task_id)
+
+    excluded = client.post(
+        f"/api/v1/screening/records/{record_id}/decisions",
+        json={
+            "stage": "title_abstract",
+            "verdict": "exclude",
+            "exclusion_reason": "not relevant",
+        },
+    )
+    assert excluded.status_code == 201, excluded.text
+
+    override = client.post(
+        f"/api/v1/screening/records/{record_id}/decisions",
+        json={"stage": "title_abstract", "verdict": "maybe"},
+    )
+    assert override.status_code == 400, override.text
+    assert "排除" in override.json()["detail"]
+
+    prisma = client.get("/api/v1/screening/prisma", params={"task_id": str(task_id)}).json()
+    assert prisma["title_abstract"] == {"screened": 1, "excluded": 1}
+    assert prisma["exclusion_reasons"] == {"not relevant": 1}
+
+
+def test_records_expose_current_verdict(client: TestClient, task_id: uuid.UUID) -> None:
+    """列表要带上「当前筛选者在本阶段的最新结论」，前端才能隐藏已排除记录的按钮。"""
+    _post_search(client, task_id)
+    record_id = _first_record_id(client, task_id)
+
+    # 未筛过 → null
+    before = client.get("/api/v1/screening/records", params={"task_id": str(task_id)}).json()
+    assert before["items"][0]["current_verdict"] is None
+    assert before["items"][0]["current_exclusion_reason"] is None
+
+    client.post(
+        f"/api/v1/screening/records/{record_id}/decisions",
+        json={
+            "stage": "title_abstract",
+            "verdict": "exclude",
+            "exclusion_reason": "not relevant",
+        },
+    )
+
+    after = client.get("/api/v1/screening/records", params={"task_id": str(task_id)}).json()
+    row = next(item for item in after["items"] if item["record_id"] == record_id)
+    assert row["current_verdict"] == "exclude"
+    assert row["current_exclusion_reason"] == "not relevant"
+
+
 # ===== GET /prisma =====
 
 

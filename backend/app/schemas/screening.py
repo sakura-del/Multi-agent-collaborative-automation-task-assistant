@@ -78,6 +78,12 @@ class ScreeningRecordOut(BaseModel):
     doi: str | None = None
     fulltext_status: str
     current_stage: str
+    #: 当前筛选者在该阶段的**最新结论**（`None` 表示还没筛过）。
+    #: 前端据此隐藏「已排除」记录的决策按钮——排除是终态，
+    #: 再点只会拿到 400，不如不显示。
+    current_verdict: str | None = None
+    #: 当前筛选者给出的排除理由（便于筛选者回顾自己为何排除）。
+    current_exclusion_reason: str | None = None
 
 
 class ScreeningRecordListOut(BaseModel):

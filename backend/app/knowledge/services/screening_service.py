@@ -192,6 +192,28 @@ class ScreeningService:
         await self.ensure_task_owned(user_id, record.task_id)
         return record
 
+    async def latest_verdicts(
+        self, records: list[ScreeningRecord], reviewer_id: uuid.UUID
+    ) -> dict[uuid.UUID, tuple[str, str | None]]:
+        """取每条记录「该筛选者在该记录**当前阶段**的最新决策」。
+
+        返回 `{record_id: (verdict, exclusion_reason)}`；尚未筛过的记录不在结果里。
+
+        为什么只看当前阶段：记录推进到全文后，标题/摘要阶段的结论已成历史；
+        前端要回答的是「我现在还能对它做什么」，而不是「它曾经怎样」。
+        也正因如此，已纳入（`included`，非筛选阶段）的记录不返回任何结论。
+        """
+        result: dict[uuid.UUID, tuple[str, str | None]] = {}
+        for record in records:
+            try:
+                stage = DecisionStage(record.current_stage)
+            except ValueError:
+                continue
+            decision = await self._repo.latest_decision(record.id, stage, reviewer_id)
+            if decision is not None:
+                result[record.id] = (decision.verdict, decision.exclusion_reason)
+        return result
+
     # ===== 查询 =====
 
     async def list_records(
@@ -226,8 +248,24 @@ class ScreeningService:
         - `include` → 进入下一阶段（标题摘要→全文→纳入；纳入阶段为终态）；
         - `maybe` → 停在当前阶段（待复核）；
         - `exclude` → 停在当前阶段（已排除，不再前进，但仍保留供计数）。
+
+        **排除是终态（按人）**：某筛选者把记录在某阶段判为 `exclude` 后，
+        该筛选者不能再对同一阶段给出别的结论。原因：PRISMA 的排除数与排除理由
+        取「每位筛选者的**最新**决策」，若允许覆盖，一次误点「待定」就会让
+        已排除的记录从流程图里消失、理由一并丢失，数字凭空减少且无痕迹。
+        （真实缺陷由 Task 7 服务器验收暴露：exclude → maybe 之后
+        `title_abstract.excluded` 从 1 变回 0。）
+
+        双人筛选不受影响：校验只看**同一筛选者**在同一阶段的历史。
         """
         record = await self.get_record(record_id)
+        if verdict is not ScreeningVerdict.EXCLUDE:
+            previous = await self._repo.latest_decision(record_id, stage, reviewer_id)
+            if previous is not None and previous.verdict == ScreeningVerdict.EXCLUDE.value:
+                raise ValueError(
+                    "该记录在此阶段已被你排除（排除是终态）："
+                    "如需恢复请让任务重新检索，或由另一位筛选者独立判断"
+                )
         await self._repo.append_decision(
             record_id,
             stage=stage,
