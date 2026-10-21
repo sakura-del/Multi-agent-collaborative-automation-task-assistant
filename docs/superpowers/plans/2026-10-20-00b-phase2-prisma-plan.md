@@ -1,6 +1,6 @@
 # PRISMA 筛选工作台 + 可复现检索日志 实施计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 让用户能对检索结果做三阶段 PRISMA 筛选（含双人独立与分歧解决），并把检索式与各阶段计数持久化为可复现、可导出的日志与流程图。
 
@@ -81,7 +81,7 @@ Rayyan/Covidence 跑流程但不检索。谁打通中间段谁就有差异化。
 - Modify: `backend/app/db/models/__init__.py`（**Lead 做**）
 - Test: `backend/tests/test_screening_models.py`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # backend/tests/test_screening_models.py
@@ -248,12 +248,12 @@ def test_migration_creates_all_orm_columns() -> None:
             assert not (orm_columns - migrated), f"{table} 迁移缺列：{sorted(orm_columns - migrated)}"
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd backend && .\.venv\Scripts\python.exe -m pytest tests/test_screening_models.py -q --no-cov`
 Expected: FAIL — `ModuleNotFoundError: No module named 'app.db.models.screening'`
 
-- [ ] **Step 3: 写实现**
+- [x] **Step 3: 写实现**
 
 ```python
 # backend/app/db/models/screening.py
@@ -508,7 +508,7 @@ def downgrade() -> None:
     op.drop_table("search_log")
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd backend && .\.venv\Scripts\python.exe -m pytest tests/test_screening_models.py -q --no-cov`
 Expected: PASS（5 passed）
@@ -520,7 +520,7 @@ Expected: PASS（5 passed）
 .\.venv\Scripts\python.exe -m pytest tests/test_migration_schema_consistency.py -q --no-cov
 ```
 
-- [ ] **Step 5: Lead 接线 + 提交**
+- [x] **Step 5: Lead 接线 + 提交**
 
 Lead 执行（**其他任务不要改这些文件**）：
 1. `app/db/models/__init__.py` 导出 `SearchLog` / `ScreeningRecord` / `ScreeningDecision`
@@ -540,7 +540,7 @@ git commit -m "feat(screening): add PRISMA screening data model and migration"
 - Create: `backend/app/db/repositories/screening.py`
 - Test: `backend/tests/test_screening_repository.py`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # backend/tests/test_screening_repository.py
@@ -677,12 +677,12 @@ async def test_append_decision_rejects_exclude_without_reason(session: AsyncSess
         )
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd backend && .\.venv\Scripts\python.exe -m pytest tests/test_screening_repository.py -q --no-cov`
 Expected: FAIL — `ModuleNotFoundError: No module named 'app.db.repositories.screening'`
 
-- [ ] **Step 3: 写实现**
+- [x] **Step 3: 写实现**
 
 ```python
 # backend/app/db/repositories/screening.py
@@ -825,12 +825,12 @@ class ScreeningRepository(BaseRepository[ScreeningRecord]):
         return conflicts
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd backend && .\.venv\Scripts\python.exe -m pytest tests/test_screening_repository.py -q --no-cov`
 Expected: PASS（5 passed）
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add backend/app/db/repositories/screening.py backend/tests/test_screening_repository.py
@@ -845,7 +845,7 @@ git commit -m "feat(screening): add append-only screening repository"
 - Create: `backend/app/knowledge/services/screening_service.py`
 - Test: `backend/tests/test_screening_service.py`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # backend/tests/test_screening_service.py
@@ -1004,12 +1004,12 @@ async def test_decide_requires_reason_for_exclude(session: AsyncSession) -> None
         )
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd backend && .\.venv\Scripts\python.exe -m pytest tests/test_screening_service.py -q --no-cov`
 Expected: FAIL — `ModuleNotFoundError: No module named 'app.knowledge.services.screening_service'`
 
-- [ ] **Step 3: 写实现**
+- [x] **Step 3: 写实现**
 
 ```python
 # backend/app/knowledge/services/screening_service.py
@@ -1252,12 +1252,12 @@ def _source_of(record: LiteratureRecord) -> str:
     return "arxiv"
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd backend && .\.venv\Scripts\python.exe -m pytest tests/test_screening_service.py -q --no-cov`
 Expected: PASS（5 passed）
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add backend/app/knowledge/services/screening_service.py backend/tests/test_screening_service.py
@@ -1273,7 +1273,7 @@ git commit -m "feat(screening): add screening service with dedupe and stage deri
 - Create: `backend/app/tools/prisma/flow.py`
 - Test: `backend/tests/test_prisma_flow.py`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # backend/tests/test_prisma_flow.py
@@ -1346,12 +1346,12 @@ def test_empty_counts_render_without_error() -> None:
     assert render_prisma_mermaid(empty).startswith("flowchart TD")
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd backend && .\.venv\Scripts\python.exe -m pytest tests/test_prisma_flow.py -q --no-cov`
 Expected: FAIL — `ModuleNotFoundError: No module named 'app.tools.prisma'`
 
-- [ ] **Step 3: 写实现**
+- [x] **Step 3: 写实现**
 
 ```python
 # backend/app/tools/prisma/__init__.py
@@ -1444,12 +1444,12 @@ def render_prisma_mermaid(counts: dict[str, Any]) -> str:
 """
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd backend && .\.venv\Scripts\python.exe -m pytest tests/test_prisma_flow.py -q --no-cov`
 Expected: PASS（5 passed）
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add backend/app/tools/prisma/ backend/tests/test_prisma_flow.py
@@ -1466,7 +1466,7 @@ git commit -m "feat(prisma): add PRISMA 2020 flow chart renderers"
 - Modify: `backend/app/api/v1/router.py`（**Lead 做**）
 - Test: `backend/tests/test_screening_api.py`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # backend/tests/test_screening_api.py
@@ -1634,12 +1634,12 @@ def test_prisma_counts_endpoint_returns_all_stages(client: TestClient) -> None:
     assert body["mermaid"].startswith("flowchart TD")
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd backend && .\.venv\Scripts\python.exe -m pytest tests/test_screening_api.py -q --no-cov`
 Expected: FAIL — `ModuleNotFoundError: No module named 'app.api.v1.endpoints.screening'`
 
-- [ ] **Step 3: 写实现**
+- [x] **Step 3: 写实现**
 
 ```python
 # backend/app/schemas/screening.py
@@ -1917,12 +1917,12 @@ async def get_prisma(
     )
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd backend && .\.venv\Scripts\python.exe -m pytest tests/test_screening_api.py -q --no-cov`
 Expected: PASS（4 passed）
 
-- [ ] **Step 5: Lead 接线 + 提交**
+- [x] **Step 5: Lead 接线 + 提交**
 
 Lead：在 `app/api/v1/router.py` 加 `screening.router`；跑全量门禁。
 
@@ -1941,7 +1941,7 @@ git commit -m "feat(screening): add PRISMA screening HTTP endpoints"
 - Create: `frontend/src/views/ScreeningView.vue` + `ScreeningView.test.ts`
 - Modify: `frontend/src/api/types.ts`、`frontend/src/router/index.ts`、`frontend/src/layouts/AppLayout.vue`（**Lead 做后三个**）
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```typescript
 // frontend/src/api/screening.test.ts
@@ -2151,12 +2151,12 @@ describe("ScreeningView", () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd frontend && pnpm test -- src/api/screening.test.ts src/views/ScreeningView.test.ts`
 Expected: FAIL — 模块不存在
 
-- [ ] **Step 3: 写实现**
+- [x] **Step 3: 写实现**
 
 `frontend/src/api/screening.ts`：
 
@@ -2568,12 +2568,12 @@ export interface PrismaCounts {
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd frontend && pnpm test -- src/api/screening.test.ts src/views/ScreeningView.test.ts`
 Expected: PASS（9 passed）
 
-- [ ] **Step 5: Lead 接线 + 提交**
+- [x] **Step 5: Lead 接线 + 提交**
 
 Lead：`types.ts` 追加类型、`router/index.ts` 加 `/tasks/:taskId/screening`、
 `AppLayout.vue` 导航项。
@@ -2589,7 +2589,7 @@ git commit -m "feat(frontend): add PRISMA screening workbench page"
 
 ## Task 7: 服务器端到端验收
 
-- [ ] **Step 1: 部署**
+- [x] **Step 1: 部署**
 
 ```powershell
 cd 'E:\Multi-agent collaborative automation task assistant'
@@ -2609,7 +2609,7 @@ docker compose exec -T backend alembic upgrade head
 docker compose exec -T backend alembic current   # 期望 b8e5f1c3d9a2 (head)
 ```
 
-- [ ] **Step 2: API 端到端（真实 PostgreSQL）**
+- [x] **Step 2: API 端到端（真实 PostgreSQL）**
 
 写脚本 `C:\Users\Lenovo\AppData\Local\Temp\prisma_e2e.py`：
 
@@ -2715,7 +2715,7 @@ Expected 输出要点：
 - PRISMA 计数自洽：`records_screened=2`，`title_abstract.excluded=1`，
   `exclusion_reasons` 含 `not relevant: 1`，`mermaid` 以 `flowchart TD` 开头
 
-- [ ] **Step 3: 浏览器端到端**
+- [x] **Step 3: 浏览器端到端**
 
 ```powershell
 cd frontend
@@ -2768,7 +2768,7 @@ test("PRISMA 筛选工作台：页面可达且无横向溢出", async ({ page })
 
 Expected: PASS
 
-- [ ] **Step 4: 更新文档并推送**
+- [x] **Step 4: 更新文档并推送**
 
 更新 `docs/superpowers/plans/2026-08-09-00-execution-notes.md`（新增 Phase 2 执行记录段）
 与 `AGENTS.md` 快照，然后：
@@ -2782,14 +2782,14 @@ git push backup main
 
 ## 验收清单
 
-- [ ] 检索落库后 `hits_total` / `hits_deduped` 正确，跨源同题去重
-- [ ] **`hits_by_source` 保存去重前各源命中数，且 `sum(hits_by_source) == hits_total`**
-- [ ] **PRISMA「识别」用去重前的各源命中数，各源合计与 `identified_total` 自洽**
-- [ ] 三阶段决策可追加，`include` 推进阶段、`exclude`/`maybe` 停留
-- [ ] 排除缺理由被拒（服务层 ValueError → 400；DB CheckConstraint 双保险）
-- [ ] PRISMA 计数由明细派生，且各阶段数字自洽（screened = included + excluded + pending）
-- [ ] 双人分歧可被 `find_conflicts` 识别
-- [ ] Markdown 表格与 Mermaid 流程图可生成，零数据不抛错
-- [ ] 前端工作台可纳入/排除（排除需填理由），展示 PRISMA 计数
-- [ ] 全量门禁：black/ruff/mypy/pytest ≥80% cov；前端 Vitest + `vue-tsc` + build
-- [ ] CI 6 作业全绿
+- [x] 检索落库后 `hits_total` / `hits_deduped` 正确，跨源同题去重
+- [x] **`hits_by_source` 保存去重前各源命中数，且 `sum(hits_by_source) == hits_total`**
+- [x] **PRISMA「识别」用去重前的各源命中数，各源合计与 `identified_total` 自洽**
+- [x] 三阶段决策可追加，`include` 推进阶段、`exclude`/`maybe` 停留
+- [x] 排除缺理由被拒（服务层 ValueError → 400；DB CheckConstraint 双保险）
+- [x] PRISMA 计数由明细派生，且各阶段数字自洽（screened = included + excluded + pending）
+- [x] 双人分歧可被 `find_conflicts` 识别
+- [x] Markdown 表格与 Mermaid 流程图可生成，零数据不抛错
+- [x] 前端工作台可纳入/排除（排除需填理由），展示 PRISMA 计数
+- [x] 全量门禁：black/ruff/mypy/pytest ≥80% cov；前端 Vitest + `vue-tsc` + build
+- [x] CI 6 作业全绿

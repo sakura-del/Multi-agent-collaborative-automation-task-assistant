@@ -255,7 +255,13 @@ RenderJob(id, project_id, status, output_uri, error, trace)
 
 ### Phase 2 · 做闭环（约 3 个月）
 
-PRISMA 筛选工作台 · 可复现检索日志 + PRISMA 流程图导出 · 团队工作区 + 席位 + 导师批注 · MCP server + 开放 API · 计费套餐 · 可观测性
+**✅ PRISMA 筛选工作台 + 可复现检索日志（2026-10-21 完成，Task 1-7 全部交付）**
+—— 三张表 + 迁移 + Repository（`seq` 稳定排序）+ 服务层（三级去重 / 计数派生）+
+流程图渲染器（中英 Markdown + Mermaid，golden 锁定）+ 4 个 HTTP 端点 + 前端工作台
+`/tasks/:taskId/screening`。服务器端到端 33 项检查全绿；浏览器双视口走查通过。
+详见 [执行记录](../superpowers/plans/2026-08-09-00-execution-notes.md#phase-2--做闭环-执行记录2026-10-20-起)。
+
+其余：团队工作区 + 席位 + 导师批注 · MCP server + 开放 API · 计费套餐 · 可观测性
 
 ### Phase 3 · 建生态（约 6 个月）
 

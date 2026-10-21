@@ -21,12 +21,12 @@
 | 项 | 值 |
 | --- | --- |
 | 分支 | `main`（工作分支 `codex/plan3-literature-workflow` 与 main 同点） |
-| HEAD | … → FilePicker `1096380` → PRISMA Task 5 `a1d8b76` → **Task 6 前端工作台 `a69adb6` + 修复 `f46f380`** |
+| HEAD | … → PRISMA Task 6 前端工作台 `a69adb6` + 修复 `f46f380` → **Task 7 验收：排除终态 `d0af591` + 列表排序稳定 `4b9e1c0` + E2E 选择器 `e29dc54`** |
 | 冻结 tag | `defense-v1` |
-| Plan 状态 | Plan 2 / 3 / 4 / 5 **全部 Exit Gate PASSED**；**Phase 1 五项全部端到端可用且遗留清零**；**Phase 2 进行中**（PRISMA 子计划 Task 6/7 已完成） |
-| 产品化进度 | **Issue #2 / #3 / #4 / #5 / #6 / #7 全部关闭且遗留项清零**；配置优先级缺陷已修复；Phase 1 五项端到端可用；**Phase 2 PRISMA 端到端可用**（三张表 + Repository + 服务层 + 渲染器 + 4 个 HTTP 端点 + **前端筛选工作台 `/tasks/:taskId/screening`**：候选列表/阶段徽标/DOI 展示/纳入·待定·排除三键/排除必填理由/阶段过滤/实时 PRISMA 计数条/Mermaid 源码；四端点统一 404 越权校验）；**前端已全面迁移到 Tailwind v4 + shadcn-vue / Nova 设计系统** |
-| 后端测试 | **2182 passed**, 8 skipped；覆盖率 **90.00%**；`mypy` 0 错误（170 文件） |
-| 前端测试 | Vitest **179 passed**；Playwright E2E **20 passed** + 筛选工作台走查（桌面 + 移动双视口） |
+| Plan 状态 | Plan 2 / 3 / 4 / 5 **全部 Exit Gate PASSED**；**Phase 1 五项全部端到端可用且遗留清零**；**Phase 2 PRISMA 子计划 Task 1-7 全部交付、端到端可用** |
+| 产品化进度 | **Issue #2 / #3 / #4 / #5 / #6 / #7 全部关闭且遗留项清零**；配置优先级缺陷已修复；Phase 1 五项端到端可用；**Phase 2 PRISMA 完成**（三张表 + Repository（`seq` 稳定排序）+ 服务层（三级去重/计数派生）+ 渲染器（中英 Markdown + Mermaid + golden）+ 4 个 HTTP 端点 + **前端筛选工作台 `/tasks/:taskId/screening`**；服务器 API 验收 33 项全绿、浏览器双视口走查通过；**排除是按人的终态**、**候选列表顺序稳定**）；**前端已全面迁移到 Tailwind v4 + shadcn-vue / Nova 设计系统** |
+| 后端测试 | **2190 passed**, 8 skipped；覆盖率 **89.93%**；`mypy` 0 错误（170 文件） |
+| 前端测试 | Vitest **181 passed**；Playwright：筛选工作台 + Phase 1 页面套件通过（`literature-review.spec.ts` 待限流窗口后复跑） |
 | CI | **6/6 作业全绿**（2026-10-19 修复；此前自 08-03 起连续失败） |
 | 服务器 | 已同步，五容器 healthy，`curl http://127.0.0.1:48080/api/v1/health/ready` → `{"status":"ready"}` |
 
@@ -130,6 +130,7 @@ docker compose build backend && docker compose up -d backend
 | 11 | **验证/清理脚本必须回查确认，不能只打印成功** | 2026-10-21 发现：Task 3 的容器验证脚本打印了「探针数据已清理 ✅」，实际残留 1 条 `search_log` + 2 条 `screening_record`（次日核查才暴露）。清理后必须再查一次 count，并提供「演示数据未被误删」的对照数字 |
 | 12 | 生产库**没有** `DELETE /tasks/{id}`（返回 405），探针任务要直接清库 | 清理顺序：`screening_decision` → `screening_record` → `search_log` → `task`（外键依赖） |
 | 13 | **回归测试必须验证「回退修复就失败」** | 2026-10-21 踩到：为两个前端时序缺陷写的「回归测试」，把修复回退后**仍然全绿**（`flushPromises()` 观测不到中间帧），属于假测试。做法：临时回退修复 → 跑测试确认变红 → 恢复实现。抓不住的断言要**删掉**而不是留着装门面 |
+| 14 | **只按 `created_at` 排序 = 顺序不稳定** | `created_at` 由 `server_default now()` 生成，**同一事务写入的多行时间戳完全相同**，PostgreSQL 对并列行返回任意顺序。已踩两次：`screening_decision`（用 `seq` 修）、`screening_record`（用 `(created_at, id)` 修）。凡「同事务批量插入 + 分页/列表」的表，排序键必须带**唯一列** |
 
 ---
 
@@ -146,6 +147,7 @@ docker compose build backend && docker compose up -d backend
 | P1-C 账号体系 | ✅ 已交付 `d44282a` + 修复 `112c398` + **前端 `f7323ff`** | 邮箱验证 + 密码重置（只存哈希/单次使用/恒定响应）；未配 SMTP 不阻塞注册 + **`/verify-email`、`/password-reset`、`/account/verify` 三页** + 登录页「忘记密码」入口。**遗留**：无 |
 | P1-D 限流 + 配额 | ✅ 已交付 `d44282a` + **缺口补齐 `63b1d95`** | 中间件 + Redis/内存实现 + fail-open + 熔断；429 带 Retry-After；**限流覆盖全部 19 条写端点**（新增 task_control/template_write/template_render）；**配额真扣减**（提交时预扣 100k、完成时按实际用量退还差额，`refund()` 原子且不扣到负数）。**遗留**：无 |
 | P1-E RIS/BibTeX 导入 | ✅ 已交付 `d44282a` + 端点 `fe56a67` + **前端 `08b7378`** | round-trip 与导出严格一致 + `POST /references/import` + **`/references/import` 预览页**。**遗留**：无 |
+| **P1-D 遗留（P1）** | 🔴 **配额预扣在任务未完成时永不退还** | `quota_refund_for_usage` 只在 `task_completed` 调用；**取消 / 失败 / 中途放弃 → 提交时预扣的 100k 白扣**。2026-10-21 Task 7 验收实测：6 个停在 `waiting_approval` 的探针任务占满 demo 日配额（100 万），所有建任务请求 429。修法：在 `cancel` / 失败 / 放弃路径也按实际用量退款 |
 
 **Issue 清单**（全部已关闭）：
 | Issue | 标题 | 优先级 | 说明 |

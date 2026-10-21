@@ -1890,6 +1890,120 @@ Mermaid `排除 n=1`），问题都在前端时序：
 `vue-tsc` 干净；build 成功（CSS 27.08 kB / JS 289.43 kB）。
 探针数据已按外键顺序清理并**复核**（筛选三表全 0，演示数据 27 任务 / 118 文档未变）。
 
+### Task 7：服务器端到端验收（`d0af591` + `4b9e1c0` + `e29dc54`）
+
+**结论**：验收通过，但过程中**暴露两个真实产品缺陷**（都不是「测试写错」，都是用户会遇到的
+行为问题），均已按 TDD 修复并补回归测试。
+
+#### 缺陷 1：排除不是终态，PRISMA 计数会**倒退**（`d0af591`）
+
+**怎么发现的**：首轮服务器 E2E 按计划断言「exclude 之后再 maybe 应成功」——脚本
+打印 PASS。但这恰恰是错的：跑完 PRISMA 计数发现 `title_abstract.excluded` 从
+`1` 变回 `0`、`exclusion_reasons` 里的 `not relevant` 消失。
+
+**根因**：PRISMA 的排除数与理由取「每位筛选者的**最新**决策」。允许覆盖就等于
+允许擦掉审计痕迹——一次误点「待定」，已排除的记录从流程图里消失，数字凭空减少，
+且没有任何提示「这条其实被排除过」。
+
+**修法**：
+
+- 服务层：非 `exclude` 决策前查该筛选者在本阶段的最新决策，已是 `exclude` 则
+  抛 `ValueError` → HTTP 400（文案说明「已被你排除」）；
+- **双人筛选不受影响**：校验只看**同一筛选者**在同一阶段的历史（另一位筛选者仍可独立判断）；
+- 列表响应补 `current_verdict` / `current_exclusion_reason`，前端据此隐藏注定 400 的按钮，
+  并显示「已排除：理由」/「待定」徽标；
+- `include` 之后再改 `maybe` 仍允许（那是复核动作，不是排除）。
+
+**测试诚实性**（AGENTS.md #13）：回退守卫 → 后端 **4 例变红**、前端 **1 例变红**（已验证）。
+
+#### 缺陷 2：候选列表顺序不稳定（`4b9e1c0`）
+
+**怎么发现的**：浏览器 E2E 在**桌面与移动两个视口都失败**，报错显示
+「点了 A 行、断言的是 B 行」。起初怀疑是测试写法问题，但改成按 id 定位后仍失败。
+
+**根因**：一次检索的多条记录写在**同一个事务**里，`created_at` 由 `server_default now()`
+生成 → 时间戳**完全相同**；而 `list_records` 只按 `created_at` 排序，PostgreSQL 对并列行
+返回**任意顺序**。后果：
+
+- 用户每刷新一次候选列表顺序就可能变 —— 正在筛选的人找不到刚才看的那条；
+- E2E 按位置取行 → 「点的是 A，断言的是 B」。
+
+这与 Task 2 给 `screening_decision` 加 `seq`（`created_at` 精度不足导致取错最新决策）
+是**同一类问题**，当时没一并检查 `screening_record`，属于漏项。
+
+**修法**：抽出 `list_records_stmt()`，排序键改为 `(created_at, id)`。
+
+**这条回归测试为什么用结构断言**：SQLite 对并列行恰好按 rowid（插入顺序）返回，
+纯行为断言（「两次查询结果一致」）**回退修复后仍然全绿**，是假测试。改为断言
+「SQL 排序键必须含唯一列 `id`」——回退 `id` 排序键 → **测试变红**（已验证）。
+
+#### 服务器验收证据
+
+**API 端到端（真实 PostgreSQL + 真实 HTTP）33 项全绿**：
+
+```
+[1] 建任务 201
+[2] 检索落库: hits_total=60 hits_deduped=2 hits_by_source={'arxiv':40,'openalex':20}
+    [OK] 跨源同题 + 同 DOI 去重（4 → 2）  [OK] sum(hits_by_source) == hits_total
+[3] 候选记录 2 条，current_verdict 均为 null
+[4] include → fulltext 201；include 后再改 maybe → 201（复核动作，允许）
+    排除缺理由 → 400
+    【回归】排除后再给 maybe → 400「该记录在此阶段已被你排除（排除是终态）…」
+    【回归】排除后再给 include → 400
+    列表 current_verdict=exclude、current_exclusion_reason=not relevant
+[5] PRISMA: identified_total=60 / duplicates_removed=58 / records_screened=2
+    title_abstract={'screened':2,'excluded':1}
+    【回归】计数未因覆盖尝试回退  【回归】排除理由未丢失
+    Mermaid 以 flowchart TD 开头、含「排除 n=1」、方括号配对
+[6] 英文渲染 OK，中英数字一致
+[7] 零数据：全 0 且流程图可生成
+[8] 越权：四端点统一 404
+[9] 阶段过滤 fulltext 只回全文阶段记录
+RESULT: 全部通过（33 项）
+```
+
+**浏览器走查**：`screening-workbench.spec.ts` **2 passed**（桌面 + 移动双视口，7.3s），
+含本次新增断言「排除后三个决策按钮消失 + 「已排除：理由」徽标可见」。
+Phase 1 页面套件 **8 passed** 无回归。
+
+#### 两个环境问题（不是产品缺陷，但必须记录）
+
+**① demo 账号配额被我们自己的验收探针占满 → 所有建任务请求 429**
+
+`quota` 是 Redis 日窗口 key（`quota:{user_id}:{UTC日期}`），**提交任务时预扣 100k**、
+任务**完成**时按实际用量退还差额。今天 demo 建的 6 个探针任务全部停在 `waiting_approval`
+（从未完成）→ 预扣不退 → 100 万日配额被 6 × 100k + 早期探针占满。
+
+**这暴露一个真实产品问题**：`quota_refund_for_usage` 只在 `task_completed` 调用，
+**任务取消 / 失败 / 中途放弃时预扣永不退还**。用户点错一次就白扣 100k 额度。
+→ 已记录为待办（见下），不属 Task 7 范围。
+
+处置：清理 6 个探针任务（外键顺序）+ 删除当日 quota key。
+**回查确认**：tasks 83→77、筛选三表 3/6/6→0/0/0、`knowledge_docs` 118 未变、
+`demo_tasks` 27 与历史基准一致。
+
+**② `literature-review.spec.ts` 自 M2 迁移起一直失效（`e29dc54`）**
+
+`getByRole("button", { name: "注册" })` 找不到元素 —— `ae90d5b` 把登录/注册改成
+shadcn **Tabs**（`role="tab"`）时漏改这个 spec。**CI 不跑 E2E**，所以隐藏至今。
+已修选择器 + 加注册限流重试（`auth_register` 为 5 次/3600s，连跑 E2E 必撞窗口）。
+
+**未闭环**：本次复跑仍被 429 拦住（窗口约 1 小时），需等窗口后复跑确认。
+
+**门禁**：black/ruff 干净；mypy 0 错误（170 文件）；pytest **2190 passed / 8 skipped**
+（2182 → 2189 → 2190）；覆盖率 **89.93%**；Vitest **181 passed**；`vue-tsc` 干净；
+build 成功（CSS 27.08 kB / JS 289.95 kB）。
+
+**PRISMA 子计划 Task 1-7 全部交付，端到端可用。**
+
+#### Task 7 暴露的后续待办
+
+| 优先级 | 事项 | 说明 |
+| --- | --- | --- |
+| **P1** | 配额预扣在任务未完成时永不退还 | 取消/失败/放弃 → 白扣 100k。应在取消与失败路径也调用 `refund`（按实际已用） |
+| P2 | `literature-review.spec.ts` 等窗口后复跑 | 选择器已修，需确认 429 消失后整条链路通过 |
+| P3 | 演示库累积 53 个 E2E 测试账号 | 注册类 E2E 每次建新用户，未清理；建议给 E2E 账号加前缀并定期清理 |
+
 ---
 
 ## 前端设计系统改造（2026-10-20）
