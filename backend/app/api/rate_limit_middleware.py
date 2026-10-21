@@ -186,6 +186,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if allowed:
             return await call_next(request)
 
+        # 可观测性：限流命中要能看到（"谁在刷"与"我们限额太紧"都需要这个数据）。
+        # 标签用**规则名**（task_create 等低基数枚举），不是真实路径。
+        from app.core import metrics as metrics_module
+
+        metrics_module.inc_counter("maa_rate_limit_rejected", route=label)
         return JSONResponse(
             status_code=429,
             content={

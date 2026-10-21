@@ -13,6 +13,7 @@ from app.api.v1.endpoints import (
     auth_lifecycle,
     citation_styles,
     health,
+    observability,
     references,
     screening,
     task_ws,
@@ -34,3 +35,5 @@ api_router.include_router(references.router)
 api_router.include_router(screening.router)
 api_router.include_router(tasks.router)
 api_router.include_router(task_ws.router)
+# 可观测性看板（Phase 2）：owner-scoped 的任务健康与成本概览
+api_router.include_router(observability.router)

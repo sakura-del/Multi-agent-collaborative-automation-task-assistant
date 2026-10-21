@@ -30,6 +30,10 @@ dependencies = [
 
     # 日志与追踪
     "structlog>=24.1.0",
+    # 可观测性（Phase 2）：Prometheus 指标。纯 Python、无系统依赖（镜像 +~200KB）。
+    # 刻意不引入 OpenTelemetry/APM：单进程 + 五容器场景下，结构化日志 + Prometheus
+    # 指标足够定位问题，引入分布式追踪需要改造所有 LLM/HTTP 调用点。
+    "prometheus-client>=0.20",
 
     # 鉴权
     "python-jose[cryptography]>=3.3.0",

@@ -403,3 +403,31 @@ export interface PrismaCounts {
   markdown: string;
   mermaid: string;
 }
+
+// ===== 可观测性看板（Phase 2）=====
+
+/** 最近任务条目（看板列表用） */
+export interface ObservabilityRecentTask {
+  task_id: string;
+  status: string;
+  used_tokens: number;
+  duration_seconds: number;
+}
+
+/** 我的任务健康与成本概览（owner-scoped，只含自己的数据） */
+export interface ObservabilityOverview {
+  tasks: {
+    total: number;
+    completed: number;
+    failed: number;
+    cancelled: number;
+    waiting_human: number;
+  };
+  /** 成功率 = completed / 已进入终态的任务数（0 表示暂无终态任务） */
+  success_rate: number;
+  tokens: {
+    total_used: number;
+    avg_per_task: number;
+  };
+  recent: ObservabilityRecentTask[];
+}

@@ -172,6 +172,13 @@ class MultiSourceLiteratureSource:
                     error=str(error),
                     error_type=type(error).__name__,
                 )
+                # 可观测性：单源故障已被隔离（不影响其他源），但不能"静默降级"——
+                # 运营需要知道哪个源在拖后腿（换源 / 降级 / 联系源方）。
+                from app.core import metrics as metrics_module
+
+                metrics_module.inc_counter(
+                    "maa_literature_source_errors", source=type(source).__name__
+                )
             else:
                 results_by_source.append(list(outcome))
 

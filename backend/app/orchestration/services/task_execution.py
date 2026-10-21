@@ -138,6 +138,22 @@ async def quota_refund_for_usage(quota: Any | None, user_id: UUID, *, actual_tok
         )
 
 
+def _dag_node_types(dag: Any) -> dict[str, str]:
+    """从 DAG 图里取 `{node_id: type}`（可观测性用）。
+
+    `TaskDAG` 把节点属性存在 networkx 的 `graph.nodes[nid]` 上，键名是 `type`
+    （见 `PlannerAgent` 的 `dag.add_node(..., type=node.type)`）。
+    **不要**从节点执行结果里猜类型：不同 agent 返回结构不同，会大量退化成 unknown。
+    """
+    try:
+        graph = dag.graph
+        return {
+            str(node_id): str(attrs.get("type") or "") for node_id, attrs in graph.nodes.items()
+        }
+    except Exception:  # pragma: no cover - 防御性兜底
+        return {}
+
+
 class TaskExecution:
     """任务运行时深模块：规划、确认、执行、恢复与查询。"""
 
@@ -451,6 +467,8 @@ class TaskExecution:
         if settle_after_commit:
             # 取消是终态：按已用额度结算预扣（否则预扣永久占用）
             await self.settle_quota(task_id)
+            # 可观测性：在 commit 之后打点，避免「事务回滚但指标已 +1」
+            await self._record_task_terminal(task_id, TaskStatus.CANCELLED.value)
         if prereserve_after_commit:
             # 从「已结算」状态继续跑：必须重新预扣剩余额度
             await self._prereserve_quota(user_id, task_id)
@@ -737,9 +755,10 @@ class TaskExecution:
 
             # 先记账再判断成败：转人工 / 失败路径同样要按已用额度结算，
             # 若放在成功分支里就会漏记（「跑了 30k 然后转人工」被当成 0 用量全额退款）。
-            await self.add_used_tokens(
-                task_id, sum_actual_tokens(getattr(result, "node_results", {}) or {})
-            )
+            node_results = getattr(result, "node_results", {}) or {}
+            await self.add_used_tokens(task_id, sum_actual_tokens(node_results))
+            # 可观测性：节点维度能回答「卡在哪个环节」，成功率只说成/败
+            self._record_node_metrics(node_results, _dag_node_types(dag))
 
             if not result.success:
                 await self._finish_waiting_human(task_id, result)
@@ -935,6 +954,7 @@ class TaskExecution:
             await session.commit()
         await self._publish(event)
         await self.settle_quota(task_id)
+        await self._record_task_terminal(task_id, TaskStatus.WAITING_HUMAN.value)
 
     async def _start_reviewing(self, task_id: UUID, result: Any) -> None:
         """调度全部成功：RUNNING → REVIEWING 并发布事件。"""
@@ -1056,6 +1076,8 @@ class TaskExecution:
             task_id=str(task_id),
             estimated=ESTIMATED_TOKENS_PER_TASK,
         )
+        # 可观测性：完成是终态之一，记状态 + token 成本 + 耗时
+        await self._record_task_terminal(task_id, TaskStatus.COMPLETED.value)
 
     # ===== 复盘产物 =====
 
@@ -1451,6 +1473,78 @@ class TaskExecution:
             return
         # 转人工 = 本段执行结束：按已用额度结算预扣（规划失败时用量为 0 → 全额退还）
         await self.settle_quota(task_id)
+        await self._record_task_terminal(task_id, TaskStatus.WAITING_HUMAN.value)
+
+    # ===== 可观测性（Phase 2）=====
+
+    async def _record_task_terminal(self, task_id: UUID, status: str) -> None:
+        """记录任务终态指标（状态计数 / token 成本 / 耗时）。
+
+        在**状态转换提交之后**调用，因此并发/重试下不会重复计数
+        （转换本身有 `lock_for_update` + 状态断言兜底）。
+
+        fail-open：指标故障绝不影响任务（`core.metrics` 内部已吞异常，
+        这里再包一层，避免读库失败把终态处理搞崩）。
+        """
+        try:
+            async with self._session_factory() as session:
+                task = await TaskRepository(session).get(task_id)
+                if task is None:
+                    return
+                used = int(task.used_tokens or 0)
+                created = task.created_at
+                completed = task.completed_at or task.updated_at
+            from app.core import metrics as metrics_module
+
+            metrics_module.inc_counter("maa_tasks", status=status)
+            if used > 0:
+                metrics_module.inc_counter("maa_task_tokens", amount=used)
+            if created is not None and completed is not None:
+                elapsed = (completed - created).total_seconds()
+                if elapsed >= 0:
+                    metrics_module.observe_histogram(
+                        "maa_task_duration_seconds", elapsed, status=status
+                    )
+        except Exception as exc:  # pragma: no cover - 防御性兜底
+            logger.debug("task_metrics_record_failed", task_id=str(task_id), error=str(exc))
+
+    @staticmethod
+    def _record_node_metrics(
+        node_results: Mapping[str, Any], node_types: Mapping[str, str] | None = None
+    ) -> None:
+        """记录节点执行结果（按 node_type + status）。
+
+        为什么需要：任务成功率只说"成功/失败"，**卡在哪个环节**要靠节点维度。
+        `node_type` 是低基数枚举（search/extract/write/validate/review），
+        完全可以做标签。
+
+        `node_type` 的取法：优先用 DAG 里的 `PlanNode.type`（权威），
+        其次 output 里的 `execution_result.node_type`。**不要**只靠 output——
+        不同 agent 的返回结构不同（测试替身只回 `{"result": ...}`），
+        只靠 output 会大量退化成 `unknown`，那时指标看起来"有数据"但毫无用处。
+        """
+        try:
+            from app.core import metrics as metrics_module
+
+            types = node_types or {}
+            for node_id, node_result in node_results.items():
+                node_type = types.get(node_id)
+                if not node_type:
+                    output = getattr(node_result, "output", None)
+                    if isinstance(output, Mapping):
+                        payload = output.get("execution_result")
+                        if isinstance(payload, Mapping):
+                            node_type = payload.get("node_type")
+                        else:
+                            node_type = output.get("node_type")
+                status = getattr(getattr(node_result, "status", None), "value", None)
+                metrics_module.inc_counter(
+                    "maa_task_nodes",
+                    node_type=str(node_type or "unknown"),
+                    status=str(status or "unknown"),
+                )
+        except Exception as exc:  # pragma: no cover - 防御性兜底
+            logger.debug("node_metrics_record_failed", error=str(exc))
 
     @staticmethod
     def _describe(request: LiteratureReviewRequest) -> str:

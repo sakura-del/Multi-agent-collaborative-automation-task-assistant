@@ -674,6 +674,9 @@ class TestSettlementOnLifecyclePaths:
         try:
             task_id = await execution.submit(user_id, _request())
             await _wait_status(execution, user_id, task_id, {TaskStatus.WAITING_HUMAN.value})
+            # 状态到 waiting_human ≠ 结算已落库（结算是状态提交之后的第二步；
+            # 后续还加了可观测性打点，窗口更宽）→ 显式等结算
+            await _wait_settled(factory, task_id)
 
             assert quota.total_refunded == ESTIMATED_TOKENS_PER_TASK
         finally:

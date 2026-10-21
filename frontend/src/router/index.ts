@@ -3,6 +3,7 @@ import { createRouter, createWebHistory } from "vue-router";
 import AppLayout from "@/layouts/AppLayout.vue";
 import KnowledgeView from "@/views/KnowledgeView.vue";
 import LoginView from "@/views/LoginView.vue";
+import ObservabilityView from "@/views/ObservabilityView.vue";
 import PasswordResetView from "@/views/PasswordResetView.vue";
 import ReferenceImportView from "@/views/ReferenceImportView.vue";
 import ScreeningView from "@/views/ScreeningView.vue";
@@ -62,6 +63,8 @@ export const router = createRouter({
         { path: "styles", name: "styles", component: StyleView },
         { path: "templates", name: "templates", component: TemplateView },
         { path: "references/import", name: "reference-import", component: ReferenceImportView },
+        // 用量与健康看板（Phase 2 可观测性）：owner-scoped，只显示自己的任务统计
+        { path: "observability", name: "observability", component: ObservabilityView },
         // 登录后也可从这里重发验证邮件（无 token 时展示重发按钮）
         { path: "account/verify", name: "account-verify", component: VerifyEmailView },
       ],

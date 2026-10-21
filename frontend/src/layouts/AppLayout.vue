@@ -1,5 +1,13 @@
 <script setup lang="ts">
-import { FileInput, FileText, ListChecks, Library, LogOut, Palette } from "lucide-vue-next";
+import {
+  Activity,
+  FileInput,
+  FileText,
+  ListChecks,
+  Library,
+  LogOut,
+  Palette,
+} from "lucide-vue-next";
 import { useRouter } from "vue-router";
 
 import { Button } from "@/components/ui/button";
@@ -20,6 +28,7 @@ const NAV_ITEMS = [
   { name: "styles", label: "引用样式", icon: Palette },
   { name: "templates", label: "Word 模板", icon: FileText },
   { name: "reference-import", label: "导入文献", icon: FileInput },
+  { name: "observability", label: "用量", icon: Activity },
 ] as const;
 
 function handleLogout() {

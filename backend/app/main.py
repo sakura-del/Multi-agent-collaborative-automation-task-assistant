@@ -200,6 +200,12 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestIDMiddleware)
     # 鉴权上下文中间件：预解析 token 注入 request.state，不强制拦截
     app.add_middleware(AuthContextMiddleware)
+    # HTTP 指标（Phase 2 可观测性）：最后注册 → 洋葱模型最外层 → 最先执行、最后记录，
+    # 因此能覆盖整条链路耗时（含鉴权/限流），也不会被内层异常跳过。
+    # 内部 fail-open：指标故障绝不影响响应。
+    from app.api.metrics_middleware import MetricsMiddleware
+
+    app.add_middleware(MetricsMiddleware)
 
     # 全局异常处理：把 AppException 转成统一 JSON 响应结构
     @app.exception_handler(AppException)
@@ -211,6 +217,12 @@ def create_app() -> FastAPI:
             message=exc.message,
             details=exc.details,
         )
+        # 可观测性：配额拒绝单独计数（与限流 429 区分——「用户额度用尽」和
+        # 「客户端在刷」在运营上要采取完全不同的动作）
+        if exc.error_code == "QUOTA_EXCEEDED":
+            from app.core import metrics as metrics_module
+
+            metrics_module.inc_counter("maa_quota_rejected")
         # 429（配额/限流）必须带 Retry-After，客户端才知道何时可重试
         headers: dict[str, str] = {}
         retry_after = getattr(exc, "retry_after", None)
@@ -228,6 +240,23 @@ def create_app() -> FastAPI:
 
     # 路由挂载
     app.include_router(api_router)
+
+    # ===== 可观测性：Prometheus 抓取端点（Phase 2）=====
+    # 为什么在根路径而不在 /api/v1：Prometheus 生态的默认约定就是 `/metrics`，
+    # 换路径要在抓取配置里额外指定，没有必要。
+    #
+    # ⚠️ **刻意无鉴权**（Prometheus 抓取器不带业务 token），因此
+    # `app/core/metrics.py` 的指标标签里绝不允许出现 user_id / 任务标题 / 真实路径
+    # （只允许状态、节点类型、源名、路由模板这类低基数枚举）。
+    # 生产部署应只在内网暴露本端点 —— 见 docs/runbooks/observability.md。
+    @app.get("/metrics", include_in_schema=False)
+    async def prometheus_metrics() -> Response:
+        from app.core import metrics as metrics_module
+
+        return Response(
+            content=metrics_module.render(),
+            media_type="text/plain; version=0.0.4; charset=utf-8",
+        )
 
     return app
 
