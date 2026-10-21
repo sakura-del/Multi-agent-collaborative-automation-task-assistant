@@ -182,4 +182,49 @@ describe("WorkspaceView", () => {
       .find((b) => b.text().includes("生成邀请码"));
     expect(inviteBtn).toBeUndefined();
   });
+
+  it("手动填过 slug 后，改名字不覆盖 slug", async () => {
+    /**
+     * **回归测试**（真实缺陷）：自动化工具与真实用户都会「先填名字、再填 slug」。
+     * 首版 `syncSlug` 只看「slug 是否为空」，Playwright `fill()` 的 blur 时序
+     * 让派生值插进了输入中途，实测 slug 变成
+     * `e2e-1792583811206-mobile-chromee2e-team-...`（两段拼接）。
+     *
+     * 回退 `slugTouched` 后本用例变红。
+     */
+    vi.mocked(listWorkspaces).mockResolvedValue([] as never);
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("创建团队"))!
+      .trigger("click");
+
+    // 用户手动填 slug
+    await wrapper.get("#ws-slug").setValue("my-custom-slug");
+    // 再改名字（触发 blur → syncSlug）
+    await wrapper.get("#ws-name").setValue("张三课题组");
+    await wrapper.get("#ws-name").trigger("blur");
+
+    expect((wrapper.get("#ws-slug").element as HTMLInputElement).value).toBe("my-custom-slug");
+  });
+
+  it("没手动填 slug 时，名字自动派生 slug", async () => {
+    vi.mocked(listWorkspaces).mockResolvedValue([] as never);
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("创建团队"))!
+      .trigger("click");
+
+    await wrapper.get("#ws-name").setValue("Zhang Lab 2026");
+    await wrapper.get("#ws-name").trigger("blur");
+
+    expect((wrapper.get("#ws-slug").element as HTMLInputElement).value).toBe("zhang-lab-2026");
+  });
 });

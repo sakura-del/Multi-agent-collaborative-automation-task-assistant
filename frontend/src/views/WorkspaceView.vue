@@ -47,6 +47,19 @@ const creating = ref(false);
 const inviteCode = ref("");
 const joining = ref(false);
 
+/**
+ * 用户是否手动编辑过 slug。
+ *
+ * **为什么需要这个标记**：自动派生挂在 name 的 `@blur` 上，而自动化工具
+ * （Playwright `fill()`）会「先填 name → 焦点转移触发 blur → 再填 slug」，
+ * 此时派生逻辑会与输入竞争，实测把 slug 拼成
+ * `e2e-1792583811206-mobile-chromee2e-team-...`。
+ *
+ * 真实用户也会遇到类似情况（填了名字又回头改 slug，再改名字时 slug 被覆盖）。
+ * 用「用户动过就不再自动改」这个规则，行为可预测。
+ */
+const slugTouched = ref(false);
+
 /** 刚生成的邀请码（只显示一次）。 */
 const generatedInvite = ref<{ workspaceId: string; code: string; role: string } | null>(null);
 const copied = ref(false);
@@ -83,9 +96,14 @@ async function refresh() {
   }
 }
 
-/** slug 从名字自动派生（用户可改）。只保留小写字母/数字/连字符。 */
+/**
+ * 从名字派生 slug。
+ *
+ * 规则：**用户手动改过 slug 就不再自动覆盖**（`slugTouched`）。
+ * 否则「先填名字、再填 slug」这类操作顺序会让派生值覆盖用户输入。
+ */
 function syncSlug() {
-  if (newSlug.value.trim()) {
+  if (slugTouched.value) {
     return;
   }
   newSlug.value = newName.value
@@ -94,6 +112,11 @@ function syncSlug() {
     .replace(/[^a-z0-9-]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 64);
+}
+
+/** 用户手动输入 slug → 标记为已编辑，后续不再自动派生。 */
+function onSlugInput() {
+  slugTouched.value = true;
 }
 
 async function submitCreate() {
@@ -114,6 +137,7 @@ async function submitCreate() {
     newName.value = "";
     newSlug.value = "";
     newSeatLimit.value = 5;
+    slugTouched.value = false;
     await refresh();
   } catch (err) {
     error.value = (err as Error).message || "创建失败";
@@ -226,7 +250,12 @@ function seatText(workspace: Workspace): string {
         </div>
         <div>
           <Label for="ws-slug">标识（URL 用）</Label>
-          <Input id="ws-slug" v-model="newSlug" placeholder="zhangsan-lab" />
+          <Input
+            id="ws-slug"
+            v-model="newSlug"
+            placeholder="zhangsan-lab"
+            @input="onSlugInput"
+          />
         </div>
         <div>
           <Label for="ws-seat">席位上限</Label>
