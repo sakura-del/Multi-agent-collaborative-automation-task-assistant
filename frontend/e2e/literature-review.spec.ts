@@ -9,7 +9,16 @@ import { existsSync, statSync } from "node:fs";
 
 const FIXTURE = resolve(dirname(fileURLToPath(import.meta.url)), "fixtures/sample.txt");
 const SHOTS = resolve(dirname(fileURLToPath(import.meta.url)), "screenshots");
-const WORKFLOW_TIMEOUT = 12 * 60_000;
+
+/**
+ * 整个工作流的超时。
+ *
+ * 2026-10-21 实测：跑服务器的真实模型流程（12 个节点）需要 **13 分钟以上**
+ * （服务器 CPU 约为本机 1/28，见 AGENTS.md §4.2），原 12 分钟不够——
+ * 用例在"等结果 Tab"处超时，但任务在服务器上其实已完成（completed）。
+ * 提到 25 分钟：既覆盖慢机器，又不会让真正的卡死无限等待。
+ */
+const WORKFLOW_TIMEOUT = 25 * 60_000;
 
 /** Plan 4 Exit Gate 截图：任务列表 / 规划确认 / 运行中 DAG / 人工干预 / 最终结果 */
 async function capture(page: Page, name: string, project: string) {

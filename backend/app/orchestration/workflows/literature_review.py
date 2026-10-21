@@ -42,9 +42,45 @@ from app.orchestration.workflows.prompts import (
     render_executor_prompt,
     render_planner_prompt,
 )
-from app.tools.literature.models import LiteratureSearch
+from app.tools.literature.models import (
+    MAX_SEARCH_RESULTS,
+    MIN_SEARCH_RESULTS,
+    LiteratureSearch,
+)
 
 logger = get_logger(__name__)
+
+#: 检索节点未指定条数时的默认值（与 `LiteratureSearch.max_results` 默认一致）
+DEFAULT_SEARCH_RESULTS = 10
+
+
+def clamp_max_results(raw: Any) -> int:
+    """把 LLM 给的 `max_results` **夹到** `LiteratureSearch` 的合法区间。
+
+    为什么需要夹紧而不是直接报错：检索节点参数由**规划模型自由生成**，
+    `max_results=60` 这类值很常见（用户说"找 60 篇文献"时尤其自然）。
+    直接把它传给 `LiteratureSearch` 会触发 `le=50` 校验错 → 执行器重试 4 次
+    （换策略也改变不了这个数字）→ 节点转 `waiting_human`，
+    用户在界面上只看到"任务卡住"（2026-10-21 浏览器 E2E 实测踩到）。
+
+    语义：能解析成整数的夹到 `[1, 50]`；解析不了（None/字符串/布尔）
+    退回默认 10 —— 宁可少取几条，也不要让整篇综述失败。
+    """
+    if isinstance(raw, bool):  # bool 是 int 子类，必须先排除
+        return DEFAULT_SEARCH_RESULTS
+    if isinstance(raw, int):
+        value = raw
+    elif isinstance(raw, float) and raw.is_integer():
+        value = int(raw)
+    elif isinstance(raw, str):
+        try:
+            value = int(raw.strip())
+        except ValueError:
+            return DEFAULT_SEARCH_RESULTS
+    else:
+        return DEFAULT_SEARCH_RESULTS
+    return max(MIN_SEARCH_RESULTS, min(MAX_SEARCH_RESULTS, value))
+
 
 #: 文献场景允许的节点类型（与 PlanNode.type 一致）
 REQUIRED_NODE_TYPES = frozenset({"search", "extract", "write", "validate", "review"})
@@ -375,7 +411,7 @@ class LiteratureReviewWorkflow:
         if self._source is None:
             raise HumanActionRequiredError("缺少文献检索源（arXiv 或离线清单）")
         query = self._query_for(task, node, plan)
-        max_results = int(node.input.get("max_results", 10))
+        max_results = clamp_max_results(node.input.get("max_results"))
         records = await self._source.search(LiteratureSearch(query=query, max_results=max_results))
         content = "\n".join(
             f"- {record.title} ({record.source_id}) {record.source_url}" for record in records

@@ -328,6 +328,71 @@ class TestEvidenceConstrainedExecution:
         assert len(result.artifacts) == 2
 
 
+class TestSearchMaxResultsClamping:
+    """`max_results` 必须被**夹紧**到契约区间，而不是让任务失败。
+
+    真实缺陷（2026-10-21 浏览器 E2E 暴露）：规划节点参数由 LLM 自由生成，
+    它把 `max_results` 写成 60（用户要求"找 60 篇"时很自然），而
+    `LiteratureSearch.max_results` 的契约是 `le=50` → pydantic 校验错 →
+    执行器重试 4 次（换策略也改不了这个数字）→ 节点转 `waiting_human`，
+    任务永远跑不到 completed，用户在界面上只看到"卡住"。
+
+    正确行为：超出区间时**夹到最近合法值**并继续（PRISMA/可用性都接受
+    "最多取 50 条"），而不是让整篇综述失败。
+    """
+
+    async def test_clamps_max_results_above_contract_limit(self) -> None:
+        from app.tools.literature.models import MAX_SEARCH_RESULTS
+
+        source = _FakeArxivSource([_record("2401.12341v1")])
+        workflow = LiteratureReviewWorkflow(planner=PlannerAgent(), source=source)
+        task = _task()
+        plan = await workflow.plan(task)
+        search_node = next(node for node in plan.nodes if node.type == "search")
+        search_node.input = {**search_node.input, "max_results": 60}
+
+        await workflow.execute_node(task, search_node)
+
+        assert source.calls[0].max_results == MAX_SEARCH_RESULTS
+
+    async def test_clamps_zero_and_negative_to_one(self) -> None:
+        source = _FakeArxivSource([_record("2401.12341v1")])
+        workflow = LiteratureReviewWorkflow(planner=PlannerAgent(), source=source)
+        task = _task()
+        plan = await workflow.plan(task)
+        search_node = next(node for node in plan.nodes if node.type == "search")
+
+        for bad in (0, -5):
+            search_node.input = {**search_node.input, "max_results": bad}
+            await workflow.execute_node(task, search_node)
+            assert source.calls[-1].max_results == 1, f"max_results={bad} 应夹到 1"
+
+    async def test_tolerates_non_numeric_max_results(self) -> None:
+        """LLM 可能给字符串或噪声值 —— 退回默认值，不要崩。"""
+        source = _FakeArxivSource([_record("2401.12341v1")])
+        workflow = LiteratureReviewWorkflow(planner=PlannerAgent(), source=source)
+        task = _task()
+        plan = await workflow.plan(task)
+        search_node = next(node for node in plan.nodes if node.type == "search")
+        search_node.input = {**search_node.input, "max_results": "很多"}
+
+        await workflow.execute_node(task, search_node)
+
+        assert 1 <= source.calls[-1].max_results <= 50
+
+    async def test_respects_valid_value_unchanged(self) -> None:
+        source = _FakeArxivSource([_record("2401.12341v1")])
+        workflow = LiteratureReviewWorkflow(planner=PlannerAgent(), source=source)
+        task = _task()
+        plan = await workflow.plan(task)
+        search_node = next(node for node in plan.nodes if node.type == "search")
+        search_node.input = {**search_node.input, "max_results": 7}
+
+        await workflow.execute_node(task, search_node)
+
+        assert source.calls[0].max_results == 7
+
+
 # ===== 校验与复盘缝 =====
 
 

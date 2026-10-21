@@ -12,6 +12,18 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
+#: 单次检索允许请求的最大结果数。
+#:
+#: 为什么需要这个常量：`LiteratureSearch.max_results` 的上限是 `le=50`，但**检索节点
+#: 的参数由 LLM 规划自由生成**，它会写 60/100（用户说"找 60 篇"时很自然）。
+#: 过去这类值直接触发 pydantic 校验错 → 节点重试 4 次（换策略也改不了这个数字）
+#: → 转 `waiting_human`，用户在界面上只看到"任务卡住"。
+#: 调用方（`literature_review._execute_search`）必须用它把 LLM 给的值**夹紧**。
+MAX_SEARCH_RESULTS = 50
+
+#: 检索条数的下限（0/负数夹到 1）。
+MIN_SEARCH_RESULTS = 1
+
 
 class LiteratureSearch(BaseModel):
     """arXiv 检索请求。"""
@@ -19,7 +31,7 @@ class LiteratureSearch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     query: str = Field(min_length=2, max_length=300)
-    max_results: int = Field(default=10, ge=1, le=50)
+    max_results: int = Field(default=10, ge=MIN_SEARCH_RESULTS, le=MAX_SEARCH_RESULTS)
     date_from: date | None = None
     date_to: date | None = None
 
