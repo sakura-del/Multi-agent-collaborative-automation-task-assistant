@@ -13,9 +13,11 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.screening import (
@@ -81,7 +83,7 @@ class ScreeningRepository(BaseRepository[ScreeningRecord]):
         *,
         stage: DecisionStage | None = None,
         limit: int = 200,
-    ) -> Select[tuple[ScreeningRecord]]:
+    ) -> Any:
         """构造候选记录查询（**排序稳定**）。
 
         为什么必须显式带 `id`：一次检索的多条记录写在同一个事务里，
@@ -90,6 +92,11 @@ class ScreeningRepository(BaseRepository[ScreeningRecord]):
         用户每刷新一次候选列表顺序就可能变（找不到刚看的那条），
         浏览器 E2E 也会因「取第 N 行」而指到别的记录。
         （同类问题在 Task 2 已用 `screening_decision.seq` 修过一次。）
+
+        **返回类型刻意写 `Any`**：`Select[...]` 的泛型参数在 SQLAlchemy 不同小版本
+        间的 stubs 里不一致（本地 2.0.51 推断 `Select[tuple[Model]]`，CI 装到的版本
+        推断 `Select[Model]`），写死任何一种都会让另一侧 `mypy` 报错。
+        本方法的返回值只用于执行查询与断言，不需要精确类型。
         """
         stmt = select(ScreeningRecord).where(ScreeningRecord.task_id == task_id)
         if stage is not None:
@@ -108,7 +115,8 @@ class ScreeningRepository(BaseRepository[ScreeningRecord]):
     ) -> list[ScreeningRecord]:
         """列出任务的候选记录；可按当前阶段过滤。"""
         stmt = self.list_records_stmt(task_id, stage=stage, limit=limit)
-        return list((await self.db.execute(stmt)).scalars().all())
+        rows: Sequence[ScreeningRecord] = (await self.db.execute(stmt)).scalars().all()
+        return list(rows)
 
     # ===== 决策（追加式）=====
 
