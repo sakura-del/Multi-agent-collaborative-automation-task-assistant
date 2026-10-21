@@ -1757,6 +1757,82 @@ RESULT: PASS
 **门禁**：black/ruff 干净；mypy 0 错误（168 文件）；pytest **2159 passed / 8 skipped**
 （2132 → 2159，+27 例）。
 
+### Task 5：HTTP 端点（`a1d8b76`）
+
+**交付**：`app/schemas/screening.py` + `app/api/v1/endpoints/screening.py`，
+接线进 `api/v1/router.py`。
+
+| 方法 | 路径 |
+| --- | --- |
+| POST | `/api/v1/screening/search-logs` |
+| GET | `/api/v1/screening/records?task_id=` |
+| POST | `/api/v1/screening/records/{id}/decisions` |
+| GET | `/api/v1/screening/prisma?task_id=` |
+
+**对计划初稿的四处修正（都是真实缺陷）**
+
+**1. 越权（严重）**。计划端点的 `task_id` 来自 query/body 却**从不校验任务归属**——
+任何登录用户都能读别人的筛选记录与 PRISMA 数字，或往别人的记录里追加决策；
+`POST /decisions` 更只有 `record_id`，连任务 id 都没有。
+修法：`ScreeningService.ensure_task_owned()` / `get_owned_record()`（复用既有
+`TaskRepository.get_for_user`），四个端点全部先校验，**统一 404 而非 403**
+（403 等于告诉调用方「这个 id 存在」，会泄漏他人资源存在性）。
+
+**2. DOI 被静默丢弃 → 最高优先级去重键失效**。`LiteratureRecordIn.doi` 声明了
+却完全没用，`source_url` 被填成 `https://example.org/{source_id}`；而领域层靠
+`source_url` 的 `https://doi.org/…` 提取 DOI。结果「同 DOI 不同源」永远去不掉重，
+PRISMA 去重后记录数虚高。修法：有 `doi` 时构造 `https://doi.org/{quote(doi)}`。
+
+**3. 违反事务边界约定**。计划里 `await service._db.commit()  # noqa: SLF001`
+直接访问私有 session；项目既有约定是**服务层负责 commit**
+（`citation_style_service` 文档字符串明写）。改为 `record_search()`/`decide()`
+在服务层 commit；`decide` 的 commit 保证「决策行 + 阶段推进」原子落库。
+
+**4. `hits_total` 无法表达**。上游报 200 命中只回 5 条样本时无从传入，
+识别数字会退化成 5。补可选 `hits_total`。
+
+**其他改进**：`stage`/`verdict` 用真实枚举（非法值 Pydantic 直接 422，OpenAPI
+可见合法取值）；`hits_by_source` 值加 `ge=0`（负数会让流程图自相矛盾）；
+`GET /prisma` 支持 `language=zh|en`；响应补 `doi`。
+
+**新增「路由接线」回归测试**。单测端点函数测不出「忘了 `include_router`」——
+那种情况端点能过、线上 404。用 OpenAPI schema 断言四条路径存在。
+踩到一个坑：本项目 FastAPI 版本把被 include 的路由包成惰性 `_IncludedRouter`，
+`api_router.routes` 里看不到真实 path（只有 11 个 `_IncludedRouter` 对象），
+必须走 `probe.openapi()["paths"]`。
+
+**服务器端到端验证（真实 PostgreSQL + 真实 HTTP）**
+
+```
+[1] demo 登录 OK
+[2] 探针任务创建 OK
+[3] 检索落库: hits_total=137 hits_deduped=2 hits_by_source={'arxiv':100,'openalex':37}
+    [OK] DOI 跨源去重生效（3 条 → 2 条，其中两条 DOI 仅大小写/题名不同）
+[4] 列记录: 2 条（doi=10.1234/rag.2024 已归一化为小写并保留）
+[5] 越权校验 OK：4 个端点对非本人任务统一 404
+[6] include 推进阶段 OK: fulltext
+[7] 排除无理由被拒 OK: 400「排除决策必须提供 exclusion_reason…」
+[8] 带理由排除 OK: stage=title_abstract
+[9] 非法枚举被拒 OK: 422
+[10] PRISMA: identified_total=137 / duplicates_removed=135 / records_screened=2
+     title_abstract={'screened':2,'excluded':1} / exclusion_reasons={'not relevant':1}
+     [OK] 各源合计自洽 / 流程闭合 / Mermaid 与 Markdown 均生成
+[11] 英文渲染 OK（数字与中文版一致）
+[12] DELETE /tasks/{id} → 405（任务无删除端点，改用 psql 清理探针）
+RESULT: PASS
+```
+
+**一个真实的清理教训**：`DELETE /tasks/{id}` 不存在（405），探针任务需直接清库。
+**更重要的是**：Task 3 的容器验证脚本当时打印了「[8] 探针数据已清理 ✅」，
+但本次核查发现**它并没有清干净**——残留 1 条 `search_log` + 2 条 `screening_record`
+（2026-10-20 18:55 的数据）。已按 `task.title LIKE '%探针%'` 彻底清理并**复核**
+（三张表均 0，演示数据 27 任务 / 118 文档未受影响）。
+→ 规则：**清理脚本必须回查确认，不能只打印成功就当真**。
+
+**门禁**：black/ruff 干净；mypy 0 错误（170 文件）；pytest **2182 passed / 8 skipped**
+（2159 → 2182，+23 例）；Task 3/4 的 86 项筛选相关测试全部仍通过
+（证明加 commit 未破坏既有行为）。
+
 ---
 
 ## 前端设计系统改造（2026-10-20）

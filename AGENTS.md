@@ -21,11 +21,11 @@
 | 项 | 值 |
 | --- | --- |
 | 分支 | `main`（工作分支 `codex/plan3-literature-workflow` 与 main 同点） |
-| HEAD | … → PRISMA Task 4 `3c8aa53` → **前端设计系统 M2 完成 `c89ade4` → FilePicker `1096380`** |
+| HEAD | … → 前端设计系统 M2 `c89ade4` → FilePicker `1096380` → **PRISMA Task 5 `a1d8b76`** |
 | 冻结 tag | `defense-v1` |
-| Plan 状态 | Plan 2 / 3 / 4 / 5 **全部 Exit Gate PASSED**；**Phase 1 五项全部端到端可用且遗留清零**；**Phase 2 进行中**（PRISMA 子计划 Task 4/7 已完成） |
-| 产品化进度 | **Issue #2 / #3 / #4 / #5 / #6 / #7 全部关闭且遗留项清零**；配置优先级缺陷已修复；Phase 1 五项端到端可用；**Phase 2 PRISMA 数据层 + Repository + 服务层 + 渲染器已就位**；**前端已全面迁移到 Tailwind v4 + shadcn-vue / Nova 设计系统**（8 页 + 13 组件，`<style scoped>` 清零，CSS −34%） |
-| 后端测试 | **2159 passed**, 8 skipped；覆盖率 **90.00%**；`mypy` 0 错误（168 文件） |
+| Plan 状态 | Plan 2 / 3 / 4 / 5 **全部 Exit Gate PASSED**；**Phase 1 五项全部端到端可用且遗留清零**；**Phase 2 进行中**（PRISMA 子计划 Task 5/7 已完成） |
+| 产品化进度 | **Issue #2 / #3 / #4 / #5 / #6 / #7 全部关闭且遗留项清零**；配置优先级缺陷已修复；Phase 1 五项端到端可用；**Phase 2 PRISMA 后端全栈就位**（三张表 + Repository + 服务层 + 渲染器 + **4 个 HTTP 端点** `POST /screening/search-logs`、`GET /screening/records`、`POST /screening/records/{id}/decisions`、`GET /screening/prisma`；追加式决策、`seq` 稳定排序、双人分歧、三级去重、PRISMA 计数派生、中英 Markdown/Mermaid、**四端点统一 404 越权校验**）；**前端已全面迁移到 Tailwind v4 + shadcn-vue / Nova 设计系统**（8 页 + 13 组件，`<style scoped>` 清零，CSS −34%） |
+| 后端测试 | **2182 passed**, 8 skipped；覆盖率 **90.00%**；`mypy` 0 错误（170 文件） |
 | 前端测试 | Vitest **156 passed**；Playwright E2E **20 passed**（桌面 + 移动双视口，含文件上传） |
 | CI | **6/6 作业全绿**（2026-10-19 修复；此前自 08-03 起连续失败） |
 | 服务器 | 已同步，五容器 healthy，`curl http://127.0.0.1:48080/api/v1/health/ready` → `{"status":"ready"}` |
@@ -127,6 +127,8 @@ docker compose build backend && docker compose up -d backend
 | 8 | 冒烟栈用独立 project `maa-test` + `ports: !override` | 防止 `down --volumes` 误删生产数据卷 |
 | 9 | 改 `docker-compose.yml` 的 LLM 环境变量必须用**嵌套名** `LLM__XXX` | pydantic-settings 用 `__` 映射；只写扁平名不生效 |
 | 10 | 新增 LLM provider 后要检查 `factory.py` 的 provider 循环元组 | 曾因漏加 `deepseek` 导致 base_url 取不到 |
+| 11 | **验证/清理脚本必须回查确认，不能只打印成功** | 2026-10-21 发现：Task 3 的容器验证脚本打印了「探针数据已清理 ✅」，实际残留 1 条 `search_log` + 2 条 `screening_record`（次日核查才暴露）。清理后必须再查一次 count，并提供「演示数据未被误删」的对照数字 |
+| 12 | 生产库**没有** `DELETE /tasks/{id}`（返回 405），探针任务要直接清库 | 清理顺序：`screening_decision` → `screening_record` → `search_log` → `task`（外键依赖） |
 
 ---
 
