@@ -92,9 +92,12 @@ test("PRISMA 筛选工作台：造数据 → 纳入/排除 → 计数变化", as
   await expect(prisma).toContainText("识别");
 
   // 纳入第一条 → 阶段推进到「全文」
+  // 注意：这里**按 id 取行**而不是按位置（`rows.first()`）。刷新后列表会重新渲染，
+  // 位置可能变（后端排序曾因 created_at 并列而不稳定，Task 7 已修）；按 id 定位
+  // 才不会「点的是 A、断言的是 B」。
   const rows = page.locator('[data-test^="screening-row-"]');
-  const firstRow = rows.first();
-  const firstId = (await firstRow.getAttribute("data-test"))!.replace("screening-row-", "");
+  const firstId = (await rows.first().getAttribute("data-test"))!.replace("screening-row-", "");
+  const firstRow = page.locator(`[data-test="screening-row-${firstId}"]`);
   await page.locator(`[data-test="screening-include-${firstId}"]`).click();
   await expect(page.locator('[data-test="screening-success"]')).toContainText("已纳入", {
     timeout: 20_000,
@@ -102,7 +105,7 @@ test("PRISMA 筛选工作台：造数据 → 纳入/排除 → 计数变化", as
   await expect(firstRow).toContainText("全文");
   await shot(page, "after-include");
 
-  // 排除第三条：先点排除 → 表单出现 → 填理由 → 提交
+  // 排除第三条（同样按 id 定位）：
   const thirdRow = rows.nth(2);
   const thirdId = (await thirdRow.getAttribute("data-test"))!.replace("screening-row-", "");
   await page.locator(`[data-test="screening-exclude-${thirdId}"]`).click();
@@ -117,6 +120,14 @@ test("PRISMA 筛选工作台：造数据 → 纳入/排除 → 计数变化", as
     timeout: 20_000,
   });
 
+  // 排除是终态：按钮必须消失，改显示「已排除：理由」徽标
+  // （否则用户会点一个注定 400 的按钮，且 PRISMA 计数可能被覆盖掉）
+  await expect(page.locator(`[data-test="screening-include-${thirdId}"]`)).toHaveCount(0);
+  await expect(page.locator(`[data-test="screening-exclude-${thirdId}"]`)).toHaveCount(0);
+  const excludedBadge = page.locator(`[data-test="screening-excluded-badge-${thirdId}"]`);
+  await expect(excludedBadge).toBeVisible();
+  await expect(excludedBadge).toContainText("marine biology, not relevant");
+
   // PRISMA 计数必须跟着变：标题/摘要排除 = 1
   await expect(prisma).toContainText("标题/摘要排除");
   await shot(page, "after-exclude");
@@ -124,10 +135,11 @@ test("PRISMA 筛选工作台：造数据 → 纳入/排除 → 计数变化", as
   // Mermaid 源码存在
   await expect(page.locator('[data-test="screening-mermaid"]')).toContainText("flowchart TD");
 
-  // 阶段过滤
+  // 阶段过滤：只剩「全文」阶段那一条（纳入的那条），且不再有标题/摘要的行
   await page.locator('[data-test="screening-stage-filter"]').selectOption("fulltext");
-  await page.waitForTimeout(1000);
+  await expect(rows).toHaveCount(1, { timeout: 20_000 });
   await expect(rows.first()).toContainText("全文");
+  await expect(page.locator(`[data-test="screening-row-${thirdId}"]`)).toHaveCount(0);
   await shot(page, "filtered-fulltext");
 
   // 清理：直接调后端删除不支持，用 psql 侧脚本清理（此处只打印 taskId 供清理）

@@ -344,3 +344,44 @@ class TestRecordQueries:
             await session.execute(select(func.count()).select_from(ScreeningDecision))
         ).scalar_one()
         assert total == 3
+
+    async def test_list_records_is_stable_when_created_at_ties(self, session: AsyncSession) -> None:
+        """`created_at` 并列时，列表顺序必须**稳定**（同一次检索的多条记录）。
+
+        真实缺陷（Task 7 浏览器验收暴露）：一次检索把 3 条记录写在**同一个事务**里，
+        `created_at` 由 `server_default now()` 生成 → 三条时间戳完全相同。
+        而 `list_records` 只按 `created_at` 排序，PostgreSQL 对并列行返回**任意顺序**：
+        用户每次刷新看到的候选顺序都可能变，正在筛选的人会找不到刚才那一条；
+        浏览器 E2E 也因「按位置取第 N 行」而在刷新后指到别的记录。
+
+        这与 Task 2 给 `screening_decision` 加 `seq` 是同一类问题。
+
+        **为什么用 SQL 结构断言而不是只比两次查询结果**：SQLite 对并列行恰好按
+        rowid（插入顺序）返回，两次查询必然一致 —— 行为断言在这里是**假测试**，
+        把排序键改回去也照样绿（AGENTS.md #13）。真正能抓住回归的是「排序键必须
+        含唯一列」这一结构事实。
+        """
+        task_id, record_ids, _, _ = await _seed(session, titles=("T1", "T2", "T3"))
+
+        repo = ScreeningRepository(session)
+        stmt = repo.list_records_stmt(task_id)
+        ordered = list(stmt._order_by_clauses)
+
+        # 1) 排序键必须显式含 id（唯一列），并列时才不会退化成「数据库随便给」
+        rendered = " ".join(str(clause) for clause in ordered)
+        assert "screening_record.id" in rendered, f"排序键缺少唯一列 id：{rendered}"
+
+        # 2) created_at 仍是主排序键（按入库先后展示）
+        assert "screening_record.created_at" in rendered
+
+        # 3) 行为兜底：强制并列后重复查询结果一致
+        tied = datetime(2026, 10, 21, 3, 0, 0, tzinfo=UTC)
+        for record_id in record_ids:
+            record = await session.get(ScreeningRecord, record_id)
+            assert record is not None
+            record.created_at = tied
+        await session.commit()
+
+        first = [row.id for row in await repo.list_records(task_id)]
+        second = [row.id for row in await repo.list_records(task_id)]
+        assert first == second

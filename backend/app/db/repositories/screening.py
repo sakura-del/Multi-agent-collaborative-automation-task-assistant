@@ -15,7 +15,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import func, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.screening import (
@@ -75,6 +75,30 @@ class ScreeningRepository(BaseRepository[ScreeningRecord]):
         await self.db.refresh(record)
         return record
 
+    def list_records_stmt(
+        self,
+        task_id: uuid.UUID,
+        *,
+        stage: DecisionStage | None = None,
+        limit: int = 200,
+    ) -> Select[tuple[ScreeningRecord]]:
+        """构造候选记录查询（**排序稳定**）。
+
+        为什么必须显式带 `id`：一次检索的多条记录写在同一个事务里，
+        `created_at` 由 `server_default now()` 生成 → 时间戳完全相同。
+        只按 `created_at` 排序时 PostgreSQL 对并列行返回**任意顺序**，
+        用户每刷新一次候选列表顺序就可能变（找不到刚看的那条），
+        浏览器 E2E 也会因「取第 N 行」而指到别的记录。
+        （同类问题在 Task 2 已用 `screening_decision.seq` 修过一次。）
+        """
+        stmt = select(ScreeningRecord).where(ScreeningRecord.task_id == task_id)
+        if stage is not None:
+            stmt = stmt.where(ScreeningRecord.current_stage == stage.value)
+        return stmt.order_by(
+            ScreeningRecord.created_at.asc(),
+            ScreeningRecord.id.asc(),
+        ).limit(max(1, min(limit, _MAX_RECORDS)))
+
     async def list_records(
         self,
         task_id: uuid.UUID,
@@ -83,12 +107,7 @@ class ScreeningRepository(BaseRepository[ScreeningRecord]):
         limit: int = 200,
     ) -> list[ScreeningRecord]:
         """列出任务的候选记录；可按当前阶段过滤。"""
-        stmt = select(ScreeningRecord).where(ScreeningRecord.task_id == task_id)
-        if stage is not None:
-            stmt = stmt.where(ScreeningRecord.current_stage == stage.value)
-        stmt = stmt.order_by(ScreeningRecord.created_at.asc()).limit(
-            max(1, min(limit, _MAX_RECORDS))
-        )
+        stmt = self.list_records_stmt(task_id, stage=stage, limit=limit)
         return list((await self.db.execute(stmt)).scalars().all())
 
     # ===== 决策（追加式）=====
