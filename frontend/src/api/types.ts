@@ -332,3 +332,70 @@ export interface BibliographyEntry {
   url: string | null;
   verification_status: VerificationStatus | null;
 }
+
+/* ===== Phase 2 · PRISMA 筛选工作台 ===== */
+
+/** 一次检索的可复现日志 */
+export interface SearchLogOut {
+  search_log_id: string;
+  task_id: string;
+  query: string;
+  sources: string[];
+  hits_total: number;
+  hits_by_source: Record<string, number>;
+  hits_deduped: number;
+  executed_at: string;
+}
+
+/** 检索提交载荷（跨源去重在后端完成） */
+export interface SearchLogCreatePayload {
+  task_id: string;
+  query: string;
+  sources: string[];
+  hits_by_source?: Record<string, number>;
+  hits_total?: number;
+  records: Array<{
+    source_id: string;
+    title: string;
+    authors: string[];
+    abstract: string;
+    doi?: string | null;
+  }>;
+}
+
+/** 候选文献快照 */
+export interface ScreeningRecord {
+  record_id: string;
+  source: string;
+  source_id: string;
+  title: string;
+  authors: string[];
+  abstract: string;
+  doi: string | null;
+  fulltext_status: string;
+  current_stage: string;
+}
+
+export type ScreeningStage = "title_abstract" | "fulltext" | "included";
+export type ScreeningVerdict = "include" | "exclude" | "maybe";
+
+export interface ScreeningDecisionPayload {
+  stage: ScreeningStage;
+  verdict: ScreeningVerdict;
+  exclusion_reason?: string | null;
+  note?: string;
+}
+
+/** PRISMA 2020 计数 + 可直接进论文的渲染结果 */
+export interface PrismaCounts {
+  identified_by_source: Record<string, number>;
+  identified_total: number;
+  duplicates_removed: number;
+  records_screened: number;
+  title_abstract: { screened: number; excluded: number };
+  fulltext: { assessed: number; excluded: number };
+  included: number;
+  exclusion_reasons: Record<string, number>;
+  markdown: string;
+  mermaid: string;
+}

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import { ListFilter } from "lucide-vue-next";
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
@@ -149,6 +150,15 @@ onBeforeUnmount(() => {
           </span>
         </p>
       </div>
+      <!-- PRISMA 筛选工作台入口（Phase 2）：筛选数据跟着任务走 -->
+      <RouterLink
+        :to="{ name: 'task-screening', params: { taskId: props.taskId } }"
+        data-test="open-screening"
+        class="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-sm font-medium transition-colors hover:bg-muted"
+      >
+        <ListFilter :size="15" aria-hidden="true" />
+        <span>PRISMA 筛选</span>
+      </RouterLink>
     </header>
 
     <ErrorBanner :message="errorMessage" />

@@ -5,6 +5,7 @@ import KnowledgeView from "@/views/KnowledgeView.vue";
 import LoginView from "@/views/LoginView.vue";
 import PasswordResetView from "@/views/PasswordResetView.vue";
 import ReferenceImportView from "@/views/ReferenceImportView.vue";
+import ScreeningView from "@/views/ScreeningView.vue";
 import StyleView from "@/views/StyleView.vue";
 import TaskDetailView from "@/views/TaskDetailView.vue";
 import TaskListView from "@/views/TaskListView.vue";
@@ -48,6 +49,13 @@ export const router = createRouter({
           path: "tasks/:taskId",
           name: "task-detail",
           component: TaskDetailView,
+          props: true,
+        },
+        // PRISMA 筛选工作台：挂在任务之下（筛选数据跟着任务走）
+        {
+          path: "tasks/:taskId/screening",
+          name: "task-screening",
+          component: ScreeningView,
           props: true,
         },
         { path: "knowledge", name: "knowledge", component: KnowledgeView },
