@@ -2205,6 +2205,119 @@ PRISMA → HTTP 200，Mermaid 以 flowchart TD 开头
 
 ---
 
+## Phase 2 · 可观测性（2026-10-21，`9f42d7a` + `664452f` + `8d51d4b`）
+
+**计划**：[2026-10-21-01-observability-plan.md](2026-10-21-01-observability-plan.md)
+**Runbook**：[docs/runbooks/observability.md](../../runbooks/observability.md)
+
+### 1. 现状校正（先明确不做什么）
+
+已有：结构化日志（带 `trace_id`/`task_id`）、`RequestIDMiddleware`、健康检查、
+限流与配额计数（只在 Redis 里）、`task.used_tokens`（本轮刚落地，是成本指标的数据源）。
+
+缺：`/metrics` 端点（之前只在限流中间件的 skip 列表里"预留"了名字）、指标本身、看板。
+
+**明确不做**（写进计划与 runbook）：
+
+| 不做 | 理由 |
+| --- | --- |
+| APM / OpenTelemetry | 单进程 + 五容器，结构化日志 + Prometheus 足够；追踪要改造所有 LLM/HTTP 调用点，成本远高于收益 |
+| 多租户指标隔离 | `/metrics` 是**运维端点**，含 `user_id` 会炸基数且泄漏；用户视角走单独的 owner-scoped 看板端点 |
+| 告警（Alertmanager） | 告警渠道（邮件/webhook）未定，SMTP 也未配齐；先让指标可用，告警单独立项 |
+
+### 2. 指标设计与两个硬约束
+
+8 个指标（HTTP 请求数/延迟、任务状态/token/耗时/节点、检索源错误、限流与配额拒绝）。
+
+**硬约束 ①：基数控制**。HTTP 标签必须用**路由模板**（`/api/v1/tasks/{task_id}`），
+不能是真实路径——否则每个任务一条时间序列，且外部扫 `/foo1`、`/foo2`… 就能无限
+注入序列（Prometheus 侧的真实攻击面）。未匹配路由用 `__unmatched__` 常量。
+`/metrics` 与 health 探针不记录（高频调用会淹没业务数据）。
+
+**硬约束 ②：无 PII**。`/metrics` 刻意无鉴权（Prometheus 抓取器不带业务 token），
+所以标签里绝不允许 `user_id` / 任务标题 / 真实路径。已用测试钉死
+（`test_metrics_contains_no_pii` + 服务器侧「标签中不含 UUID」断言）。
+
+### 3. 三个实现细节（都是踩过才知道的）
+
+**① 独立 `CollectorRegistry`，不用默认全局 registry**
+默认 registry 会导致：测试间状态串扰、模块重复 import 时抛
+`Duplicated timeseries in CollectorRegistry`（进程起不来）。
+
+**② 打点全部 fail-open**
+指标是旁路能力。反例代价：一次 registry 故障让所有建任务请求 500，
+比「没有监控」糟糕得多。这跟限流 `fail-open`、配额 `fail-open` 是同一原则。
+
+**③ 节点类型从 DAG 取，不从 agent 返回里猜**
+首版从 `output["execution_result"]["node_type"]` 取，结果全部退化成
+`node_type="unknown"`——因为不同 agent 返回结构不同（测试替身只回
+`{"result": ...}`）。改成从 DAG 的 `PlanNode.type`（networkx 节点属性 `type`）取，
+五类节点才正确区分。教训：**指标"有数据"不等于"有用"**。
+
+### 4. 打点位置的选择
+
+| 位置 | 做法 | 为什么 |
+| --- | --- | --- |
+| 任务终态 | **状态转换提交之后**打点 | 转换本身有 `lock_for_update` + 状态断言，重复进入会提前 return，不会重复计数；事务内打点会出现「回滚了但指标已 +1」 |
+| 取消 | 在 `control()` commit 之后 | 同上；不用实例变量传状态（`TaskExecution` 被多任务共享，会有并发风险） |
+| token 成本 | 用 `settle_quota` 已知的 `used` 直接打点 | 不再查一次库（`used_tokens=0` 时不打点——不该给 0 值造时间序列） |
+
+### 5. nginx 差点让 `/metrics` 白做（`664452f`）
+
+首次部署后 `curl /metrics` 返回 **HTML 462 字节**——nginx 只代理了
+`/api/`、`/docs`、`/openapi.json`，`/metrics` 落到 SPA 的 `location /` 回了 index.html。
+加 `location = /metrics`（精确匹配，不误伤 `/metrics-xxx`）后通过。
+
+→ 规则：**新增根路径端点后必须验证 nginx 是否代理**，否则「本地测试全绿、
+线上 404」且看起来像前端问题。
+
+### 6. 测试诚实性（AGENTS.md #13，四组回退验证）
+
+| 回退项 | 结果 |
+| --- | --- |
+| fail-open（`except` 改为 `raise`） | `test_inc_counter_swallows_errors` **变红** ✅ |
+| 路由模板（改用 `request.url.path`） | 3 例基数控制测试 **变红** ✅ |
+| 检索源打点（`if False`） | 2 例 **变红** ✅ |
+| owner 过滤（`.where(True)`） | `test_other_users_data_not_visible` **变红** ✅ |
+
+**另抓到一条测试竞态**：`_record_task_terminal` 要读库，放宽了
+「状态已变 → 结算落库」的窗口，暴露 `test_planning_failure_refunds_full_reservation`
+只等状态就断言的时序缺陷（本地全量跑偶发失败、单独跑通过）。改用
+`_wait_settled` 等结算落库；3 并发压测验证稳定。
+
+### 7. 服务器验收证据
+
+```
+/metrics：HTTP 200，text/plain; version=0.0.4，64+ 样本
+  8 个指标族全部存在
+  maa_http_requests_total{method="GET",route="/tasks/{task_id}",status="422"}  ← 路由模板，非真实路径
+  标签中不含 UUID、不含 user_id、不含 task_title
+
+真实任务（1faa994c，离线）：
+  maa_tasks_total{status="completed"} = 1
+  maa_task_nodes_total 五类节点各 1：search / extract / write / validate / review
+  maa_task_tokens_total 未出现 —— used_tokens=0（离线不调 LLM，不给 0 值造序列，正确）
+
+看板 API /observability/overview：
+  tasks={total:28, completed:21, failed:0, cancelled:2, waiting_human:4}
+  success_rate=0.7778  (= 21/(21+0+2+4)，分母只算已进终态的任务)
+  recent[0]={1faa994c, completed, 0 token, 983 秒}
+  未鉴权 → 401 ✓
+
+浏览器走查：双视口 2 passed（概览卡 28 / 77.8% / 0 / 0，状态徽标 已完成21 已取消2 待人工4，
+最近任务表 10 行，无横向溢出）
+```
+
+### 8. 门禁
+
+black/ruff 干净；mypy 0 错误（173 文件）；pytest **2264 passed / 8 skipped**
+（2217 → 2264，+47）；覆盖率 **89.95%**。前端 Vitest **190 passed**（181 → 190）、
+`vue-tsc` 干净、build 成功（CSS 27.30 kB / JS 294.72 kB）。
+
+**Phase 2 进度：PRISMA ✅ + 可观测性 ✅**（剩余：团队工作区 / 开放 API / 计费）。
+
+---
+
 ## 前端设计系统改造（2026-10-20）
 
 **目标**：统一设计语言 + 技术栈锁定，让任何一次改动（甚至 oneshot）都产出风格一致的界面。

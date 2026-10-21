@@ -261,7 +261,15 @@ RenderJob(id, project_id, status, output_uri, error, trace)
 `/tasks/:taskId/screening`。服务器端到端 33 项检查全绿；浏览器双视口走查通过。
 详见 [执行记录](../superpowers/plans/2026-08-09-00-execution-notes.md#phase-2--做闭环-执行记录2026-10-20-起)。
 
-其余：团队工作区 + 席位 + 导师批注 · MCP server + 开放 API · 计费套餐 · 可观测性
+**✅ 可观测性 · 指标与成本看板（2026-10-21 完成）**
+—— 8 个 Prometheus 指标（HTTP 请求数/延迟、任务状态/token/耗时/节点、
+检索源错误、限流与配额拒绝）+ `GET /metrics`（经 nginx 代理）+ 用户看板
+`/observability`（owner-scoped）。**基数控制**：HTTP 标签用路由模板而非真实路径；
+**无 PII**：`/metrics` 无鉴权但绝不含 user_id/标题/路径。详见
+[执行记录](../superpowers/plans/2026-08-09-00-execution-notes.md#phase-2--可观测性2026-10-21-9f42d7a--664452f--8d51d4b) 与
+[runbook](../runbooks/observability.md)。
+
+其余：团队工作区 + 席位 + 导师批注 · MCP server + 开放 API · 计费套餐
 
 ### Phase 3 · 建生态（约 6 个月）
 
