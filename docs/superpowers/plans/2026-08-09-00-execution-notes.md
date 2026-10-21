@@ -2547,18 +2547,43 @@ scope 卡死。这条用 `test_jwt_skips_scope_check` 钉死，并**回退验证
 | **scope 对 JWT 也生效** | **2 例变红**（关键回归） ✅ |
 | 迁移缺 `updated_at` | 变红 ✅ |
 
-### 7. 三个坑
+### 7. 三个坑（**第一个是服务器验收才抓到的真实缺陷**）
 
-**① SDK 2.x API 变更**（见上表）。教训：用第三方 SDK 前先
+**① `get_visible_workspace_ids` 里的 JWT-only 依赖（`f764b40` 修复）**
+
+首版只把端点签名里的 `current_user` 换成双通道依赖，**漏掉了间接依赖**：
+`get_visible_workspace_ids` 内部还写着 `Depends(get_current_active_user)`（JWT only）。
+
+现象（服务器实测，**稳定复现**）：
+
+```
+GET  /tasks       → 401  ← 有这个依赖
+POST /tasks       → 201  ← 没有这个依赖
+```
+
+**同一个 Key，一半端点能用一半不能用**。本地测试全绿是因为测试用
+`dependency_overrides` 直接替换了用户，绕过了真实鉴权链。
+
+修法：该依赖改用 `get_current_user_or_api_key`；顺带把批注端点也改为双通道
+（`annotations:write` scope）。
+
+**新增 `test_open_api_endpoints.py`**：逐个端点用真实 Key 实测「不能 401」
+（11 个端点全覆盖）。回退验证：把该依赖改回 JWT-only →
+`test_list_tasks` / `test_get_task` 立刻变红，**正是线上出问题的那两个**。
+
+> 教训：**改共用鉴权依赖时，本地 mock 测试不足以证明正确性** ——
+> 必须用真实凭证逐个端点打一遍。这类「间接依赖漏改」是 mock 测试的结构性盲区。
+
+**② SDK 2.x API 变更**（见上表）。教训：用第三方 SDK 前先
 `inspect.signature` 看实际形态，别照 1.x 的教程写。
 
-**② 测试假 client 的闭包 bug**：内部类 `_Resp` 里的 `self` 是 `_Resp` 实例
+**③ 测试假 client 的闭包 bug**：内部类 `_Resp` 里的 `self` 是 `_Resp` 实例
 而非外层 `_FakeClient`，`self._payload` 报 `AttributeError`，5 条测试同时红。
 修法：把值捕获到局部变量。
 
-**③ 既有测试的 `dependency_overrides` 静默失效**：任务端点改用新依赖后，
-覆盖 `get_current_active_user` 不再生效 → 2 条配额测试 401。
-教训：**改共用依赖后必须跑相关端点的既有测试**，不能只看新测试绿。
+**④ 既有测试的 `dependency_overrides` 静默失效**：任务/批注端点改用新依赖后，
+覆盖 `get_current_active_user` 不再生效 → 配额测试与协作测试报 401/ERROR。
+教训：改共用依赖后必须跑**相关端点的既有测试**，不能只看新测试绿。
 
 ### 8. 门禁
 

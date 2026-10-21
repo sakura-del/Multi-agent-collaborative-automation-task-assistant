@@ -278,7 +278,16 @@ RenderJob(id, project_id, status, output_uri, error, trace)
 [执行记录](../superpowers/plans/2026-08-09-00-execution-notes.md#phase-2--团队工作区--席位--导师批注2026-10-21-de4c6aa) 与
 [runbook](../runbooks/team-workspace.md)。
 
-其余：MCP server + 开放 API · 计费套餐
+**✅ 开放 API + MCP + API Key（2026-10-21 完成）**
+—— `api_key` 表（**只存 sha256**、固定前缀 `maa_` 便于泄漏扫描、吊销/过期软删除）
++ 四个 scope（`tasks:read`/`tasks:write`/`artifacts:read`/`annotations:write`）+
+**双通道鉴权**（`X-API-Key` 与 Bearer 物理隔离，scope 只对 Key 生效）+
+**MCP server**（官方 SDK；stdio + HTTP 两种传输；5 个工具覆盖发起→查→取→导出）+
+前端 `/settings/api-keys` 管理页。服务器端到端 35 项检查全绿。详见
+[执行记录](../superpowers/plans/2026-08-09-00-execution-notes.md#phase-2--开放-api--mcp--api-key2026-10-21-c01cd16) 与
+[runbook](../runbooks/open-api-mcp.md)。
+
+其余：计费套餐
 
 ### Phase 3 · 建生态（约 6 个月）
 
