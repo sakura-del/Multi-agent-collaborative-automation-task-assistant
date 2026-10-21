@@ -72,8 +72,16 @@ async function refresh() {
   loading.value = true;
   error.value = null;
   try {
-    records.value = await listScreeningRecords(props.taskId, stageFilter.value || undefined);
-    prisma.value = await getPrismaCounts(props.taskId);
+    // 先并行取回两份数据，再**一起**赋值：
+    // 若像早期实现那样先 `records.value = await ...` 再 `prisma.value = await ...`，
+    // 中间会有一帧「新记录 + 旧计数」的不一致画面（实测截图捕获到
+    // 「已排除」成功提示与「标题/摘要排除 0」同时存在，看起来像计数没更新）。
+    const [nextRecords, nextPrisma] = await Promise.all([
+      listScreeningRecords(props.taskId, stageFilter.value || undefined),
+      getPrismaCounts(props.taskId),
+    ]);
+    records.value = nextRecords;
+    prisma.value = nextPrisma;
   } catch (err) {
     error.value = (err as Error).message || "筛选数据加载失败";
   } finally {
@@ -115,16 +123,20 @@ async function submitExclude(record: ScreeningRecord) {
     error.value = "排除必须填写理由";
     return;
   }
+  const reason = excludeReason.value.trim();
+  // 先收起表单再提交/刷新：否则成功后表单会一直挂着（等刷新回来才消失），
+  // 用户容易重复点「确认排除」
+  excludeFormId.value = null;
+  excludeReason.value = "";
   await submitDecision(
     record,
     {
       stage: stageFor(record),
       verdict: "exclude",
-      exclusion_reason: excludeReason.value.trim(),
+      exclusion_reason: reason,
     },
     `已排除「${record.title}」`
   );
-  excludeFormId.value = null;
 }
 
 async function submitDecision(

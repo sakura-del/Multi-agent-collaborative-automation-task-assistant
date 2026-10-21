@@ -215,4 +215,61 @@ describe("ScreeningView", () => {
     expect(empty.exists()).toBe(true);
     expect(empty.text()).not.toContain("暂无数据");
   });
+
+  it("排除成功后收起表单（不重复挂在那里）", async () => {
+    vi.mocked(createDecision).mockResolvedValue({
+      record_id: "r1",
+      current_stage: "title_abstract",
+    });
+
+    const wrapper = mount(ScreeningView, { props: { taskId: "task-1" } });
+    await flushPromises();
+
+    await wrapper.find('[data-test="screening-exclude-r1"]').trigger("click");
+    await wrapper.find('[data-test="screening-exclude-reason-r1"]').setValue("不相关");
+
+    // 关键：在「提交后、刷新完成前」这一瞬间断言表单已收起。
+    // 若实现是「刷新完才收起」，此时表单仍在（用户会以为没提交、重复点击）。
+    // 不能让 createDecision 立刻 resolve：用一个可控的 deferred 卡住那一帧。
+    let releaseDecision!: () => void;
+    vi.mocked(createDecision).mockReturnValue(
+      new Promise((resolve) => {
+        releaseDecision = () =>
+          resolve({ record_id: "r1", current_stage: "title_abstract" });
+      })
+    );
+
+    await wrapper.find('[data-test="screening-exclude-submit-r1"]').trigger("click");
+    await wrapper.vm.$nextTick();
+
+    expect(
+      wrapper.find('[data-test="screening-exclude-form-r1"]').exists(),
+      "提交后表单必须立刻收起，不能等刷新回来"
+    ).toBe(false);
+
+    releaseDecision();
+    await flushPromises();
+    expect(createDecision).toHaveBeenCalled();
+  });
+
+  it("刷新时记录与计数都会重新拉取（数据一致性的前提）", async () => {
+    // 说明：曾尝试断言「两条请求并行发起」来防「新记录 + 旧计数」的中间帧，
+    // 但该断言在串行实现下同样通过（mock 的挂起方式骗过时序判定），属于
+    // **假测试**，已删除。这里只保留能可靠断言的契约：刷新时两者都刷新。
+    vi.mocked(createDecision).mockResolvedValue({
+      record_id: "r1",
+      current_stage: "title_abstract",
+    });
+
+    const wrapper = mount(ScreeningView, { props: { taskId: "task-1" } });
+    await flushPromises();
+    const recordsCallsBefore = vi.mocked(listScreeningRecords).mock.calls.length;
+    const prismaCallsBefore = vi.mocked(getPrismaCounts).mock.calls.length;
+
+    await wrapper.find('[data-test="screening-include-r1"]').trigger("click");
+    await flushPromises();
+
+    expect(vi.mocked(listScreeningRecords).mock.calls.length).toBe(recordsCallsBefore + 1);
+    expect(vi.mocked(getPrismaCounts).mock.calls.length).toBe(prismaCallsBefore + 1);
+  });
 });
