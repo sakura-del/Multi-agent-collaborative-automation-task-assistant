@@ -2017,9 +2017,106 @@ app/db/repositories/screening.py:111 error: Argument 1 to "list" has incompatibl
 
 | 优先级 | 事项 | 说明 |
 | --- | --- | --- |
-| **P1** | 配额预扣在任务未完成时永不退还 | 取消/失败/放弃 → 白扣 100k。应在取消与失败路径也调用 `refund`（按实际已用） |
+| **P1** | 配额预扣在任务未完成时永不退还 | ✅ **已修复（`8794cc1`，见下节）** |
 | P2 | `literature-review.spec.ts` 等窗口后复跑 | 选择器已修，需确认 429 消失后整条链路通过 |
 | P3 | 演示库累积 53 个 E2E 测试账号 | 注册类 E2E 每次建新用户，未清理；建议给 E2E 账号加前缀并定期清理 |
+
+---
+
+## 配额结算修复（2026-10-21，`8794cc1`）
+
+**计划**：[2026-10-21-00-quota-settlement-plan.md](2026-10-21-00-quota-settlement-plan.md)
+
+### 1. 问题与取证
+
+提交任务按预估 100k **预扣**配额，退款只在 `_finish_reviewing`（任务完成）调用。
+于是取消 / 失败 / 转人工 / 放弃确认的任务，预扣**永久占用**。
+
+Task 7 验收时实际撞上：demo 账号 6 个停在 `waiting_approval` 的探针任务占满 100 万日配额
+（Redis `quota:{user_id}:{UTC日期}`），之后**所有建任务请求 429**。
+用户视角的后果：点错一次、或看完规划不想跑，100k 额度就白扣了。
+
+### 2. 修法（四个要点）
+
+**① 用量必须落库**：新增 `task.used_tokens`。
+真实用量原本只存在于内存 `ExecutionResult`，进程重启 / 任务中止后**无法统计** ——
+这正是「未完成任务退不了款」的技术原因。`add_used_tokens` 增量累加
+（续跑/重试的 `node_results` 只含本段节点，累加才不重不漏）。
+
+**② 结算幂等**：新增 `task.quota_settled`。
+结算要调 Redis `refund()`，重复调用等于「越退越多」——额度能被刷成正收益。
+
+**顺序很关键**：判定 + 置标记**在同一事务 commit**，**之后**才 `refund()`。
+因为退款是外部副作用（Redis），DB 回滚不了它；若先退后标记，
+一旦标记失败下次还会再退。宁可少退（Redis 故障时标记已落库，不再重试）不可多退。
+
+**③ 四条终止路径全部结算**：
+
+| 路径 | 接入点 |
+| --- | --- |
+| `CANCELLED` | `control()` commit 后 |
+| `WAITING_HUMAN` | `_finish_waiting_human`（调度不全成功）+ `_mark_waiting_human`（规划/执行异常） |
+| `WAITING_APPROVAL` | `_plan` 转到该状态后**立即结算** |
+| `COMPLETED` | `_finish_reviewing`（改为走统一 `settle_quota`） |
+
+**④ `WAITING_APPROVAL` 是「进入即结算、确认时重新预扣」**：
+该状态不是终态（用户可能确认后继续），但它是**最容易长期停留**的状态
+（今天的 429 就是它造成的）。所以进入时先结算；`approve_plan` 时按
+`ESTIMATED − used` 重新预扣，额度不足抛 `QuotaExceededError`（429）**拒绝确认**，
+任务停在原状态不动。`retry_node` / `supply_input` 从 `WAITING_HUMAN` 继续时同样重新预扣。
+
+### 3. 测试诚实性（AGENTS.md #13，本轮抓到一条假测试）
+
+| 回归测试 | 回退修复后 | 处理 |
+| --- | --- | --- |
+| 结算幂等（调 3 次只退 1 次） | **变红** ✅ | 保留 |
+| 规划失败转人工 → 全额退 | **变红** ✅ | 保留 |
+| 调度失败转人工 → 按已用结算 | **变红** ✅ | 保留 |
+| 确认执行 → 重新预扣 | **变红** ✅ | 保留 |
+| 「WAITING_APPROVAL 后取消」→ 结算 | 仍全绿 ❌ | **换掉**：该状态到达时已结算，取消的结算被幂等跳过，**把取消路径的结算整个删掉该用例也通过**。改为「规划中被卡住时取消」（未结算），回退后确实变红 |
+
+### 4. 迁移 `d4b1e7f2a8c3`
+
+幂等（列已存在则跳过）；**存量 `completed` 任务置 `quota_settled=true`**
+——它们的预扣已在完成时校正过，不标记会被重放路径再退一次。
+
+生产验证（真实 PostgreSQL）：
+
+```
+alembic current → d4b1e7f2a8c3 (head)
+列：quota_settled boolean NOT NULL DEFAULT false；used_tokens integer NOT NULL DEFAULT 0
+存量：completed 48 条 → settled 48 条；反例（completed 却未标记）0 条
+未完成：cancelled 2 / waiting_approval 3 / waiting_human 24 → 保持未结算
+```
+
+### 5. 服务器端到端验证（真实 PostgreSQL + 真实 Redis）
+
+```
+[1] 建任务 → 规划完成进入 waiting_approval
+[2] 取消 → 200
+[3] 连续建任务：成功 10 个（第 11 个 429 = 10 × 100k 真实用满）
+    ← 修复前：停在 waiting_approval 的任务占满额度，第 2 个就 429
+[4] 逐个取消 10/10 → 配额归零（Redis key = 0）
+数据库核对：11 个探针全部 cancelled + quota_settled=true，used_tokens=0
+（离线确定性规划不调 LLM，用量为 0 是正确值）
+清理后回查：77 任务 / 118 文档 / 0 探针 / demo 27 任务（与基准一致）
+```
+
+PRISMA 验收脚本复跑 **33 项全绿**（无回归）；筛选工作台 E2E **双视口 2 passed**。
+
+### 6. 明确不做（已写入计划文档）
+
+- **不做定时超时释放**：项目无定时任务基础设施，本次不引入。
+  `WAITING_APPROVAL` 用「进入即结算」解决，不依赖超时。
+- **不补扣超出预扣的部分**：保持既有语义（预估值是保守上限）。
+- **规划阶段用量不统计**：规划 API 不返回 token 用量，无法获取。
+  影响：规划后放弃的任务按 0 用量全额退款——宁可少扣用户，也不额外惩罚。
+- **存量未结算任务不回补**：5 个修复前任务（10-18 ~ 10-20）保持未结算。
+  它们的预扣发生在**过去的日窗口**（Redis key 按 UTC 日期，早已过期），
+  现在退还等于给今天的窗口凭空加额度，没有实际意义。
+
+**门禁**：black/ruff 干净；mypy 0 错误（170 文件）；pytest **2213 passed / 8 skipped**
+（2190 → 2213，+23 例）；覆盖率 **89.85%**。
 
 ---
 
