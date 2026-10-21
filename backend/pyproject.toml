@@ -38,6 +38,10 @@ dependencies = [
     # 鉴权
     "python-jose[cryptography]>=3.3.0",
     "bcrypt>=4.0.0",
+    # 开放 API / MCP（Phase 2）：用**官方** MCP SDK，不自研 JSON-RPC 协议
+    # （协议细节：能力协商、SSE 重连、工具 schema 演进 —— 自研只会引入 bug）。
+    # 注意：SDK 2.x 的 API 与 1.x 不同（构造注入 handler 而非装饰器），见 app/mcp/server.py。
+    "mcp>=2.0",
 
     # LLM 层
     # 说明（Plan 5 Task 4）：早期声明的 langchain / langchain-community / tiktoken

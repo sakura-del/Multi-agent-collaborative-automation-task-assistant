@@ -15,6 +15,7 @@ from app.api.v1.endpoints import (
     annotations as annotation_endpoints,
 )
 from app.api.v1.endpoints import (
+    api_keys,
     auth,
     auth_lifecycle,
     citation_styles,
@@ -48,3 +49,5 @@ api_router.include_router(observability.router)
 api_router.include_router(workspaces.router)
 # 导师批注（Phase 2）：挂在 /tasks/{task_id}/annotations 下
 api_router.include_router(annotation_endpoints.router)
+# API Key 管理（Phase 2 开放 API）：**强制 JWT only**（Key 不能生成新 Key）
+api_router.include_router(api_keys.router)

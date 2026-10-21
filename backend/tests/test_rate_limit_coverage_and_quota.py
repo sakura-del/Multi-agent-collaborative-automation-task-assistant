@@ -136,7 +136,9 @@ def _build_app(*, quota: _FakeQuota, submitted: list[str]) -> FastAPI:
     app.include_router(tasks_endpoint.router, prefix="/api/v1")
     app.dependency_overrides[tasks_endpoint.get_quota_service] = _quota_dep
     app.dependency_overrides[tasks_endpoint.get_task_execution] = _exec_dep
-    app.dependency_overrides[tasks_endpoint.get_current_active_user] = _user_dep
+    # Phase 2 开放 API 后，任务端点走**双通道**鉴权依赖；
+    # 只覆盖 `get_current_active_user` 不再生效（端点已不依赖它）。
+    app.dependency_overrides[tasks_endpoint.get_current_user_or_api_key] = _user_dep
 
     @app.exception_handler(AppException)
     async def _handle(_: Any, exc: AppException) -> Any:

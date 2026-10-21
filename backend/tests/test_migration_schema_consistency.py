@@ -383,3 +383,103 @@ class TestWorkspaceMigration:
                     f"缺 {expected - migrated}，多 {migrated - expected}"
                 )
         engine.dispose()
+
+
+class TestApiKeyMigration:
+    """`f2b8d5c1a9e4`（API Key 表）的行为与幂等。
+
+    必须成立的性质：
+
+    1. **幂等**：全新部署时表已由 ORM 建好；已部署库缺表。两条路径都要能跑通。
+    2. **`key_hash` 唯一约束**：安全兜底（两个 Key 共用哈希等于互相可用）。
+    3. **迁移结构 == ORM metadata**：`Base` 自动加 `created_at`/`updated_at`，
+       手写迁移最容易漏（`email_token` 与 `workspace` 都踩过）。
+    """
+
+    MIGRATION = VERSIONS_DIR / "f2b8d5c1a9e4_add_api_key.py"
+
+    @staticmethod
+    def _base_ddl() -> list[str]:
+        return [
+            'CREATE TABLE "user" (id CHAR(32) PRIMARY KEY, username VARCHAR(64))',
+        ]
+
+    def test_creates_table_with_unique_hash(self) -> None:
+        engine = create_engine("sqlite://")
+        with engine.begin() as connection:
+            for ddl in self._base_ddl():
+                connection.exec_driver_sql(ddl)
+            context = MigrationContext.configure(connection)
+            with Operations.context(context):
+                _load(self.MIGRATION).upgrade()
+
+            tables = set(inspect(connection).get_table_names())
+            columns = {c["name"] for c in inspect(connection).get_columns("api_key")}
+            indexes = {idx["name"] for idx in inspect(connection).get_indexes("api_key")}
+        engine.dispose()
+
+        assert "api_key" in tables
+        assert {
+            "id",
+            "user_id",
+            "name",
+            "prefix",
+            "key_hash",
+            "scopes",
+            "last_used_at",
+            "expires_at",
+            "revoked_at",
+            "created_at",
+            "updated_at",
+        } <= columns
+        # 绝不能有明文列
+        assert not (columns & {"key", "plaintext", "secret", "raw_key", "token"})
+        assert "ix_api_key_user_id" in indexes
+        assert "ix_api_key_prefix" in indexes
+
+    def test_upgrade_is_idempotent(self) -> None:
+        engine = create_engine("sqlite://")
+        with engine.begin() as connection:
+            for ddl in self._base_ddl():
+                connection.exec_driver_sql(ddl)
+            context = MigrationContext.configure(connection)
+            with Operations.context(context):
+                module = _load(self.MIGRATION)
+                module.upgrade()
+                module.upgrade()
+        engine.dispose()
+
+    def test_downgrade_removes_table(self) -> None:
+        engine = create_engine("sqlite://")
+        with engine.begin() as connection:
+            for ddl in self._base_ddl():
+                connection.exec_driver_sql(ddl)
+            context = MigrationContext.configure(connection)
+            with Operations.context(context):
+                module = _load(self.MIGRATION)
+                module.upgrade()
+                module.downgrade()
+
+            tables = set(inspect(connection).get_table_names())
+        engine.dispose()
+
+        assert "api_key" not in tables
+
+    def test_migration_matches_orm_metadata(self) -> None:
+        from app.db.models.api_key import ApiKey
+
+        engine = create_engine("sqlite://")
+        with engine.begin() as connection:
+            for ddl in self._base_ddl():
+                connection.exec_driver_sql(ddl)
+            context = MigrationContext.configure(connection)
+            with Operations.context(context):
+                _load(self.MIGRATION).upgrade()
+
+            migrated = {c["name"] for c in inspect(connection).get_columns("api_key")}
+        engine.dispose()
+
+        expected = set(ApiKey.__table__.columns.keys())
+        assert (
+            migrated == expected
+        ), f"api_key 迁移与 ORM 不一致：缺 {expected - migrated}，多 {migrated - expected}"

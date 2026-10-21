@@ -21,7 +21,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response
 
-from app.api.deps import get_current_active_user
+from app.api.deps import (
+    get_current_active_user,
+    get_current_user_or_api_key,
+    require_scope,
+)
 from app.core.config import get_settings
 from app.core.exceptions import ValidationException
 from app.core.quota import QuotaService
@@ -126,8 +130,16 @@ def get_quota_service(request: Request) -> QuotaService | None:
 
 ExecutionDep = Annotated[TaskExecution, Depends(get_task_execution)]
 CurrentUserDep = Annotated[User, Depends(get_current_active_user)]
+#: 双通道鉴权（Phase 2 开放 API）：`X-API-Key` 优先，其次 Bearer。
+#: **只用于开放端点**（任务读写与产物下载）；Key 管理端点仍强制 JWT only。
+ApiUserDep = Annotated[User, Depends(get_current_user_or_api_key)]
 QuotaDep = Annotated["QuotaService | None", Depends(get_quota_service)]
 WorkspaceIdsDep = Annotated[list[UUID], Depends(get_visible_workspace_ids)]
+
+#: 端点 scope 依赖（只对 Key 认证的请求生效；JWT 请求直接放行）。
+TasksReadScope = Annotated[None, Depends(require_scope("tasks:read"))]
+TasksWriteScope = Annotated[None, Depends(require_scope("tasks:write"))]
+ArtifactsReadScope = Annotated[None, Depends(require_scope("artifacts:read"))]
 
 
 @router.post(
@@ -139,7 +151,8 @@ WorkspaceIdsDep = Annotated[list[UUID], Depends(get_visible_workspace_ids)]
 async def create_task(
     payload: TaskCreate,
     execution: ExecutionDep,
-    current_user: CurrentUserDep,
+    current_user: ApiUserDep,
+    _scope: TasksWriteScope,
     quota: QuotaDep = None,
 ) -> TaskCreateOut:
     """创建任务：**先扣配额再落库**，规划在后台执行。
@@ -157,8 +170,9 @@ async def create_task(
 @router.get("", response_model=list[TaskSummaryOut], summary="列出当前用户任务")
 async def list_tasks(
     execution: ExecutionDep,
-    current_user: CurrentUserDep,
+    current_user: ApiUserDep,
     workspace_ids: WorkspaceIdsDep,
+    _scope: TasksReadScope,
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> list[TaskSummaryOut]:
@@ -184,8 +198,9 @@ async def list_tasks(
 async def get_task(
     task_id: UUID,
     execution: ExecutionDep,
-    current_user: CurrentUserDep,
+    current_user: ApiUserDep,
     workspace_ids: WorkspaceIdsDep,
+    _scope: TasksReadScope,
 ) -> TaskSnapshot:
     """返回任务状态、规划、子任务与复盘报告（个人任务或我所属工作区的任务）。"""
     return await execution.get_snapshot(current_user.id, task_id, workspace_ids=workspace_ids)
@@ -200,7 +215,8 @@ async def approve_plan(
     task_id: UUID,
     payload: PlanApproval,
     execution: ExecutionDep,
-    current_user: CurrentUserDep,
+    current_user: ApiUserDep,
+    _scope: TasksWriteScope,
 ) -> TaskSnapshot:
     """确认规划：revision 必须等于当前 plan_version。"""
     return await execution.approve_plan(current_user.id, task_id, payload.revision)
@@ -211,7 +227,8 @@ async def control_task(
     task_id: UUID,
     payload: TaskControl,
     execution: ExecutionDep,
-    current_user: CurrentUserDep,
+    current_user: ApiUserDep,
+    _scope: TasksWriteScope,
 ) -> TaskSnapshot:
     """pause / resume / cancel / retry_node / supply_input。"""
     return await execution.control(current_user.id, task_id, payload.to_contract())
@@ -221,7 +238,8 @@ async def control_task(
 async def list_events(
     task_id: UUID,
     execution: ExecutionDep,
-    current_user: CurrentUserDep,
+    current_user: ApiUserDep,
+    _scope: TasksReadScope,
     after: Annotated[int, Query(ge=0)] = 0,
 ) -> TaskEventPage:
     """返回 after 之后的递增事件，用于断线重连补拉。"""
@@ -239,7 +257,8 @@ async def download_artifact(
     task_id: UUID,
     artifact_id: str,
     execution: ExecutionDep,
-    current_user: CurrentUserDep,
+    current_user: ApiUserDep,
+    _scope: ArtifactsReadScope,
 ) -> FileResponse:
     """owner-scoped 下载：路径由服务端 artifact_id 解析，下载名固定。"""
     path, download_name = await execution.resolve_artifact(current_user.id, task_id, artifact_id)
@@ -259,7 +278,8 @@ async def download_artifact(
 async def download_references_bibtex(
     task_id: UUID,
     execution: ExecutionDep,
-    current_user: CurrentUserDep,
+    current_user: ApiUserDep,
+    _scope: ArtifactsReadScope,
 ) -> Response:
     """把已持久化的参考文献导出为 BibTeX（Issue #4 M2，owner-scoped）。"""
     try:
@@ -277,7 +297,8 @@ async def download_references_bibtex(
 async def download_references_ris(
     task_id: UUID,
     execution: ExecutionDep,
-    current_user: CurrentUserDep,
+    current_user: ApiUserDep,
+    _scope: ArtifactsReadScope,
 ) -> Response:
     """把已持久化的参考文献导出为 RIS（Issue #4 M2，owner-scoped）。"""
     try:

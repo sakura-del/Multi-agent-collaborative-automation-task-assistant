@@ -6,6 +6,7 @@ import {
   ListChecks,
   Library,
   LogOut,
+  KeyRound,
   Palette,
   Users,
 } from "lucide-vue-next";
@@ -31,6 +32,7 @@ const NAV_ITEMS = [
   { name: "reference-import", label: "导入文献", icon: FileInput },
   { name: "workspaces", label: "团队", icon: Users },
   { name: "observability", label: "用量", icon: Activity },
+  { name: "api-keys", label: "API Key", icon: KeyRound },
 ] as const;
 
 function handleLogout() {

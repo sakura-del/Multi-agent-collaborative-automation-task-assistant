@@ -496,3 +496,30 @@ export interface ParagraphMatch {
   paragraph_index: number | null;
   resolved: boolean;
 }
+
+// ===== 开放 API 与 MCP（Phase 2）=====
+
+/** API Key 权限范围 */
+export type ApiKeyScope =
+  | 'tasks:read'
+  | 'tasks:write'
+  | 'artifacts:read'
+  | 'annotations:write';
+
+/** Key 元数据（**绝不含明文**） */
+export interface ApiKeyInfo {
+  key_id: string;
+  name: string;
+  /** 明文前缀（如 maa_7Kx9mQ2p），用于辨认是哪个脚本的 Key */
+  prefix: string;
+  scopes: ApiKeyScope[];
+  last_used_at: string | null;
+  expires_at: string | null;
+  revoked_at: string | null;
+  created_at: string;
+}
+
+/** 创建响应：**唯一**含明文的模型，key 只出现一次 */
+export interface ApiKeyCreated extends ApiKeyInfo {
+  key: string;
+}

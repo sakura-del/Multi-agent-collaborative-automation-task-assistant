@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from "vue-router";
 
 import AppLayout from "@/layouts/AppLayout.vue";
+import ApiKeyView from "@/views/ApiKeyView.vue";
 import KnowledgeView from "@/views/KnowledgeView.vue";
 import LoginView from "@/views/LoginView.vue";
 import ObservabilityView from "@/views/ObservabilityView.vue";
@@ -74,6 +75,8 @@ export const router = createRouter({
           name: "workspace-detail",
           component: WorkspaceDetailView,
         },
+        // API Key 管理（Phase 2 开放 API）
+        { path: "settings/api-keys", name: "api-keys", component: ApiKeyView },
         // 登录后也可从这里重发验证邮件（无 token 时展示重发按钮）
         { path: "account/verify", name: "account-verify", component: VerifyEmailView },
       ],

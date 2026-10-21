@@ -18,10 +18,12 @@
   workspace.py:   WORKSPACE / WORKSPACE_MEMBER / WORKSPACE_INVITE
                   （Phase 2：团队工作区 + 席位 + 邀请码）
   annotation.py:  TASK_ANNOTATION（Phase 2：导师批注，段落指纹锚点）
+  api_key.py:     API_KEY（Phase 2：开放 API / MCP 凭证，只存哈希）
 """
 
 from app.db.models.agent import Agent, AgentInteraction
 from app.db.models.annotation import TaskAnnotation
+from app.db.models.api_key import ApiKey
 from app.db.models.citation_style import CitationStyle
 from app.db.models.email_token import EmailToken
 from app.db.models.feedback import HumanFeedback
@@ -40,6 +42,7 @@ from app.db.models.workspace import Workspace, WorkspaceInvite, WorkspaceMember
 __all__ = [
     "Agent",
     "AgentInteraction",
+    "ApiKey",
     "CitationStyle",
     "DocChunk",
     "EmailToken",
