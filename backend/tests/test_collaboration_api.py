@@ -67,8 +67,12 @@ def api() -> Any:
     application.include_router(workspaces_endpoint.router, prefix="/api/v1")
     application.include_router(annotations_endpoint.router, prefix="/api/v1")
     application.dependency_overrides[get_db] = _get_db
-    for module in (workspaces_endpoint, annotations_endpoint):
-        application.dependency_overrides[module.get_current_active_user] = _current_user
+    # 工作区端点仍用 JWT-only 依赖
+    application.dependency_overrides[workspaces_endpoint.get_current_active_user] = _current_user
+    # 批注端点已改为**双通道**鉴权（Phase 2 开放 API），覆盖旧依赖不再生效
+    application.dependency_overrides[annotations_endpoint.get_current_user_or_api_key] = (
+        _current_user
+    )
 
     application.state.factory = factory
     application.state.holder = holder

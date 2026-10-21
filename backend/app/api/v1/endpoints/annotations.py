@@ -27,7 +27,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_active_user
+from app.api.deps import get_current_user_or_api_key, require_scope
 from app.collaboration.services.annotation_service import (
     AnnotationError,
     AnnotationPermissionError,
@@ -44,7 +44,11 @@ from app.schemas.annotation import (
 
 router = APIRouter(prefix="/tasks/{task_id}/annotations", tags=["annotations"])
 
-CurrentUserDep = Annotated[User, Depends(get_current_active_user)]
+#: 批注属于**开放 API 范围**（`annotations:write` scope），所以用双通道鉴权。
+#: 若用 JWT only，用 Key 调批注端点会 401 —— 而导师脚本正是 Key 的典型用法。
+CurrentUserDep = Annotated[User, Depends(get_current_user_or_api_key)]
+#: 写批注的 scope 依赖（只对 Key 认证的请求生效）。
+AnnotationsWriteScope = Annotated[None, Depends(require_scope("annotations:write"))]
 DbDep = Annotated[AsyncSession, Depends(get_db)]
 
 
@@ -93,7 +97,11 @@ async def list_annotations(
 
 @router.post("", response_model=AnnotationOut, status_code=201, summary="新建批注")
 async def create_annotation(
-    task_id: UUID, payload: AnnotationCreate, current_user: CurrentUserDep, db: DbDep
+    task_id: UUID,
+    payload: AnnotationCreate,
+    current_user: CurrentUserDep,
+    _scope: AnnotationsWriteScope,
+    db: DbDep,
 ) -> AnnotationOut:
     """新建批注。
 
@@ -144,6 +152,7 @@ async def update_annotation(
     annotation_id: UUID,
     payload: AnnotationUpdate,
     current_user: CurrentUserDep,
+    _scope: AnnotationsWriteScope,
     db: DbDep,
 ) -> AnnotationOut:
     """改正文（仅作者本人；admin 也不改别人的话——那是篡改）。"""
@@ -166,7 +175,11 @@ async def update_annotation(
 
 @router.post("/{annotation_id}/resolve", response_model=AnnotationOut, summary="标记已解决")
 async def resolve_annotation(
-    task_id: UUID, annotation_id: UUID, current_user: CurrentUserDep, db: DbDep
+    task_id: UUID,
+    annotation_id: UUID,
+    current_user: CurrentUserDep,
+    _scope: AnnotationsWriteScope,
+    db: DbDep,
 ) -> AnnotationOut:
     """标记已解决（幂等；**不删除**批注——导师要能看到历史意见）。"""
     service = _service(db)
@@ -181,7 +194,11 @@ async def resolve_annotation(
 
 @router.post("/{annotation_id}/reopen", response_model=AnnotationOut, summary="重新打开")
 async def reopen_annotation(
-    task_id: UUID, annotation_id: UUID, current_user: CurrentUserDep, db: DbDep
+    task_id: UUID,
+    annotation_id: UUID,
+    current_user: CurrentUserDep,
+    _scope: AnnotationsWriteScope,
+    db: DbDep,
 ) -> AnnotationOut:
     """重新打开批注（清空已解决标记）。"""
     service = _service(db)
@@ -196,7 +213,11 @@ async def reopen_annotation(
 
 @router.delete("/{annotation_id}", status_code=204, summary="删除批注")
 async def delete_annotation(
-    task_id: UUID, annotation_id: UUID, current_user: CurrentUserDep, db: DbDep
+    task_id: UUID,
+    annotation_id: UUID,
+    current_user: CurrentUserDep,
+    _scope: AnnotationsWriteScope,
+    db: DbDep,
 ) -> None:
     """删除批注（本人可删；他人批注需工作区 admin+）。"""
     service = _service(db)

@@ -2453,6 +2453,124 @@ black/ruff 干净；mypy 0 错误（183 文件）；pytest **2346 passed / 8 ski
 
 ---
 
+## Phase 2 · 开放 API + MCP + API Key（2026-10-21，`c01cd16`）
+
+**计划**：[2026-10-21-03-open-api-mcp-plan.md](2026-10-21-03-open-api-mcp-plan.md)
+**Runbook**：[docs/runbooks/open-api-mcp.md](../../runbooks/open-api-mcp.md)
+
+### 1. 三个真实需求（按强度）
+
+1. **自动化工作流接入**：研究者已有 Claude Desktop / Cursor / Obsidian，
+   希望「在写作工具里直接发起综述」而不是切浏览器。MCP 是当前事实标准。
+2. **机构集成**：图书馆/科研管理系统要稳定 HTTP API。
+3. **计费前置**：没有 Key 就没有可归属的调用方，计费只能按用户粗算。
+
+**明确不做**：OAuth 2.0（成本是 Key 的 5 倍且无应用市场）、按 Key 扣款
+（计费是第 6 项）、Webhook（轮询 `get_task_status` 即可）、
+MCP 资源订阅（工具已覆盖异步任务场景）、独立 `/api/v2`。
+
+### 2. Key 设计的三条安全约束
+
+**① 只存 `sha256`，绝不存明文。**
+与密码同一原则。代价是忘记只能重建 —— **正确取舍**（Key 泄漏的代价远高于
+重建一次的不便）。测试 `test_no_plaintext_column` 会拦住任何明文列。
+
+**② 固定前缀 `maa_`。**
+便于 GitHub Secret Scanning / gitleaks 识别告警（行业惯例 `sk-`/`ghp_`/`AKIA`）。
+`prefix` 列存明文前 12 位，让用户在列表里认出「哪个脚本的 Key」。
+
+**③ 吊销/过期软删除 + 统一 401。**
+`revoked_at`/`expires_at` 非空即失效但**行保留**（审计要回答「什么时候被谁吊销」）。
+401 不解释原因 —— 区分「已吊销」与「不存在」等于告诉攻击者「这个 Key 曾经有效」。
+
+**`last_used_at` 60 秒节流**：每个 API 请求一次 UPDATE 是真实写放大；
+它的用途是「判断 Key 是否还在用」，秒级精度毫无意义。
+
+### 3. 四个 scope（为什么不是 1 个或 10 个）
+
+| Scope | 允许 |
+| --- | --- |
+| `tasks:read` | 列任务 / 查快照 / 回放事件 |
+| `tasks:write` | 建任务 / 确认规划 / 控制 |
+| `artifacts:read` | 下载 Markdown/DOCX/.bib/.ris |
+| `annotations:write` | 写批注 |
+
+**不只给全权**：只读集成（同步状态到看板）是最常见需求，给全权等于过度授权。
+**不再细**：10 个勾选框让用户困惑，收益极低。
+
+### 4. 双通道鉴权（本任务最大风险点）
+
+```
+X-API-Key: maa_xxxx      ← 开放 API / MCP（优先）
+Authorization: Bearer    ← 网页前端（既有）
+```
+
+两条通道**物理隔离**：Key 塞 Bearer → 401；JWT 塞 `X-API-Key` → 401。
+
+**scope 只对 Key 生效**，JWT 用户走既有角色逻辑 —— 否则所有网页操作会被
+scope 卡死。这条用 `test_jwt_skips_scope_check` 钉死，并**回退验证**：
+把 scope 校验对 JWT 也启用 → 2 例立刻红。
+
+**改造面与对策**：10 个任务端点改用双通道依赖。风险控制：
+1. 新依赖**只用于开放端点**，不全局替换；
+2. 管理端点强制 JWT only（Key 生成新 Key = 权限提升）；
+3. 每个端点保留「JWT 仍可用」回归测试。
+
+### 5. MCP：用官方 SDK，不自研协议
+
+`mcp>=2.0`。**SDK 2.x 的 API 与 1.x 完全不同**（踩到了）：
+
+| | 1.x | 2.x |
+| --- | --- | --- |
+| 注册 handler | `@server.list_tools()` 装饰器 | `Server(name, on_list_tools=..., on_call_tool=...)` 构造注入 |
+| handler 签名 | `() -> list[Tool]` | `(context, params) -> ListToolsResult` |
+| schema 字段 | `inputSchema` | `input_schema`（snake_case） |
+
+首版 8 条测试同时红，查 `inspect.signature(Server.__init__)` 才定位。
+
+**5 个工具**覆盖「发起 → 查 → 取 → 导出」：`create_literature_review` /
+`get_task_status` / `list_tasks` / `get_task_output` / `export_task`。
+
+**`get_task_status` 只返摘要**：返全文会吃掉大半个上下文窗口，后续对话全被挤掉。
+需要正文时显式用 `get_task_output`（工具名表达了「要内容」）。
+
+**MCP 不直连数据库**：它是**客户端**调开放 API —— 权限/限流自动生效、
+可独立部署（甚至跑在用户机器上）、不会成为绕过配额的后门。
+
+### 6. 测试诚实性（AGENTS #13，五组回退验证）
+
+| 回退项 | 结果 |
+| --- | --- |
+| 吊销检查 | 变红 ✅ |
+| 过期检查 | 变红 ✅ |
+| `last_used_at` 节流 | 变红 ✅ |
+| **scope 对 JWT 也生效** | **2 例变红**（关键回归） ✅ |
+| 迁移缺 `updated_at` | 变红 ✅ |
+
+### 7. 三个坑
+
+**① SDK 2.x API 变更**（见上表）。教训：用第三方 SDK 前先
+`inspect.signature` 看实际形态，别照 1.x 的教程写。
+
+**② 测试假 client 的闭包 bug**：内部类 `_Resp` 里的 `self` 是 `_Resp` 实例
+而非外层 `_FakeClient`，`self._payload` 报 `AttributeError`，5 条测试同时红。
+修法：把值捕获到局部变量。
+
+**③ 既有测试的 `dependency_overrides` 静默失效**：任务端点改用新依赖后，
+覆盖 `get_current_active_user` 不再生效 → 2 条配额测试 401。
+教训：**改共用依赖后必须跑相关端点的既有测试**，不能只看新测试绿。
+
+### 8. 门禁
+
+black/ruff 干净；mypy 0 错误（192 文件）；pytest **2443 passed / 8 skipped**
+（2346 → 2443，+97）；覆盖率 89.34%。前端 Vitest **248 passed**（233 → 248，+15）、
+`vue-tsc` 干净、build 成功（CSS 28.76 kB / JS 322.00 kB）。
+
+**Phase 2 进度：PRISMA ✅ + 可观测性 ✅ + 团队工作区 ✅ + 开放 API ✅**
+（剩余：计费套餐）。
+
+---
+
 ## 前端设计系统改造（2026-10-20）
 
 **目标**：统一设计语言 + 技术栈锁定，让任何一次改动（甚至 oneshot）都产出风格一致的界面。

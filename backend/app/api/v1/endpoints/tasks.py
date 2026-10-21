@@ -54,7 +54,11 @@ def get_task_execution(request: Request) -> TaskExecution:
 
 
 async def get_visible_workspace_ids(
-    current_user: Annotated[User, Depends(get_current_active_user)],
+    # ⚠️ 必须用**双通道**依赖：若这里写 `get_current_active_user`（JWT only），
+    # 用 API Key 调 `GET /tasks` 会在这一步 401 —— 而 `POST /tasks` 却是 201
+    # （因为建任务端点没有这个依赖）。首版就是这样，实测「同一 Key 列任务 401、
+    # 建任务 201」，排查了半天。
+    current_user: Annotated[User, Depends(get_current_user_or_api_key)],
     db: Annotated[Any, Depends(get_db)],
 ) -> list[UUID]:
     """当前用户所属的工作区 id 列表（任务归属双轨用）。
