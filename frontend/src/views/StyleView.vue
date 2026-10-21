@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import { CircleCheck, Loader2, Trash2, Upload } from "lucide-vue-next";
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
+import FilePicker from "@/components/common/FilePicker.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -28,7 +29,7 @@ const successMessage = ref<string | null>(null);
 const uploading = ref(false);
 const deletingId = ref<string | null>(null);
 const selectedFile = ref<File | null>(null);
-const fileInput = ref<HTMLInputElement | null>(null);
+const filePicker = ref<{ reset: () => void } | null>(null);
 
 const defaultStyleTitle = computed(
   () => styles.value.find((style) => style.style_id === defaultStyleId.value)?.title ?? ""
@@ -98,9 +99,7 @@ async function handleUpload() {
     const created = await uploadCitationStyle(selectedFile.value as File);
     successMessage.value = `已上传样式「${created.title}」（${created.style_id}）`;
     selectedFile.value = null;
-    if (fileInput.value) {
-      fileInput.value.value = "";
-    }
+    filePicker.value?.reset();
     await refresh();
   } catch (error) {
     // 后端 400 的 detail（含逐条 reasons）在这里展示
@@ -142,13 +141,12 @@ async function handleDelete(styleId: string) {
     >
       <div class="grid gap-1.5">
         <Label for="style-file">样式文件</Label>
-        <input
+        <FilePicker
           id="style-file"
-          ref="fileInput"
+          ref="filePicker"
           data-test="style-file"
-          type="file"
           :accept="ACCEPTED.join(',')"
-          class="block w-full text-xs text-muted-foreground file:mr-2 file:rounded-md file:border file:border-border file:bg-background file:px-2 file:py-1 file:text-xs file:font-medium file:text-foreground hover:file:bg-muted"
+          placeholder="选择 .csl 文件"
           @change="onFileChange"
         />
       </div>

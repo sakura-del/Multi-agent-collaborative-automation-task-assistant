@@ -3,6 +3,7 @@ import { ref } from "vue";
 import { Loader2, Upload } from "lucide-vue-next";
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
+import FilePicker from "@/components/common/FilePicker.vue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -85,12 +86,11 @@ async function handleSubmit() {
     <div class="flex flex-wrap items-end gap-3">
       <div class="grid gap-1.5">
         <Label for="document-file">文件</Label>
-        <input
+        <FilePicker
           id="document-file"
           data-test="document-file"
-          type="file"
           :accept="ACCEPTED.join(',')"
-          class="block w-full text-xs text-muted-foreground file:mr-2 file:rounded-md file:border file:border-border file:bg-background file:px-2 file:py-1 file:text-xs file:font-medium file:text-foreground hover:file:bg-muted"
+          placeholder="选择 pdf / docx / md / txt"
           @change="onFileChange"
         />
       </div>

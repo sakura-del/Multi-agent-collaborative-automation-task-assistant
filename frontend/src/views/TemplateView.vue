@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import { CircleCheck, Download, FileText, Loader2, Trash2, Upload } from "lucide-vue-next";
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
+import FilePicker from "@/components/common/FilePicker.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -27,7 +28,7 @@ const renderingId = ref<string | null>(null);
 const deletingId = ref<string | null>(null);
 const selectedFile = ref<File | null>(null);
 const templateName = ref("");
-const fileInput = ref<HTMLInputElement | null>(null);
+const filePicker = ref<{ reset: () => void } | null>(null);
 
 const hint = computed(() => {
   if (!templates.value.length) {
@@ -97,9 +98,7 @@ async function handleUpload() {
     successMessage.value = `已上传模板「${created.name}」（识别到 ${created.placeholders.length} 个占位符）`;
     selectedFile.value = null;
     templateName.value = "";
-    if (fileInput.value) {
-      fileInput.value.value = "";
-    }
+    filePicker.value?.reset();
     await refresh();
   } catch (error) {
     // 后端 400 的 detail（含逐条 reasons）在这里展示
@@ -184,13 +183,12 @@ function placeholderKeys(template: TemplateOut): string[] {
     >
       <div class="grid gap-1.5">
         <Label for="template-file">模板文件（.docx）</Label>
-        <input
+        <FilePicker
           id="template-file"
-          ref="fileInput"
+          ref="filePicker"
           data-test="template-file"
-          type="file"
           :accept="ACCEPTED.join(',')"
-          class="block w-full text-xs text-muted-foreground file:mr-2 file:rounded-md file:border file:border-border file:bg-background file:px-2 file:py-1 file:text-xs file:font-medium file:text-foreground hover:file:bg-muted"
+          placeholder="选择 .docx 文件"
           @change="onFileChange"
         />
       </div>
