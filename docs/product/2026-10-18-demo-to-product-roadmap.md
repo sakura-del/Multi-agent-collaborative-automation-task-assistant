@@ -269,7 +269,16 @@ RenderJob(id, project_id, status, output_uri, error, trace)
 [执行记录](../superpowers/plans/2026-08-09-00-execution-notes.md#phase-2--可观测性2026-10-21-9f42d7a--664452f--8d51d4b) 与
 [runbook](../runbooks/observability.md)。
 
-其余：团队工作区 + 席位 + 导师批注 · MCP server + 开放 API · 计费套餐
+**✅ 团队工作区 + 席位 + 导师批注（2026-10-21 完成）**
+—— `workspace` / `workspace_member`（= 席位，owner 也占一席）/ `workspace_invite`
+（一次性邀请码）/ `task_annotation`；**任务归属双轨**（`workspace_id` 为 NULL =
+个人任务，非空 = 工作区共享，配额仍按发起人扣）；**viewer 也能写批注**（导师核心
+场景）；批注用**段落指纹**锚点（重跑后失配显示「原文已变更」而非静默错挂）。
+服务器端到端 37 项检查全绿；浏览器双视口走查通过。详见
+[执行记录](../superpowers/plans/2026-08-09-00-execution-notes.md#phase-2--团队工作区--席位--导师批注2026-10-21-de4c6aa) 与
+[runbook](../runbooks/team-workspace.md)。
+
+其余：MCP server + 开放 API · 计费套餐
 
 ### Phase 3 · 建生态（约 6 个月）
 

@@ -21,15 +21,15 @@
 | 项 | 值 |
 | --- | --- |
 | 分支 | `main`（工作分支 `codex/plan3-literature-workflow` 与 main 同点） |
-| HEAD | … → E2E 收尾 `d8d8c0e`/`ff97ae3` → **Phase 2 可观测性 `9f42d7a` → nginx `/metrics` 代理 `664452f` → 看板 E2E `8d51d4b` → 执行记录 `c04a994`** |
+| HEAD | … → 可观测性 `9f42d7a` → nginx `/metrics` `664452f` → **团队工作区 `de4c6aa` → slug 修复 `5d90d11`/`d67dc22`** |
 | 冻结 tag | `defense-v1` |
-| Plan 状态 | Plan 2 / 3 / 4 / 5 **全部 Exit Gate PASSED**；**Phase 1 五项全部端到端可用且遗留清零**；**Phase 2：PRISMA ✅ + 可观测性 ✅**（剩余：团队工作区 / 开放 API / 计费） |
-| 产品化进度 | **Issue #2~#7 全部关闭且遗留清零**；**P1-D 配额遗留已修复**；**`max_results` 已夹紧**；**PRISMA 完成**（三张表 + 服务层 + 渲染器 + 4 端点 + 前端工作台，API 验收 33 项全绿）；**可观测性完成**（8 个 Prometheus 指标 + `/metrics` + nginx 代理 + 用户看板 `/observability`；标签无 PII、路由用模板控基数）；**前端已迁移到 Tailwind v4 + shadcn-vue / Nova** |
-| 数据库迁移 head | **`d4b1e7f2a8c3`**（task 配额结算两列） |
-| 后端测试 | **2264 passed**, 8 skipped；覆盖率 **89.95%**；`mypy` 0 错误（173 文件） |
-| 前端测试 | Vitest **190 passed**；**Playwright E2E 48 测试实例**（24 场景 × 桌面/移动双视口） |
-| CI | **6/6 作业全绿**（2026-10-21 `c04a994` 复验，含 Docker Build 与 Compose Smoke） |
-| 服务器 | 已同步至 `c04a994`，五容器 healthy，`/api/v1/health/ready` → `{"status":"ready"}`，`/metrics` → 200 `text/plain; version=0.0.4` |
+| Plan 状态 | Plan 2 / 3 / 4 / 5 **全部 Exit Gate PASSED**；**Phase 1 五项全部端到端可用且遗留清零**；**Phase 2：PRISMA ✅ + 可观测性 ✅ + 团队工作区 ✅**（剩余：MCP/开放 API / 计费） |
+| 产品化进度 | **Issue #2~#7 全部关闭且遗留清零**；**P1-D 配额遗留已修复**；**`max_results` 已夹紧**；**PRISMA 完成**；**可观测性完成**（8 指标 + `/metrics` + 看板）；**团队工作区完成**（工作区/席位/一次性邀请码/导师批注；任务归属双轨；viewer 可批注；段落指纹锚点）；**前端已迁移到 Tailwind v4 + shadcn-vue / Nova** |
+| 数据库迁移 head | **`e7a1c4b9f2d6`**（团队工作区 + 批注 4 表 + `task.workspace_id`） |
+| 后端测试 | **2346 passed**, 8 skipped；覆盖率 **89.39%**；`mypy` 0 错误（183 文件） |
+| 前端测试 | Vitest **233 passed**；**Playwright E2E 52 测试实例**（26 场景 × 双视口） |
+| CI | **6/6 作业全绿**（2026-10-21 `c04a994` 复验；团队工作区待复验） |
+| 服务器 | 已同步至 `d67dc22`，五容器 healthy，`/api/v1/health/ready` → `{"status":"ready"}`，`alembic current` = `e7a1c4b9f2d6 (head)` |
 
 **演示账号**：`demo` / `demo12345`（知识库已有 10 篇冻结语料 / 2834 分块）
 **E2E 固定账号**：`e2efull` / `e2ereconn`，密码 `e2e-password-2026`（复用，不再每次注册——`auth_register` 限流 5 次/3600s）
