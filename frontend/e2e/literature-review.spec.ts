@@ -35,11 +35,31 @@ function uniqueUser(prefix: string): { username: string; email: string; password
 
 async function register(page: Page, user: { username: string; email: string; password: string }) {
   await page.goto("/login");
-  await page.getByRole("button", { name: "注册" }).click();
+  // 登录/注册切换在 M2 设计系统迁移后是 shadcn Tabs（role="tab"），不是 button。
+  // 曾用 `getByRole("button", { name: "注册" })` → 迁移后该用例静默失效（找不到元素）。
+  await page.getByRole("tab", { name: "注册" }).click();
   await page.locator("#username").fill(user.username);
   await page.locator("#email").fill(user.email);
   await page.locator("#password").fill(user.password);
-  await page.getByRole("button", { name: "注册并登录" }).click();
+
+  // 注册是高开销写端点，受 P1-D 限流保护：连续跑 E2E 会撞窗口（页面出现
+  // 「请求过于频繁，请稍后重试」）。等窗口恢复后重试，避免把限流误报成产品缺陷。
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    await page.getByRole("button", { name: "注册并登录" }).click();
+    const settled = await Promise.race([
+      page
+        .waitForURL(/\/tasks/, { timeout: 15_000 })
+        .then(() => "ok" as const)
+        .catch(() => null),
+      page
+        .locator("text=请求过于频繁")
+        .waitFor({ state: "visible", timeout: 15_000 })
+        .then(() => "limited" as const)
+        .catch(() => null),
+    ]);
+    if (settled !== "limited") break;
+    await page.waitForTimeout(10_000);
+  }
   await expect(page).toHaveURL(/\/tasks/);
 }
 
