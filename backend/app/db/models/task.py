@@ -11,7 +11,16 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -67,6 +76,23 @@ class Task(Base):
     # 任务产出物清单（Markdown/DOCX 等下载信息）
     artifacts: Mapped[list[dict[str, Any]]] = mapped_column(
         JSON, default=list, nullable=False, comment="产出物清单"
+    )
+
+    # ===== 配额结算（P1-D 遗留修复，2026-10-21）=====
+    #: 任务**实际已消耗**的 token 总量（配额结算依据）。
+    #:
+    #: 为什么必须落库：提交任务时按预估 100k 预扣配额，结算要按真实用量退差额；
+    #: 而真实用量原本只存在于内存 `ExecutionResult` 里，进程重启 / 任务中途取消后
+    #: 就丢了，导致「未完成任务的预扣永远退不掉」——用户点错一次就白扣 100k。
+    used_tokens: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False, comment="实际已消耗 token（配额结算依据）"
+    )
+    #: 配额是否已结算（**幂等保护**）。
+    #:
+    #: 结算会调 `quota.refund()`，重复调用等于「越退越多」——额度能被刷成正收益。
+    #: 标记与结算判定在**同一事务**内完成，保证每条任务只结算一次。
+    quota_settled: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, comment="配额是否已结算（幂等保护）"
     )
 
     # 任务输出格式要求（如 markdown / pdf / xlsx）

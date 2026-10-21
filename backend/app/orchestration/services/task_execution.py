@@ -154,6 +154,145 @@ class TaskExecution:
         # None 表示配额关闭（`quota.enabled=false`）或未接线 → 全部跳过。
         self._quota = quota_service
 
+    # ===== 配额结算（P1-D 遗留修复）=====
+
+    async def add_used_tokens(self, task_id: UUID, tokens: int) -> None:
+        """累加任务实际消耗的 token（**增量**，不覆盖）。
+
+        为什么增量而不是赋值：任务可能分多段跑（重启续跑、重试节点），
+        每段的 `node_results` 只含本段节点；累加才能得到全过程用量。
+
+        失败只记 warning：用量记账失败不该让正在执行的任务崩掉
+        （最坏情况是少退额度——宁可少退也不多退）。
+        """
+        amount = int(tokens)
+        if amount <= 0:
+            return
+        try:
+            async with self._session_factory() as session:
+                repo = TaskRepository(session)
+                task = await repo.lock_for_update(task_id)
+                task.used_tokens = int(task.used_tokens or 0) + amount
+                await session.commit()
+        except LookupError:
+            return
+        except Exception as exc:  # pragma: no cover - 防御性兜底
+            logger.warning(
+                "task_used_tokens_add_failed",
+                task_id=str(task_id),
+                tokens=amount,
+                error=str(exc),
+            )
+
+    async def settle_quota(self, task_id: UUID) -> None:
+        """按实际用量结算配额（**幂等**：每个任务只结算一次）。
+
+        退款额 = 预扣 − `used_tokens`；实际超出预扣则不补扣（与既有语义一致）。
+
+        **顺序很重要**：先在事务里「判定 + 置标记 + commit」，**再**调
+        `quota.refund()`。原因：退款写的是 Redis，事务回滚不了外部副作用；
+        若先退后标记，一旦标记失败下次还会再退（额度越退越多）。
+        宁可少退（Redis 故障时标记已落库，不再重试）也不可多退。
+        """
+        refund_tokens: int | None = None
+        user_id: UUID | None = None
+        try:
+            async with self._session_factory() as session:
+                repo = TaskRepository(session)
+                task = await repo.lock_for_update(task_id)
+                if task.quota_settled:
+                    return  # 已结算：绝不重复退
+                task.quota_settled = True
+                used = int(task.used_tokens or 0)
+                refund_tokens = ESTIMATED_TOKENS_PER_TASK - used
+                user_id = task.user_id
+                await session.commit()
+        except LookupError:
+            # 任务不存在（已被清理）：无事可做，不当作错误
+            return
+        except Exception as exc:  # pragma: no cover - 防御性兜底
+            logger.warning("quota_settlement_failed", task_id=str(task_id), error=str(exc))
+            return
+
+        if user_id is None or refund_tokens is None or refund_tokens <= 0:
+            return
+        if self._quota is None:
+            return
+        try:
+            await self._quota.refund(user_id, tokens=refund_tokens)
+        except Exception as exc:  # pragma: no cover - fail-open
+            logger.warning(
+                "quota_refund_failed",
+                task_id=str(task_id),
+                user_id=str(user_id),
+                tokens=refund_tokens,
+                error=str(exc),
+            )
+            return
+        logger.info(
+            "quota_settled",
+            task_id=str(task_id),
+            user_id=str(user_id),
+            refunded=refund_tokens,
+        )
+
+    async def _prereserve_quota(self, user_id: UUID, task_id: UUID) -> None:
+        """从「已结算」状态**继续执行**前，重新预扣剩余额度（`ESTIMATED − used`）。
+
+        为什么必须重新扣：`WAITING_APPROVAL` / `WAITING_HUMAN` → 继续执行时，
+        预扣已在转态时退还；不重新扣就等于「先结算、再免费跑完」。
+
+        额度不足时抛 `QuotaExceededError`（HTTP 429），**拒绝继续**
+        —— 明确告诉用户额度不够，而不是跑到一半失败留下半成品。
+        """
+        if self._quota is None:
+            return
+        async with self._session_factory() as session:
+            repo = TaskRepository(session)
+            task = await repo.lock_for_update(task_id)
+            used = int(task.used_tokens or 0)
+            already_settled = bool(task.quota_settled)
+            if not already_settled:
+                # 尚未结算（例如任务从未转态过）：预扣仍在，无需重复扣
+                return
+            remaining = ESTIMATED_TOKENS_PER_TASK - used
+            if remaining <= 0:
+                return  # 额度已用完（甚至超出）：不再扣，执行阶段自行按 0 额度继续
+            # 先扣再解除标记：扣失败（额度不足）时保持「已结算」状态，
+            # 用户重新充值后再确认仍然成立，不会出现「标记解了但没扣到钱」。
+            await self._quota.check_and_consume(user_id, tokens=remaining)
+            task.quota_settled = False
+            await session.commit()
+        logger.info("quota_prereserved", task_id=str(task_id), tokens=remaining)
+
+    async def _undo_prereserve(self, user_id: UUID, task_id: UUID) -> None:
+        """撤销一次预扣（并发冲突时回滚已扣的额度）。
+
+        为什么需要：`approve_plan` 分两步（校验 → 预扣 → 再校验 → 转态），
+        预扣与转态之间状态可能被并发改变。若不撤销，用户会为一次**未发生**的
+        执行白付额度。
+        """
+        if self._quota is None:
+            return
+        try:
+            async with self._session_factory() as session:
+                repo = TaskRepository(session)
+                task = await repo.lock_for_update(task_id)
+                used = int(task.used_tokens or 0)
+                if not task.quota_settled:
+                    return  # 预扣并未生效（未结算态），无需撤销
+                remaining = ESTIMATED_TOKENS_PER_TASK - used
+                task.quota_settled = True
+                await session.commit()
+            if remaining > 0:
+                await self._quota.refund(user_id, tokens=remaining)
+        except Exception as exc:  # pragma: no cover - fail-open
+            logger.warning(
+                "quota_prereserve_undo_failed",
+                task_id=str(task_id),
+                error=str(exc),
+            )
+
     # ===== 对外接口 =====
 
     async def submit(self, user_id: UUID, request: LiteratureReviewRequest) -> UUID:
@@ -197,7 +336,13 @@ class TaskExecution:
         task_id: UUID,
         revision: int,
     ) -> TaskSnapshot:
-        """确认规划：版本匹配且处于 WAITING_APPROVAL 时进入 RUNNING 并开始执行。"""
+        """确认规划：版本匹配且处于 WAITING_APPROVAL 时进入 RUNNING 并开始执行。
+
+        `WAITING_APPROVAL` 期间预扣是**已退还**的（见 `_plan` 的结算），所以确认时
+        要按 `ESTIMATED − used` 重新预扣；额度不足则拒绝确认（429），
+        而不是跑到一半因额度问题失败。
+        """
+        # 先校验状态与版本，**再**预扣：否则状态不对的请求也会白扣额度
         async with self._session_factory() as session:
             repo = TaskRepository(session)
             task = await self._lock_owned(session, repo, user_id, task_id)
@@ -211,6 +356,21 @@ class TaskExecution:
                 raise ValidationException(
                     "规划版本不匹配",
                     details={"expected": task.plan_version, "received": revision},
+                )
+        await session.commit()
+
+        # 重新预扣：额度不足时抛 429，任务保持 WAITING_APPROVAL 不动
+        await self._prereserve_quota(user_id, task_id)
+
+        async with self._session_factory() as session:
+            repo = TaskRepository(session)
+            task = await self._lock_owned(session, repo, user_id, task_id)
+            if task.status != TaskStatus.WAITING_APPROVAL.value:
+                # 预扣期间状态被并发改变（另一处确认/取消）→ 撤销预扣并报冲突
+                await self._undo_prereserve(user_id, task_id)
+                raise ValidationException(
+                    "任务当前不在等待确认状态",
+                    details={"status": task.status},
                 )
 
             await repo.transition(
@@ -242,6 +402,10 @@ class TaskExecution:
         """人工控制：pause / resume / cancel / retry_node / supply_input。"""
         retrack = False
         cancel_after_commit = False
+        #: 取消是终态 → 需要结算配额
+        settle_after_commit = False
+        #: 从「已结算」状态继续执行（转人工后重试/补输入）→ 需要重新预扣
+        prereserve_after_commit = False
         events: list[TaskEvent] = []
         async with self._session_factory() as session:
             repo = TaskRepository(session)
@@ -261,16 +425,19 @@ class TaskExecution:
             elif command is TaskCommand.CANCEL:
                 events.append(await self._control_cancel(session, repo, task, status))
                 cancel_after_commit = True
+                settle_after_commit = True
             elif command is TaskCommand.RETRY_NODE:
                 events.append(
                     await self._control_retry_node(session, task, status, request.node_id)
                 )
                 retrack = True
+                prereserve_after_commit = True
             elif command is TaskCommand.SUPPLY_INPUT:
                 events.append(
                     await self._control_supply_input(session, repo, task, status, request.input)
                 )
                 retrack = TaskStatus(task.status) is TaskStatus.RUNNING
+                prereserve_after_commit = retrack
             else:  # pragma: no cover - 枚举已穷尽
                 raise ValidationException(f"不支持的任务命令: {command}")
 
@@ -281,6 +448,12 @@ class TaskExecution:
             await self._publish(event)
         if cancel_after_commit:
             await self.container.cancel(task_id)
+        if settle_after_commit:
+            # 取消是终态：按已用额度结算预扣（否则预扣永久占用）
+            await self.settle_quota(task_id)
+        if prereserve_after_commit:
+            # 从「已结算」状态继续跑：必须重新预扣剩余额度
+            await self._prereserve_quota(user_id, task_id)
         if retrack and not self.container.is_tracking(task_id):
             self.container.track(task_id, self._execute(task_id))
         logger.info("task_control", task_id=str(task_id), command=request.command.value)
@@ -393,6 +566,10 @@ class TaskExecution:
 
             await self._publish(event)
             logger.info("task_planned", task_id=str(task_id), revision=plan.version)
+            # 进入 WAITING_APPROVAL 即先结算：用户可能永远不确认执行，
+            # 而预扣若一直挂着就会白占额度（2026-10-21 实测：6 个任务占满日配额）。
+            # 确认执行时会重新预扣（`approve_plan` → `_prereserve_quota`）。
+            await self.settle_quota(task_id)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -556,6 +733,12 @@ class TaskExecution:
                 pre_completed=completed,
                 trace_id=trace_id,
                 subtask_ids=subtask_ids,
+            )
+
+            # 先记账再判断成败：转人工 / 失败路径同样要按已用额度结算，
+            # 若放在成功分支里就会漏记（「跑了 30k 然后转人工」被当成 0 用量全额退款）。
+            await self.add_used_tokens(
+                task_id, sum_actual_tokens(getattr(result, "node_results", {}) or {})
             )
 
             if not result.success:
@@ -728,7 +911,11 @@ class TaskExecution:
         return factory
 
     async def _finish_waiting_human(self, task_id: UUID, result: Any) -> None:
-        """调度未全部完成：任务转入 WAITING_HUMAN 并记录事件。"""
+        """调度未全部完成：任务转入 WAITING_HUMAN 并记录事件。
+
+        转人工意味着**本段执行结束**（用户可能随时放弃），因此按已用额度结算预扣；
+        若之后 `retry_node` / `supply_input` 继续执行，会重新预扣（见 `_prereserve_quota`）。
+        """
         async with self._session_factory() as session:
             repo = TaskRepository(session)
             task = await repo.lock_for_update(task_id)
@@ -747,6 +934,7 @@ class TaskExecution:
             )
             await session.commit()
         await self._publish(event)
+        await self.settle_quota(task_id)
 
     async def _start_reviewing(self, task_id: UUID, result: Any) -> None:
         """调度全部成功：RUNNING → REVIEWING 并发布事件。"""
@@ -859,14 +1047,13 @@ class TaskExecution:
         await self._publish(event)
         logger.info("task_completed", task_id=str(task_id), artifacts=len(artifacts))
 
-        # P1-D：按**实际用量**校正提交时的预扣（差额退还）。
-        # fail-open——配额组件故障绝不能让已完成的任务失败。
-        actual_tokens = sum_actual_tokens(getattr(result, "node_results", {}) or {})
-        await quota_refund_for_usage(self._quota, user_id, actual_tokens=actual_tokens)
+        # P1-D：按**实际用量**结算提交时的预扣（差额退还）。
+        # 用量已在 `_execute` 调度结束后记账（`add_used_tokens`），这里只做结算，
+        # 否则同一批 `node_results` 会被累加两次。
+        await self.settle_quota(task_id)
         logger.info(
             "quota_corrected",
             task_id=str(task_id),
-            actual_tokens=actual_tokens,
             estimated=ESTIMATED_TOKENS_PER_TASK,
         )
 
@@ -1261,6 +1448,9 @@ class TaskExecution:
             await self._publish(event)
         except Exception:
             logger.exception("task_mark_waiting_human_failed", task_id=str(task_id))
+            return
+        # 转人工 = 本段执行结束：按已用额度结算预扣（规划失败时用量为 0 → 全额退还）
+        await self.settle_quota(task_id)
 
     @staticmethod
     def _describe(request: LiteratureReviewRequest) -> str:

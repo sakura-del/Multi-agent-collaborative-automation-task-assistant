@@ -195,3 +195,89 @@ class TestFixMigrationIsIdempotent:
             with Operations.context(context):
                 _load(self.FIX_MIGRATION).downgrade()
         engine.dispose()
+
+
+class TestTaskQuotaSettlementMigration:
+    """`d4b1e7f2a8c3`（task 配额结算列）的行为与幂等。
+
+    这个迁移有两个**必须在生产上成立**的性质：
+
+    1. **幂等**：全新部署时列已由 ORM 建好；已部署库缺列。两条路径都要能跑通
+       （Phase 1 `email_token` 非幂等迁移导致 compose smoke 失败的教训）。
+    2. **存量 `completed` 任务置 `quota_settled=true`**：这些任务的预扣已在完成时
+       按实际用量校正过，若不标记，上线后任何重放路径都会**再退一次**
+       —— 额度被重复退还，等于可被刷。
+    """
+
+    MIGRATION = VERSIONS_DIR / "d4b1e7f2a8c3_add_task_quota_settlement.py"
+
+    @staticmethod
+    def _task_ddl() -> str:
+        return (
+            "CREATE TABLE task ("
+            "id CHAR(32) PRIMARY KEY, status VARCHAR(16) NOT NULL DEFAULT 'pending', "
+            "user_id CHAR(32), title VARCHAR(256), description TEXT, "
+            "created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, "
+            "updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL)"
+        )
+
+    def test_adds_columns_and_backfills_completed(self) -> None:
+        engine = create_engine("sqlite://")
+        with engine.begin() as connection:
+            connection.exec_driver_sql(self._task_ddl())
+            connection.exec_driver_sql(
+                "INSERT INTO task (id, status) VALUES ('a', 'completed'), ('b', 'running')"
+            )
+            context = MigrationContext.configure(connection)
+            with Operations.context(context):
+                _load(self.MIGRATION).upgrade()
+
+            columns = {c["name"] for c in inspect(connection).get_columns("task")}
+            assert {"used_tokens", "quota_settled"} <= columns
+
+            rows = dict(
+                connection.exec_driver_sql(
+                    "SELECT id, quota_settled FROM task ORDER BY id"
+                ).fetchall()
+            )
+            used = dict(
+                connection.exec_driver_sql(
+                    "SELECT id, used_tokens FROM task ORDER BY id"
+                ).fetchall()
+            )
+        engine.dispose()
+
+        assert rows["a"] in (True, 1), "已完成任务必须标记为已结算（否则会重复退款）"
+        assert rows["b"] in (False, 0), "未完成任务必须保持未结算"
+        assert used == {"a": 0, "b": 0}
+
+    def test_upgrade_is_idempotent_when_columns_exist(self) -> None:
+        """列已存在（全新部署路径）时不得报错。"""
+        engine = create_engine("sqlite://")
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                "CREATE TABLE task ("
+                "id CHAR(32) PRIMARY KEY, status VARCHAR(16), "
+                "used_tokens INTEGER NOT NULL DEFAULT 0, "
+                "quota_settled BOOLEAN NOT NULL DEFAULT 0)"
+            )
+            context = MigrationContext.configure(connection)
+            with Operations.context(context):
+                _load(self.MIGRATION).upgrade()
+        engine.dispose()
+
+    def test_downgrade_removes_columns(self) -> None:
+        engine = create_engine("sqlite://")
+        with engine.begin() as connection:
+            connection.exec_driver_sql(self._task_ddl())
+            context = MigrationContext.configure(connection)
+            with Operations.context(context):
+                module = _load(self.MIGRATION)
+                module.upgrade()
+                module.downgrade()
+
+            columns = {c["name"] for c in inspect(connection).get_columns("task")}
+        engine.dispose()
+
+        assert "used_tokens" not in columns
+        assert "quota_settled" not in columns
