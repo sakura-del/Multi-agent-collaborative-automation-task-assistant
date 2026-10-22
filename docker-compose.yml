@@ -120,6 +120,12 @@ services:
       LLM__DEFAULT_MODEL: ${LLM__DEFAULT_MODEL:-gpt-6-luna}
       LLM__OPENAI_API_KEY: ${LLM__OPENAI_API_KEY:-}
       LLM__OPENAI_BASE_URL: ${LLM__OPENAI_BASE_URL:-https://api.openai.com/v1}
+      # 单次 LLM 请求超时（秒）。默认 30 对网页交互合适，但**跑实验矩阵不够**：
+      # 服务器负载高时 gpt-6-luna 经常 >30s，导致节点重试耗尽、任务卡在 reviewing。
+      # 实测（2026-10-22 pilot）158 次 `Request timed out`，4/8 run 失败。
+      # 实验时用 `LLM__REQUEST_TIMEOUT=120` 覆盖；网页场景保持默认。
+      LLM__REQUEST_TIMEOUT: ${LLM__REQUEST_TIMEOUT:-30}
+      LLM__MAX_RETRIES: ${LLM__MAX_RETRIES:-3}
       # DeepSeek 保底通道（OpenAI 兼容协议）：主模型 5xx/超时后由 fallback_chain 接管
       LLM__DEEPSEEK_API_KEY: ${LLM__DEEPSEEK_API_KEY:-}
       LLM__DEEPSEEK_BASE_URL: ${LLM__DEEPSEEK_BASE_URL:-https://api.deepseek.com/v1}
