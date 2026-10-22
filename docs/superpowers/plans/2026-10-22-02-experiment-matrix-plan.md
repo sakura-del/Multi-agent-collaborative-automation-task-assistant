@@ -141,6 +141,79 @@ class LiteratureReviewRequest(BaseModel):
 
 ---
 
+## 3.5 实测进展（2026-10-22）
+
+### 已跑通
+
+`pilot-8`（1 主题 × 4 画像 × 2 重复 = 8 runs）在服务器稳定推进，
+**每 run 约 7 分钟**。四组画像已开始产出差异数据。
+
+### 跑通过程中抓到三个真实缺陷（全部已修复）
+
+**缺陷 1：任务永远卡在 `waiting_approval`（`9dd5ea2`）**
+
+`TaskExecutionExecutor` 首版：
+
+```python
+snapshot = await execution.get_snapshot(...)   # submit 后是 planning
+while snapshot.status == WAITING_APPROVAL:     # 条件不成立 → 从不审批
+    await execution.approve_plan(...)
+    break
+while ...:                                     # 只等终态，没人审批就永远等
+```
+
+规划是**异步**的，submit 返回时状态是 `planning`。首版只在「第一次取快照时
+恰好已是 waiting_approval」才审批 —— 实际几乎不可能命中。
+实测任务创建后卡 8 分钟不动。
+
+修法：审批并入主轮询循环，见到 `waiting_approval` 就批、**只批一次**
+（重复审批会因 revision 过期被拒）。
+
+**缺陷 2：画像开关没传给请求（`9dd5ea2`）**
+
+`TaskExecutionExecutor` 构造 `LiteratureReviewRequest` 时没传三个开关，
+四组实验会走同一条路径 —— 消融失效。已从 `spec.profile` 透传。
+
+**缺陷 3：no_rag 画像永远跑不出结果（`95767be`）**
+
+`retrieval_mode=none` 时 evidence 为空，但提示词要求「必须用 [E1] 标记引用
+证据」—— **要求自相矛盾**。模型按训练习惯输出 `[E1]`，`_resolve_citations`
+判为越界 → 重试 3 次 → 转 `waiting_human`。实测 pilot 的 2 个
+`single_agent_no_rag` run 全部卡在这里。
+
+修法两层：
+
+1. 提示词（`literature_executor_system.j2`）：无证据时明确「不要使用任何
+   引用标记、不要编造出处、全部标注模型推断」；
+2. 校验（`_resolve_citations`）：`evidence_count == 0` 时**不判越界**
+   （没有范围可越），但记 `citation_without_evidence` warning 留痕。
+
+**为什么不删掉标记**：篡改模型输出会让实验数据不可信。保留原文 + warning
+更诚实（这也是「模型在无证据时仍会幻觉引用」的直接证据）。
+
+**有证据时保持严格**：越界仍抛异常（模型编造不存在的文献必须拒绝）。
+
+### 单 run 耗时与总时长推算
+
+| 项 | 实测值 |
+| --- | --- |
+| 单 run 耗时 | **约 7 分钟**（9 个节点 + 复盘） |
+| pilot 8 runs | 约 55 分钟 |
+| **全量 120 runs** | **约 14 小时** |
+
+⚠️ 全量必须**分段跑**（`--retry-failed` 支持续跑），不能指望一次跑完。
+
+### 另一个观察：LLM 超时重试频繁
+
+日志里 `llm_chat_retry attempt=1/2 error='Request timed out.'` 出现较多。
+原因：`gpt-6-luna` 在服务器负载下响应慢（`request_timeout` 默认 30s）。
+这会让单 run 耗时波动，但**不影响结果正确性**（重试后成功）。
+
+若要压缩时长，可调大 `LLM__REQUEST_TIMEOUT`。当前不动：实验参数应保持
+与生产一致，否则数据不可比。
+
+---
+
 ## 4. Exit Gate
 
 - [ ] 三个开关有默认值，既有全量测试绿

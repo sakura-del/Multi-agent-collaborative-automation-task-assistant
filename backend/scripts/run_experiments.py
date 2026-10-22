@@ -181,6 +181,17 @@ async def _main() -> int:
         print("--dry-run：不执行，退出。")
         return 0
 
+    # ⚠️ 必须先 `init_kb()`：`KnowledgeSearchProvider` 依赖全局知识库单例，
+    # 未初始化时任何检索都会抛「知识库未初始化：请先在应用生命周期中调用 init_kb()」。
+    #
+    # 实测后果（pilot-8 首跑）：`no_rag` 画像不检索所以能过，
+    # `vector` / `hybrid_rerank` 画像全部重试耗尽转 waiting_human ——
+    # **恰好只有需要检索的两组失败**，很容易误判成「画像差异」。
+    # 应用侧在 lifespan 里做同样的事（app/main.py:58），本脚本必须自己补上。
+    from app.knowledge.services.factory import init_kb
+
+    init_kb()
+
     container = RuntimeContainer(knowledge_query=KnowledgeSearchProvider())
     await container.start()
     try:
