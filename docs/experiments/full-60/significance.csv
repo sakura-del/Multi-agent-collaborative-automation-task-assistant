@@ -1,0 +1,12 @@
+profile,baseline,metric,n_pairs,statistic,p_value
+multi_agent_no_rag,single_agent_no_rag,citation_resolvability,0,,
+multi_agent_no_rag,single_agent_no_rag,evidence_coverage,0,,
+multi_agent_no_rag,single_agent_no_rag,error_citation_rate,0,,
+multi_agent_no_rag,single_agent_no_rag,duplicate_paragraph_ratio,14,0.0,0.17971249487899976
+multi_agent_no_rag,single_agent_no_rag,recall_at_5,0,,
+multi_agent_no_rag,single_agent_no_rag,ndcg_at_5,0,,
+multi_agent_no_rag,single_agent_no_rag,success,14,,
+multi_agent_no_rag,single_agent_no_rag,duration_ms,14,32.0,0.216552734375
+multi_agent_no_rag,single_agent_no_rag,total_tokens,0,,
+multi_agent_no_rag,single_agent_no_rag,retries,14,0.0,0.17971249487899976
+multi_agent_no_rag,single_agent_no_rag,recovery_success,0,,
