@@ -43,6 +43,11 @@ RUN pip install --upgrade pip && \
 COPY backend/alembic ./alembic
 COPY backend/alembic.ini ./
 COPY backend/entrypoint.sh ./
+# 实验框架与运维脚本（2026-10-22）：120-run 实验矩阵必须在容器内跑
+# （本机连不上模型端点；且需要与生产同版本的依赖）。
+# `evaluation/` 含 15 主题 + 3 领域语料清单（约 200KB），`scripts/` 是运行入口。
+COPY backend/evaluation ./evaluation
+COPY backend/scripts ./scripts
 COPY config ./config
 RUN chmod +x ./entrypoint.sh
 
