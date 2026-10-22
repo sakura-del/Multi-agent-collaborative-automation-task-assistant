@@ -43,11 +43,7 @@ def _call_line_numbers() -> list[int]:
     （回退验证时抓到）。必须逐行判断「去掉缩进后正好是 `init_kb()`」。
     """
     lines = SCRIPT.read_text(encoding="utf-8").splitlines()
-    return [
-        index
-        for index, line in enumerate(lines, start=1)
-        if line.strip() == "init_kb()"
-    ]
+    return [index for index, line in enumerate(lines, start=1) if line.strip() == "init_kb()"]
 
 
 class TestInitKbCalled:
@@ -90,9 +86,7 @@ class TestInitKbCalled:
         assert calls, "init_kb() 未被调用"
         source_lines = _source().splitlines()
         dry_line = next(
-            index
-            for index, line in enumerate(source_lines, start=1)
-            if "if args.dry_run:" in line
+            index for index, line in enumerate(source_lines, start=1) if "if args.dry_run:" in line
         )
 
         assert dry_line < calls[0], (

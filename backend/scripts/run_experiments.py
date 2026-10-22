@@ -188,9 +188,36 @@ async def _main() -> int:
     # `vector` / `hybrid_rerank` 画像全部重试耗尽转 waiting_human ——
     # **恰好只有需要检索的两组失败**，很容易误判成「画像差异」。
     # 应用侧在 lifespan 里做同样的事（app/main.py:58），本脚本必须自己补上。
-    from app.knowledge.services.factory import init_kb
+    from app.knowledge.services.document_service import KnowledgeDocumentService
+    from app.knowledge.services.factory import (
+        get_index_manager,
+        get_kb,
+        get_storage,
+        init_kb,
+    )
 
     init_kb()
+
+    # ⚠️ 还必须**重建 BM25 索引**（第二轮实测抓到的缺陷）。
+    #
+    # BM25 索引是**进程内存**结构，`init_kb()` 只建向量库客户端，不灌数据。
+    # 应用侧 lifespan 会调 `rebuild_bm25()`（app/main.py:67），独立脚本不调 →
+    # 检索时 `bm25_hits=0`，混合检索退化（只剩向量一路，召回率大幅下降）。
+    #
+    # 实测证据：pilot 日志 `hybrid_search_done bm25_hits=0 fused=0 vector_hits=0`，
+    # 而库里 demo 有 2835 个分块 —— 索引根本没灌进去。
+    async with AsyncSessionLocal() as session:
+        bm25_service = KnowledgeDocumentService(
+            session,
+            storage=get_storage(),
+            index_manager=get_index_manager(),
+            kb=get_kb(),
+        )
+        try:
+            rebuilt = await bm25_service.rebuild_bm25()
+            print(f"BM25 索引已重建：{rebuilt} 个分块")
+        except Exception as exc:  # 空库/表缺失不阻塞（与 lifespan 同策略）
+            print(f"BM25 重建跳过：{type(exc).__name__}: {exc}")
 
     container = RuntimeContainer(knowledge_query=KnowledgeSearchProvider())
     await container.start()
