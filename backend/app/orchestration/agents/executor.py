@@ -155,6 +155,13 @@ class ExecutorAgent(BaseAgent):
 
         cited = self._resolve_citations(content, len(evidence_list))
         warnings: list[str] = []
+        if not evidence_list and cited:
+            # 无证据却出现引用标记：**不抛异常**（否则 no_rag 画像整批实验失败），
+            # 但必须留痕 —— 这是模型幻觉的直接证据，实验指标要能看到。
+            #
+            # 为什么不删掉标记：那会篡改模型输出，实验数据不再可信。
+            # 保留原文 + 记 warning 更诚实。
+            warnings.append("citation_without_evidence")
         if evidence_list and not cited:
             warnings.append("no_evidence_marker")
 
@@ -178,8 +185,22 @@ class ExecutorAgent(BaseAgent):
 
     @staticmethod
     def _resolve_citations(content: str, evidence_count: int) -> set[int]:
-        """解析引用标记；编号超出证据范围时抛 `EvidenceCitationError`。"""
+        """解析引用标记；编号超出证据范围时抛 `EvidenceCitationError`。
+
+        ## `evidence_count == 0` 时**不校验**（2026-10-22 实验矩阵修复）
+
+        无 RAG 画像（`retrieval_mode=none`）没有证据，但模型仍可能按训练习惯
+        输出 `[E1]`。若照旧抛异常 → 节点重试 3 次 → 转人工 →
+        **no_rag 画像永远跑不出结果**（实测 pilot 的 2 个 run 全卡在这里）。
+
+        正确语义：没有证据时引用标记本身没有「范围」可越，谈不上越界。
+        这里只**收集**标记（用于 warning 留痕），不判失败。
+
+        有证据时保持严格：越界意味着模型编造了不存在的文献，必须拒绝。
+        """
         cited = {int(match) for match in _CITATION_MARKER.findall(content)}
+        if evidence_count == 0:
+            return cited
         invalid = sorted(index for index in cited if index < 1 or index > evidence_count)
         if invalid:
             raise EvidenceCitationError(
