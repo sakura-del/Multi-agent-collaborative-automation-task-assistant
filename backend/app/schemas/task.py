@@ -56,6 +56,18 @@ class TaskCreate(BaseModel):
     verify_references: bool | None = None
     """是否做外部引用核验（Issue #3）：None=沿用全局配置；True=强制核验（含离线任务）；False=跳过。"""
 
+    # ===== 实验画像开关（2026-10-22 实验矩阵）=====
+    # 默认全开 = 与改造前行为一致。`to_contract()` 用 `model_dump()` 全量透传，
+    # 所以这里加同名字段即可，无需改映射代码。
+    retrieval_mode: Literal["none", "vector", "hybrid_rerank"] = "hybrid_rerank"
+    """检索模式：none=不检索 / vector=向量 / hybrid_rerank=混合+重排（默认）。"""
+
+    validation_enabled: bool = True
+    """是否执行 validate 节点（关闭后仍规划、只跳过执行）。"""
+
+    review_enabled: bool = True
+    """是否执行 review 节点（关闭后用 write 输出作最终正文）。"""
+
     def to_contract(self) -> LiteratureReviewRequest:
         """映射为编排层契约（HTTP 层不向编排层传递自身模型）。"""
         return LiteratureReviewRequest(**self.model_dump())

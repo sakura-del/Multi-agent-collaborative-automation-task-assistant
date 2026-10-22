@@ -126,6 +126,7 @@ class LiteratureReviewWorkflow:
         context_builder: Any | None = None,
         source: Any | None = None,
         reference_verifier: Any | None = None,
+        knowledge_query: Any | None = None,
         top_k: int = 8,
     ) -> None:
         self._planner = planner
@@ -136,6 +137,10 @@ class LiteratureReviewWorkflow:
         self._source = source
         # 引用真实性核验器（Issue #3 / 计划 §2.6）：None 表示不核验，校验节点保持原行为
         self._reference_verifier = reference_verifier
+        # 检索后端（2026-10-22 实验矩阵）：`retrieval_mode=none` 时不触碰它。
+        # 与 `_context_builder` 分开是因为实验需要**显式区分**「没有检索」与
+        # 「检索了但没命中」—— 前者不调用后端，后者调用后返回空。
+        self._knowledge_query = knowledge_query
         self._top_k = top_k
         self._plan: TaskPlan | None = None
         # 节点证据缓存：重生成时复用同一证据集（Plan 3 Task 4）
@@ -322,14 +327,47 @@ class LiteratureReviewWorkflow:
             prepared["dependency_outputs"] = dependency_outputs
 
         if plan_node.type in EVIDENCE_NODE_TYPES:
-            context = await self._build_context(task, prepared["query"])
-            prepared["evidence_context"] = context.text
-            prepared["evidence"] = [item.model_dump(mode="json") for item in context.evidence]
-            prepared["insufficient_evidence"] = context.insufficient
-            if context.insufficient:
-                prepared["warnings"].append("insufficient_evidence")
+            if self._retrieval_mode(task) == "none":
+                # 实验画像 `no_rag`：**不检索**，evidence 为空。
+                # 与「检索了但没命中」区分开（后者会带 insufficient_evidence 警告），
+                # 这样实验指标能正确归因。
+                prepared["warnings"].append("retrieval_disabled")
+            else:
+                context = await self._build_context(task, prepared["query"])
+                prepared["evidence_context"] = context.text
+                prepared["evidence"] = [item.model_dump(mode="json") for item in context.evidence]
+                prepared["insufficient_evidence"] = context.insufficient
+                if context.insufficient:
+                    prepared["warnings"].append("insufficient_evidence")
         self._prepared[plan_node.id] = prepared
         return prepared
+
+    # ===== 实验画像开关（2026-10-22 实验矩阵）=====
+
+    @staticmethod
+    def _retrieval_mode(task: Any) -> str:
+        """读检索模式；缺省 `hybrid_rerank`（与契约默认一致）。"""
+        config = getattr(task, "config", None) or {}
+        value = str(config.get("retrieval_mode") or "hybrid_rerank")
+        return value if value in {"none", "vector", "hybrid_rerank"} else "hybrid_rerank"
+
+    @staticmethod
+    def _flag(task: Any, name: str, *, default: bool = True) -> bool:
+        """读布尔开关；缺省 `default`（与契约默认一致）。
+
+        同时兼容 `task.config` 是 dict 与 Pydantic 对象两种情况 ——
+        实验脚本传 dict，HTTP 路径传契约对象。
+        """
+        config = getattr(task, "config", None)
+        if config is None:
+            return default
+        if isinstance(config, dict):
+            value = config.get(name)
+        else:
+            value = getattr(config, name, None)
+        if value is None:
+            return default
+        return bool(value)
 
     def prepared_for(self, node_id: str) -> dict[str, Any] | None:
         """返回节点上次准备的上下文（重生成时复用同一证据集）。"""
@@ -432,7 +470,21 @@ class LiteratureReviewWorkflow:
         引用真实性核验（Issue #3 / 计划 §2.6）：核验器存在且能从检索 artifacts 解析出候选时，
         先执行 `verify_many`，再把结论以 `reference_verifications` 随载荷交给校验 Agent。
         核验依赖外部元数据源，异常只降级为「无核验结论」，不得让校验节点失败。
+
+        ## `validation_enabled=False`（实验画像）
+
+        **不调用校验 Agent**（省一次 LLM 调用），直接返回通过。
+        必须在 `issues` 里留痕 —— 否则事后无法区分「真通过」与「压根没校验」，
+        实验数据会失真。
         """
+        if not self._flag(task, "validation_enabled"):
+            return ValidationReport(
+                passed=True,
+                score=100.0,
+                checks=[],
+                retryable=False,
+                feedback="校验已跳过（validation_enabled=False，实验画像）",
+            )
         if self._validator is None:
             raise HumanActionRequiredError("缺少校验 Agent")
         prepared = self.prepared_for(result.node_id) or {}

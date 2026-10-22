@@ -204,6 +204,42 @@ class LiteratureReviewRequest(BaseModel):
     - ``False``：本任务强制跳过核验。
     """
 
+    # ===== 实验画像开关（2026-10-22 实验矩阵）=====
+    #
+    # ## 为什么放在请求契约而不是全局配置
+    #
+    # 120 次实验要跑四种画像。若用全局配置，每次切换都要重启进程，
+    # 且并发跑不同画像会互相污染。放契约里，每个 run 的 `config.json`
+    # 天然记录了开关取值 —— 可复现、可并发、可追溯。
+    #
+    # ## 为什么默认全开
+    #
+    # 网页用户不传这些字段时必须得到**完整能力**（检索 + 校验 + 复盘），
+    # 与改造前一致。任一默认关闭都会让既有用户静默降级。
+
+    retrieval_mode: Literal["none", "vector", "hybrid_rerank"] = "hybrid_rerank"
+    """检索模式（实验消融维度）。
+
+    - ``none``：不检索，仅用冻结清单（对应 `single_agent_no_rag` / `multi_agent_no_rag`）；
+    - ``vector``：向量检索（`multi_agent_vector_rag`）；
+    - ``hybrid_rerank``：向量 + 关键词混合 + 重排（`multi_agent_hybrid_rerank`，默认）。
+    """
+
+    validation_enabled: bool = True
+    """是否执行 `validate` 节点（引用校验与完整性检查）。
+
+    关闭后 `validate` 节点仍会被**规划**（`REQUIRED_NODE_TYPES` 契约要求），
+    但执行期直接返回通过、不调用 LLM。这样 DAG 结构一致，只改变执行行为 ——
+    实验对比才干净。
+    """
+
+    review_enabled: bool = True
+    """是否执行 `review` 节点（复盘与最终正文生成）。
+
+    关闭后 `review` 节点用上游 `write` 节点的输出作为最终正文，不调用 LLM。
+    同上：仍被规划，只跳过执行。
+    """
+
 
 class TaskControlRequest(BaseModel):
     """人工控制命令（HTTP TaskControl 映射到此）。"""

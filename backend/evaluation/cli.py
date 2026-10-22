@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -61,22 +62,87 @@ def _load_selected_topics(topic_id: str | None) -> list[EvaluationTopic]:
     return selected
 
 
-def _build_executor(adapter: str, args: argparse.Namespace) -> Any:
+def build_live_executor(
+    *,
+    execution: Any = None,
+    user_id: uuid.UUID | None = None,
+    poll_interval: float = 5.0,
+    timeout: float = 1800.0,
+) -> Any:
+    """装配真实执行器（`--adapter live`）。
+
+    ## 为什么单列成函数
+
+    装配需要真实数据库 + 模型客户端 + 演示用户。单测里不该真连，
+    所以依赖全部可注入；CLI 走默认（真实依赖）。
+
+    ## 为什么缺依赖要报 `ValueError` 而不是 `AttributeError`
+
+    实验要跑几小时。若启动 3 秒后抛 `'NoneType' object has no attribute ...`，
+    用户不知道该补什么。每条错误都说清「缺什么、怎么补」。
+
+    ## `poll_interval` 默认 5 秒
+
+    单 run 通常 1–5 分钟。1 秒轮询会让数据库查询量翻倍且无收益。
+    """
+    from evaluation.runner import TaskExecutionExecutor
+
+    if execution is None:
+        raise ValueError(
+            "live 适配器缺少 TaskExecution：请用 scripts/run_experiments.py 启动"
+            "（它会装配数据库与模型客户端）"
+        )
+    if user_id is None:
+        raise ValueError("live 适配器缺少演示用户 id：请先用 resolve_demo_user() 解析账号")
+    return TaskExecutionExecutor(
+        execution,
+        user_id=user_id,
+        poll_interval=poll_interval,
+        timeout=timeout,
+    )
+
+
+def resolve_demo_user(*, username: str, lookup: Any) -> uuid.UUID:
+    """按用户名解析演示用户 id（实验任务需要 owner）。
+
+    `lookup` 是 `async (username) -> User | None` 的可调用对象（便于测试注入）。
+    """
+    import asyncio
+
+    user = asyncio.run(lookup(username))
+    if user is None:
+        raise ValueError(
+            f"演示用户 {username!r} 不存在。请先在网页注册该账号" f"（或改用 --user 指定已有账号）"
+        )
+    user_id = getattr(user, "id", None)
+    if not isinstance(user_id, uuid.UUID):
+        raise ValueError(f"用户 {username!r} 的 id 非法：{user_id!r}")
+    return user_id
+
+
+def build_executor(adapter: str) -> Any:
+    """按名称构造执行器（**只用于 fixed**；live 需 `build_live_executor`）。
+
+    `live` 走 `scripts/run_experiments.py`（需要数据库与模型客户端装配），
+    不在 CLI 里直接构造 —— 否则 CLI 会隐式连数据库，`--help` 都可能变慢。
+    """
+
     if adapter == "fixed":
         return FixedAdapterExecutor()
-    if adapter != "live":
-        raise SystemExit(f"未知适配器: {adapter}（fixed / live）")
-    raise SystemExit(
-        "live 适配器需要在实验环境中装配 TaskExecution（数据库 + 语料入库 + 模型密钥），"
-        "请参考 evaluation/TaskExecutionExecutor 在本机脚本中注入。"
-    )
+    if adapter == "live":
+        raise SystemExit(
+            "live 适配器需要装配数据库与模型客户端，请用：\n"
+            "  python -m scripts.run_experiments --profiles all --repetitions 2\n"
+            "（该脚本会构造 TaskExecution 并调用 build_live_executor）"
+        )
+    raise SystemExit(f"未知适配器: {adapter}（fixed / live）")
 
 
 async def _run(args: argparse.Namespace) -> int:
     profiles = _load_selected_profiles(args.profiles)
     topics = _load_selected_topics(args.topic)
     specs = build_matrix(profiles, topics, args.repetitions)
-    executor = _build_executor(args.adapter, args)
+    executor = build_executor(args.adapter)
 
     output_root = Path(args.output_root).expanduser().resolve()
     runner = ExperimentRunner(
