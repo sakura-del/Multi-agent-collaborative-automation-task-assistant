@@ -287,7 +287,18 @@ RenderJob(id, project_id, status, output_uri, error, trace)
 [执行记录](../superpowers/plans/2026-08-09-00-execution-notes.md#phase-2--开放-api--mcp--api-key2026-10-21-c01cd16) 与
 [runbook](../runbooks/open-api-mcp.md)。
 
-其余：计费套餐
+**✅ 计费套餐（2026-10-22 完成，Phase 2 收官）**
+—— 四档套餐（free 1 篇 / student 10 / pro 50 / institution 不限）+
+**篇数为主、token 为辅**的双配额（篇数入数据库作计费依据，token 留 Redis 作成本护栏，
+错误码 `PLAN_QUOTA_EXCEEDED` 与 `TOKEN_BUDGET_EXCEEDED` 严格区分）+
+四条功能门禁（团队/工作区数量/席位/开放 API）+ 手工开通 + 前端 `/settings/plan`。
+服务器三阶段验收 42 项全绿。详见
+[执行记录](../superpowers/plans/2026-08-09-00-execution-notes.md#phase-2--计费套餐2026-10-22phase-2-收官) 与
+[runbook](../runbooks/billing-plans.md)。
+
+**Phase 2 五项全部交付完成**（PRISMA / 可观测性 / 团队工作区 / 开放 API / 计费套餐）。
+
+其余：论文实验矩阵 · 答辩彩排
 
 ### Phase 3 · 建生态（约 6 个月）
 

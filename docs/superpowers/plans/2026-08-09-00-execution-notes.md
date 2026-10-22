@@ -2571,6 +2571,36 @@ API 门禁加上后 `test_api_key_auth.py` 全部 403。都是「测试 app 没�
 用 `python -c @"..."@` 改测试文件时，`prefix="/api/v1"` 变成 `prefix=/api/v1` →
 语法错误。改为写 `.py` 脚本文件再执行。
 
+**⑤ 时区声明不一致 → `POST /billing/subscribe` 500（服务器验收抓到，`d68c1d9`）**
+
+`subscribe()` 用 `datetime.now(UTC)`（**aware**）写 `period_start/period_end`，
+但 ORM 把这两列声明成 naive `DateTime`（迁移建的是 `timestamptz`）。
+asyncpg 拒绝混用：
+
+```
+can't subtract offset-naive and offset-aware datetimes
+```
+
+**为什么单测没抓到**：本地 SQLite 完全不校验时区，naive/aware 都写入成功。
+这是继「mock 掩盖双通道鉴权缺陷」之后**第二次同类问题** ——
+**本地测试通过不能证明 PostgreSQL 上正确**。
+
+修法：ORM 显式 `DateTime(timezone=True)`。新增 `TestTimezoneAwareness`
+三条断言（列声明 / 迁移一致 / 写入值 aware），回退验证变红。
+
+**⑥ 席位门禁错误里显示错误的套餐 id（`5cb941e`）**
+
+`SeatLimitExceeded` 未传 `plan_id` → 走默认值 `free`。实测专业版用户请求
+50 席返回 `{"requested":50,"limit":10,"plan_id":"free"}` ——
+运维看到「free 套餐席位上限 10」会一头雾水（free 实际是 0）。
+修法：端点先取真实套餐再抛错。
+
+**⑦ 并发扣篇数测试满负载 flaky（`5cb941e`）**
+
+单跑必过、满负载全量偶发 `database is locked`（SQLite 默认 rollback journal
+不支持并发写）。修法：测试建库开 `PRAGMA journal_mode=WAL` + `busy_timeout=30s`。
+**这是测试环境适配，不改实现**（生产 PostgreSQL 行锁语义本就正确）。
+
 ### 8. 测试诚实性（AGENTS #13，五组回退验证）
 
 | 回退项 | 结果 |
@@ -2583,9 +2613,21 @@ API 门禁加上后 `test_api_key_auth.py` 全部 403。都是「测试 app 没�
 
 ### 9. 门禁与交付
 
-后端 pytest **2572 passed / 8 skipped**（2457 → 2572，+115），覆盖率 89%+；
+后端 pytest **2530 passed / 8 skipped**（2457 → 2530，+73），覆盖率 **89.30%**；
 mypy 0 错误（190 文件）；ruff/black 干净。
-前端 Vitest **256 passed**（248 → 256，+8）、`vue-tsc` 干净、build 成功。
+前端 Vitest **256 passed**（248 → 256，+8）、`vue-tsc` 干净、
+build 成功（CSS 29.95 kB / JS 327.12 kB）。
+
+**服务器端到端验收**（三阶段，42 项检查全绿）：
+
+| 阶段 | 验证内容 | 结果 |
+| --- | --- | --- |
+| 一 | 套餐列表公开、免费档撞限 429 + 错误码、用量准确、团队门禁 403、API 门禁 403、JWT 不受影响 | 20/20 |
+| 二 | 手工开通学生版、额度变 10、**已用篇数保留**（升级不重置）、可继续建任务、团队放开、数量门禁 | 12/12 |
+| 三 | 升级专业版、额度 50、席位门禁（请求 50 席 → 403 `PLAN_SEAT_LIMIT`）、API 与 **MCP 放开** | 10/10 |
+
+**清理回查**：probe_users 0 / subscription 0 / usage_counter 0 /
+**demo 27（未变）** / knowledge_docs 104 / plan 4（种子保留）/ quota_keys 0。
 
 **Phase 2 进度：PRISMA ✅ + 可观测性 ✅ + 团队工作区 ✅ + 开放 API ✅ + 计费套餐 ✅**
 —— **Phase 2 五项全部交付完成。**
