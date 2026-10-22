@@ -47,6 +47,7 @@ from typing import Any
 
 from sqlalchemy import (
     Boolean,
+    DateTime,
     ForeignKey,
     Integer,
     String,
@@ -201,8 +202,16 @@ class Subscription(Base):
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, default="active", comment="active/expired/cancelled"
     )
-    period_start: Mapped[datetime] = mapped_column(nullable=False, comment="计费周期开始")
-    period_end: Mapped[datetime] = mapped_column(nullable=False, comment="计费周期结束")
+    # ⚠️ 必须 `DateTime(timezone=True)`：迁移建的是 timestamptz，而写入用的是
+    # `datetime.now(UTC)`（aware）。若 ORM 声明成 naive DateTime，asyncpg 会报
+    # `can't subtract offset-naive and offset-aware datetimes` —— 本地 SQLite
+    # 不校验时区，所以单测全绿、**只有真实 PostgreSQL 才炸**（已踩）。
+    period_start: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, comment="计费周期开始"
+    )
+    period_end: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, comment="计费周期结束"
+    )
     seats_purchased: Mapped[int] = mapped_column(
         Integer, nullable=False, default=1, comment="购买席位数（个人版=1）"
     )

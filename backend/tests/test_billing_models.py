@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import pathlib
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -348,3 +349,48 @@ class TestPeriodKey:
         # UTC 2026-10-31 23:30 在 UTC+8 是 11-01 07:30，但仍属 10 月
         moment = datetime(2026, 10, 31, 23, 30, tzinfo=UTC)
         assert period_key_for(moment) == "2026-10"
+
+
+class TestTimezoneAwareness:
+    """时区声明必须与写入值一致（**真实 PostgreSQL 才炸的缺陷**）。
+
+    ## 这个测试为什么必须存在
+
+    `subscribe()` 用 `datetime.now(UTC)`（**aware**）写 `period_start/end`。
+    若 ORM 把列声明成 naive `DateTime`，asyncpg 会报
+    `can't subtract offset-naive and offset-aware datetimes`。
+
+    **本地 SQLite 完全不校验时区**，所以单测全绿、只有部署到 PostgreSQL 才 500。
+    2026-10-22 服务器验收实际踩到：`POST /billing/subscribe` 返回 500。
+
+    无法在单测里跑 PostgreSQL，所以这里断言**列声明带时区** ——
+    这是那个缺陷的充要条件（迁移建的是 timestamptz，ORM 必须一致）。
+    """
+
+    def test_subscription_period_columns_are_timezone_aware(self) -> None:
+        from sqlalchemy import DateTime
+
+        for column_name in ("period_start", "period_end"):
+            column = Subscription.__table__.columns[column_name]
+            assert isinstance(column.type, DateTime), f"{column_name} 不是 DateTime"
+            assert column.type.timezone is True, (
+                f"Subscription.{column_name} 必须声明 timezone=True："
+                "写入值是 aware datetime，naive 列会在 PostgreSQL 报时区错误"
+            )
+
+    def test_migration_matches_timezone_declaration(self) -> None:
+        """迁移里的 `period_start/end` 也必须是 timestamptz（与 ORM 一致）。"""
+        migration = pathlib.Path(
+            "alembic/versions/a3c9e6d2b8f1_add_billing_tables.py"
+        ).read_text(encoding="utf-8")
+        assert migration.count('"period_start"') == 1
+        assert migration.count('"period_end"') == 1
+        segment = migration.split('"period_start"')[1].split('"seats_purchased"')[0]
+        assert segment.count("timezone=True") == 2, (
+            "period_start 与 period_end 都必须 timezone=True"
+        )
+
+    def test_written_value_is_aware(self) -> None:
+        """`subscribe()` 写入的值确实是 aware —— 与上面的列声明配套。"""
+        moment = datetime.now(UTC)
+        assert moment.tzinfo is not None
