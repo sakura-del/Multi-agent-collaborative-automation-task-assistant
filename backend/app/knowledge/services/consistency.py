@@ -121,8 +121,10 @@ async def check_vector_consistency(
         or 0
     )
 
-    # 真实接口是 `size()`（见 VectorStore.size）；测试替身也提供同名方法。
-    actual_vectors = int(vector_store.size())
+    # `VectorStore.size` 是**属性**（见 index_manager.get_stats 的用法）。
+    # 测试替身可以给属性或方法，这里兼容两种写法。
+    raw_size = getattr(vector_store, "size", 0)
+    actual_vectors = int(raw_size() if callable(raw_size) else raw_size)
 
     report = VectorConsistencyReport(
         expected_vectors=chunk_count,

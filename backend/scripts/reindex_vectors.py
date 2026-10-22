@@ -51,7 +51,7 @@ async def _main() -> int:
     args = _parse_args()
 
     from app.db.session import AsyncSessionLocal
-    from app.knowledge.services.factory import get_kb, init_kb
+    from app.knowledge.services.factory import get_index_manager, init_kb
     from app.knowledge.services.reindex import reindex_from_chunks
 
     user_id = None
@@ -64,10 +64,12 @@ async def _main() -> int:
             raise SystemExit(f"--user-id 不是合法 UUID：{args.user_id}") from exc
 
     init_kb()
+    # 向量库本体在 IndexManager 里（`get_kb()` 是门面，没有写入接口）
+    vector_store = get_index_manager()._vector_store  # noqa: SLF001
     async with AsyncSessionLocal() as session:
         result = await reindex_from_chunks(
             session=session,
-            vector_store=get_kb(),
+            vector_store=vector_store,
             batch_size=args.batch_size,
             user_id=user_id,
             dry_run=args.dry_run,

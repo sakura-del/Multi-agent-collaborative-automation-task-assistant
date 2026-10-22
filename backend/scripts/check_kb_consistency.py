@@ -53,11 +53,15 @@ async def _main() -> int:
 
     from app.db.session import AsyncSessionLocal
     from app.knowledge.services.consistency import check_vector_consistency
-    from app.knowledge.services.factory import get_kb, init_kb
+    from app.knowledge.services.factory import get_index_manager, init_kb
 
     init_kb()
+    # 注意：`get_kb()` 返回 KnowledgeBase 门面，**没有** size 属性。
+    # 向量库本体在 IndexManager 里（与 get_stats() 同源）。
+    index_manager = get_index_manager()
+    vector_store = index_manager._vector_store  # noqa: SLF001 - 运维脚本，读内部状态
     async with AsyncSessionLocal() as session:
-        report = await check_vector_consistency(session=session, vector_store=get_kb())
+        report = await check_vector_consistency(session=session, vector_store=vector_store)
 
     if args.json:
         print(json.dumps(report.as_dict(), ensure_ascii=False, indent=2))
