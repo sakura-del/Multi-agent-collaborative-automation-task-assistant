@@ -399,24 +399,37 @@ class TaskExecutionExecutor:
 
         from app.orchestration.contracts import LiteratureReviewRequest, TaskStatus
 
+        # **画像开关必须传给请求**，否则四组实验走同一条路径（消融失效）。
+        # 这些值来自 `ExperimentConfig`（每个 run 的 config.json 已记录）。
         request = LiteratureReviewRequest(
             topic=spec.topic.topic_zh,
             keywords=[spec.topic.query_en],
             max_documents=10,
             offline_dataset=True,
+            retrieval_mode=spec.profile.retrieval_mode.value,
+            validation_enabled=spec.profile.validation_enabled,
+            review_enabled=spec.profile.review_enabled,
         )
         task_id = await self.execution.submit(self.user_id, request)
         deadline = time.monotonic() + self.timeout
+
+        # 规划是**异步**的：submit 返回时状态通常是 `planning`，
+        # 需要轮询等到 `waiting_approval` 才能审批。
+        #
+        # ⚠️ 首版写成「先取一次快照，若已是 waiting_approval 才审批，然后 break」，
+        # 结果：submit 后快照是 planning → while 不成立 → 从不审批 →
+        # 任务永远停在 waiting_approval（实测卡了 8 分钟才发现）。
+        # 正确做法：审批并入主轮询循环，见到 waiting_approval 就批，且**只批一次**。
+        approved = False
         snapshot = await self.execution.get_snapshot(self.user_id, task_id)
-        while snapshot.status == TaskStatus.WAITING_APPROVAL.value:
-            await self.execution.approve_plan(self.user_id, task_id, snapshot.revision)
-            snapshot = await self.execution.get_snapshot(self.user_id, task_id)
-            break
         while time.monotonic() < deadline:
-            snapshot = await self.execution.get_snapshot(self.user_id, task_id)
+            if snapshot.status == TaskStatus.WAITING_APPROVAL.value and not approved:
+                await self.execution.approve_plan(self.user_id, task_id, snapshot.revision)
+                approved = True
             if snapshot.status in TERMINAL_STATUSES:
                 break
             await asyncio.sleep(self.poll_interval)
+            snapshot = await self.execution.get_snapshot(self.user_id, task_id)
 
         events = await self.execution.events_after(self.user_id, task_id, 0)
         review = snapshot.review_report or {}

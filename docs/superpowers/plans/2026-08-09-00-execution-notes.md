@@ -2453,6 +2453,98 @@ black/ruff 干净；mypy 0 错误（183 文件）；pytest **2346 passed / 8 ski
 
 ---
 
+## 实验矩阵可运行化（2026-10-22）
+
+**计划**：[2026-10-22-02-experiment-matrix-plan.md](2026-10-22-02-experiment-matrix-plan.md)
+
+Phase 2 五项交付完成后，转向毕业设计的**硬指标**：120-run 实验矩阵。
+
+### 1. 两个阻塞（跑之前必须先解决）
+
+**阻塞 1：四个画像跑不出差异（严重）**
+
+`LiteratureReviewRequest` 只有 topic/keywords 等字段，**没有**画像开关，
+工作流也不读。后果：`multi_agent_no_rag` 与 `multi_agent_hybrid_rerank`
+会走**同一条**路径，差异只剩模型采样噪声 —— **论文的消融章节不成立**。
+
+**阻塞 2：CLI 的 `--adapter live` 是未实现占位**
+
+```python
+raise SystemExit("live 适配器需要在实验环境中装配 TaskExecution ...")
+```
+
+而 `TaskExecutionExecutor`（runner.py:376）其实**早已写好**，只是没接线。
+
+### 2. 三个画像开关（默认全开）
+
+| 开关 | 默认 | 关闭/设为 none 时 |
+| --- | --- | --- |
+| `retrieval_mode` | `hybrid_rerank` | `none`=不检索（evidence 为空）；`vector`=仅向量 |
+| `validation_enabled` | `True` | 跳过校验 Agent（省一次 LLM） |
+| `review_enabled` | `True` | 用 write 输出作最终正文 |
+
+**为什么放请求契约而不是全局配置**：120 次运行要跑四种画像。全局配置每次
+切换都要重启进程，且并发跑不同画像会互相污染。放契约里，每个 run 的
+`config.json` 天然记录开关 —— 可复现、可并发、可追溯。
+
+**为什么「关闭 = 跳过执行」而不是「不规划」**：`REQUIRED_NODE_TYPES` 要求
+规划必须含 validate/review 节点。关闭就不规划会让 DAG 结构变，
+实验对比不干净。所以：规划照旧、执行跳过。
+
+**跳过时必须留痕**（`ValidationReport.feedback` 写「已跳过」）：否则事后
+无法区分「真通过」与「压根没校验」，实验数据失真。
+
+### 3. 检索开关的生效点（踩过一个认知错误）
+
+首版断言 `knowledge_query.calls >= 1`，测试永远红。原因是**检索入口不是
+`knowledge_query`**，而是 `context_builder.build(...)`；前者是构建器内部依赖，
+工作流不直接调它。
+
+改正为断言 `context_builder.calls`，并加对照用例（`none` 模式**一次都不调**）。
+这是「断言写错对象」的典型 —— 测试红不一定是实现错。
+
+### 4. 三个坑
+
+**① 镜像只 COPY app/，实验代码根本不在容器里**
+
+`import evaluation` → `ModuleNotFoundError`。实验矩阵**必须在容器内跑**
+（本机连不上模型端点，且要与生产同版本依赖），但 Dockerfile 只拷了 `app`。
+补 `COPY backend/evaluation` 与 `backend/scripts`（两者不进 wheel，
+`packages.find` 仍只含 `app*`，仅靠镜像层提供）。
+
+**② 预检读错字段名**
+
+`settings.llm.api_key` 不存在 —— 实际是按 provider 分列
+（`openai_api_key` / `deepseek_api_key` / `glm_api_key` / `qwen_api_key`）。
+导致任何配置都报「密钥缺失」。改为检查四个 provider 任一有 key，
+错误消息点明具体环境变量名。
+
+**③ 容器内 `python -m scripts.run_experiments` 的 cwd 必须是 `/app`**
+
+`docker compose exec -T backend python -m ...` 默认就在 `/app`，
+但脚本仍保留 `sys.path` 兜底（支持直接执行）。
+
+### 5. 启动前预检（一次性报出所有缺失项）
+
+实验要跑几小时。若启动 3 秒后抛 `'NoneType' object has no attribute ...`，
+用户不知道该补什么。预检一次性检查：
+
+- 数据库可达 + 演示用户存在；
+- 知识库非空（104 篇已入库）；
+- 任一 provider 的模型密钥。
+
+任一缺失给**可操作提示**（「请先在网页注册该账号」「配置 LLM__OPENAI_API_KEY」）。
+
+### 6. 门禁
+
+mypy 0 错误（198 文件）；ruff/black 干净；新增 29 测试全绿
+（契约 14 + 工作流 7 + live 装配 8）；literature/workflow 相关回归
+**209 passed**（无回归）。
+
+**回退验证**：校验开关与检索开关逐个回退 → 对应测试变红。
+
+---
+
 ## Phase 2 · 计费套餐（2026-10-22，**Phase 2 收官**）
 
 **计划**：[2026-10-22-01-billing-plans-plan.md](2026-10-22-01-billing-plans-plan.md)
