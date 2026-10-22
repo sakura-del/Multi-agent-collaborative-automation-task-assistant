@@ -127,10 +127,20 @@ async def _preflight(session_factory: Any, username: str) -> Any:
     try:
         from app.core.config import get_settings
 
-        settings = get_settings()
-        api_key = getattr(getattr(settings, "llm", None), "api_key", None)
-        if not api_key:
-            problems.append("LLM 密钥缺失 → 在 .env 配置 LLM__API_KEY")
+        llm = get_settings().llm
+        # 字段名是 `openai_api_key` / `deepseek_api_key` 等（不是统一的 api_key）。
+        # 任一 provider 有 key 即可 —— 实际用哪个由 default_provider + fallback_chain 决定。
+        provider_keys = {
+            "openai": getattr(llm, "openai_api_key", None),
+            "glm": getattr(llm, "glm_api_key", None),
+            "qwen": getattr(llm, "qwen_api_key", None),
+            "deepseek": getattr(llm, "deepseek_api_key", None),
+        }
+        if not any(provider_keys.values()):
+            problems.append(
+                "LLM 密钥全部缺失 → 在 .env 配置 LLM__OPENAI_API_KEY"
+                "（或 LLM__DEEPSEEK_API_KEY 作为保底）"
+            )
     except Exception as exc:
         problems.append(f"无法读取配置（{type(exc).__name__}: {exc}）")
 
