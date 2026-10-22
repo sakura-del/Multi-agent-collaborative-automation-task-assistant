@@ -65,7 +65,7 @@ async def _main() -> int:
 
     init_kb()
     # 向量库本体在 IndexManager 里（`get_kb()` 是门面，没有写入接口）
-    vector_store = get_index_manager()._vector_store  # noqa: SLF001
+    vector_store = get_index_manager()._vector_store
     async with AsyncSessionLocal() as session:
         result = await reindex_from_chunks(
             session=session,

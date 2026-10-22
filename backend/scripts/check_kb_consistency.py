@@ -59,7 +59,7 @@ async def _main() -> int:
     # 注意：`get_kb()` 返回 KnowledgeBase 门面，**没有** size 属性。
     # 向量库本体在 IndexManager 里（与 get_stats() 同源）。
     index_manager = get_index_manager()
-    vector_store = index_manager._vector_store  # noqa: SLF001 - 运维脚本，读内部状态
+    vector_store = index_manager._vector_store
     async with AsyncSessionLocal() as session:
         report = await check_vector_consistency(session=session, vector_store=vector_store)
 

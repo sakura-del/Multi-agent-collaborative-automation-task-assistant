@@ -29,7 +29,7 @@
 | 后端测试 | **2577+ passed**, 8 skipped；覆盖率 **~89%**；`mypy` 0 错误（198 文件） |
 | 前端测试 | Vitest **256 passed**；**Playwright E2E 52 测试实例**（26 场景 × 双视口） |
 | CI | **6/6 作业全绿**（2026-10-21 `8e25670` 复验；开放 API 待复验） |
-| 服务器 | 已同步至 `5cb941e`，五容器 healthy，`/api/v1/health/ready` → `{"status":"ready"}`，`alembic current` = `a3c9e6d2b8f1 (head)`，四套餐种子已就位 |
+| 服务器 | 已同步至 `4ee4742`，五容器 healthy，`/api/v1/health/ready` → `{"status":"ready"}`，`alembic current` = `a3c9e6d2b8f1 (head)`，四套餐种子已就位，**向量库已重建（28344 条一致）** |
 
 **演示账号**：`demo` / `demo12345`（知识库已有 10 篇冻结语料 / 2834 分块）
 **E2E 固定账号**：`e2efull` / `e2ereconn`，密码 `e2e-password-2026`（复用，不再每次注册——`auth_register` 限流 5 次/3600s）

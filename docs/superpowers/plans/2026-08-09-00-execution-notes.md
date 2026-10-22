@@ -2453,6 +2453,105 @@ black/ruff 干净；mypy 0 错误（183 文件）；pytest **2346 passed / 8 ski
 
 ---
 
+## 向量库一致性修复（2026-10-22）
+
+**计划**：[2026-10-22-03-vector-consistency-plan.md](2026-10-22-03-vector-consistency-plan.md)
+
+实验矩阵实测的**副产品**：追查「检索画像跑不出引用标记」时发现的**产品级缺陷**。
+
+### 1. 缺陷
+
+| 存储 | 记录数 |
+| --- | --- |
+| SQLite `knowledge_doc` | **104**（全部 `index_status=ready`） |
+| SQLite `doc_chunk` | **28344** |
+| SQLite `vector_index` | **28344** |
+| **Chroma 实际向量** | **4** |
+
+**向量检索对所有用户完全失效**，检索退化为 BM25 单路
+（`hybrid_search_done bm25_hits=30 vector_hits=0`）。
+
+而 `index_status` 全是 `ready` —— **数据库在撒谎**。
+
+### 2. 根因
+
+Chroma 卷被重置过（那 4 条孤儿向量的 `doc_id` 在 SQLite 里**都不存在**，
+卷只有 152K），但 SQLite 的文档/分块/向量索引记录保留。
+
+上传链路本身正确（`ingest()` 会写 Chroma），所以这是**历史数据漂移**。
+
+**但真正的代码缺陷是：系统没有任何手段发现和修复这种漂移。**
+这个问题是「实验跑不出引用标记」才**偶然**追查到的。
+
+### 3. 交付两个模块
+
+**① 一致性校验**（`app/knowledge/services/consistency.py`，只读）
+
+- 比对「ready 文档的分块数」与「向量库实际条数」；
+- 报告 `missing_vectors` / `orphan_vectors` / 操作提示；
+- CLI：`python -m scripts.check_kb_consistency [--json]`
+
+**② 按 chunk 重建**（`app/knowledge/services/reindex.py`）
+
+- 从 SQLite 读 `DocChunk.content`（**不需重新解析 PDF**）；
+- **用原 `chunk_id` 作为向量 id** —— 保证 `vector_index.chroma_id` 映射
+  继续有效，**引用追溯不断**；
+- 分批 500 条；单批失败不中断（记录并继续，幂等可重跑）；
+- CLI：`python -m scripts.reindex_vectors [--dry-run] [--user-id X]`
+
+### 4. 为什么不用现有 `IndexManager.rebuild_all()`
+
+它按**文件路径**重新解析文档：
+
+```python
+self.clear()                    # 清空 Chroma
+for source in sources:
+    self.add_document(source)   # 重新分块 → 生成**新的** chunk id
+```
+
+后果：向量 id 与 SQLite `doc_chunk.id` 不一致 →
+`_attach_storage_ids()` 无法回溯 → **引用追溯断裂**（本项目核心能力：
+每条证据要能点回原文）。
+
+### 5. 实测结果
+
+| 步骤 | 结果 |
+| --- | --- |
+| 修复前检查 | `expected=28344 actual=4 missing=28340` |
+| 重建 | **28344/28344 条，0 失败，45 秒**（Mock embedding） |
+| 重建后检查 | `expected=28344 actual=28348 orphan=4` |
+| 清理孤儿 | 双保险确认 SQLite 无对应 doc 后删除 4 条 |
+| 最终检查 | **`vector_consistency_ok chunks=28344 documents=104 vectors=28344`** |
+| 检索验证 | **`vector_hits=30 fused=15 results=5`**，chunk_id 是合法 UUID |
+
+### 6. 两个接口误用（服务器实测抓到，`4ee4742`）
+
+**① `VectorStore.size` 是属性，不是方法**
+
+`index_manager.get_stats()` 里写的是 `self._vector_store.size`（无括号）。
+一致性检查里调 `size()` → `AttributeError`。
+
+**② `get_kb()` 返回 `KnowledgeBase` 门面**
+
+只有 `query()` / `invalidate_cache()` 等方法，**没有** `size` 属性。
+向量库本体在 `IndexManager._vector_store` 里。两个 CLI 脚本都改成从
+`get_index_manager()` 取。
+
+### 7. 测试诚实性（AGENTS #13，两组回退验证）
+
+| 回退项 | 结果 |
+| --- | --- |
+| 一致性判定改成永远 `True` | `TestInconsistentCase` 全红 ✅ |
+| 重建时把 `chunk_id` 换成随机 UUID | `TestIdPreservation` 全红 ✅ |
+
+第二条尤其重要：它守的是**引用追溯能力**，不是数字对得上。
+
+### 8. 门禁
+
+新增 15 测试（一致性 6 + 重建 9）；mypy 0 错误（200 文件）；ruff/black 干净。
+
+---
+
 ## 实验矩阵可运行化（2026-10-22）
 
 **计划**：[2026-10-22-02-experiment-matrix-plan.md](2026-10-22-02-experiment-matrix-plan.md)
