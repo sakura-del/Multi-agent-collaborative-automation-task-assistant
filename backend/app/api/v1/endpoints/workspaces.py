@@ -17,13 +17,18 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_active_user
+from app.api.v1.endpoints.tasks import get_plan_service
+from app.billing.services.plan_service import (
+    SeatLimitExceeded,
+    WorkspaceLimitExceeded,
+)
 from app.collaboration.services.workspace_service import (
     InviteError,
     PermissionError_,
@@ -96,10 +101,39 @@ async def _to_out(service: WorkspaceService, user_id: UUID, workspace) -> Worksp
 
 @router.post("", response_model=WorkspaceOut, status_code=201, summary="创建工作区")
 async def create_workspace(
-    payload: WorkspaceCreate, current_user: CurrentUserDep, db: DbDep
+    payload: WorkspaceCreate,
+    current_user: CurrentUserDep,
+    db: DbDep,
+    plan_service: Annotated[Any, Depends(get_plan_service)],
 ) -> WorkspaceOut:
-    """创建工作区；创建者自动成为 owner（占一个席位）。"""
+    """创建工作区；创建者自动成为 owner（占一个席位）。
+
+    ## 三条套餐门禁（Phase 2 计费）
+
+    1. **`allow_team`** —— 免费档完全没有团队功能（403 `PLAN_FEATURE_UNAVAILABLE`）；
+    2. **`max_workspaces`** —— 数量上限（403 `PLAN_WORKSPACE_LIMIT`）；
+    3. **`max_seats_per_workspace`** —— 席位上限（403 `PLAN_SEAT_LIMIT`，
+       **不静默截断**：截断会让用户以为买到了更多席位）。
+
+    检查顺序：功能 → 数量 → 席位。先看「有没有这个功能」，再看「用了多少」，
+    最后看「要多少」—— 这个顺序给出的错误消息最贴合用户当前的问题。
+
+    **数量口径**：按 `owner_id` 计（我创建的），不按「我参与的」——
+    否则被邀请进 10 个团队就把额度占满了。
+    """
     service = _service(db)
+    # ① 功能门禁
+    await plan_service.require_feature(current_user.id, "team")
+    # ② 数量门禁
+    owned = await service.count_owned(current_user.id)
+    if not await plan_service.can_create_workspace(current_user.id, current_count=owned):
+        limit = await plan_service.workspace_limit_for(current_user.id)
+        raise WorkspaceLimitExceeded(limit=limit, current=owned)
+    # ③ 席位门禁
+    seat_cap = await plan_service.max_seats_for(current_user.id)
+    if payload.seat_limit > seat_cap:
+        raise SeatLimitExceeded(requested=payload.seat_limit, limit=seat_cap)
+
     try:
         workspace = await service.create(
             current_user.id,

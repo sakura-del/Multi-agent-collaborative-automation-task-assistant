@@ -109,6 +109,17 @@ def open_app() -> Any:
 
     application.dependency_overrides[get_db] = _get_db
     application.dependency_overrides[tasks_endpoint.get_task_execution] = lambda: _FakeExecution()
+
+    # Phase 2 计费：建任务会先查篇数。本文件测的是**开放端点的鉴权链**
+    # （「每个端点用 Key 都不能 401」），不是计费，所以放开篇数。
+    class _UnlimitedPlanService:
+        async def check_and_consume_review(self, user_id, **_kwargs):  # type: ignore[no-untyped-def]
+            return None
+
+        async def require_feature(self, user_id, feature, **_kwargs):  # type: ignore[no-untyped-def]
+            return None
+
+    application.state.plan_service = _UnlimitedPlanService()
     application.state.factory = factory
     application.state.client = TestClient(application)
     return application

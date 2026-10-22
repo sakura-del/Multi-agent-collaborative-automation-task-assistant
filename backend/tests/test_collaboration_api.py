@@ -69,6 +69,24 @@ def api() -> Any:
     application.dependency_overrides[get_db] = _get_db
     # 工作区端点仍用 JWT-only 依赖
     application.dependency_overrides[workspaces_endpoint.get_current_active_user] = _current_user
+
+    # Phase 2 计费：建工作区会先查套餐门禁（团队功能/数量/席位）。
+    # 本文件测的是**协作语义**（角色、席位、邀请码），不是计费，
+    # 所以注入一个「全功能放开」的 stub。
+    class _OpenPlanService:
+        async def require_feature(self, user_id, feature, **_kwargs):  # type: ignore[no-untyped-def]
+            return None
+
+        async def can_create_workspace(self, user_id, *, current_count, **_kwargs):  # type: ignore[no-untyped-def]
+            return True
+
+        async def workspace_limit_for(self, user_id, **_kwargs):  # type: ignore[no-untyped-def]
+            return 1000
+
+        async def max_seats_for(self, user_id, **_kwargs):  # type: ignore[no-untyped-def]
+            return 1000
+
+    application.state.plan_service = _OpenPlanService()
     # 批注端点已改为**双通道**鉴权（Phase 2 开放 API），覆盖旧依赖不再生效
     application.dependency_overrides[annotations_endpoint.get_current_user_or_api_key] = (
         _current_user

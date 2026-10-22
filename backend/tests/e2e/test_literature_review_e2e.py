@@ -90,6 +90,17 @@ def e2e_env(tmp_path: Path) -> Iterator[Any]:
     app.state.container = container
     app.state.runtime = execution
 
+    # Phase 2 计费：本 e2e 测的是**工作流确定性**（同一输入两次跑结果一致），
+    # 需要建 2 个任务；免费档 1 篇/月会拦住。注入放开篇数的 stub。
+    class _UnlimitedPlanService:
+        async def check_and_consume_review(self, user_id, **_kwargs):  # type: ignore[no-untyped-def]
+            return None
+
+        async def require_feature(self, user_id, feature, **_kwargs):  # type: ignore[no-untyped-def]
+            return None
+
+    app.state.plan_service = _UnlimitedPlanService()
+
     yield {
         "client": client,
         "session_factory": session_factory,
@@ -103,6 +114,7 @@ def e2e_env(tmp_path: Path) -> Iterator[Any]:
 
     client.__exit__(None, None, None)
     app.dependency_overrides.clear()
+    app.state.plan_service = None
     kb_factory.reset_kb()
     asyncio.run(engine.dispose())
 

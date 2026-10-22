@@ -140,6 +140,18 @@ def _build_app(*, quota: _FakeQuota, submitted: list[str]) -> FastAPI:
     # 只覆盖 `get_current_active_user` 不再生效（端点已不依赖它）。
     app.dependency_overrides[tasks_endpoint.get_current_user_or_api_key] = _user_dep
 
+    # Phase 2 计费：建任务会先查篇数。本测试只关心 **token 配额**，
+    # 所以注入一个「不限篇数」的 stub —— 否则免费档 1 篇/月会先触发，
+    # 测不到 token 分支。
+    class _UnlimitedPlanService:
+        async def check_and_consume_review(self, user_id: Any, **_kwargs: Any) -> None:
+            return None
+
+        async def require_feature(self, user_id: Any, feature: str, **_kwargs: Any) -> None:
+            return None
+
+    app.state.plan_service = _UnlimitedPlanService()
+
     @app.exception_handler(AppException)
     async def _handle(_: Any, exc: AppException) -> Any:
         from fastapi.responses import JSONResponse

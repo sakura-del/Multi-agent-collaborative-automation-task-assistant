@@ -483,3 +483,141 @@ class TestApiKeyMigration:
         assert (
             migrated == expected
         ), f"api_key 迁移与 ORM 不一致：缺 {expected - migrated}，多 {migrated - expected}"
+
+
+class TestBillingMigration:
+    """`a3c9e6d2b8f1`（计费三表 + 套餐种子）的行为与幂等。
+
+    必须成立的性质：
+
+    1. **幂等**：全新部署时表已由 ORM 建好；已部署库缺表。两条路径都要能跑通。
+    2. **种子幂等且可调价**：重复 upgrade 不重复插入，但价格可更新
+       （改价不该要求删库重建）。
+    3. **迁移结构 == ORM metadata**：`Base` 自动加 `created_at`/`updated_at`，
+       手写迁移最容易漏（`email_token` / `workspace` / `api_key` 都踩过）。
+    4. **`usage_counter` 的 `(user_id, period_key)` 唯一**：计费依据不能重复计数。
+    """
+
+    MIGRATION = VERSIONS_DIR / "a3c9e6d2b8f1_add_billing_tables.py"
+
+    @staticmethod
+    def _base_ddl() -> list[str]:
+        return [
+            'CREATE TABLE "user" (id CHAR(32) PRIMARY KEY, username VARCHAR(64))',
+        ]
+
+    def test_creates_tables_and_seeds(self) -> None:
+        engine = create_engine("sqlite://")
+        with engine.begin() as connection:
+            for ddl in self._base_ddl():
+                connection.exec_driver_sql(ddl)
+            context = MigrationContext.configure(connection)
+            with Operations.context(context):
+                _load(self.MIGRATION).upgrade()
+
+            tables = set(inspect(connection).get_table_names())
+            plan_ids = {
+                row[0] for row in connection.exec_driver_sql("SELECT id FROM plan").fetchall()
+            }
+            free = connection.exec_driver_sql(
+                "SELECT monthly_reviews, allow_team, allow_api_access "
+                "FROM plan WHERE id = 'free'"
+            ).first()
+        engine.dispose()
+
+        assert {"plan", "subscription", "usage_counter"} <= tables
+        assert plan_ids == {"free", "student", "pro", "institution"}
+        assert free is not None
+        assert free[0] == 1, "免费档必须 1 篇/月"
+        assert bool(free[1]) is False, "免费档不能用团队"
+        assert bool(free[2]) is False, "免费档不能用 API"
+
+    def test_upgrade_is_idempotent_and_updates_price(self) -> None:
+        """重复 upgrade 不重复插入，且价格可更新（调价不需要删库）。"""
+        engine = create_engine("sqlite://")
+        with engine.begin() as connection:
+            for ddl in self._base_ddl():
+                connection.exec_driver_sql(ddl)
+            context = MigrationContext.configure(connection)
+            with Operations.context(context):
+                module = _load(self.MIGRATION)
+                module.upgrade()
+                # 手工改价，模拟「已上线后调价」
+                connection.exec_driver_sql(
+                    "UPDATE plan SET price_cents = 12345 WHERE id = 'student'"
+                )
+                module.upgrade()
+
+            count = connection.exec_driver_sql("SELECT count(1) FROM plan").scalar()
+            price = connection.exec_driver_sql(
+                "SELECT price_cents FROM plan WHERE id = 'student'"
+            ).scalar()
+        engine.dispose()
+
+        assert count == 4, f"种子必须幂等，实际 {count} 行"
+        assert price == 1900, "重复 upgrade 应把价格更新回种子值"
+
+    def test_downgrade_removes_tables(self) -> None:
+        engine = create_engine("sqlite://")
+        with engine.begin() as connection:
+            for ddl in self._base_ddl():
+                connection.exec_driver_sql(ddl)
+            context = MigrationContext.configure(connection)
+            with Operations.context(context):
+                module = _load(self.MIGRATION)
+                module.upgrade()
+                module.downgrade()
+
+            tables = set(inspect(connection).get_table_names())
+        engine.dispose()
+
+        assert "plan" not in tables
+        assert "subscription" not in tables
+        assert "usage_counter" not in tables
+
+    def test_migration_matches_orm_metadata(self) -> None:
+        from app.db.models.billing import Plan, Subscription, UsageCounter
+
+        engine = create_engine("sqlite://")
+        with engine.begin() as connection:
+            for ddl in self._base_ddl():
+                connection.exec_driver_sql(ddl)
+            context = MigrationContext.configure(connection)
+            with Operations.context(context):
+                _load(self.MIGRATION).upgrade()
+
+            inspector = inspect(connection)
+            for model in (Plan, Subscription, UsageCounter):
+                migrated = {c["name"] for c in inspector.get_columns(model.__tablename__)}
+                expected = set(model.__table__.columns.keys())
+                assert migrated == expected, (
+                    f"{model.__tablename__} 迁移与 ORM 不一致："
+                    f"缺 {expected - migrated}，多 {migrated - expected}"
+                )
+        engine.dispose()
+
+    def test_usage_counter_unique_constraint(self) -> None:
+        """计费依据不能重复计数（同用户同月份只能一行）。"""
+        import sqlalchemy as sa
+
+        engine = create_engine("sqlite://")
+        with engine.begin() as connection:
+            for ddl in self._base_ddl():
+                connection.exec_driver_sql(ddl)
+            connection.exec_driver_sql("INSERT INTO \"user\" (id, username) VALUES ('u1', 'alice')")
+            context = MigrationContext.configure(connection)
+            with Operations.context(context):
+                _load(self.MIGRATION).upgrade()
+
+            connection.exec_driver_sql(
+                "INSERT INTO usage_counter (id, user_id, period_key, reviews_used, "
+                "created_at, updated_at) VALUES "
+                "('c1', 'u1', '2026-10', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+            )
+            with pytest.raises(sa.exc.IntegrityError):
+                connection.exec_driver_sql(
+                    "INSERT INTO usage_counter (id, user_id, period_key, reviews_used, "
+                    "created_at, updated_at) VALUES "
+                    "('c2', 'u1', '2026-10', 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                )
+        engine.dispose()

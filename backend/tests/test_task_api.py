@@ -145,6 +145,20 @@ class _StaticReviewer(BaseAgent):
 # ===== 夹具 =====
 
 
+class _UnlimitedPlanService:
+    """不限篇数的套餐服务 stub。
+
+    本文件测任务归属与生命周期，不是计费。用 stub 而不是真 `PlanService`
+    有两个好处：不需要 `plan` 表种子；不会因为免费档 1 篇/月把用例卡住。
+    """
+
+    async def check_and_consume_review(self, user_id: Any, **_kwargs: Any) -> None:
+        return None
+
+    async def require_feature(self, user_id: Any, feature: str, **_kwargs: Any) -> None:
+        return None
+
+
 @pytest.fixture
 def api_env(tmp_path: Path) -> Iterator[Any]:
     """带独立文件型 SQLite 的 TestClient + 运行时安装助手。"""
@@ -198,6 +212,10 @@ def api_env(tmp_path: Path) -> Iterator[Any]:
         execution = TaskExecution(container)
         app.state.container = container
         app.state.runtime = execution
+        # Phase 2 计费：建任务会先查篇数。本文件测的是**任务归属/生命周期**，
+        # 不是计费，所以注入「不限篇数」stub —— 否则免费档 1 篇/月会让
+        # 需要建多个任务的用例（如归属隔离）全部撞 429。
+        app.state.plan_service = _UnlimitedPlanService()
         installed.append(container)
         return execution
 
@@ -210,6 +228,7 @@ def api_env(tmp_path: Path) -> Iterator[Any]:
             pass
     client.__exit__(None, None, None)
     app.dependency_overrides.clear()
+    app.state.plan_service = None
     asyncio.run(engine.dispose())
 
 

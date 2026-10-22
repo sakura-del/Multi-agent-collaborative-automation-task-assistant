@@ -132,6 +132,21 @@ class WorkspaceService:
             )
             return list(rows.scalars().all())
 
+    async def count_owned(self, user_id: uuid.UUID) -> int:
+        """**我拥有的**工作区数量（套餐 `max_workspaces` 的计数口径）。
+
+        为什么不复用 `list_for_user`：那个返回「我参与的」，包含别人邀请我进的。
+        若按参与数计额度，用户被拉进 10 个团队后就无法建自己的团队了 ——
+        额度被别人的邀请消耗掉，这显然不对。
+
+        额度只按**我创建的**算。
+        """
+        async with self._session_factory() as session:
+            count = await session.scalar(
+                select(func.count()).select_from(Workspace).where(Workspace.owner_id == user_id)
+            )
+            return int(count or 0)
+
     async def get_for_user(self, user_id: uuid.UUID, workspace_id: uuid.UUID) -> Workspace | None:
         """非成员返回 `None`（端点层转 404，不泄漏存在性）。"""
         async with self._session_factory() as session:

@@ -127,7 +127,9 @@ class TestQuotaExceededError:
     def test_status_code_is_429(self) -> None:
         error = QuotaExceededError(retry_after=30, used=1000, limit=1000)
         assert error.status_code == 429
-        assert error.error_code == "QUOTA_EXCEEDED"
+        # Phase 2 计费后改名：token 护栏必须与「篇数用尽」区分错误码，
+        # 否则用户会以为买套餐能解除 token 限制（见 app/core/quota.py docstring）
+        assert error.error_code == "TOKEN_BUDGET_EXCEEDED"
         assert error.message
 
     def test_carries_retry_after_and_remaining(self) -> None:

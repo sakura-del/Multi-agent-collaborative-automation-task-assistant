@@ -18,6 +18,7 @@ from app.api.v1.endpoints import (
     api_keys,
     auth,
     auth_lifecycle,
+    billing,
     citation_styles,
     health,
     observability,
@@ -51,3 +52,5 @@ api_router.include_router(workspaces.router)
 api_router.include_router(annotation_endpoints.router)
 # API Key 管理（Phase 2 开放 API）：**强制 JWT only**（Key 不能生成新 Key）
 api_router.include_router(api_keys.router)
+# 计费套餐（Phase 2 最后一项）：用量/套餐列表/手工开通
+api_router.include_router(billing.router)

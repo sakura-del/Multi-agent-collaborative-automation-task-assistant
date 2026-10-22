@@ -19,11 +19,14 @@
                   （Phase 2：团队工作区 + 席位 + 邀请码）
   annotation.py:  TASK_ANNOTATION（Phase 2：导师批注，段落指纹锚点）
   api_key.py:     API_KEY（Phase 2：开放 API / MCP 凭证，只存哈希）
+  billing.py:     PLAN / SUBSCRIPTION / USAGE_COUNTER
+                  （Phase 2：计费套餐——篇数为主、token 为辅）
 """
 
 from app.db.models.agent import Agent, AgentInteraction
 from app.db.models.annotation import TaskAnnotation
 from app.db.models.api_key import ApiKey
+from app.db.models.billing import Plan, Subscription, UsageCounter
 from app.db.models.citation_style import CitationStyle
 from app.db.models.email_token import EmailToken
 from app.db.models.feedback import HumanFeedback
@@ -50,13 +53,16 @@ __all__ = [
     "FailureCase",
     "HumanFeedback",
     "KnowledgeDoc",
+    "Plan",
     "ScreeningDecision",
     "ScreeningRecord",
     "SearchLog",
+    "Subscription",
     "Subtask",
     "Task",
     "TaskAnnotation",
     "TaskDag",
+    "UsageCounter",
     "User",
     "UserTemplate",
     "ValidationResult",

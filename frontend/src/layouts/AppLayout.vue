@@ -6,6 +6,7 @@ import {
   ListChecks,
   Library,
   LogOut,
+  CreditCard,
   KeyRound,
   Palette,
   Users,
@@ -33,6 +34,7 @@ const NAV_ITEMS = [
   { name: "workspaces", label: "团队", icon: Users },
   { name: "observability", label: "用量", icon: Activity },
   { name: "api-keys", label: "API Key", icon: KeyRound },
+  { name: "plan", label: "我的套餐", icon: CreditCard },
 ] as const;
 
 function handleLogout() {

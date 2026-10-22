@@ -2453,6 +2453,145 @@ black/ruff 干净；mypy 0 错误（183 文件）；pytest **2346 passed / 8 ski
 
 ---
 
+## Phase 2 · 计费套餐（2026-10-22，**Phase 2 收官**）
+
+**计划**：[2026-10-22-01-billing-plans-plan.md](2026-10-22-01-billing-plans-plan.md)
+**Runbook**：[docs/runbooks/billing-plans.md](../../runbooks/billing-plans.md)
+
+### 1. 要解决的核心矛盾：双轨配额打架
+
+现有配额是「按 **UTC 日** 扣 token」，套餐是「按 **月** 篇数」。直接并存会出问题：
+
+- 用户买了「专业版 50 篇/月」，某天跑 3 篇就撞日 token 上限 → **明明有额度却用不了**；
+- 反过来日 token 宽松时，免费用户一天跑 50 篇 → 篇数额度形同虚设；
+- 两个 429 若都用 `QUOTA_EXCEEDED`，用户不知道是「今天超了」还是「本月超了」，
+  更糟的是会**以为买套餐能解决**（而 token 护栏买套餐也没用）。
+
+### 2. 决策：篇数为主，token 为辅
+
+| 维度 | 角色 | 存储 | 面向用户 | 错误码 |
+| --- | --- | --- | --- | --- |
+| **篇数（月）** | **准入控制（主）** | 数据库 `usage_counter` | ✅ 销售单位 | `PLAN_QUOTA_EXCEEDED` |
+| **token（日）** | **成本护栏（辅）** | Redis（既有） | ❌ 不宣传 | `TOKEN_BUDGET_EXCEEDED` |
+
+**为什么篇数用数据库而 token 用 Redis**：
+
+- 篇数是**收钱依据**，必须持久、可审计、可与 `task` 表对账。
+  Redis 丢了就是「用户说 3 篇、系统说 5 篇」的纠纷；
+- token 是成本护栏，精度要求低（分钟级滞后可接受），Redis 原子计数更快。
+
+**检查顺序固定**：先篇数（用户可理解、可解决），再 token（内部护栏）。
+反过来的话用户会先看到「token 预算用尽」这种他无法理解的错误。
+
+**篇数扣减不退还**：任务失败也消耗了真实算力。这与 token 预扣不同
+（token 在终态按实际用量退还差额）。**产品文案必须说清**。
+
+### 3. 数据模型
+
+| 表 | 关键设计 |
+| --- | --- |
+| `plan` | **表而非代码常量**（改价不发版、历史订阅可回溯）；`is_active=false` 下架**不删行** |
+| `subscription` | 同一用户只能一条 `active`（PostgreSQL 部分唯一索引 `WHERE status='active'`） |
+| `usage_counter` | `UNIQUE(user_id, period_key)` —— **计费依据不能重复计数** |
+
+**为什么套餐 id 是语义化字符串**（`free`/`pro`）：它会出现在前端路由、日志、
+运维 SQL 里，`free` 比 `7f3a...` 可读得多。
+
+**为什么免费档不建订阅行**：新用户注册就写订阅会让「有多少付费用户」的统计
+被免费行污染，且注册流程多一次写库。
+
+### 4. 篇数扣减的原子性（**收钱依据，必须不超发**）
+
+「先 `SELECT` 查已用，再 `UPDATE +1`」在并发下必然超发：两个请求同时读到 9/10，
+都通过 → 11 篇。所以用一条 SQL 完成判定 + 扣减：
+
+```sql
+UPDATE usage_counter SET reviews_used = reviews_used + 1
+ WHERE user_id = :uid AND period_key = :period
+   AND (reviews_used < :limit OR :limit < 0)
+```
+
+`rowcount == 0` → 超限（或行不存在，先 upsert 再重试一次）。
+
+**回退验证**：去掉上限条件 → 3 例变红（含并发超发测试）。
+
+### 5. 四条功能门禁
+
+| 门禁 | 字段 | 错误码 |
+| --- | --- | --- |
+| 团队功能 | `allow_team` | `PLAN_FEATURE_UNAVAILABLE` |
+| 工作区数量 | `max_workspaces` | `PLAN_WORKSPACE_LIMIT` |
+| 席位上限 | `max_seats_per_workspace` | `PLAN_SEAT_LIMIT` |
+| 开放 API | `allow_api_access` | `PLAN_FEATURE_UNAVAILABLE` |
+
+**为什么工作区数量与功能分成两个错误码**：前者是「完全没有团队功能」（免费档），
+后者是「有功能但数量用完了」（学生档建第 2 个）。前端引导完全不同
+（升级 vs 删旧建新）。
+
+**席位超限不静默截断**：用户请求 10 席而套餐只给 3 席时，若静默建成 3 席，
+用户会以为买到了 10 席。必须显式拒绝。
+
+**工作区数量按 `owner_id` 计**（我创建的），不按「我参与的」——
+否则被邀请进 10 个团队就把自己的额度占满了。
+
+**API 门禁只对 Key 生效**：JWT（网页）不受 `allow_api_access` 限制 ——
+网页是免费档的唯一入口，若也拦就没法用了。
+
+### 6. 支付：本轮不接网关
+
+| 做什么 | 不做什么 |
+| --- | --- |
+| `source='manual'` + `note` 记录开通原因 | 支付宝/微信/Stripe |
+| 管理员手工开通（`role='admin'`） | 支付回调 / 对账 / 退款 / 自动续费 |
+
+**三个理由**：① 个人主体无商户资质；② 支付网关（回调验签、幂等、对账、退款）
+是独立子系统，成本高于套餐本身；③ 当前要验证的是「套餐与配额联动是否正确」，
+不是「能否收钱」。
+
+`subscription.source` 已含 `payment` 枚举，将来接网关只需写一个适配器。
+
+### 7. 四个坑
+
+**① `PlanService` 与请求级 session 共用会 `MissingGreenlet`**
+`PlanService` 内部开多个短事务、每个都 `commit`。与端点 `get_db` 共用 session 时，
+`commit` 让已加载的 ORM 对象过期，随后访问属性触发懒加载 IO → async 上下文炸。
+修法：套餐服务走自己的 session factory（与 runtime 同源）。
+
+**② `free` 套餐缺失导致全站 500（已改为降级）**
+首版在 `plan` 表没有种子时抛 `RuntimeError`。但测试用 `Base.metadata.create_all`
+建表（不走迁移、没有种子）→ **所有建任务请求 500**。
+修法：降级为内存默认 `free` + warning。**计费配置问题不该拖垮核心业务。**
+
+**③ 改共用依赖后既有测试静默失效（本次 16 例）**
+工作区创建加套餐门禁后，`test_collaboration_api.py` 全部失败；
+API 门禁加上后 `test_api_key_auth.py` 全部 403。都是「测试 app 没有注入
+新依赖」的连带影响。教训同开放 API 那次：**改共用依赖必须跑相关端点的既有测试**。
+
+**④ PowerShell 吃掉 Python 内联脚本的引号（AGENTS #1 又踩一次）**
+用 `python -c @"..."@` 改测试文件时，`prefix="/api/v1"` 变成 `prefix=/api/v1` →
+语法错误。改为写 `.py` 脚本文件再执行。
+
+### 8. 测试诚实性（AGENTS #13，五组回退验证）
+
+| 回退项 | 结果 |
+| --- | --- |
+| 篇数 UPDATE 的上限条件 | **3 例变红**（含并发超发） ✅ |
+| 迁移缺 `updated_at` | 变红 ✅ |
+| API 门禁 | 变红 ✅ |
+| 席位门禁 | 变红 ✅ |
+| 工作区数量门禁 | 变红 ✅ |
+
+### 9. 门禁与交付
+
+后端 pytest **2572 passed / 8 skipped**（2457 → 2572，+115），覆盖率 89%+；
+mypy 0 错误（190 文件）；ruff/black 干净。
+前端 Vitest **256 passed**（248 → 256，+8）、`vue-tsc` 干净、build 成功。
+
+**Phase 2 进度：PRISMA ✅ + 可观测性 ✅ + 团队工作区 ✅ + 开放 API ✅ + 计费套餐 ✅**
+—— **Phase 2 五项全部交付完成。**
+
+---
+
 ## Phase 2 · 开放 API + MCP + API Key（2026-10-21，`c01cd16`）
 
 **计划**：[2026-10-21-03-open-api-mcp-plan.md](2026-10-21-03-open-api-mcp-plan.md)

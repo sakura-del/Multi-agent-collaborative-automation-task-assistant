@@ -26,6 +26,7 @@ from app.api.deps import (
     get_current_user_or_api_key,
     require_scope,
 )
+from app.billing.services.plan_service import PlanService
 from app.core.config import get_settings
 from app.core.exceptions import ValidationException
 from app.core.quota import QuotaService
@@ -132,12 +133,44 @@ def get_quota_service(request: Request) -> QuotaService | None:
     return build_quota_service()
 
 
+def get_plan_service(request: Request) -> PlanService:
+    """构造套餐服务（Phase 2 计费）。
+
+    ## 为什么用独立的 session factory 而不是请求级 session
+
+    `PlanService` 内部会开**多个**短事务（查订阅、原子扣减、读用量），
+    每个方法都 `commit`。若与端点的 `get_db` 共用同一个 session：
+
+    - `commit` 会让端点那边已加载的 ORM 对象过期；
+    - 随后访问属性触发懒加载 IO，在 async 上下文里可能撞 `MissingGreenlet`
+      （实测就是这么炸的）。
+
+    所以套餐服务走自己的 session（与 `runtime` 的 `session_factory` 同源），
+    事务边界互不干扰。
+
+    优先级：`app.state.plan_service`（测试注入）→ `runtime` 的 factory → 报错。
+    """
+    injected = getattr(request.app.state, "plan_service", None)
+    # 鸭子类型而非 isinstance：测试常注入轻量 stub（只实现当前用例用到的方法），
+    # 强制 isinstance 会逼测试去构造真实 service（连带 DB 依赖）。
+    # 判定用 `require_feature`（**工作区端点也调它**，而 stub 未必实现扣篇数）。
+    if injected is not None and hasattr(injected, "require_feature"):
+        return injected  # type: ignore[no-any-return]
+
+    runtime = getattr(request.app.state, "runtime", None)
+    session_factory = getattr(runtime, "_session_factory", None)
+    if session_factory is None:
+        raise RuntimeError("套餐服务未初始化：runtime 缺少 session_factory")
+    return PlanService(session_factory)
+
+
 ExecutionDep = Annotated[TaskExecution, Depends(get_task_execution)]
 CurrentUserDep = Annotated[User, Depends(get_current_active_user)]
 #: 双通道鉴权（Phase 2 开放 API）：`X-API-Key` 优先，其次 Bearer。
 #: **只用于开放端点**（任务读写与产物下载）；Key 管理端点仍强制 JWT only。
 ApiUserDep = Annotated[User, Depends(get_current_user_or_api_key)]
 QuotaDep = Annotated["QuotaService | None", Depends(get_quota_service)]
+PlanServiceDep = Annotated[PlanService, Depends(get_plan_service)]
 WorkspaceIdsDep = Annotated[list[UUID], Depends(get_visible_workspace_ids)]
 
 #: 端点 scope 依赖（只对 Key 认证的请求生效；JWT 请求直接放行）。
@@ -157,16 +190,35 @@ async def create_task(
     execution: ExecutionDep,
     current_user: ApiUserDep,
     _scope: TasksWriteScope,
+    plan_service: PlanServiceDep,
     quota: QuotaDep = None,
 ) -> TaskCreateOut:
-    """创建任务：**先扣配额再落库**，规划在后台执行。
+    """创建任务：**先查篇数，再查 token，最后落库**。
 
-    配额检查必须发生在 `execution.submit` **之前**：超限时任务不能被创建
-    （先建后拒会留下一个注定失败的僵尸任务，且用户已消耗一次建任务限额）。
-    提交时按 `ESTIMATED_TOKENS_PER_TASK` 预扣；执行完成后按实际用量校正。
+    ## 检查顺序（不能颠倒）
+
+    1. **篇数（月，套餐）** —— 用户可理解的限制，可通过升级/等下月解决；
+    2. **token（日，成本护栏）** —— 内部保护，用户无法自行解决。
+
+    反过来会让用户先看到「token 预算用尽」这种他无法理解的错误，
+    而他真正撞的是篇数限制。
+
+    ## 所有检查必须在 `execution.submit` 之前
+
+    先建后拒会留下一个注定失败的僵尸任务，且用户已消耗一次建任务限额。
+
+    ## 篇数扣减**不退还**
+
+    任务失败也消耗了真实算力，所以篇数不退。这与 token 预扣不同
+    （token 在任务终态按实际用量退还差额）。
     """
+    # ① 篇数（数据库原子扣减；超限抛 PLAN_QUOTA_EXCEEDED）
+    await plan_service.check_and_consume_review(current_user.id)
+
+    # ② token 成本护栏（Redis；超限抛 TOKEN_BUDGET_EXCEEDED）
     if quota is not None:
         await quota.check_and_consume(current_user.id, tokens=ESTIMATED_TOKENS_PER_TASK)
+
     task_id = await execution.submit(current_user.id, payload.to_contract())
     return TaskCreateOut(task_id=task_id, status=TaskStatus.PLANNING.value)
 

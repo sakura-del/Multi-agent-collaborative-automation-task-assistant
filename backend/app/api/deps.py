@@ -158,9 +158,56 @@ async def get_current_user_or_api_key(
         request.state.user = user
         setattr(request.state, _STATE_AUTH_VIA_KEY, True)
         setattr(request.state, _STATE_API_KEY, record)
+
+        # Phase 2 计费：**开放 API 访问权由套餐决定**。
+        # 免费档 `allow_api_access=False` → 403（不是 401：Key 本身有效）。
+        # 为什么不放在 `require_scope` 里：scope 是「这个 Key 能做什么」，
+        # 套餐是「这个用户能不能用 API」—— 两个正交维度，混在一起会让
+        # 错误消息无法区分「Key 权限不足」与「套餐不含 API」。
+        await _require_api_access(db, user)
         return user
 
     return await get_current_user(request, db)
+
+
+async def _require_api_access(db: AsyncSession, user: User) -> None:
+    """校验用户套餐含开放 API 权限（仅对 **Key 认证** 的请求调用）。
+
+    JWT 请求**不检查**：网页是免费档的唯一入口，若也拦就没法用了。
+
+    套餐表缺失（测试用 create_all 建表时没有种子）时**放行**：
+    计费配置问题不该让开放 API 全面 403（fail-open，与配额同策略）。
+    """
+    from contextlib import asynccontextmanager
+
+    from app.billing.services.plan_service import FeatureNotAvailable, PlanService
+
+    @asynccontextmanager
+    async def _factory():  # type: ignore[no-untyped-def]
+        yield db
+
+    service = PlanService(_factory)  # type: ignore[arg-type]
+    # 先确认套餐表里有种子数据。**空表 → 放行**（fail-open）：
+    # 计费配置缺失（测试用 create_all 建表、或误删 plan 行）不该让
+    # 开放 API 全面 403。这与配额/限流的 fail-open 同策略。
+    if not await _plan_table_seeded(db):
+        return
+    plan = await service.get_active_plan(user.id)
+    if not plan.allow_api_access:
+        raise FeatureNotAvailable(feature="api", plan_id=plan.id, label="开放 API")
+
+
+async def _plan_table_seeded(db: AsyncSession) -> bool:
+    """`plan` 表是否有种子数据（用于 fail-open 判定）。"""
+    from sqlalchemy import func, select
+
+    from app.db.models.billing import Plan
+
+    try:
+        count = await db.scalar(select(func.count()).select_from(Plan))
+    except Exception:  # pragma: no cover - 表不存在时也放行
+        return False
+    return bool(count)
 
 
 def require_scope(scope: str):  # type: ignore[no-untyped-def]

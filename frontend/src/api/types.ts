@@ -523,3 +523,52 @@ export interface ApiKeyInfo {
 export interface ApiKeyCreated extends ApiKeyInfo {
   key: string;
 }
+
+// ===== 计费套餐（Phase 2 最后一项）=====
+
+/** 套餐（公开信息）。 */
+export interface BillingPlan {
+  plan_id: string;
+  name: string;
+  /** 每月篇数；-1 = 不限（机构版） */
+  monthly_reviews: number;
+  max_workspaces: number;
+  max_seats_per_workspace: number;
+  allow_api_access: boolean;
+  allow_team: boolean;
+  /** 月费（**分**）；0 = 免费。前端展示时除以 100 */
+  price_cents: number;
+  description: string | null;
+}
+
+/**
+ * 我的用量。
+ *
+ * ⚠️ 进度条直接用这三个字段，**不要自己算**：
+ * 口径（UTC 自然月）在服务端定义，前端重算必然漂移。
+ */
+export interface BillingUsage {
+  /** 周期 YYYY-MM（UTC 年月） */
+  period_key: string;
+  reviews_used: number;
+  /** 本月额度；-1 = 不限 */
+  monthly_reviews: number;
+  /** 剩余篇数；null = 不限 */
+  reviews_remaining: number | null;
+  plan_id: string;
+  plan_name: string;
+}
+
+/** 订阅信息（管理员开通后返回）。 */
+export interface SubscriptionInfo {
+  subscription_id: string;
+  user_id: string;
+  plan_id: string;
+  status: string;
+  period_start: string;
+  period_end: string;
+  seats_purchased: number;
+  /** manual / payment */
+  source: string;
+  note: string | null;
+}

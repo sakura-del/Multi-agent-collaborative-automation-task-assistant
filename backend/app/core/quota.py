@@ -64,15 +64,32 @@ return target
 
 
 class QuotaExceededError(AppException):
-    """按用户配额耗尽（当前窗口内已用满），HTTP 429。
+    """**token 成本护栏**耗尽（当前窗口内已用满），HTTP 429。
+
+    ## 为什么错误码是 `TOKEN_BUDGET_EXCEEDED` 而不是 `QUOTA_EXCEEDED`
+
+    Phase 2 引入计费套餐后有两类 429：
+
+    | 限制 | 错误码 | 用户该怎么办 |
+    | --- | --- | --- |
+    | 篇数（月，套餐） | `PLAN_QUOTA_EXCEEDED` | 升级套餐 / 等下月 |
+    | token（日，本类） | `TOKEN_BUDGET_EXCEEDED` | **明天再试（买套餐也没用）** |
+
+    两者混用会让用户以为「买套餐能解除 token 限制」，买完发现还是不行 ——
+    这是真实的客诉来源。
+
+    ## 为什么消息里不提「套餐」
+
+    token 护栏是**内部成本保护**，不是销售点。提套餐等于给出错误暗示。
+    消息只说「今日 token 预算已用尽，请明天再试」，并带 `Retry-After`。
 
     刻意定义在 `quota.py`（而不是 `core/exceptions.py`）：配额是 P1-D 的内部概念，
     避免核心异常模块被业务细节污染。
     """
 
     status_code = 429
-    default_message = "今日配额已用尽"
-    error_code = "QUOTA_EXCEEDED"
+    default_message = "今日 token 预算已用尽，请明天再试"
+    error_code = "TOKEN_BUDGET_EXCEEDED"
 
     def __init__(
         self,
