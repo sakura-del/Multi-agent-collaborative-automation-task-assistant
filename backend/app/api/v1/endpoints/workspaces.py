@@ -126,13 +126,16 @@ async def create_workspace(
     await plan_service.require_feature(current_user.id, "team")
     # ② 数量门禁
     owned = await service.count_owned(current_user.id)
+    plan = await plan_service.get_active_plan(current_user.id)
     if not await plan_service.can_create_workspace(current_user.id, current_count=owned):
         limit = await plan_service.workspace_limit_for(current_user.id)
-        raise WorkspaceLimitExceeded(limit=limit, current=owned)
+        raise WorkspaceLimitExceeded(limit=limit, current=owned, plan_id=plan.id)
     # ③ 席位门禁
     seat_cap = await plan_service.max_seats_for(current_user.id)
     if payload.seat_limit > seat_cap:
-        raise SeatLimitExceeded(requested=payload.seat_limit, limit=seat_cap)
+        # 必须带上**真实** plan_id：首版漏传，错误里显示默认 `free`，
+        # 运维看到「free 套餐席位上限 10」会一头雾水。
+        raise SeatLimitExceeded(requested=payload.seat_limit, limit=seat_cap, plan_id=plan.id)
 
     try:
         workspace = await service.create(

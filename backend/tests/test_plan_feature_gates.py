@@ -73,7 +73,13 @@ def env() -> Any:
     async def _handle(_: Any, exc: AppException) -> Any:
         return JSONResponse(
             status_code=exc.status_code,
-            content={"error_code": exc.error_code, "message": exc.message},
+            content={
+                "error_code": exc.error_code,
+                "message": exc.message,
+                # details 必须透出：门禁错误码之外还要给 requested/limit/plan_id，
+                # 否则前端无法生成「上限 3 席，你请求 10 席」这类精确提示
+                "details": exc.details,
+            },
         )
 
     application.dependency_overrides[get_db] = _get_db
@@ -186,6 +192,10 @@ class TestSeatLimitCap:
         assert resp.status_code == 403, resp.text
         body = resp.json()
         assert body["error_code"] == "PLAN_SEAT_LIMIT"
+        # 错误里必须带**真实** plan_id（首版漏传 → 显示默认 free，误导运维）
+        assert body["details"]["plan_id"] == "student"
+        assert body["details"]["requested"] == 10
+        assert body["details"]["limit"] == 3
 
     def test_seat_limit_within_cap_allowed(self, env) -> None:
         user = _user(env, "sc2")

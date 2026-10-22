@@ -74,8 +74,17 @@ def api() -> Any:
     # 本文件测的是**协作语义**（角色、席位、邀请码），不是计费，
     # 所以注入一个「全功能放开」的 stub。
     class _OpenPlanService:
+        async def check_and_consume_review(self, user_id, **_kwargs):  # type: ignore[no-untyped-def]
+            return None
+
         async def require_feature(self, user_id, feature, **_kwargs):  # type: ignore[no-untyped-def]
             return None
+
+        async def get_active_plan(self, user_id, **_kwargs):  # type: ignore[no-untyped-def]
+            # 端点用它给错误消息带真实 plan_id
+            from types import SimpleNamespace
+
+            return SimpleNamespace(id="pro", name="专业版")
 
         async def can_create_workspace(self, user_id, *, current_count, **_kwargs):  # type: ignore[no-untyped-def]
             return True

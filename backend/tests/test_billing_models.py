@@ -380,15 +380,15 @@ class TestTimezoneAwareness:
 
     def test_migration_matches_timezone_declaration(self) -> None:
         """迁移里的 `period_start/end` 也必须是 timestamptz（与 ORM 一致）。"""
-        migration = pathlib.Path(
-            "alembic/versions/a3c9e6d2b8f1_add_billing_tables.py"
-        ).read_text(encoding="utf-8")
+        migration = pathlib.Path("alembic/versions/a3c9e6d2b8f1_add_billing_tables.py").read_text(
+            encoding="utf-8"
+        )
         assert migration.count('"period_start"') == 1
         assert migration.count('"period_end"') == 1
         segment = migration.split('"period_start"')[1].split('"seats_purchased"')[0]
-        assert segment.count("timezone=True") == 2, (
-            "period_start 与 period_end 都必须 timezone=True"
-        )
+        assert (
+            segment.count("timezone=True") == 2
+        ), "period_start 与 period_end 都必须 timezone=True"
 
     def test_written_value_is_aware(self) -> None:
         """`subscribe()` 写入的值确实是 aware —— 与上面的列声明配套。"""

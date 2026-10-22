@@ -382,8 +382,12 @@ class TestConcurrency:
 
         db_path = tmp_path / "billing.db"
         url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
-        setup_engine = _engine(url)
+        # WAL + busy_timeout：并发写必需。默认 rollback journal 下多个连接同时写
+        # 会直接报 `database is locked`（本地满负载跑全量时实际踩到过，
+        # 单跑这条用例却通过 —— 典型的负载相关 flaky）。
+        setup_engine = _engine(url, connect_args={"timeout": 30})
         async with setup_engine.begin() as connection:
+            await connection.exec_driver_sql("PRAGMA journal_mode=WAL")
             await connection.run_sync(Base.metadata.create_all)
         setup_factory = _factory(setup_engine, class_=_Session, expire_on_commit=False)
         async with setup_factory() as session:
@@ -402,7 +406,7 @@ class TestConcurrency:
         await service.subscribe(user_id, "student", note="x")
 
         async def attempt() -> bool:
-            engine = _engine(url)
+            engine = _engine(url, connect_args={"timeout": 30})
             factory = _factory(engine, class_=_Session, expire_on_commit=False)
             try:
                 await PlanService(factory).check_and_consume_review(user_id)
