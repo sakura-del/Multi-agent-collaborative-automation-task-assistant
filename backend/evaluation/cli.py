@@ -138,6 +138,14 @@ def build_executor(adapter: str) -> Any:
     raise SystemExit(f"未知适配器: {adapter}（fixed / live）")
 
 
+def _build_executor(adapter: str, args: argparse.Namespace | None = None) -> Any:
+    """**向后兼容别名**（旧测试与外部脚本用这个名字）。
+
+    新代码请用 `build_executor`（签名更简单：`args` 参数已不再需要）。
+    """
+    return build_executor(adapter)
+
+
 async def _run(args: argparse.Namespace) -> int:
     profiles = _load_selected_profiles(args.profiles)
     topics = _load_selected_topics(args.topic)

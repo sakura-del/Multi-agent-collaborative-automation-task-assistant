@@ -56,9 +56,15 @@ class TestInitKbCalled:
         )
 
     def test_init_kb_imported_from_factory(self) -> None:
+        """`init_kb` 必须从 `app.knowledge.services.factory` 导入。
+
+        注意：导入可能写成单行或**多行括号**形式（black 按行长重排），
+        所以这里检查「模块路径 + 名称」都出现，不锁具体格式。
+        """
         source = _source()
 
-        assert "from app.knowledge.services.factory import init_kb" in source
+        assert "from app.knowledge.services.factory import" in source
+        assert "init_kb" in source
 
     def test_init_kb_called_before_search_provider(self) -> None:
         """顺序也重要：初始化必须在构造检索提供者**之前**。
