@@ -78,7 +78,7 @@ function handleLogout() {
   <div class="grid min-h-screen grid-cols-1 bg-background md:grid-cols-[14rem_1fr]">
     <!-- 侧栏（窄屏折成单行横向滚动导航） -->
     <aside
-      class="relative flex flex-col gap-6 border-b border-border bg-card px-3 py-4 max-md:gap-0 md:border-b-0 md:border-r md:py-6"
+      class="flex flex-col gap-6 border-b border-border bg-card px-3 py-4 max-md:gap-2 md:border-b-0 md:border-r md:py-6"
     >
       <!-- 品牌：微缩标记 + 名称（beUI 用紧凑字标，不做大 logo） -->
       <div class="hidden items-center gap-2 px-2 md:flex">
@@ -120,10 +120,11 @@ function handleLogout() {
         </div>
       </nav>
 
-      <!-- 当前用户：底部分隔线 + 用户名 + 登出。
-           窄屏把登出按钮挪到右上角绝对定位，不再占导航行空间。 -->
+      <!-- 当前用户：宽屏在侧栏底部（分隔线 + 用户名 + 登出）。
+           窄屏**不绝对定位**（会和滚动中的导航项重叠），
+           而是跟在导航行之后单独一行、右对齐。 -->
       <div
-        class="flex items-center justify-between gap-2 border-t border-border px-2 pt-3 max-md:absolute max-md:top-2.5 max-md:right-2 max-md:border-0 max-md:p-0 md:mt-auto"
+        class="flex items-center justify-between gap-2 border-t border-border px-2 pt-3 max-md:justify-end max-md:border-0 max-md:px-0 max-md:pt-0 md:mt-auto"
       >
         <div class="hidden min-w-0 md:block">
           <p class="truncate text-xs font-medium text-foreground" :title="auth.user?.email">
