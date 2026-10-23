@@ -2453,6 +2453,71 @@ black/ruff 干净；mypy 0 错误（183 文件）；pytest **2346 passed / 8 ski
 
 ---
 
+## 真实使用路径巡检 · 第二轮（2026-10-23）
+
+**巡检记录**：[docs/runbooks/usage-path-audit-2.md](../../runbooks/usage-path-audit-2.md)
+
+### 覆盖范围
+
+上一轮做了知识库 / 模板 / 工作区权限（54 项）。本轮补剩余三条：
+**CSL 自定义引用样式、批注段落指纹锚点、开放 API + MCP**（98 项）。
+
+### 抓到的 3 个缺陷（`1dcbb44`）
+
+**① 数字制的正文标记硬编码 `[n]`，自定义样式对正文无效**
+
+```python
+if meta.numbering == "citation-number":
+    marker = f"[{number}]"      # ← 完全绕过 CSL <citation>
+```
+
+用户上传标记为 `〔1〕` 的样式后：参考文献列表按样式渲染，正文永远是 `[1]`。
+
+**为什么测试没抓到**：GB/T 7714 顺序编码制**正好就是 `[1]`** —— 预置样式的
+期望值与硬编码值相同。而 `citation_style` 表上线后一直是 0 行。
+
+**② 多条文献的 marker 全部串成 `〔1〕`**
+
+`_render_item` 每次只喂「当前条目」给 citeproc，它永远是第 1 个引用。
+修法：传 `preceding`（前序条目）一起注册。
+
+**③ `TaskSnapshot` 缺 `final_output` → MCP 取不到正文**
+
+执行层会**写入** `task.final_output`，但契约里没这个字段（`extra="forbid"` 不
+允许额外加）→ MCP 的 `get_task_output` 永远返回 `markdown: null`，
+`get_task_status` 永远提示「尚无产出」。
+
+**为什么测试全绿（假测试）**：`tests/test_mcp_tools.py` 用**手写 dict 替身**
+伪造了 `final_output`。替身里有、真实契约里没有 —— **测的是替身**。
+
+这是本项目**第二次**踩这个坑（第一次是前端 `flushPromises()`）。
+
+### 巡检确认无缺陷的两处
+
+| 链路 | 评价 |
+| --- | --- |
+| 批注段落锚点 | **实现质量好**：用「内容哈希」而非索引，实测改写锚点所在段 → `matched=False` + `paragraph_index=None`（不挂错段）；前插新段 → 索引按内容重算（3→4）；恢复原文 → 重新匹配 |
+| 开放 API 双通道 | **边界严密**：JWT 塞 `X-API-Key` → 401，Key 塞 `Bearer` → 401，不能互相冒充；scope 不足返回 **403 而非 404**（用户能知道「换把 Key」而不是「任务不存在」） |
+
+### 落地改进（防止同类问题复发）
+
+新增两类测试：
+
+1. `test_mcp_contract_alignment.py` —— payload 由**真实 Pydantic 模型**的
+   `model_dump()` 生成，契约丢字段测试立刻红；
+2. `test_csl_custom_citation_marker.py` —— 用**自定义样式**（非预置）验证，
+   避免「预置样式的期望值恰好等于硬编码值」。
+
+**共同教训**：测试要验证**真实契约**，不是「我以为的契约」。
+手写 dict 替身让测试永远无法发现契约缺字段。
+
+### 门禁
+
+后端 **2611 → 2630 passed**（+19）；mypy 0 错误（200 文件）。
+测试诚实性：本轮 4 组回退验证全部变红。
+
+---
+
 ## 真实使用路径巡检（2026-10-23）
 
 **巡检记录**：[docs/runbooks/usage-path-audit.md](../../runbooks/usage-path-audit.md)
