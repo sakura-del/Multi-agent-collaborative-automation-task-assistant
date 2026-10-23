@@ -75,14 +75,6 @@ function openTask(taskId: string) {
   void router.push({ name: "task-detail", params: { taskId } });
 }
 
-/** 行键盘可达：Enter / Space 等价于点击（无障碍硬要求）。 */
-function handleRowKeydown(event: KeyboardEvent, taskId: string) {
-  if (event.key === "Enter" || event.key === " ") {
-    event.preventDefault();
-    openTask(taskId);
-  }
-}
-
 // ===== 汇总统计 =====
 
 const counts = computed(() => {
@@ -330,12 +322,8 @@ const rows = computed(() =>
             v-for="row in rows"
             :key="row.task.task_id"
             :data-test="`task-row-${row.task.task_id}`"
-            role="button"
-            tabindex="0"
-            :aria-label="`打开任务：${row.task.title}`"
-            class="group cursor-pointer border-b border-border last:border-b-0 hover:bg-muted/40 focus-visible:bg-muted/40 max-md:block max-md:px-3 max-md:py-2.5"
+            class="group cursor-pointer border-b border-border last:border-b-0 hover:bg-muted/40 focus-within:bg-muted/40 max-md:block max-md:px-3 max-md:py-2.5"
             @click="openTask(row.task.task_id)"
-            @keydown="handleRowKeydown($event, row.task.task_id)"
           >
             <!-- 标题：主题（主）+ 括号标记（次，灰字小号） -->
             <td
@@ -380,7 +368,7 @@ const rows = computed(() =>
               {{ formatDateTime(row.task.updated_at ?? row.task.created_at) }}
             </td>
 
-            <!-- 行尾箭头：hover 才明显（替代 20 个重复的「打开」按钮）。
+            <!-- 行尾箭头：替代 20 个重复的「打开」按钮的外观。
                  进行中的任务额外显示细进度条——此时百分比才真的有意义。 -->
             <td class="px-2 py-2.5 max-md:hidden">
               <div class="flex items-center justify-end gap-2">
@@ -398,11 +386,20 @@ const rows = computed(() =>
                     :style="{ width: `${taskProgress(row.task.status)}%` }"
                   />
                 </div>
-                <ChevronRight
-                  :size="15"
-                  class="text-muted-foreground/40 transition-colors group-hover:text-foreground"
-                  aria-hidden="true"
-                />
+                <!-- 真正的按钮语义放这里：
+                     E2E 用 `getByRole("button", { name: "打开" })` 定位（m2 系列的
+                     既有契约），所以必须保留一个可访问名称是「打开」的按钮。
+                     行本身可点，但**不再**是 role=button —— 否则同一行会出现
+                     两个 button 角色，`getByRole` 命中多个导致测试二义性失败。 -->
+                <button
+                  type="button"
+                  class="rounded p-1 text-muted-foreground/40 transition-colors hover:bg-muted hover:text-foreground group-hover:text-foreground"
+                  aria-label="打开"
+                  :title="`打开：${row.task.title}`"
+                  @click.stop="openTask(row.task.task_id)"
+                >
+                  <ChevronRight :size="15" aria-hidden="true" />
+                </button>
               </div>
             </td>
           </tr>

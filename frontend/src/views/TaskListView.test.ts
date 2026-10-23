@@ -241,12 +241,21 @@ describe("既有测试契约必须保留", () => {
     expect(wrapper.find('[data-test="empty-state"]').exists()).toBe(true);
   });
 
-  it("整行可点击进入详情（不再依赖右侧「打开」按钮）", async () => {
+  it("整行可点击进入详情，且行内有具名的「打开」按钮", async () => {
     const wrapper = await mountWith([task({ task_id: "click-me" })]);
     const row = wrapper.find('[data-test="task-row-click-me"]');
 
-    // 行本身可聚焦且是按钮语义（无障碍要求）
-    expect(row.attributes("role")).toBe("button");
-    expect(row.attributes("tabindex")).toBe("0");
+    // 行本身可点击（cursor-pointer + @click）
+    expect(row.classes()).toContain("cursor-pointer");
+
+    // **关键**：必须有一个可访问名称是「打开」的按钮。
+    // E2E（m2-result-preview / m2-all-preview）用
+    // `getByRole("button", { name: "打开" })` 定位，这是既有契约。
+    const openButton = row.find('button[aria-label="打开"]');
+    expect(openButton.exists()).toBe(true);
+
+    // 行本身**不能**是 role=button：否则同一行有两个 button 角色，
+    // `getByRole` 会命中多个，E2E 报二义性（实测踩过）。
+    expect(row.attributes("role")).not.toBe("button");
   });
 });
