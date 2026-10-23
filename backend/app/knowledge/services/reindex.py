@@ -119,12 +119,28 @@ async def reindex_from_chunks(
         try:
             vector_store.add_chunks(chunks)
             indexed += len(chunks)
+            # **关键**：同步更新 vector_index.chroma_id
+            #
+            # 向量库里的 id 现在是 chunk_id（UUID），但 `vector_index.chroma_id`
+            # 仍是建库时生成的 16 位 hex —— 不更新的话该表变成**死数据**，
+            # 任何按 chroma_id 反查的逻辑都会失败。
+            #
+            # 为什么之前漏了：`_attach_storage_ids` 里「结果 id 已是 UUID →
+            # 原样保留」，所以检索恰好还能工作，掩盖了这个不一致。
+            for chunk_row, _owner in batch:
+                await _sync_vector_index(session, str(chunk_row.id))
         except Exception as exc:
             # 单批失败不中断：记录并继续，运维可重复运行（upsert 幂等）
             failed_batches += 1
             message = f"批次 {start // batch_size + 1} 失败：{type(exc).__name__}: {exc}"
             errors.append(message)
             logger.error("reindex_batch_failed", batch=start // batch_size + 1, error=str(exc))
+
+    if indexed:
+        # 一次性提交（逐条 flush 太慢；28344 条只提交一次）
+        commit = getattr(session, "commit", None)
+        if commit is not None:
+            await commit()
 
     logger.info(
         "reindex_done",
@@ -137,4 +153,22 @@ async def reindex_from_chunks(
         indexed=indexed,
         failed_batches=failed_batches,
         errors=errors,
+    )
+
+
+async def _sync_vector_index(session: Any, chunk_id: str) -> None:
+    """把 `vector_index.chroma_id` 更新为新的向量 id（即 chunk_id）。
+
+    抽成模块级函数而不是方法：`reindex_from_chunks` 是**函数**（不是类），
+    上一版注释里写的 `self._sync_vector_index` 是笔误。
+
+    使用 ORM `update()` 构造语句，`session.execute()` 执行。
+    测试替身只要提供 `execute()` 即可。
+    """
+    from sqlalchemy import update
+
+    from app.db.models.knowledge import VectorIndex
+
+    await session.execute(
+        update(VectorIndex).where(VectorIndex.chunk_id == chunk_id).values(chroma_id=chunk_id)
     )

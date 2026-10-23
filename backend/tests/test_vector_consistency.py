@@ -13,6 +13,10 @@
 
 ## 本文件锁定
 
+> 本文件是「**只比数量**」的历史用例（`verify_ids=False`）。
+> id 级校验（数量相等但 id 不同 → 仍报不一致）由
+> `test_vector_consistency_ids.py` 覆盖。
+
 1. 一致时返回 `consistent=True`；
 2. 不一致时准确报出 `expected` / `actual` / 缺失数量；
 3. 能识别**孤儿向量**（Chroma 有、SQLite 没有）；
@@ -64,6 +68,7 @@ class TestConsistentCase:
         report = await check_vector_consistency(
             session=_FakeSession(docs=2, chunks=100),
             vector_store=_FakeVectorStore(100),
+            verify_ids=False,
         )
 
         assert isinstance(report, VectorConsistencyReport)
@@ -78,6 +83,7 @@ class TestConsistentCase:
         report = await check_vector_consistency(
             session=_FakeSession(docs=0, chunks=0),
             vector_store=_FakeVectorStore(0),
+            verify_ids=False,
         )
 
         assert report.consistent is True
@@ -91,6 +97,7 @@ class TestInconsistentCase:
         report = await check_vector_consistency(
             session=_FakeSession(docs=104, chunks=28344),
             vector_store=_FakeVectorStore(4),
+            verify_ids=False,
         )
 
         assert report.consistent is False
@@ -104,6 +111,7 @@ class TestInconsistentCase:
         report = await check_vector_consistency(
             session=_FakeSession(docs=1, chunks=10),
             vector_store=_FakeVectorStore(14),
+            verify_ids=False,
         )
 
         assert report.consistent is False
@@ -117,6 +125,7 @@ class TestInconsistentCase:
         report = await check_vector_consistency(
             session=_FakeSession(docs=104, chunks=28344),
             vector_store=_FakeVectorStore(4),
+            verify_ids=False,
         )
 
         assert report.hint
@@ -128,6 +137,7 @@ class TestInconsistentCase:
         report = await check_vector_consistency(
             session=_FakeSession(docs=104, chunks=28344),
             vector_store=_FakeVectorStore(4),
+            verify_ids=False,
         )
 
         payload = report.as_dict()

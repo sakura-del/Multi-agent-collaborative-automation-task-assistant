@@ -45,6 +45,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description="检查向量库与数据库是否一致（只读）",
     )
     parser.add_argument("--json", action="store_true", help="以 JSON 输出（便于脚本判断）")
+    parser.add_argument(
+        "--skip-ids",
+        action="store_true",
+        help="只比数量（快，但会漏检「数量相等、id 全不同」的漂移）",
+    )
     return parser.parse_args(argv)
 
 
@@ -61,7 +66,9 @@ async def _main() -> int:
     index_manager = get_index_manager()
     vector_store = index_manager._vector_store
     async with AsyncSessionLocal() as session:
-        report = await check_vector_consistency(session=session, vector_store=vector_store)
+        report = await check_vector_consistency(
+            session=session, vector_store=vector_store, verify_ids=not args.skip_ids
+        )
 
     if args.json:
         print(json.dumps(report.as_dict(), ensure_ascii=False, indent=2))
@@ -73,6 +80,10 @@ async def _main() -> int:
             print("结论：**一致**")
         else:
             print(f"结论：**不一致**（缺 {report.missing_vectors}，孤儿 {report.orphan_vectors}）")
+            if report.ids_verified and report.missing_ids:
+                print(f"缺失 id 样本（前 {len(report.missing_ids)}）：{report.missing_ids[:5]}")
+            if report.ids_verified and report.orphan_ids:
+                print(f"孤儿 id 样本（前 {len(report.orphan_ids)}）：{report.orphan_ids[:5]}")
             print()
             print(report.hint)
 

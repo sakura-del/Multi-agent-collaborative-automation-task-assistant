@@ -114,6 +114,17 @@ class VectorStore:
         self._ensure_collection()
         return self._collection.count() > 0
 
+    def list_ids(self) -> list[str]:
+        """返回全部向量 id（用于一致性校验）。
+
+        为什么需要它：`size` 只给数量。**数量相等但 id 完全不同**的漂移
+        （实测踩到：Chroma 是 UUID、`vector_index.chroma_id` 是 16 位 hex，
+        交集为 0）在数量维度上看起来完全正常。必须比对 id 集合才能发现。
+        """
+        self._ensure_collection()
+        payload = self._collection.get(include=[])
+        return [str(i) for i in (payload.get("ids") or [])]
+
     def add_chunks(self, chunks: list[TextChunk]) -> int:
         """批量添加分块到向量索引。返回实际添加数量。"""
         if not chunks:
