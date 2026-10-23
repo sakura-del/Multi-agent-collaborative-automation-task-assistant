@@ -99,17 +99,27 @@ describe("TaskDag", () => {
     expect(wrapper.emitted("select")).toEqual([["n2"], ["n4"]]);
   });
 
-  it("draws one edge per dependency and exposes a fit-view command", async () => {
+  it("每条依赖画一条边", async () => {
     const wrapper = mount(TaskDag, {
       props: { nodes: PLAN_NODES, statuses: statuses({}) },
     });
 
     // 依赖边：n2→n1、n3→n1、n4→n2、n4→n3
     expect(wrapper.findAll('[data-test^="dag-edge-"]')).toHaveLength(4);
-    const fit = wrapper.find('[data-test="dag-fit"]');
-    expect(fit.exists()).toBe(true);
-    await fit.trigger("click");
-    expect((wrapper.vm as unknown as { scale: number }).scale).toBeGreaterThan(0);
+  });
+
+  it("提供可滚动视口，并暴露当前布局方向（替代旧的「适应窗口」缩放）", async () => {
+    // 2026-10-23 重设计：旧实现的「适应窗口」把 DAG 整体缩放，节点字随之变小。
+    // 改为按容器宽度自适应换向（横向放不下 → 纵向），并把方向暴露到 DOM
+    // 供测试与样式使用。链式任务因此不再被横向裁切。
+    const wrapper = mount(TaskDag, {
+      props: { nodes: PLAN_NODES, statuses: statuses({}) },
+    });
+
+    const viewport = wrapper.find('[data-test="dag-viewport"]');
+    expect(viewport.exists()).toBe(true);
+    expect(viewport.classes().some((c) => c.includes("overflow-auto"))).toBe(true);
+    expect(["horizontal", "vertical"]).toContain(viewport.attributes("data-orientation"));
   });
 
   it("keeps dragging and connection editing disabled", () => {

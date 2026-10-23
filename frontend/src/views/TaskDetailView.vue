@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ListFilter } from "lucide-vue-next";
+import { ListFilter, MessageSquare, X } from "lucide-vue-next";
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
@@ -16,9 +16,18 @@ import TaskToolbar from "@/components/tasks/TaskToolbar.vue";
 import { useAuthStore } from "@/stores/auth";
 import { useTaskStore } from "@/stores/tasks";
 import type { PlanNode, SubtaskStatus, TaskControl } from "@/api/types";
-import { formatDateTime } from "@/utils/task-status";
+import { formatDateTime, needsUserAction } from "@/utils/task-status";
 
-// 任务详情：Tab 由路由 query 驱动（刷新不丢），规划确认与 DAG 联查
+// 任务详情：Tab 由路由 query 驱动（刷新不丢），规划确认与 DAG 联查。
+//
+// ## 这次重设计的三个真问题（2026-10-23，截图实测）
+//
+// 1. **批注面板占满每个 tab 底部**：四个 tab 下面都挂着完整批注面板（含大块
+//    空态），把「结果」「日志」挤得很长。批注是协作场景才用的，不该在所有
+//    tab 抢占纵向空间 → 改成**侧边抽屉，默认收起**。
+// 2. **头部信息偏弱**：只写 `revision 1 · 更新于 …`，没回答「现在要我做什么」。
+//    → 「待我确认」状态时在头部显式提示。
+// 3. 结果页 Markdown 与执行 tab DAG 的问题分别在 TaskResult / TaskDag 里修。
 const props = defineProps<{ taskId: string }>();
 
 const store = useTaskStore();
@@ -36,6 +45,8 @@ const pending = ref(false);
 const errorMessage = ref<string | null>(null);
 const conflictMessage = ref<string | null>(null);
 const selectedNodeId = ref<string | null>(null);
+/** 批注抽屉开关（默认收起）。 */
+const annotationOpen = ref(false);
 
 const activeTab = computed<TabKey>(() => {
   const value = String(route.query.tab ?? "plan");
@@ -43,6 +54,9 @@ const activeTab = computed<TabKey>(() => {
 });
 
 const resultAvailable = computed(() => Boolean(store.snapshot?.review_report));
+
+/** 当前状态是否需要用户行动（决定头部是否出现提示）。 */
+const needsAction = computed(() => needsUserAction(store.snapshot?.status ?? "created"));
 
 function selectTab(tab: TabKey) {
   if (tab === "result" && !resultAvailable.value) {
@@ -144,36 +158,72 @@ onBeforeUnmount(() => {
 <template>
   <section>
     <header class="mb-4 flex flex-wrap items-start justify-between gap-3">
-      <div>
-        <h1 class="text-lg font-semibold tracking-tight">
+      <div class="min-w-0">
+        <h1 class="text-xl font-semibold tracking-tight">
           {{ store.snapshot?.title ?? "任务详情" }}
         </h1>
-        <p class="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+        <p class="mt-1.5 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
           <StatusBadge :status="store.snapshot?.status ?? 'created'" />
-          <span>
-            revision {{ store.snapshot?.revision ?? "—" }} · 更新于
+          <span class="text-xs">
+            修订 {{ store.snapshot?.revision ?? "—" }} · 更新于
             {{ formatDateTime(store.snapshot?.updated_at) }}
           </span>
         </p>
       </div>
-      <!-- PRISMA 筛选工作台入口（Phase 2）：筛选数据跟着任务走 -->
-      <RouterLink
-        :to="{ name: 'task-screening', params: { taskId: props.taskId } }"
-        data-test="open-screening"
-        class="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-sm font-medium transition-colors hover:bg-muted"
-      >
-        <ListFilter :size="15" aria-hidden="true" />
-        <span>PRISMA 筛选</span>
-      </RouterLink>
+
+      <div class="flex shrink-0 items-center gap-2">
+        <!-- 批注入口：抽屉默认收起，用计数提示有没有待看意见 -->
+        <button
+          type="button"
+          data-test="toggle-annotation"
+          :aria-expanded="annotationOpen"
+          class="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-sm font-medium transition-colors hover:bg-muted"
+          @click="annotationOpen = !annotationOpen"
+        >
+          <MessageSquare :size="15" aria-hidden="true" />
+          <span>批注</span>
+        </button>
+
+        <!-- PRISMA 筛选工作台入口（Phase 2）：筛选数据跟着任务走 -->
+        <RouterLink
+          :to="{ name: 'task-screening', params: { taskId: props.taskId } }"
+          data-test="open-screening"
+          class="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-sm font-medium transition-colors hover:bg-muted"
+        >
+          <ListFilter :size="15" aria-hidden="true" />
+          <span>PRISMA 筛选</span>
+        </RouterLink>
+      </div>
     </header>
+
+    <!-- 需要用户行动时显式提示：这是本页唯一「你必须做点什么」的信息，
+         以前只靠状态徽标暗示，容易被忽略。 -->
+    <div
+      v-if="needsAction"
+      data-test="action-hint"
+      class="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-warning/30 bg-warning/8 px-3 py-2 text-sm"
+    >
+      <span class="font-medium text-warning">
+        {{
+          store.snapshot?.status === "waiting_approval"
+            ? "规划已生成，等你确认后开始执行"
+            : "任务已暂停，等你介入"
+        }}
+      </span>
+      <button
+        v-if="activeTab !== 'plan' && store.snapshot?.status === 'waiting_approval'"
+        type="button"
+        class="text-xs text-warning underline underline-offset-2"
+        @click="selectTab('plan')"
+      >
+        去确认规划 →
+      </button>
+    </div>
 
     <ErrorBanner :message="errorMessage" />
 
     <!-- 选项卡：下划线式，窄屏可横向滚动 -->
-    <nav
-      class="mb-4 flex gap-1 overflow-x-auto border-b border-border"
-      role="tablist"
-    >
+    <nav class="mb-4 flex gap-1 overflow-x-auto border-b border-border" role="tablist">
       <button
         v-for="tab in TABS"
         :key="tab"
@@ -247,11 +297,39 @@ onBeforeUnmount(() => {
       />
     </div>
 
-    <!-- 导师批注（Phase 2）：任务级批注，与产出并列展示 -->
-    <AnnotationPanel
-      class="mt-4"
-      :task-id="props.taskId"
-      :current-user-id="currentUserId"
-    />
+    <!-- 导师批注（Phase 2）：**侧边抽屉**，默认收起。
+         旧版把它常驻在四个 tab 底部（含大块空态），把结果/日志挤得很长；
+         批注属于协作场景，不该在所有 tab 抢占纵向空间。 -->
+    <Teleport to="body">
+      <div
+        v-if="annotationOpen"
+        class="fixed inset-0 z-40 bg-foreground/20"
+        data-test="annotation-backdrop"
+        @click="annotationOpen = false"
+      />
+      <aside
+        v-if="annotationOpen"
+        data-test="annotation-drawer"
+        role="dialog"
+        aria-label="导师批注"
+        class="fixed top-0 right-0 z-50 flex h-full w-full max-w-md flex-col border-l border-border bg-card shadow-raised"
+      >
+        <div class="flex items-center justify-between border-b border-border px-4 py-3">
+          <h2 class="text-sm font-semibold">导师批注</h2>
+          <button
+            type="button"
+            data-test="close-annotation"
+            aria-label="关闭批注"
+            class="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+            @click="annotationOpen = false"
+          >
+            <X :size="16" aria-hidden="true" />
+          </button>
+        </div>
+        <div class="min-h-0 flex-1 overflow-y-auto p-4">
+          <AnnotationPanel :task-id="props.taskId" :current-user-id="currentUserId" />
+        </div>
+      </aside>
+    </Teleport>
   </section>
 </template>

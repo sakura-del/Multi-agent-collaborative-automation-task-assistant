@@ -197,3 +197,165 @@
     }
   }
 }
+
+/* ============================================================
+   综述正文排版（`.md-body`，2026-10-23 任务详情页重设计）
+
+   ## 为什么这里有手写 CSS（AGENTS §6.5 的唯一例外）
+
+   规范要求「禁止新增手写 CSS，业务样式一律用原子类」。但 Markdown 渲染出的
+   HTML 是通过 `v-html` 注入的 —— **我们无法给 `<h1>` / `<li>` / `<table>`
+   逐个加 Tailwind 类名**（那些标签来自 marked 的输出，不是模板里写的）。
+
+   所以这一段是「渲染产物的排版规则」，不是业务组件样式：
+   - 作用域严格限定在 `.md-body` 内（只有 TaskResult 用它）；
+   - 只用 `:root` 里定义的语义 token，不写任何一次性颜色；
+   - 不引入第二套设计体系（字号/间距延续 §6.5.3 的刻度）。
+   ============================================================ */
+@layer components {
+  .md-body {
+    font-size: 0.875rem;
+    line-height: 1.75;
+    color: var(--foreground);
+  }
+
+  /* 标题：层级靠字号 + 上间距拉开，不靠装饰 */
+  .md-body :where(h1, h2, h3, h4, h5, h6) {
+    font-weight: 600;
+    line-height: 1.35;
+    letter-spacing: -0.01em;
+    color: var(--foreground);
+  }
+  .md-body h1 {
+    font-size: 1.25rem;
+    margin: 0 0 0.75rem;
+  }
+  .md-body h2 {
+    font-size: 1.0625rem;
+    margin: 1.5rem 0 0.5rem;
+    padding-bottom: 0.35rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .md-body h3 {
+    font-size: 0.9375rem;
+    margin: 1.25rem 0 0.4rem;
+  }
+  .md-body :where(h4, h5, h6) {
+    font-size: 0.875rem;
+    margin: 1rem 0 0.35rem;
+  }
+  /* 首个标题不要上间距（否则正文区顶部空一截） */
+  .md-body > :first-child {
+    margin-top: 0;
+  }
+
+  /* 段落与列表 */
+  .md-body p {
+    margin: 0 0 0.75rem;
+  }
+  .md-body :where(ul, ol) {
+    margin: 0 0 0.75rem;
+    padding-left: 1.25rem;
+  }
+  .md-body ul {
+    list-style: disc;
+  }
+  .md-body ol {
+    list-style: decimal;
+  }
+  .md-body li {
+    margin: 0.2rem 0;
+  }
+  .md-body li > :where(ul, ol) {
+    margin: 0.2rem 0 0.2rem;
+  }
+
+  /* 强调：粗体用字重区分而不是颜色（引用标记 [E1] 已经在正文里，别再上色） */
+  .md-body strong {
+    font-weight: 600;
+  }
+  .md-body em {
+    font-style: italic;
+  }
+  .md-body del {
+    text-decoration: line-through;
+    color: var(--muted-foreground);
+  }
+
+  /* 引用块：左侧细线 + 弱化文字 */
+  .md-body blockquote {
+    margin: 0 0 0.75rem;
+    padding: 0.15rem 0 0.15rem 0.75rem;
+    border-left: 2px solid var(--border-strong);
+    color: var(--muted-foreground);
+  }
+
+  /* 行内代码与代码块 */
+  .md-body code {
+    padding: 0.1rem 0.3rem;
+    border-radius: var(--radius-sm);
+    background: var(--muted);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.8125rem;
+  }
+  .md-body pre {
+    margin: 0 0 0.75rem;
+    padding: 0.75rem 0.875rem;
+    overflow-x: auto;
+    border-radius: var(--radius-md);
+    background: var(--muted);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.8125rem;
+    line-height: 1.6;
+  }
+  .md-body pre code {
+    padding: 0;
+    background: transparent;
+    font-size: inherit;
+  }
+
+  /* 表格：只留横线（beUI 的轻线条语言） */
+  .md-body table {
+    width: 100%;
+    margin: 0 0 0.75rem;
+    border-collapse: collapse;
+    font-size: 0.8125rem;
+  }
+  .md-body :where(th, td) {
+    padding: 0.4rem 0.6rem;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+    vertical-align: top;
+  }
+  .md-body th {
+    font-weight: 600;
+    color: var(--muted-foreground);
+  }
+
+  /* 链接：主色 + 下划线只在 hover 出现（安静基调） */
+  .md-body a {
+    color: var(--primary);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    text-decoration-color: color-mix(in oklch, var(--primary) 35%, transparent);
+  }
+  .md-body a:hover {
+    text-decoration-color: var(--primary);
+  }
+
+  /* 分隔线 */
+  .md-body hr {
+    margin: 1.25rem 0;
+    border: 0;
+    border-top: 1px solid var(--border);
+  }
+
+  /* 降级通道（无可用消毒器时 renderMarkdown 输出 <pre class="md-fallback">） */
+  .md-fallback {
+    margin: 0;
+    white-space: pre-wrap;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.8125rem;
+    line-height: 1.7;
+  }
+}

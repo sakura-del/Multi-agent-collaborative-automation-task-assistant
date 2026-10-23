@@ -13,8 +13,19 @@ import type {
   ReviewReport,
   VerificationStatus,
 } from "@/api/types";
+import { renderMarkdown } from "@/utils/markdown";
 
-// 结果视图：左侧正文（纯文本渲染，不用 v-html），右侧克制的元数据栏
+// 结果视图：左侧正文（Markdown 渲染成排版 + 可切源码），右侧克制的元数据栏。
+//
+// ## 为什么不再用纯文本
+//
+// 原先用 `<pre>{{ final_markdown }}</pre>`，注释写的原因是「不用 v-html」
+// （安全考虑）。但用户看到的是一篇**带井号和星号的综述** —— 这是核心产出页，
+// 可读性影响最大。
+//
+// 现在改为 marked + DOMPurify 两段式（见 utils/markdown.ts）：
+// 渲染成排版，同时消毒；环境不支持可靠消毒时降级为转义纯文本。
+// 这样既保住安全底线，又不是把 Markdown 原样摆在用户面前。
 const props = defineProps<{
   taskId: string;
   report: ReviewReport;
@@ -23,6 +34,11 @@ const props = defineProps<{
 
 const downloading = ref<"markdown" | "docx" | null>(null);
 const errorMessage = ref<string | null>(null);
+/** 源码视图开关（默认渲染视图）。 */
+const showSource = ref(false);
+
+/** 消毒后的正文 HTML（`v-html` 用；安全性由 renderMarkdown 保证）。 */
+const renderedMarkdown = computed(() => renderMarkdown(props.report.final_markdown));
 
 const SCORE_LABELS: Record<string, string> = {
   citation_traceability: "引用可追溯性",
@@ -158,10 +174,35 @@ async function download(kind: "markdown" | "docx") {
 <template>
   <section class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_16rem]" data-test="task-result">
     <article class="min-w-0">
-      <h2 class="mb-2 text-base font-semibold tracking-tight">最终综述</h2>
-      <pre
-        class="max-h-[70vh] overflow-auto rounded-lg border border-border bg-card p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap"
+      <div class="mb-2 flex items-center justify-between gap-2">
+        <h2 class="text-base font-semibold tracking-tight">最终综述</h2>
+        <!-- 源码/预览切换：综述正文渲染成排版后，仍要能让用户看原始 Markdown
+             （核对引用标记、复制到别处都用得上）。 -->
+        <button
+          type="button"
+          data-test="toggle-md-source"
+          class="rounded px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          @click="showSource = !showSource"
+        >
+          {{ showSource ? "渲染视图" : "源码" }}
+        </button>
+      </div>
+
+      <!-- 渲染视图：Markdown → 消毒后的 HTML。
+           `renderMarkdown` 内部走 marked + DOMPurify（无可用消毒器时降级为
+           转义纯文本），所以这里用 v-html 是安全的 —— 详见 utils/markdown.ts。 -->
+      <div
+        v-if="!showSource"
         data-test="result-markdown"
+        class="md-body max-h-[70vh] overflow-auto rounded-lg border border-border bg-card px-5 py-4"
+        v-html="renderedMarkdown"
+      />
+
+      <!-- 源码视图：纯文本逐字展示（不解析），供核对与复制。 -->
+      <pre
+        v-else
+        data-test="result-markdown-source"
+        class="max-h-[70vh] overflow-auto rounded-lg border border-border bg-card p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap"
         >{{ props.report.final_markdown }}</pre
       >
     </article>
