@@ -21,15 +21,15 @@
 | 项 | 值 |
 | --- | --- |
 | 分支 | `main`（工作分支 `codex/plan3-literature-workflow` 与 main 同点） |
-| HEAD | … → MCP 契约 + CSL 标记 `1dcbb44` → 前端重设计阶段一 `c1dca26` → **任务列表重设计 `82f5fa1` + 两处回归修复 `93d4aff`/`0f81f91`** |
+| HEAD | … → 任务列表重设计 `82f5fa1` → 前端重设计阶段一 `c1dca26` → **任务详情页重设计 `a52daff` + 三处修复 `b92fd4a`/`bdef610`/`fbdd0bf`** |
 | 冻结 tag | `defense-v1` |
 | Plan 状态 | Plan 2 / 3 / 4 / 5 **全部 Exit Gate PASSED**；**Phase 1 五项全部端到端可用且遗留清零**；**Phase 2 五项全部交付完成**（PRISMA ✅ + 可观测性 ✅ + 团队工作区 ✅ + 开放 API ✅ + 计费套餐 ✅） |
 | 产品化进度 | **Issue #2~#7 全部关闭且遗留清零**；**P1-D 配额遗留已修复**；**`max_results` 已夹紧**；**PRISMA 完成**；**可观测性完成**（8 指标 + `/metrics` + 看板）；**团队工作区完成**（工作区/席位/邀请码/批注；归属双轨；viewer 可批注）；**开放 API 完成**（Key 只存哈希 + 4 scope + 双通道鉴权 + MCP server 5 工具 + 管理页）；**计费套餐完成**（四档 + 篇数为主 token 为辅 + 四条功能门禁 + 手工开通 + 套餐页）；**前端已迁移到 Tailwind v4 + shadcn-vue / Nova** |
 | 数据库迁移 head | **`a3c9e6d2b8f1`**（plan / subscription / usage_counter 三表 + 四套餐种子） |
 | 后端测试 | **2630+ passed**, 8 skipped；覆盖率 **~89%**；`mypy` 0 错误（200 文件） |
-| 前端测试 | Vitest **292 passed**；**Playwright E2E 26 场景**（chromium 24 passed / 2 需 LLM 余额） |
+| 前端测试 | Vitest **318 passed**（+6 skipped）；**Playwright E2E 26 场景**（chromium 23 passed / 2 需 LLM 余额 / 1 偶发资源耗尽） |
 | CI | **6/6 作业全绿**（2026-10-21 `8e25670` 复验；开放 API 待复验） |
-| 服务器 | 已同步至 `1dcbb44`，五容器 healthy，`/api/v1/health/ready` → `{"status":"ready"}`，`alembic current` = `a3c9e6d2b8f1 (head)`，四套餐种子已就位，**向量库 id 级一致（28344 条，`ids_verified=True`）** |
+| 服务器 | 已同步至 `fbdd0bf`，五容器 healthy，`/api/v1/health/ready` → `{"status":"ready"}`，`alembic current` = `a3c9e6d2b8f1 (head)`，四套餐种子已就位，**向量库 id 级一致（28344 条，`ids_verified=True`）** |
 
 **演示账号**：`demo` / `demo12345` —— **全权限管理员**（`role=admin` + `institution` 套餐：篇数不限 / 含团队 / 含开放 API）；知识库 11 篇 / 28341 分块
 **E2E 固定账号**：`e2efull` / `e2ereconn`，密码 `e2e-password-2026`（复用，不再每次注册——`auth_register` 限流 5 次/3600s）
