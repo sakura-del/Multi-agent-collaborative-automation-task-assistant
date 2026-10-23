@@ -76,9 +76,9 @@ function handleLogout() {
 
 <template>
   <div class="grid min-h-screen grid-cols-1 bg-background md:grid-cols-[14rem_1fr]">
-    <!-- 侧栏（窄屏折成顶部横向导航） -->
+    <!-- 侧栏（窄屏折成单行横向滚动导航） -->
     <aside
-      class="flex flex-col gap-6 border-b border-border bg-card px-3 py-4 md:border-b-0 md:border-r md:py-6"
+      class="relative flex flex-col gap-6 border-b border-border bg-card px-3 py-4 max-md:gap-0 md:border-b-0 md:border-r md:py-6"
     >
       <!-- 品牌：微缩标记 + 名称（beUI 用紧凑字标，不做大 logo） -->
       <div class="hidden items-center gap-2 px-2 md:flex">
@@ -92,22 +92,20 @@ function handleLogout() {
       </div>
 
       <nav
-        class="app-nav__links flex min-w-0 flex-1 flex-wrap items-start gap-x-4 gap-y-5 md:flex-col md:flex-nowrap md:gap-6"
+        class="app-nav__links flex min-w-0 flex-1 items-center gap-x-4 gap-y-5 max-md:flex-nowrap max-md:overflow-x-auto max-md:pb-1 md:flex-col md:flex-nowrap md:items-stretch md:gap-6"
         aria-label="主导航"
       >
-        <div
-          v-for="group in NAV_GROUPS"
-          :key="group.label || 'main'"
-          class="min-w-0 md:w-full"
-        >
-          <!-- 分组标题：微缩大写 + 字距放开（beUI 的导航语言） -->
+        <div v-for="group in NAV_GROUPS" :key="group.label || 'main'" class="shrink-0 md:w-full">
+          <!-- 分组标题：微缩大写 + 字距放开（beUI 的导航语言）。
+               窄屏不显示 —— 横向滚动条里放不下分组标签，
+               且窄屏优先保证"一眼看到全部入口"。 -->
           <p
             v-if="group.label"
             class="mb-1.5 hidden px-2 text-[11px] font-medium tracking-wider text-muted-foreground uppercase md:block"
           >
             {{ group.label }}
           </p>
-          <div class="flex flex-wrap items-center gap-1 md:flex-col md:items-stretch">
+          <div class="flex items-center gap-1 md:flex-col md:items-stretch">
             <RouterLink
               v-for="item in group.items"
               :key="item.name"
@@ -122,8 +120,11 @@ function handleLogout() {
         </div>
       </nav>
 
-      <!-- 当前用户：底部分隔线 + 用户名 + 登出 -->
-      <div class="flex items-center justify-between gap-2 border-t border-border px-2 pt-3 md:mt-auto">
+      <!-- 当前用户：底部分隔线 + 用户名 + 登出。
+           窄屏把登出按钮挪到右上角绝对定位，不再占导航行空间。 -->
+      <div
+        class="flex items-center justify-between gap-2 border-t border-border px-2 pt-3 max-md:absolute max-md:top-2.5 max-md:right-2 max-md:border-0 max-md:p-0 md:mt-auto"
+      >
         <div class="hidden min-w-0 md:block">
           <p class="truncate text-xs font-medium text-foreground" :title="auth.user?.email">
             {{ auth.user?.username ?? "未登录" }}
