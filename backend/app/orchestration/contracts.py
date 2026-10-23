@@ -288,5 +288,15 @@ class TaskSnapshot(BaseModel):
     subtasks: list[SubtaskSnapshot] = Field(default_factory=list)
     artifacts: list[dict[str, Any]] = Field(default_factory=list)
     review_report: dict[str, Any] | None = None
+    #: 综述正文（Markdown）。**必须随快照下发** —— 开放 API / MCP 直接消费它：
+    #: `app/mcp/tools.py::get_task_output` 读 `snapshot["final_output"]`，
+    #: `get_task_status` 用 `bool(final_output)` 判断「有没有产出」。
+    #:
+    #: 曾经漏掉过：执行层会**写入** `task.final_output`，但契约里没有这个字段
+    #: （且 `extra="forbid"`），序列化时被静默丢弃 → MCP 永远返回 `markdown: null`、
+    #: 永远提示「尚无产出」。既有测试用手写 dict 替身伪造了这个字段，所以全绿。
+    #:
+    #: `None`（而非空串）表示「还没产出」，调用方靠它区分状态。
+    final_output: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None

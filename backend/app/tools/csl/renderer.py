@@ -218,12 +218,19 @@ class CitationRenderer:
             seen.add(item.id)
 
         style_cache: dict[tuple[str, str], CitationStylesStyle] = {}
-        for item in ordered:
+        for position, item in enumerate(ordered):
             locale = locale_for_language(item.language, default=meta.default_locale)
             number = numbers.get(item.id)
             try:
                 entry_text, engine_marker = self._render_item(
-                    meta.path, locale, item, style_cache, bibliography
+                    meta.path,
+                    locale,
+                    item,
+                    style_cache,
+                    bibliography,
+                    # 前序条目：让 citeproc 的 citation-number 与全局序号一致
+                    # （只喂单条时它永远是 1 → 多条串号）
+                    preceding=ordered[:position],
                 )
             except Exception as exc:  # 样式解析 / 引擎渲染任何异常都不得让整篇参考文献失败
                 _add_warning(
@@ -243,7 +250,16 @@ class CitationRenderer:
                 bibliography.entries.append(entry_text)
 
             if meta.numbering == "citation-number":
-                marker = f"[{number}]"
+                # **正文标记必须来自样式本身**（CSL `<citation><layout prefix/suffix>`）。
+                #
+                # 曾经的缺陷：这里硬编码 `f"[{number}]"`，导致自定义样式的
+                # `<citation>` 段完全不生效 —— 参考文献列表按样式渲染，正文却永远是
+                # `[1]`。GB/T 7714 顺序编码制正好就是 `[1]`，所以预置样式的测试全绿，
+                # 只有真实上传的自定义样式（如 `〔1〕`）才会暴露。
+                #
+                # `engine_marker` 是 `_render_item` 里由 citeproc 按样式算出来的，
+                # 优先用它；为空（引擎未产出）才回退内置 `[n]`。
+                marker = engine_marker.strip() or f"[{number}]"
             else:
                 marker = engine_marker.strip() or fallback_citation_marker(
                     item, numbering=meta.numbering, number=number, locale=locale
@@ -284,23 +300,42 @@ class CitationRenderer:
         item: CslItem,
         style_cache: dict[tuple[str, str], CitationStylesStyle],
         bibliography: RenderedBibliography,
+        *,
+        preceding: Sequence[CslItem] = (),
     ) -> tuple[str, str]:
-        """渲染单条条目与行内 marker；异常向上抛（由 :meth:`render` 兜底并记 warning）。"""
+        """渲染单条条目与行内 marker；异常向上抛（由 :meth:`render` 兜底并记 warning）。
+
+        ## `preceding` 为什么必要
+
+        citeproc 的 `citation-number` 是**按 citation 注册顺序**分配的。只把当前条目
+        喂给引擎，它是第 1 个 → 永远算成 1。
+
+        实测后果：两条文献的正文标记都是 `〔1〕`（**串号**）。这在「数字制 + 自定义
+        样式」组合下必然发生，而 GB/T 7714 走硬编码路径时看不出来。
+
+        修法：把该条目**之前**的条目一起注册（按同一顺序），当前条目才会拿到正确序号。
+        条目数量级是几十条，重复注册的开销可忽略。
+        """
         key = (str(style_path), locale)
         style = style_cache.get(key)
         if style is None:
             style = CitationStylesStyle(str(style_path), locale=locale, validate=False)
             style_cache[key] = style
 
-        source = CiteProcJSON([item.to_csl_json()])
+        # 前序条目 + 当前条目一起进引擎，保证 citation-number 与全局序号一致
+        all_items = [*preceding, item]
+        source = CiteProcJSON([entry.to_csl_json() for entry in all_items])
         engine = CitationStylesBibliography(style, source, formatter.plain)
-        citation = Citation([CitationItem(item.id)])
-        engine.register(citation)
+        citations = [Citation([CitationItem(entry.id)]) for entry in all_items]
+        for citation in citations:
+            engine.register(citation)
 
+        target = citations[-1]
         raw_entries = [str(entry) for entry in engine.bibliography()]
-        raw_marker = engine.cite(citation, lambda _missing: None)
+        raw_marker = engine.cite(target, lambda _missing: None)
 
-        entry = raw_entries[0] if raw_entries else ""
+        # 引擎按注册顺序输出 bibliography，当前条目是最后一条
+        entry = raw_entries[-1] if raw_entries else ""
         marker = str(raw_marker) if raw_marker else ""
         if not entry.strip():
             _add_warning(

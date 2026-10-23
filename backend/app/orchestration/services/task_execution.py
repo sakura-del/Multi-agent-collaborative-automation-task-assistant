@@ -1411,6 +1411,9 @@ class TaskExecution:
             subtasks=subtasks,
             artifacts=list(task.artifacts or []),
             review_report=task.review_report,
+            # 正文必须随快照下发：MCP/开放 API 的 get_task_output 读的就是它。
+            # 曾经漏掉 → MCP 永远返回 markdown: null（tests 用 dict 替身掩盖了）。
+            final_output=task.final_output,
             created_at=created_at,
             updated_at=updated_at,
         )
