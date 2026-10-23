@@ -129,14 +129,18 @@ async def get_stats(
     current_user: User = Depends(get_current_active_user),
     service: KnowledgeDocumentService = Depends(get_document_service),
 ) -> KnowledgeStatsOut:
-    """统计当前用户的文档数与分块数。"""
-    total_docs, total_chunks = await service.stats(current_user.id)
-    return KnowledgeStatsOut(
-        total_docs=total_docs,
-        total_chunks=total_chunks,
-        vector_index_ready=True,
-        bm25_index_ready=True,
-    )
+    """统计当前用户的文档数、分块数与**真实**索引状态。
+
+    ## 为什么不再是硬编码
+
+    原先这里写死 `vector_index_ready=True, bm25_index_ready=True` ——
+    无论真实索引状况如何都报「就绪」。本会话已踩过同类坑：数据库说
+    28344 条向量就绪，Chroma 实际只有 4 条，向量检索对全体用户静默失效。
+
+    现在由 `service.index_health()` 用可验证的事实计算（见其 docstring）。
+    """
+    health = await service.index_health(current_user.id)
+    return KnowledgeStatsOut(**health)
 
 
 @router.post(

@@ -157,16 +157,33 @@ describe("DocumentUpload", () => {
 });
 
 describe("DocumentTable", () => {
-  it("shows title, type, source, status, chunks and created time", () => {
+  it("shows title, type, status, chunks and created time", () => {
     const wrapper = mount(DocumentTable, {
       props: { documents: [documentRow()] },
     });
 
     const row = wrapper.find('[data-test="document-row-doc-1"]');
     expect(row.text()).toContain("RAG 综述");
-    expect(row.text()).toContain("pdf");
-    expect(row.text()).toContain("upload");
+    // 类型用徽标展示（`pdf` → `PDF`，2026-10-23 重设计）
+    expect(row.text()).toContain("PDF");
     expect(row.text()).toContain("42");
+    // 来源列在「来源全相同」时隐藏（实测 11 篇全是 upload，该列无信息量）
+    expect(row.text()).not.toContain("upload");
+    expect(wrapper.find('[data-test="doc-col-source"]').exists()).toBe(false);
+  });
+
+  it("keeps the source column when sources actually differ", () => {
+    const wrapper = mount(DocumentTable, {
+      props: {
+        documents: [
+          documentRow(),
+          { ...documentRow(), id: "doc-2", source: "arxiv", title: "另一篇" },
+        ],
+      },
+    });
+
+    expect(wrapper.find('[data-test="doc-col-source"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="document-row-doc-2"]').text()).toContain("arxiv");
   });
 
   it("requires confirmation before deleting", async () => {

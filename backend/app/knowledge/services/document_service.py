@@ -17,6 +17,7 @@ import asyncio
 import re
 from dataclasses import replace
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
 from fastapi import UploadFile
@@ -227,6 +228,53 @@ class KnowledgeDocumentService:
     async def stats(self, user_id: UUID) -> tuple[int, int]:
         """统计用户文档数与分块数。"""
         return await self._repo.stats_for_user(user_id)
+
+    async def index_health(self, user_id: UUID) -> dict[str, Any]:
+        """计算该用户知识库的**真实**索引健康状态（2026-10-23）。
+
+        ## 为什么需要它
+
+        `/knowledge/stats` 原先把两个 ready 标志硬编码为 `True`。那是把
+        「未知」伪装成「就绪」—— 本会话已因同类谎言（数据库说向量就绪、
+        Chroma 只有 4 条）导致向量检索静默失效，最后靠实验异常才追查到。
+
+        现在一切来自可验证的事实：
+
+        - `vector_index_ready`：向量索引行数 == 分块数，且分块数 > 0；
+        - `bm25_index_ready`：进程内 BM25 索引确实就绪（查不到就报 False）。
+
+        `index_failed_count` / `indexing_count` 供页面提示「哪些需要你处理」。
+        """
+        total_docs, total_chunks = await self._repo.stats_for_user(user_id)
+        vector_rows = await self._repo.vector_rows_for_user(user_id)
+        status_counts = await self._repo.index_status_counts_for_user(user_id)
+
+        # 向量索引完整：有分块，且每个分块都有对应的向量索引行
+        vector_ready = total_chunks > 0 and vector_rows == total_chunks
+
+        return {
+            "total_docs": total_docs,
+            "total_chunks": total_chunks,
+            "vector_index_ready": vector_ready,
+            "bm25_index_ready": self._bm25_ready(),
+            "vector_index_rows": vector_rows,
+            "index_failed_count": status_counts.get("failed", 0),
+            "indexing_count": status_counts.get("indexing", 0),
+        }
+
+    @staticmethod
+    def _bm25_ready() -> bool:
+        """进程内 BM25 索引是否**确实**就绪。
+
+        取不到索引管理器（未初始化）时返回 False —— 「确认不了」不能显示成
+        「就绪」，否则又回到硬编码 `True` 的老问题。
+        """
+        try:
+            from app.knowledge.services.factory import get_index_manager
+
+            return bool(get_index_manager().get_stats().bm25_index_ready)
+        except Exception:  # 未初始化 / 实现差异：一律视为「无法确认」
+            return False
 
     async def search(self, user_id: UUID, request: KnowledgeSearchIn) -> list[RetrievalResult]:
         """检索：强制 user_id 过滤 + namespace 缓存隔离。"""

@@ -199,9 +199,20 @@ export interface KnowledgeDocumentList {
 export interface KnowledgeStats {
   total_docs: number;
   total_chunks: number;
+  /**
+   * 向量索引是否**真的**完整（2026-10-23 起由后端实际计算）。
+   *
+   * 此前后端把它硬编码为 `true` —— 本会话已因同类谎言（数据库说就绪、
+   * Chroma 只有 4 条向量）导致向量检索对全体用户静默失效。
+   */
   vector_index_ready: boolean;
+  /** 进程内 BM25 索引是否就绪（无法确认时后端返回 false）。 */
   bm25_index_ready: boolean;
   last_update?: string | null;
+  /** 索引失败的文档数（需要重新上传）。 */
+  index_failed_count?: number;
+  /** 正在索引的文档数（只需等待）。 */
+  indexing_count?: number;
 }
 
 export interface KnowledgeSearchInput {

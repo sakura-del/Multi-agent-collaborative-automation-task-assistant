@@ -37,13 +37,28 @@ class KnowledgeDocumentList(BaseModel):
 
 
 class KnowledgeStatsOut(BaseModel):
-    """索引统计响应体。"""
+    """索引统计响应体。
+
+    ## 两个 ready 标志的真实含义（2026-10-23 修复）
+
+    原先 `vector_index_ready` / `bm25_index_ready` 在端点里被**硬编码为 True**，
+    无论真实索引状况如何都报「就绪」。本会话已踩过同类的坑（SQLite 说 28344
+    条向量、Chroma 实际只有 4 条），所以这两个标志必须来自可验证的事实：
+
+    - `vector_index_ready`：该用户的向量索引行数 **等于** 分块数且大于 0；
+    - `bm25_index_ready`：进程内 BM25 索引**确实**已就绪（无法确认时为 False，
+      因为「确认不了」不该被显示成「就绪」）。
+    """
 
     total_docs: int
     total_chunks: int
     vector_index_ready: bool
     bm25_index_ready: bool
     last_update: str | None = None
+    #: 索引失败的文档数（需要重新上传）。
+    index_failed_count: int = 0
+    #: 正在索引的文档数（只需等待，无需操作）。
+    indexing_count: int = 0
 
 
 class KnowledgeSearchIn(BaseModel):

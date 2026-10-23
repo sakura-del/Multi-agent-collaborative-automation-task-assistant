@@ -14,11 +14,11 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.db.base import Base
-from app.db.models.knowledge import DocChunk, KnowledgeDoc
+from app.db.models.knowledge import DocChunk, KnowledgeDoc, VectorIndex
 from app.db.session import get_db
 from app.knowledge.services import factory
 
@@ -356,3 +356,108 @@ class TestSearch:
         for item in body["results"]:
             assert item["text"]
             assert item["score"] > 0
+
+
+class TestStatsIndexReadinessIsReal:
+    """索引状态必须来自真实数据（2026-10-23 知识库页重设计）。
+
+    ## 缺陷
+
+    `GET /knowledge/stats` 原先把 `vector_index_ready` / `bm25_index_ready`
+    硬编码成 `True`，无论真实索引状况如何都报「就绪」。
+
+    ## 为什么危险
+
+    本会话已踩过完全同类的坑：SQLite 有 28344 条 `vector_index`，Chroma 实际
+    只有 4 条向量，而 `index_status` 全是 `ready` —— **数据库在撒谎**，
+    向量检索对所有用户静默失效。
+
+    如果知识库页展示这个硬编码的 `True`，就是把谎言做成 UI。
+    """
+
+    def test_empty_kb_is_not_ready(self, client: TestClient) -> None:
+        """空知识库不能报「就绪」（0 条向量没有可检索的东西）。"""
+        token = _register_and_login(client, "kb-ready-empty")
+        data = client.get("/api/v1/knowledge/stats", headers=_auth(token)).json()
+
+        assert data["total_docs"] == 0
+        assert data["vector_index_ready"] is False
+
+    def test_complete_index_is_ready(self, client: TestClient) -> None:
+        token = _register_and_login(client, "kb-ready-ok")
+        _upload(client, token, "ok.txt", "索引完整性测试内容" * 20, "完整性文档")
+
+        data = client.get("/api/v1/knowledge/stats", headers=_auth(token)).json()
+        assert data["total_chunks"] > 0
+        assert data["vector_index_ready"] is True
+
+    def test_missing_vector_rows_make_it_not_ready(self, client: TestClient) -> None:
+        """**核心**：向量索引行缺失时必须报 False。
+
+        这正是实测踩过的漂移：`doc_chunk` 有行、`vector_index` 缺行 ——
+        `index_status` 仍是 ready，但检索实际找不到这段。
+        """
+        token = _register_and_login(client, "kb-ready-drift")
+        _upload(client, token, "drift.txt", "向量漂移测试内容" * 20, "漂移文档")
+
+        async def drop_vector_rows() -> None:
+            async with client.session_factory() as session:  # type: ignore[attr-defined]
+                doc = await session.scalar(
+                    select(KnowledgeDoc).where(KnowledgeDoc.title == "漂移文档")
+                )
+                assert doc is not None
+                chunk_ids = (
+                    (await session.execute(select(DocChunk.id).where(DocChunk.doc_id == doc.id)))
+                    .scalars()
+                    .all()
+                )
+                assert chunk_ids, "应至少有一个分块"
+                await session.execute(
+                    delete(VectorIndex).where(VectorIndex.chunk_id.in_(chunk_ids))
+                )
+                await session.commit()
+
+        asyncio.run(drop_vector_rows())
+
+        data = client.get("/api/v1/knowledge/stats", headers=_auth(token)).json()
+        assert data["vector_index_ready"] is False
+
+
+class TestStatsIndexStatusCounts:
+    """按索引状态计数（供页面提示「有 N 篇需要处理」）。"""
+
+    def test_counts_start_at_zero_and_are_per_user(self, client: TestClient) -> None:
+        token = _register_and_login(client, "kb-count-a")
+        _upload(client, token, "count.txt", "计数测试内容" * 10, "计数文档")
+
+        data = client.get("/api/v1/knowledge/stats", headers=_auth(token)).json()
+        assert data["index_failed_count"] == 0
+        assert data["indexing_count"] == 0
+
+        other = _register_and_login(client, "kb-count-b")
+        other_data = client.get("/api/v1/knowledge/stats", headers=_auth(other)).json()
+        assert other_data["total_docs"] == 0
+        assert other_data["index_failed_count"] == 0
+
+    def test_failed_docs_are_counted(self, client: TestClient) -> None:
+        token = _register_and_login(client, "kb-count-fail")
+        _upload(client, token, "fail.txt", "失败计数测试" * 10, "失败文档")
+
+        async def mark_failed() -> None:
+            async with client.session_factory() as session:  # type: ignore[attr-defined]
+                # 注意：`failure_reason` 不是独立列，它存在 `meta_info["error"]` 里
+                # （见 endpoints._to_out）。直接写 `failure_reason=` 会报列不存在。
+                await session.execute(
+                    update(KnowledgeDoc)
+                    .where(KnowledgeDoc.title == "失败文档")
+                    .values(
+                        index_status="failed",
+                        meta_info={"error": "模拟解析失败"},
+                    )
+                )
+                await session.commit()
+
+        asyncio.run(mark_failed())
+
+        data = client.get("/api/v1/knowledge/stats", headers=_auth(token)).json()
+        assert data["index_failed_count"] == 1
