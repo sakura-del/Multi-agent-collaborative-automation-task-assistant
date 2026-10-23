@@ -143,6 +143,18 @@ describe("进度列：不再有说谎的百分比进度条", () => {
     const wrapper = await mountWith([task({ status: "running" })]);
     expect(wrapper.findAll('[role="progressbar"]')).toHaveLength(1);
   });
+
+  it("终态不重复显示文字徽标（图标已表达同一件事）", async () => {
+    // 实测截图问题：`✓ 已完成` 并排出现，同一信息说两遍，降低可扫读性。
+    // 终态只保留形状图标；非终态（需要人看懂"正在做什么"）才配徽标。
+    const wrapper = await mountWith([
+      task({ task_id: "done", status: "completed", title: "完成的（x）" }),
+      task({ task_id: "wait", status: "waiting_approval", title: "待确认的（y）" }),
+    ]);
+
+    expect(wrapper.find('[data-test="task-row-done"]').text()).not.toContain("已完成");
+    expect(wrapper.find('[data-test="task-row-wait"]').text()).toContain("待确认规划");
+  });
 });
 
 describe("汇总统计", () => {

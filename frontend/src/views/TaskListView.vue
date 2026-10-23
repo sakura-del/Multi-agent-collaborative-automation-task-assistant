@@ -14,6 +14,7 @@ import type { TaskCreate, TaskSummary } from "@/api/types";
 import {
   formatDateTime,
   isActive,
+  isTerminal,
   needsUserAction,
   splitTaskTitle,
   taskProgress,
@@ -359,12 +360,16 @@ const rows = computed(() =>
               </div>
             </td>
 
-            <!-- 状态：图标（形状区分终态）+ 文字徽标 -->
-            <td class="px-3 py-2.5 max-md:flex max-md:items-center max-md:justify-between max-md:gap-3 max-md:px-0 max-md:py-1">
+            <!-- 状态：终态只留**形状图标**（✓/✕/⊖），非终态才配文字徽标。
+                 同屏渲染图标+徽标会说两遍同一件事（实测 `✓ 已完成` 并排），
+                 信息重复反而降低可扫读性。 -->
+            <td
+              class="px-3 py-2.5 max-md:flex max-md:items-center max-md:justify-between max-md:gap-3 max-md:px-0 max-md:py-1"
+            >
               <span class="hidden text-xs text-muted-foreground max-md:inline">状态</span>
               <span class="inline-flex items-center gap-1.5">
                 <TaskStatusIcon :status="row.task.status" />
-                <StatusBadge :status="row.task.status" />
+                <StatusBadge v-if="!isTerminal(row.task.status)" :status="row.task.status" />
               </span>
             </td>
 
