@@ -99,6 +99,12 @@ test("任务详情页展示导师批注面板", async ({ page, request }) => {
   await login(page, "demo", "demo12345");
   await page.goto(`/tasks/${taskId}`);
 
+  // 2026-10-23 重设计：批注从「每个 tab 底部常驻」改为**侧边抽屉，默认收起**
+  // （旧版挂在四个 tab 下面，含大块空态，把结果/日志挤得很长）。
+  // 所以先断言抽屉默认关闭，点开后再断言面板内容。
+  await expect(page.locator('[data-test="annotation-drawer"]')).toHaveCount(0);
+  await page.locator('[data-test="toggle-annotation"]').click();
+
   await expect(page.getByRole("heading", { name: "导师批注" })).toBeVisible({
     timeout: 30_000,
   });
