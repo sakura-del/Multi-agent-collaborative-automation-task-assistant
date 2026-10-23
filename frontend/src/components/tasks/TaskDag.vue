@@ -184,7 +184,7 @@ function statusOf(nodeId: string): SubtaskStatus | undefined {
         <div
           v-for="node in nodes"
           :key="node.id"
-          class="absolute flex cursor-pointer flex-col justify-center gap-0.5 rounded-lg border border-l-4 border-border bg-card px-2.5 py-2 text-left"
+          class="absolute flex cursor-pointer flex-col justify-center gap-1 overflow-hidden rounded-lg border border-l-4 border-border bg-card px-2.5 py-2 text-left"
           :class="[
             NODE_TONE_CLASS[nodeStatusTone(statusOf(node.id))],
             selected === node.id ? 'ring-2 ring-primary/35' : '',
@@ -202,8 +202,9 @@ function statusOf(nodeId: string): SubtaskStatus | undefined {
           @click="emit('select', node.id)"
           @keydown.enter.prevent="emit('select', node.id)"
         >
-          <span class="line-clamp-2 text-sm font-semibold">{{ node.title }}</span>
-          <span class="text-xs text-muted-foreground">
+          <!-- 标题最多两行；超出省略。`leading-snug` 保证两行不会挤到副标题。 -->
+          <span class="line-clamp-2 text-sm leading-snug font-semibold">{{ node.title }}</span>
+          <span class="truncate text-xs text-muted-foreground">
             {{ node.type }} · {{ nodeStatusLabel(statusOf(node.id)) }}
           </span>
         </div>

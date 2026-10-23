@@ -2,12 +2,19 @@ import type { PlanNode, SubtaskStatus } from "@/api/types";
 
 // DAG 几何：固定节点尺寸，按拓扑深度分列、同层按出现次序分行（确定性、不受状态影响）
 export const DAG_NODE_WIDTH = 200;
-export const DAG_NODE_HEIGHT = 68;
+/**
+ * 节点高度 84px（原 68）。
+ *
+ * 实测：标题两行 + 副标题一行需要约 76px 内容高度，68px 会溢出 ——
+ * 截图里第二行文字压在副标题上（「…书目信息与证据证据」叠字）。
+ * 加高到 84 保证两行标题不挤压元信息行。
+ */
+export const DAG_NODE_HEIGHT = 84;
 export const DAG_COLUMN_GAP = 96;
 export const DAG_ROW_GAP = 24;
 
-/** 纵向排列时的几何（换向后节点变窄、行距变小，因为纵向天然更紧凑）。 */
-export const DAG_VERTICAL_NODE_WIDTH = 240;
+/** 纵向排列时的几何（换向后节点变宽，因为纵向布局横向空间充裕）。 */
+export const DAG_VERTICAL_NODE_WIDTH = 300;
 export const DAG_VERTICAL_ROW_GAP = 40;
 
 /**

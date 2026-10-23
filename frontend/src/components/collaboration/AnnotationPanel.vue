@@ -45,6 +45,13 @@ const props = defineProps<{
   taskId: string;
   /** 当前用户 id（决定「删除」按钮是否显示）。 */
   currentUserId?: string;
+  /**
+   * 去掉自身外框与标题（2026-10-23 任务详情页改为侧边抽屉）。
+   *
+   * 抽屉自己已有标题栏与边框，面板再带一层会**重复显示「导师批注」**并多一圈框
+   * （截图实测）。默认 `false` 保持既有调用方行为不变。
+   */
+  bare?: boolean;
 }>();
 
 const annotations = ref<Annotation[]>([]);
@@ -139,8 +146,12 @@ function formatTime(value: string): string {
 </script>
 
 <template>
-  <section class="rounded-lg border border-border bg-card">
-    <header class="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2">
+  <section :class="props.bare ? '' : 'rounded-lg border border-border bg-card'">
+    <!-- bare 模式由外层（抽屉）提供标题栏，这里不再重复显示 -->
+    <header
+      v-if="!props.bare"
+      class="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2"
+    >
       <h2 class="flex items-center gap-1.5 text-sm font-medium">
         <MessageSquare class="size-4" />
         导师批注
@@ -149,7 +160,13 @@ function formatTime(value: string): string {
       <Badge v-else-if="annotations.length" variant="success">全部已处理</Badge>
     </header>
 
-    <div class="px-3 py-2">
+    <!-- bare 模式下把「待处理」计数放到内容顶部（信息不丢失） -->
+    <div v-else-if="unresolvedCount || annotations.length" class="mb-2 flex justify-end">
+      <Badge v-if="unresolvedCount" variant="warning">{{ unresolvedCount }} 条待处理</Badge>
+      <Badge v-else variant="success">全部已处理</Badge>
+    </div>
+
+    <div :class="props.bare ? '' : 'px-3 py-2'">
       <ErrorBanner :message="error" testid="annotation-error" />
 
       <form class="mb-2" data-test="annotation-form" @submit.prevent="submit">

@@ -327,7 +327,7 @@ onBeforeUnmount(() => {
           </button>
         </div>
         <div class="min-h-0 flex-1 overflow-y-auto p-4">
-          <AnnotationPanel :task-id="props.taskId" :current-user-id="currentUserId" />
+          <AnnotationPanel :task-id="props.taskId" :current-user-id="currentUserId" bare />
         </div>
       </aside>
     </Teleport>
