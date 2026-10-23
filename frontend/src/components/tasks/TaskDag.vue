@@ -151,12 +151,15 @@ function statusOf(nodeId: string): SubtaskStatus | undefined {
       </span>
     </div>
 
-    <!-- 容器：宽度实测 → 驱动换向。纵向时允许纵向滚动（节点多也不会丢）。 -->
+    <!-- 容器：宽度实测 → 驱动换向。纵向时允许纵向滚动（节点多也不会丢）。
+         高度上限按「放得下 6 个纵向节点」取（6×84 + 5×40 = 704）。
+         实测踩到：上限设 520 时 5 个节点（580px）只能看到 4 个 ——
+         又是裁切。宁可容器高一点，也不要让用户以为节点丢了。 -->
     <div
       ref="containerRef"
       data-test="dag-viewport"
       :data-orientation="layout.orientation"
-      class="max-h-[520px] max-w-full min-w-0 overflow-auto rounded-lg border border-border bg-background p-3"
+      class="max-h-[70vh] max-w-full min-w-0 overflow-auto rounded-lg border border-border bg-background p-3"
     >
       <div
         class="relative"
