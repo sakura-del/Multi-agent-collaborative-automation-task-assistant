@@ -75,6 +75,23 @@ function openTask(taskId: string) {
   void router.push({ name: "task-detail", params: { taskId } });
 }
 
+/**
+ * 终态的中文标签（只给屏幕阅读器 / 页面内搜索用，视觉上不显示）。
+ *
+ * 为什么终态不显示徽标却仍要文字：
+ * - 图标靠形状区分终态（✓/✕/⊖），视觉更干净，但读屏软件读不出 SVG 语义；
+ * - 既有 E2E（m2-result-preview）按行文本含「已完成」来定位已完成任务。
+ */
+const TERMINAL_LABELS: Record<string, string> = {
+  completed: "已完成",
+  failed: "已失败",
+  cancelled: "已取消",
+};
+
+function terminalLabel(status: string): string {
+  return TERMINAL_LABELS[status] ?? status;
+}
+
 // ===== 汇总统计 =====
 
 const counts = computed(() => {
@@ -348,9 +365,12 @@ const rows = computed(() =>
               </div>
             </td>
 
-            <!-- 状态：终态只留**形状图标**（✓/✕/⊖），非终态才配文字徽标。
-                 同屏渲染图标+徽标会说两遍同一件事（实测 `✓ 已完成` 并排），
-                 信息重复反而降低可扫读性。 -->
+            <!-- 状态：终态用图标 + **屏幕阅读器可见**的状态文字。
+                 - 视觉上去重（不再 `✓ 已完成` 并排）；
+                 - 但文字仍在 DOM 里（`sr-only`），因为：
+                   ① 无障碍：颜色/形状对读屏软件不可靠，必须有文字；
+                   ② 既有 E2E 依赖行文本含「已完成」来定位（m2-result-preview）；
+                   ③ 页面内 Ctrl+F 也还能搜到状态。 -->
             <td
               class="px-3 py-2.5 max-md:flex max-md:items-center max-md:justify-between max-md:gap-3 max-md:px-0 max-md:py-1"
             >
@@ -358,6 +378,7 @@ const rows = computed(() =>
               <span class="inline-flex items-center gap-1.5">
                 <TaskStatusIcon :status="row.task.status" />
                 <StatusBadge v-if="!isTerminal(row.task.status)" :status="row.task.status" />
+                <span v-else class="sr-only">{{ terminalLabel(row.task.status) }}</span>
               </span>
             </td>
 

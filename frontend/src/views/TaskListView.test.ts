@@ -144,15 +144,26 @@ describe("进度列：不再有说谎的百分比进度条", () => {
     expect(wrapper.findAll('[role="progressbar"]')).toHaveLength(1);
   });
 
-  it("终态不重复显示文字徽标（图标已表达同一件事）", async () => {
-    // 实测截图问题：`✓ 已完成` 并排出现，同一信息说两遍，降低可扫读性。
-    // 终态只保留形状图标；非终态（需要人看懂"正在做什么"）才配徽标。
+  it("终态不重复渲染可见徽标，但文字仍在 DOM 里（无障碍 + E2E 契约）", async () => {
+    // 实测截图问题：`✓ 已完成` 并排，同一信息说两遍，降低可扫读性。
+    // 但文字**不能**从 DOM 里删掉：
+    //   ① 读屏软件读不出 SVG 图标语义，必须有文字；
+    //   ② 既有 E2E（m2-result-preview）按行文本含「已完成」定位已完成任务
+    //      —— 删掉后它找不到行，会退到打开第一条（可能没有结果）而失败。
+    // 所以：终态用 `sr-only` 文字（视觉隐藏、DOM 保留）。
     const wrapper = await mountWith([
       task({ task_id: "done", status: "completed", title: "完成的（x）" }),
       task({ task_id: "wait", status: "waiting_approval", title: "待确认的（y）" }),
     ]);
 
-    expect(wrapper.find('[data-test="task-row-done"]').text()).not.toContain("已完成");
+    const doneRow = wrapper.find('[data-test="task-row-done"]');
+    // 文本在（E2E / 读屏可用）
+    expect(doneRow.text()).toContain("已完成");
+    // 但走的是 sr-only 通道，不是可见徽标
+    const srOnly = doneRow.findAll("span.sr-only").filter((el) => el.text() === "已完成");
+    expect(srOnly).toHaveLength(1);
+
+    // 非终态仍需可见的文字徽标（用户要看懂系统正在做什么）
     expect(wrapper.find('[data-test="task-row-wait"]').text()).toContain("待确认规划");
   });
 });
