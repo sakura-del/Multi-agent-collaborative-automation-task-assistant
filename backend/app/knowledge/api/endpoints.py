@@ -149,8 +149,21 @@ async def search(
     current_user: User = Depends(get_current_active_user),
     service: KnowledgeDocumentService = Depends(get_document_service),
 ) -> KnowledgeSearchOut:
-    """检索当前用户的知识库（强制 user_id 过滤）。"""
-    results = await service.search(current_user.id, req)
+    """检索当前用户的知识库（强制 user_id 过滤）。
+
+    ## 必须调 `search_for_context()` 而不是 `search()`
+
+    `search()` 直接返回索引层结果，`chunk_id` 是 **Chroma 内部 id**
+    （形如 `9eac9177523794ed`，16 位 hex）—— 前端拿到它**点不回原文**。
+
+    `search_for_context()` 内部走 `_attach_storage_ids()`，按
+    `VectorIndex.chroma_id` 把索引 id 换成 `DocChunk.id` / `KnowledgeDoc.id`
+    的 UUID，引用才能回溯。
+
+    实测（2026-10-23 巡检）：走 `search()` 时接口返回的 chunk_id 是
+    `9eac9177523794ed`，不是 UUID —— 「每条证据可点回原文」的核心能力断裂。
+    """
+    results = await service.search_for_context(current_user.id, req.query, top_k=req.top_k)
     return KnowledgeSearchOut(
         query=req.query,
         total=len(results),
