@@ -162,6 +162,74 @@ class TestConsumeReview:
         assert usage["reviews_remaining"] is None, "不限篇数时剩余为 None"
 
 
+class TestUsagePayloadForPlanPage:
+    """套餐页重设计（2026-10-26）所需的用量载荷字段。
+
+    ## 为什么要改契约，而不是前端自己补
+
+    实测（服务器 + 真实浏览器，2026-10-26）：套餐页的「当前套餐」卡只显示
+
+    ```
+    机构版  2026-10   3 / 不限 篇
+    ```
+
+    **三项权益一条都没有**（团队 / 开放 API / 席位 / 工作区），
+    而下面「可选套餐」卡里每一项都列了。后果是：用户要判断「我该不该升级」时，
+    必须自己拿当前套餐名去下面四张卡里对照找——页面上没有直接答案。
+
+    这些字段后端**本来就有**（`Plan` 表里全是现成的列），只是 `get_usage`
+    没返回。让前端去猜是错的：前端猜就等于第二份套餐配置，改价/改权益时必然漂移。
+    """
+
+    @pytest.mark.asyncio
+    async def test_usage_carries_entitlements(self, factory) -> None:
+        """当前套餐的权益必须随用量一起返回（否则当前卡只能显示名字）。"""
+        user = await _user(factory, "e1")
+        service = PlanService(factory)
+        await service.subscribe(user.id, "student", note="测试")
+
+        usage = await service.get_usage(user.id)
+
+        # 学生版：团队 ✅、API ❌、1 个工作区、3 席位
+        assert usage["allow_team"] is True
+        assert usage["allow_api_access"] is False
+        assert usage["max_workspaces"] == 1
+        assert usage["max_seats_per_workspace"] == 3
+
+    @pytest.mark.asyncio
+    async def test_usage_carries_subscription_period_end(self, factory) -> None:
+        """到期时间必须返回：用户最关心「什么时候过期」。
+
+        实测缺陷：页面上只有 `2026-10`（用量周期），**没有订阅到期日**。
+        两者是不同的东西——用量按月重置，订阅按购买日 +30 天到期。
+        用户看到 `2026-10` 会以为 10 月底才需要续费，而订阅可能 11 月 22 日到期。
+        """
+        user = await _user(factory, "e2")
+        service = PlanService(factory)
+        subscription = await service.subscribe(user.id, "student", note="测试")
+
+        usage = await service.get_usage(user.id)
+
+        assert usage["period_end"] is not None
+        # 与订阅记录一致（不重新算一遍，直接取自同一行）
+        assert usage["period_end"] == subscription.period_end
+        # 免费档没有订阅行 → 到期时间为 None，不是假日期
+        free_user = await _user(factory, "e3")
+        free_usage = await service.get_usage(free_user.id)
+        assert free_usage["period_end"] is None
+
+    @pytest.mark.asyncio
+    async def test_usage_carries_seats_purchased(self, factory) -> None:
+        """已购席位必须返回（机构版按席位计价，这是金额相关字段）。"""
+        user = await _user(factory, "e4")
+        service = PlanService(factory)
+        await service.subscribe(user.id, "institution", note="测试", seats=5)
+
+        usage = await service.get_usage(user.id)
+
+        assert usage["seats_purchased"] == 5
+
+
 class TestMonthlyReset:
     @pytest.mark.asyncio
     async def test_new_month_starts_fresh(self, factory) -> None:

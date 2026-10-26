@@ -336,9 +336,27 @@ class PlanService:
     async def get_usage(
         self, user_id: uuid.UUID, *, moment: datetime | None = None
     ) -> dict[str, object]:
-        """当前周期的篇数用量。
+        """当前周期的篇数用量 + **当前套餐权益**（2026-10-26 套餐页重设计新增）。
 
         `reviews_remaining` 为 `None` 表示不限篇数（机构版）。
+
+        ## 为什么把套餐权益也塞进用量载荷
+
+        套餐页的「当前套餐」卡原先只显示 `机构版 / 2026-10 / 3 篇`，
+        **三项权益一条都没有**，而下面「可选套餐」卡每项都列了。
+        用户要判断「该不该升级」得自己拿名字去四张卡里对照找 —— 页面上没有答案。
+
+        这些字段 `Plan` 表里本来就有，只是没返回。**不让前端自己猜**：
+        前端猜就等于第二份套餐配置，改价/改权益时必然与后端漂移。
+
+        ## `period_end` 与 `period_key` 是两个不同的东西
+
+        - `period_key`（`2026-10`）= **用量**周期，自然月，用于篇数重置；
+        - `period_end` = **订阅**到期日（购买日 + N 天）。
+
+        实测缺陷：页面只显示 `2026-10`，用户会以为「10 月底才需要续费」，
+        而实际订阅可能是 11 月 22 日到期。免费档没有订阅行 → `period_end` 为 `None`
+        （不是编一个假日期）。
         """
         now = moment or datetime.now(UTC)
         period_key = period_key_for(now)
@@ -350,6 +368,7 @@ class PlanService:
                     UsageCounter.period_key == period_key,
                 )
             )
+            subscription = await self._active_subscription(session, user_id, now)
         used_count = int(used or 0)
         limit = plan.monthly_reviews
         remaining = None if limit == UNLIMITED_REVIEWS else max(0, limit - used_count)
@@ -360,6 +379,17 @@ class PlanService:
             "reviews_remaining": remaining,
             "plan_id": plan.id,
             "plan_name": plan.name,
+            # ===== 当前套餐权益（前端「当前套餐」卡直接渲染，不再自己拼）=====
+            "allow_team": bool(plan.allow_team),
+            "allow_api_access": bool(plan.allow_api_access),
+            "max_workspaces": int(plan.max_workspaces),
+            "max_seats_per_workspace": int(plan.max_seats_per_workspace),
+            "price_cents": int(plan.price_cents),
+            # ===== 订阅信息（与用量周期区分开）=====
+            "period_end": subscription.period_end if subscription is not None else None,
+            "seats_purchased": (
+                int(subscription.seats_purchased) if subscription is not None else None
+            ),
         }
 
     async def check_and_consume_review(

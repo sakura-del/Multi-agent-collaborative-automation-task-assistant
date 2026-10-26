@@ -289,3 +289,48 @@ class TestUsageEndpoint:
         assert body["monthly_reviews"] == 10
         assert body["reviews_remaining"] == 9
         assert body["plan_id"] == "student"
+
+    def test_usage_exposes_entitlements_over_http(self, api) -> None:
+        """HTTP 层必须透出当前套餐权益（2026-10-26 套餐页重设计）。
+
+        服务层已测过（`test_plan_service.py::TestUsagePayloadForPlanPage`），
+        这里锁 HTTP 契约：`UsageOut` 少一个字段，前端「当前套餐」卡就会退化成
+        「只有一个名字」——而那正是本次要修的缺陷。
+        """
+        user = _user(api, "u2")
+        _subscribe(api, user, "pro")
+        client = api.state.client
+
+        resp = client.get("/api/v1/billing/usage", headers=_headers(user))
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        # 专业版：团队 ✅、API ✅、5 工作区、10 席位、¥69
+        assert body["allow_team"] is True
+        assert body["allow_api_access"] is True
+        assert body["max_workspaces"] == 5
+        assert body["max_seats_per_workspace"] == 10
+        assert body["price_cents"] == 6900
+        # 订阅信息：到期时间与已购席位
+        assert body["period_end"] is not None
+        assert body["seats_purchased"] == 1
+
+    def test_usage_period_end_is_null_for_free_plan(self, api) -> None:
+        """免费档没有订阅行 → `period_end` / `seats_purchased` 必须是 null。
+
+        为什么不编一个「本月底」：那是假日期。用户会以为「到 10 月底套餐就到期」，
+        而免费档根本没有到期概念。null 让前端能显示「免费档（无到期日）」。
+        """
+        user = _user(api, "u3")
+        client = api.state.client
+
+        resp = client.get("/api/v1/billing/usage", headers=_headers(user))
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["plan_id"] == "free"
+        assert body["period_end"] is None
+        assert body["seats_purchased"] is None
+        # 免费档额度 1 篇，用掉 0 篇
+        assert body["monthly_reviews"] == 1
+        assert body["reviews_remaining"] == 1

@@ -578,13 +578,22 @@ export interface BillingPlan {
 }
 
 /**
- * 我的用量。
+ * 我的用量 + **当前套餐权益**。
  *
  * ⚠️ 进度条直接用这三个字段，**不要自己算**：
  * 口径（UTC 自然月）在服务端定义，前端重算必然漂移。
+ *
+ * ## `period_key` 与 `period_end` 不是一回事（别混用）
+ *
+ * | 字段 | 含义 |
+ * | --- | --- |
+ * | `period_key` | **用量**周期（自然月，篇数按月重置），如 `2026-10` |
+ * | `period_end` | **订阅**到期日（购买日 + N 天） |
+ *
+ * 只显示 `period_key` 会让用户以为「10 月底才续费」，而订阅可能 11 月到期。
  */
 export interface BillingUsage {
-  /** 周期 YYYY-MM（UTC 年月） */
+  /** 用量周期 YYYY-MM（UTC 年月） */
   period_key: string;
   reviews_used: number;
   /** 本月额度；-1 = 不限 */
@@ -593,6 +602,24 @@ export interface BillingUsage {
   reviews_remaining: number | null;
   plan_id: string;
   plan_name: string;
+
+  // ===== 当前套餐权益（2026-10-26 重设计新增）=====
+  // 「当前套餐」卡直接渲染这些字段，**不要**拿 plan_id 去 plans 列表里找：
+  // 那等于前端维护第二份套餐配置，后端改权益时必然漂移。
+  allow_team?: boolean;
+  allow_api_access?: boolean;
+  /** 可创建工作区上限 */
+  max_workspaces?: number;
+  /** 单工作区席位上限 */
+  max_seats_per_workspace?: number;
+  /** 月费（分）；0 = 免费 */
+  price_cents?: number;
+
+  // ===== 订阅信息（与用量周期区分）=====
+  /** 订阅到期时间；免费档为 null（不是假日期） */
+  period_end?: string | null;
+  /** 已购席位数；免费档为 null */
+  seats_purchased?: number | null;
 }
 
 /** 订阅信息（管理员开通后返回）。 */

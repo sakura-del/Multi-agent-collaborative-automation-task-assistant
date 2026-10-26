@@ -37,18 +37,39 @@ class PlanOut(BaseModel):
 
 
 class UsageOut(BaseModel):
-    """我的用量。
+    """我的用量 + **当前套餐权益**（2026-10-26 套餐页重设计扩充）。
 
     前端进度条直接用这三个字段，**不要自己算** —— 口径（自然月、UTC）
     在服务端定义，前端重算必然漂移。
+
+    ## `period_key` 与 `period_end` 不是一回事（别混用）
+
+    | 字段 | 含义 | 例子 |
+    | --- | --- | --- |
+    | `period_key` | **用量**周期（自然月，篇数按月重置） | `2026-10` |
+    | `period_end` | **订阅**到期日（购买日 + N 天） | `2026-11-22` |
+
+    只给 `period_key` 会让用户以为「10 月底才续费」，而订阅可能 11 月就到期。
+    免费档没有订阅行 → `period_end` 为 `null`（不是编一个假日期）。
     """
 
-    period_key: str = Field(description="周期 YYYY-MM（UTC 年月）")
+    period_key: str = Field(description="用量周期 YYYY-MM（UTC 年月）")
     reviews_used: int
     monthly_reviews: int = Field(description="本月额度；-1 = 不限")
     reviews_remaining: int | None = Field(default=None, description="剩余篇数；null = 不限")
     plan_id: str
     plan_name: str
+
+    # ===== 当前套餐权益（「当前套餐」卡直接渲染，前端不再自己拼第二份配置）=====
+    allow_team: bool = Field(default=False, description="是否含团队协作")
+    allow_api_access: bool = Field(default=False, description="是否含开放 API")
+    max_workspaces: int = Field(default=0, description="可创建工作区上限")
+    max_seats_per_workspace: int = Field(default=0, description="单工作区席位上限")
+    price_cents: int = Field(default=0, description="月费（分）；0 = 免费")
+
+    # ===== 订阅信息（与用量周期区分）=====
+    period_end: datetime | None = Field(default=None, description="订阅到期时间；免费档为 null")
+    seats_purchased: int | None = Field(default=None, description="已购席位数；免费档为 null")
 
 
 class SubscribeRequest(BaseModel):
