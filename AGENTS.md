@@ -21,15 +21,15 @@
 | 项 | 值 |
 | --- | --- |
 | 分支 | `main`（工作分支 `codex/plan3-literature-workflow` 与 main 同点） |
-| HEAD | … → Word 模板页修复 `cd30286` → **引用库（导入页补齐）`6fdd213`** |
+| HEAD | … → Word 模板页修复 `cd30286` → 引用库 `6fdd213` → 摘要修复 `65364ed` → **mypy 修复 `cd215a0`** |
 | 冻结 tag | `defense-v1` |
 | Plan 状态 | Plan 2 / 3 / 4 / 5 **全部 Exit Gate PASSED**；**Phase 1 五项全部端到端可用且遗留清零**；**Phase 2 五项全部交付完成**（PRISMA ✅ + 可观测性 ✅ + 团队工作区 ✅ + 开放 API ✅ + 计费套餐 ✅） |
 | 产品化进度 | **Issue #2~#7 全部关闭且遗留清零**；**P1-D 配额遗留已修复**；**`max_results` 已夹紧**；**PRISMA 完成**；**可观测性完成**（8 指标 + `/metrics` + 看板，**看板数字已全部为真**）；**团队工作区完成**；**开放 API 完成**；**计费套餐完成**（四档 + 四条功能门禁 + 手工开通 + **套餐页已重设计**）；**引用样式页已重设计**（**真实渲染预览** + 删除二次确认）；**Word 模板页已修**（**不再把示例填充谎称成稿** + 删除二次确认）；**前端已迁移到 Tailwind v4 + shadcn-vue** |
 | 数据库迁移 head | **`b7d4e9f1c6a2`**（`reference_library_item` 引用库表） |
 | 后端测试 | **2705 passed**, 8 skipped；覆盖率 **~89%**；`mypy` 0 错误（205 文件） |
-| 前端测试 | Vitest **448 passed**（+6 skipped）；**Playwright E2E 42 场景**（chromium 39 passed / 2 需 LLM 余额 / 1 偶发资源耗尽） |
-| CI | **6/6 作业全绿**（2026-10-21 `8e25670` 复验；本轮未复验） |
-| 服务器 | 已同步至 `6fdd213`，五容器 healthy，`/api/v1/health/ready` → `{"status":"ready"}`，`alembic current` = **`b7d4e9f1c6a2 (head)`**，四套餐种子已就位，**向量库 id 级一致（28344 条，`ids_verified=True`）**，**`task.used_tokens` 已回填（169372，28 个任务）**，**6 个引用样式预览全部真实渲染（warnings=0）**，**模板页文案已如实标注示例**，**引用库端到端跑通（真实任务 `completed`，6/6 artifacts 来自引用库）** |
+| 前端测试 | Vitest **450 passed**（+6 skipped）；**Playwright E2E 43 场景**（新增引用库 1 条，实测通过） |
+| CI | **6/6 作业全绿**（2026-10-26 `cd215a0` / run `40288096865`；4 个下游 job 首次真正执行） |
+| 服务器 | 已同步至 `65364ed`，五容器 healthy，`/api/v1/health/ready` → `{"status":"ready"}`，`alembic current` = **`b7d4e9f1c6a2 (head)`**，四套餐种子已就位，**向量库 id 级一致（28344 条，`ids_verified=True`）**，**`task.used_tokens` 已回填（169372，28 个任务）**，**6 个引用样式预览全部真实渲染（warnings=0）**，**模板页文案已如实标注示例**，**引用库端到端跑通（真实任务 `completed`，6/6 artifacts 来自引用库）**。`cd215a0` 只改后端类型标注，不影响运行行为，未重新部署 |
 
 **演示账号**：`demo` / `demo12345` —— **全权限管理员**（`role=admin` + `institution` 套餐：篇数不限 / 含团队 / 含开放 API）；知识库 11 篇 / 28341 分块
 **E2E 固定账号**：`e2efull` / `e2ereconn`，密码 `e2e-password-2026`（复用，不再每次注册——`auth_register` 限流 5 次/3600s）
@@ -149,6 +149,8 @@ docker compose build backend && docker compose up -d backend
 | 28 | **契约校验的是形状，不是真实性**（2026-10-26） | 模板页「渲染」按钮发的是假内容（`sections[key] = "示例内容（key）"`），后端 `_validate_contract` 只检查「占位符是否都有值」——**填假的照样通过**。契约能防「少填」，防不住「填假的」。**凡前端为通过校验而自己编内容，都是在制造假成功**；应改成「校验/预览」语义并显式标注示例 |
 | 29 | **一个 E2E 文件只做一次登录**（2026-10-26） | `auth_login` 限流 **5 次/3600s**。模板页原本 4 条 test 各做「API 登录 + 页面登录」= 8 次 → **必然 429**，表现为「登录页超时」，看起来像页面缺陷（实测踩到，同一坑此前也打过 `plan.spec.ts`）。**拆 test 前先算登录次数**；需要多段断言就合并成一条 test 在一次页面访问里跑完 |
 | 30 | **验证「引用可核验」时测试数据必须真实可核验**（2026-10-26） | 引用库端到端验证用 `10.1234/jcs.2024.001` 当 DOI，任务跑成 `waiting_human`。查校验报告：LLM 判定「10.1234 是示例性或占位符 DOI」——**它判对了**（10.1234 正是 DOI 手册的示例前缀）。换成真实 DOI 后同一流程 `completed`。**不要把校验器的正确判断当成系统缺陷**；造测试数据时先确认它在真实世界里站得住 |
+| 31 | **一条命令只跑一个门禁，不要用 `Select-Object -Last` 截断**（2026-10-26） | 我把 `mypy` 和 `ruff` 串在一条命令里、都 `2>&1 \| Select-Object -Last N`，ruff 的 stderr 混进同一流并把 mypy 的错误行挤出尾部窗口 → **我只看到 mypy 的 `Success`，向用户报告「mypy 0 错误」，实际 CI 当场红了**（`"object" has no attribute "id"`）。真实状态一直是坏的，是我的读法坏了。**门禁逐个跑、看完整输出；`Select-Object -Last` 只用于已知格式的稳定输出** |
+| 32 | **本地绿 ≠ CI 绿，push 后必须看 CI**（2026-10-26） | 本轮 3 个提交里前两个 CI 是 `failure`（同一个 mypy 错误），而我在简报里写的是「本轮未复验 CI」。**`gh` 已装且已认证（含 `workflow` 权限）**，`gh run list` / `gh run view --log-failed` 一条命令就能看。**不要把「没验证」写成「未复验」就当免责** —— 该查就查 |
 
 ---
 

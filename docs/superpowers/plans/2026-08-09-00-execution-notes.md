@@ -3788,6 +3788,94 @@ quota key 已删除，回查 KEYS 为空
 > 真实浏览器是唯一能发现「我没想不到的路径」的手段。这就是 AGENTS §6.5.7
 > 把「真实浏览器截图看过」列为第一条的原因 —— 本轮再次验证了它。
 
+---
+
+## 2026-10-26 · CI 复验（`cd215a0` / run `40288096865`）
+
+**这一轮的价值不在修了什么，而在发现了「我报告的状态与实际相反」**。
+
+### 发现过程
+
+上一轮简报我写的是「CI 未复验（上次全绿是 `40255130067`）」。实际查
+`gh run list`：
+
+```
+failure   docs: record the empty-library summary defect…  CI  main  push  40285535183
+cancelled fix(references): keep the library summary…      CI  main  push  40285485854
+failure   docs: record the reference library stage…       CI  main  push  40285120715
+```
+
+**不是「未复验」，是「正在红」**。而且 CI 一直在跑（push 到 `main` 就触发），
+我上一轮说「未复验」本身就是错的 —— `gh` 早就装了、也早认证了。
+
+### 缺陷本身
+
+```
+app/api/v1/endpoints/reference_library.py:126: error:
+  "object" has no attribute "id"  [attr-defined]
+```
+
+`_to_out(row: object)` 用 `# type: ignore[attr-defined]` 压住了
+`to_csl_item()`，但**压不住 `row.id`** —— `object` 上任何属性访问 mypy 都拒绝。
+
+修法：参数类型写成 `ReferenceLibraryItem`，`# type: ignore` 直接不需要。
+
+### 为什么本地没发现（比缺陷本身更值得记）
+
+我当时跑的是：
+
+```powershell
+.\.venv\Scripts\python.exe -m mypy app evaluation 2>&1 | Select-Object -Last 5
+.\.venv\Scripts\python.exe -m ruff check --fix app tests evaluation 2>&1 | Select-Object -Last 3
+```
+
+两条命令**串在同一个 shell 调用里**，`2>&1` 把 ruff 的 stderr 并入同一流。
+ruff 在 mypy 之后打印了 2 行，尾部窗口被 ruff 占满 → 我只看到
+`Found 2 errors (2 fixed, 0 remaining)` 和**上一次** mypy 的 `Success`，
+把 mypy 的错误行挤掉了。
+
+**真实状态一直是坏的，是我的读法坏了。** 已写进 AGENTS §5 #31。
+
+### 一个被受控实验推翻的猜测
+
+我最初判断是「mypy 增量缓存没重查该文件」。做了两次实验：
+
+| 实验 | 预期（缓存假设） | 实际 |
+| --- | --- | --- |
+| 恢复 `object` 写法，增量模式跑 | 不报错 | **报错** |
+| 同上，`--no-incremental` | 报错 | **报错** |
+| 加一个不存在的属性，增量模式跑 | 不报错 | **报错** |
+
+结论：**增量缓存从来不是原因**。没有这两个实验，我会把「缓存」写进文档当结论，
+下一个人照着去清缓存 —— 那是假知识。
+
+### 下游 4 个 job 首次真正执行
+
+`test` / `migration` / `build-check` / `smoke` 全部 `needs: lint`。
+lint 一红，它们**连启动都没有**（日志显示 `- ... in 0s`）。
+所以「6/6 全绿」这个数字在这一轮之前是**没有依据的** —— 实际只有 1~2 个 job
+在跑。修完后 6 个全绿：
+
+```
+✓ Frontend Unit, Types & Build   1m21s
+✓ Lint, Format & Types           1m35s
+✓ Unit Tests & Coverage          5m27s
+✓ Docker Build Check             4m19s
+✓ Alembic Round-Trip (PG 16)     1m32s
+✓ Compose Release Smoke          3m43s
+```
+
+**迁移在 PostgreSQL 16 上的往返**（CI 日志原文）：
+
+```
+upgrade   a3c9e6d2b8f1 -> b7d4e9f1c6a2, add reference_library_item table
+downgrade b7d4e9f1c6a2 -> a3c9e6d2b8f1, add reference_library_item table
+upgrade   a3c9e6d2b8f1 -> b7d4e9f1c6a2, add reference_library_item table
+PostgreSQL integration tests: 1 passed, 9 deselected
+```
+
+本地 SQLite 上也独立验过同一往返，并确认 `alembic heads` **只有一个 head**。
+
 
 
 
