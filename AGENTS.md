@@ -1,7 +1,7 @@
 # AGENTS.md — 项目上下文与开发约定
 
 > 本文件是**给 AI 编码助手看的交接文档**。新会话开始时请先读完本文件再动手。
-> 最后更新：2026-10-26（本轮：前端重设计五阶段 + 复盘，见文末「文档入口」）
+> 最后更新：2026-10-26（本轮：用量看板重设计 + 修复 token 用量从未落库，见文末「文档入口」）
 
 ---
 
@@ -21,15 +21,15 @@
 | 项 | 值 |
 | --- | --- |
 | 分支 | `main`（工作分支 `codex/plan3-literature-workflow` 与 main 同点） |
-| HEAD | … → 知识库页 + 真实索引状态 `799ead7` → **团队工作区 6 缺陷 + 重设计 `ed109c3`** |
+| HEAD | … → 团队工作区 6 缺陷 + 重设计 `ed109c3` → **用量看板重设计 + 修复 token 用量从未落库 `b5bf912`** |
 | 冻结 tag | `defense-v1` |
 | Plan 状态 | Plan 2 / 3 / 4 / 5 **全部 Exit Gate PASSED**；**Phase 1 五项全部端到端可用且遗留清零**；**Phase 2 五项全部交付完成**（PRISMA ✅ + 可观测性 ✅ + 团队工作区 ✅ + 开放 API ✅ + 计费套餐 ✅） |
-| 产品化进度 | **Issue #2~#7 全部关闭且遗留清零**；**P1-D 配额遗留已修复**；**`max_results` 已夹紧**；**PRISMA 完成**；**可观测性完成**（8 指标 + `/metrics` + 看板）；**团队工作区完成**（工作区/席位/邀请码/批注；归属双轨；viewer 可批注）；**开放 API 完成**（Key 只存哈希 + 4 scope + 双通道鉴权 + MCP server 5 工具 + 管理页）；**计费套餐完成**（四档 + 篇数为主 token 为辅 + 四条功能门禁 + 手工开通 + 套餐页）；**前端已迁移到 Tailwind v4 + shadcn-vue / Nova** |
+| 产品化进度 | **Issue #2~#7 全部关闭且遗留清零**；**P1-D 配额遗留已修复**；**`max_results` 已夹紧**；**PRISMA 完成**；**可观测性完成**（8 指标 + `/metrics` + 看板，**看板已重设计且数字全部为真**）；**团队工作区完成**（工作区/席位/邀请码/批注；归属双轨；viewer 可批注）；**开放 API 完成**（Key 只存哈希 + 4 scope + 双通道鉴权 + MCP server 5 工具 + 管理页）；**计费套餐完成**（四档 + 篇数为主 token 为辅 + 四条功能门禁 + 手工开通 + 套餐页）；**前端已迁移到 Tailwind v4 + shadcn-vue** |
 | 数据库迁移 head | **`a3c9e6d2b8f1`**（plan / subscription / usage_counter 三表 + 四套餐种子） |
-| 后端测试 | **2635+ passed**, 8 skipped；覆盖率 **~89%**；`mypy` 0 错误（200 文件） |
-| 前端测试 | Vitest **374 passed**（+6 skipped）；**Playwright E2E 26 场景**（chromium 23 passed / 2 需 LLM 余额 / 1 偶发资源耗尽） |
-| CI | **6/6 作业全绿**（2026-10-21 `8e25670` 复验；开放 API 待复验） |
-| 服务器 | 已同步至 `ed109c3`，五容器 healthy，`/api/v1/health/ready` → `{"status":"ready"}`，`alembic current` = `a3c9e6d2b8f1 (head)`，四套餐种子已就位，**向量库 id 级一致（28344 条，`ids_verified=True`）** |
+| 后端测试 | **2641 passed**, 8 skipped；覆盖率 **89.34%**；`mypy` 0 错误（200 文件） |
+| 前端测试 | Vitest **381 passed**（+6 skipped）；**Playwright E2E 28 场景**（chromium 25 passed / 2 需 LLM 余额 / 1 偶发资源耗尽） |
+| CI | **6/6 作业全绿**（2026-10-21 `8e25670` 复验；本轮未复验） |
+| 服务器 | 已同步至 `b5bf912`，五容器 healthy，`/api/v1/health/ready` → `{"status":"ready"}`，`alembic current` = `a3c9e6d2b8f1 (head)`，四套餐种子已就位，**向量库 id 级一致（28344 条，`ids_verified=True`）**，**`task.used_tokens` 已回填（169372，28 个任务）** |
 
 **演示账号**：`demo` / `demo12345` —— **全权限管理员**（`role=admin` + `institution` 套餐：篇数不限 / 含团队 / 含开放 API）；知识库 11 篇 / 28341 分块
 **E2E 固定账号**：`e2efull` / `e2ereconn`，密码 `e2e-password-2026`（复用，不再每次注册——`auth_register` 限流 5 次/3600s）
@@ -134,6 +134,11 @@ docker compose build backend && docker compose up -d backend
 | 13 | **回归测试必须验证「回退修复就失败」** | 2026-10-21 踩到：为两个前端时序缺陷写的「回归测试」，把修复回退后**仍然全绿**（`flushPromises()` 观测不到中间帧），属于假测试。做法：临时回退修复 → 跑测试确认变红 → 恢复实现。抓不住的断言要**删掉**而不是留着装门面 |
 | 14 | **只按 `created_at` 排序 = 顺序不稳定** | `created_at` 由 `server_default now()` 生成，**同一事务写入的多行时间戳完全相同**，PostgreSQL 对并列行返回任意顺序。已踩两次：`screening_decision`（用 `seq` 修）、`screening_record`（用 `(created_at, id)` 修）。凡「同事务批量插入 + 分页/列表」的表，排序键必须带**唯一列** |
 | 15 | **删探针任务会留下未结算的配额预扣** | 配额结算靠 `task.quota_settled` 标记；**直接 `DELETE FROM task` 跳过了结算**，Redis 里预扣的 100k（`quota:{user_id}:{UTC日期}`）会残留。实测：删掉 2 个 E2E 探针后配额仍占 200k。清理脚本应额外 `redis-cli DEL` 当日 quota key，并回查 `KEYS 'quota:*'` 与 `GET` 值 |
+| 16 | **测试载荷必须与生产载荷同形状**（2026-10-26） | `sum_actual_tokens` 只读 `output["prompt_tokens"]`，而生产载荷把 token 放在 `output["execution_result"]` 里。**三条单测的载荷都是「顶层平铺」的测试替身形状**，全绿；线上 `task.used_tokens` 一直是 0，配额每次都退满（用户白嫖算力）。写载荷前先去 `_run` 里看**真实返回结构** |
+| 17 | **Core `update()` 也会触发 `onupdate`**（2026-10-26） | 用 SQLAlchemy Core `update()` 回填 `used_tokens`，把 28 个任务的 `updated_at` 全刷成同一时刻（`Base.updated_at` 带 `onupdate=func.now()`），而看板耗时用 `updated_at - created_at` → 90 秒显示成 9708 分。**写库脚本必须在 `values()` 里显式带上不想改的 `onupdate` 列**，并回查「只改了想改的那一列」 |
+| 18 | **本地前端门禁必须跑 `vue-tsc -b`，不是 `tsc --noEmit`**（2026-10-26） | `tsc --noEmit` 不检查 `.vue` 模板里的类型；可选字段在模板里直接 `> 0` 比较（`possibly undefined`）只在镜像构建的 `vue-tsc -b`（= `npm run build`）阶段才报错 → Docker 构建失败、部署半途而废。**本地跑 `node node_modules/vue-tsc/bin/vue-tsc.js -b`** |
+| 19 | **数据修复脚本必须自动检测目标，不硬编码时刻**（2026-10-26） | 恢复脚本硬编码污染时刻且用 naive datetime，而该列是 `TIMESTAMP WITH TIME ZONE` → 比较永不相等 → 脚本报「污染 0 行」，比报错更危险（看起来像没事）。改成检测「多任务共享同一 `updated_at`」这个批量 UPDATE 特征 |
+| 20 | **`getComputedStyle` 在 Tailwind v4 项目里返回 `oklch()`，不是 `rgb()`**（2026-10-26） | 对比度测量脚本用正则抠 `rgb()` 数字 → 拿到 NaN → 比值算成 1 并误报失败。改用 canvas `fillStyle` + `getImageData` 转 sRGB 再算亮度 |
 
 ---
 
@@ -329,10 +334,11 @@ frontend/src/
 **必须验证的页面清单**（改任一处都要重跑）：
 
 ```powershell
-# 全量单测 + 类型
+# 全量单测 + 类型（⚠️ 类型检查必须用 vue-tsc -b，见 §5 #18：
+# tsc --noEmit 不检查 .vue 模板，镜像构建阶段才会暴露模板里的类型错误）
 cd frontend
 node node_modules/vitest/vitest.mjs run
-node node_modules/typescript/bin/tsc --noEmit
+node node_modules/vue-tsc/bin/vue-tsc.js -b
 
 # 关键 E2E（无需 LLM 余额）
 $env:E2E_BASE_URL='http://10.0.10.2:48080'
@@ -388,7 +394,8 @@ docs/superpowers/plans/             # 计划 + 执行记录（execution-notes）
 | 想知道什么 | 读哪个 |
 | --- | --- |
 | **接手新会话**（当前状态 / 剩余任务 / 命令 / 阻塞项） | [docs/runbooks/2026-10-26-handoff.md](docs/runbooks/2026-10-26-handoff.md) |
-| **前端重设计怎么做的**（5 个阶段的设计取舍与实测证据） | [docs/superpowers/specs/2026-10-23-frontend-redesign-design.md](docs/superpowers/specs/2026-10-23-frontend-redesign-design.md) §4.5~§4.13 |
+| **前端重设计怎么做的**（6 个阶段的设计取舍与实测证据） | [docs/superpowers/specs/2026-10-23-frontend-redesign-design.md](docs/superpowers/specs/2026-10-23-frontend-redesign-design.md) §4.5~§4.14 |
+| **用量看板为什么重做**（token 用量从未落库 + 5 个缺陷 + 数据修复） | 同上 §4.14 + [execution-notes](docs/superpowers/plans/2026-08-09-00-execution-notes.md) 末节 |
 | **为什么会返工**（我的错 + 环境坑 + 打分） | [docs/retrospective/2026-10-26-frontend-redesign-retro.md](docs/retrospective/2026-10-26-frontend-redesign-retro.md) |
 | 产品化路线与竞品 | [docs/product/2026-10-18-demo-to-product-roadmap.md](docs/product/2026-10-18-demo-to-product-roadmap.md) |
 | 架构决策（为什么不用 citeproc-js 等） | [docs/adr/](docs/adr/) |

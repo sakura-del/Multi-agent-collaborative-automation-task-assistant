@@ -65,8 +65,14 @@ test("用量看板：量数值（几何 / 文本 / 溢出 / 对比度）", async
     .locator('[data-test^="observability-row-"]')
     .evaluateAll((nodes) =>
       nodes.map((n) => {
-        const title = n.querySelector("p.font-medium")?.textContent?.trim() ?? "";
-        return { title, hasTitle: title.length > 0, text: (n.textContent ?? "").trim().slice(0, 90) };
+        // 行改成 <button> 后标题是 span.font-medium（首版选择器写死 p.font-medium，
+        // 结果 ROWS_WITH_TITLE 全 0 —— 是测量脚本失效，不是页面缺陷）
+        const title = n.querySelector("span.font-medium")?.textContent?.trim() ?? "";
+        return {
+          title,
+          hasTitle: title.length > 0,
+          text: (n.textContent ?? "").trim().slice(0, 90),
+        };
       })
     );
   console.log("ROW_COUNT=" + rows.length);

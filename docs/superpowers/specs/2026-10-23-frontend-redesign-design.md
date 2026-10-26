@@ -611,3 +611,216 @@ Vitest 351 → **374 passed**（+23）：
 - 保留 `app-nav__links` 契约类名
 - 保留所有 `[data-test]` 选择器
 - 未引入新依赖（动效将来用既有的 motion-v）
+
+---
+
+## 4.14 用量看板重设计（第六阶段，已交付）
+
+> 交接文档把这一页排在**风险第一位**：*「与知识库页同类风险最高：图表/计数最容易
+> 出现『显示的数字与实际不符』，用户很难自己发现」*。
+> 实际情况比预估更糟：**页面上最重要的那个数字从来就是错的**。
+
+### 缺陷 1（最严重）：「累计 token」永远是 0，因为后端从来没记过用量
+
+**现象**：`/observability/overview` 返回 `tokens.total_used = 0`，页面显示「累计 token 0」。
+看起来像「这个用户还没用过」——**这正是它危险的地方**：0 是一个合理的值，
+用户不会怀疑，而且没有任何报错。
+
+**取证**（服务器真实数据，不是推理）：
+
+```sql
+-- task.used_tokens 全为 0
+SELECT count(*), sum(used_tokens), count(*) FILTER (WHERE used_tokens>0) FROM task;
+--  53 | 0 | 0
+
+-- 但子任务载荷里明明有 token
+SELECT sum((output_data::jsonb->'output'->'execution_result'->>'prompt_tokens')::int)
+     + sum((output_data::jsonb->'output'->'execution_result'->>'completion_tokens')::int)
+FROM subtask WHERE output_data IS NOT NULL;
+--  169372
+```
+
+**根因**：`sum_actual_tokens()` 读的是 `output["prompt_tokens"]`（顶层），
+而生产载荷（`LiteratureNodeExecutor._run`）把 token 放在
+`output["execution_result"]["prompt_tokens"]`（嵌套）。
+
+**为什么既有测试没抓到**（AGENTS §5 #13 的又一实例）：
+`test_quota_correction_on_completion.py` 的三条用例，载荷全是
+`{"prompt_tokens": 100, "completion_tokens": 50}` —— **测试替身的形状**，
+生产从来不是这样。三条用例全绿，缺陷一直在线上。
+
+**后果有两层，第二层比第一层严重**：
+
+| 层 | 后果 | 严重性 |
+| --- | --- | --- |
+| 看板 | 「累计 token」永远 0 | 用户看到错数字但不会怀疑 |
+| **配额结算** | 退款额 = `100k − used_tokens` = `100k − 0` → **每次都退满** | **用户白嫖全部算力** |
+
+第二层是钱的问题，而且和看板是同一个根因——修一处，两层同时好。
+
+### 缺陷 2：状态分布漏状态 → 看板自相矛盾
+
+旧契约只给 4 个固定状态（completed / failed / cancelled / waiting_human）+ total。
+实测 demo 有 **1 个 `waiting_approval`**，不在契约里：
+
+```
+任务总数 27
+状态分布：已完成 20 + 待人工 4 + 已取消 2 = 26   ← 差 1 个，差值不可见
+```
+
+用户不可能发现少了一个——因为**页面没有显示「合计」**，两处数字不在一起。
+
+### 缺陷 3：成功率没有分母
+
+显示 `76.9%`，但分母是 26 还是 27？不告诉用户，用户没法核对，
+而 26 这个数字来自「只算已进入终态的任务」这条业务规则。
+
+### 缺陷 4：最近任务只有 8 位 UUID
+
+```
+2361d17a  待确认规划  0 token      13 秒
+2aa48e0a  已完成      5,346 token  1 分 30 秒
+```
+
+一整列 `2361d17a`、`2aa48e0a` —— **认不出哪条是哪个任务**。
+数据库里明明有 `title`，只是没返回。
+
+### 缺陷 5（本阶段自己引入，靠取证抓到）：耗时 9708 分钟
+
+回填脚本跑完后，页面显示「9708 分 12 秒」（约 6.7 天），而真实耗时 90 秒。
+
+根因：`Base.updated_at` 带 `onupdate=func.now()`，**Core 的 `update()` 也触发它**。
+回填 `used_tokens` 时把 28 个历史任务的 `updated_at` 全刷成同一时刻，
+而耗时用 `updated_at - created_at` 计算。
+
+这不只是「统计不准」：`updated_at` 是审计字段，任务列表的「更新时间」也用它。
+**回填脚本污染了业务数据**。已用 `restore_task_updated_at.py` 恢复（依据
+`completed_at` → `execution_log.logged_at` → `subtask.updated_at`），
+并修好脚本本身（显式写回 `updated_at=Task.updated_at` 压掉 onupdate）。
+
+> 教训：**写库脚本必须核对「只改了想改的那一列」**。
+> 这次是因为「量数值」量到 `9708 分` 才发现的 —— 只看「回填成功 28 行」不会发现。
+
+### 缺陷 6（自己引入，靠结构取证抓到）：任务行键盘不可达
+
+首版把行做成 `<li @click>`。用 `FOCUSABLE` 导出实测：
+
+```
+FOCUSABLE=[…, {tag:"BUTTON", testid:"observability-refresh"},
+           {tag:"BUTTON", testid:"observability-row-…"}]   ← 修复后才有
+```
+
+修复前该列表里**没有任何一行任务** —— 键盘用户完全进不去任务详情，
+违反 AGENTS §6.5.3「所有可交互元素键盘可达」。改成 `<button type="button">`。
+
+### 重设计与信息架构
+
+| 区块 | 内容 | 为什么这样 |
+| --- | --- | --- |
+| 头部 | 标题 + 说明 + **刷新按钮** | 看板是快照；任务刚跑完不想按 F5 |
+| 概览四卡 | 任务总数 / 成功率 / 累计 token / 平均每任务 token | 沿用既有结构 |
+| 成功率卡 | 百分比 + **「已完成 20 / 26 个终态任务」** | 分母露出来，用户能核对 |
+| 累计 token 卡 | 数字 + **「23 个任务有用量记录」** 或 **「历史任务未记录用量」** | 区分「真没用过」与「老数据没记」 |
+| 平均 token 卡 | 数字 + 「仅统计有用量记录的任务」 | 说明口径（历史 0 值不拉低均值） |
+| 状态分布 | **全部状态**（含 waiting_approval）+ **「合计 27 / 共 27 个」** | 合计是自洽的可见证据；`waiting_approval` 排最前（唯一卡住用户的状态） |
+| 最近任务 | **标题**（主）+ UUID/时间（次）+ 右侧 token/耗时；整行是 `<button>` | 标题才认得出是哪次运行；键盘可达 |
+
+**为什么 `waiting_approval` 排最前**：它只有 1 个，按计数排会排到最后，
+但它是**唯一**需要用户动手的状态。看板的职责是让人一眼看到「有什么在等我」。
+
+### 后端契约变更（新增，全部向后兼容）
+
+| 字段 | 说明 |
+| --- | --- |
+| `by_status` | **全状态**计数（`dict`，不枚举）。之和恒等于 `tasks.total` |
+| `terminal_count` | 成功率的分母（已进入终态的任务数） |
+| `recent[].title` / `created_at` | 标题与时间 |
+| `tokens.recorded_task_count` | `used_tokens > 0` 的任务数 |
+
+**`avg_per_task` 口径变更（设计变更，非回归）**：分母从「全部任务」改为
+「有用量记录的任务」。理由：历史任务全是 0，按全部任务平均会把均值拉成假低值；
+`cancelled` 且 `used_tokens=0` 的任务确实没消耗，也不该进分母。
+既有测试 `test_aggregates_own_tasks` 的断言随之从 `45000//4` 改为 `45000//3`。
+
+### 服务器实测证据（真实浏览器 + 真实接口）
+
+```
+CARD_GEOMETRY  四卡等宽 242px、同 y=100、无重叠
+STATUS_BADGES  ["待确认 1","待人工 4","已完成 20","已取消 2"]   ← 旧版只有后三个
+STATUS_SUM     合计 27 / 共 27 个                              ← 自洽
+SUCCESS_DENOM  已完成 20 / 26 个终态任务
+TOKEN_HINT     23 个任务有用量记录
+ROW_COUNT      10，ROWS_WITH_TITLE 10                          ← 全部有标题
+ROW_FOCUSABLE  {tag:"BUTTON", isActive:true}                    ← 键盘可达
+FOCUS_RING     {outlineStyle:"solid", outlineWidth:"2px"}       ← 焦点环可见
+DESKTOP_OVERFLOW_PX  0
+MOBILE_OVERFLOW_PX   0
+CONTRAST       正文 19.68:1，次要文字 6.01:1（AA 要求 4.5:1）
+耗时           「1 分 30 秒」（污染时是「9708 分 12 秒」）
+token          144,259（修复前 0）
+```
+
+### 数据修复（两步，都带回查）
+
+```bash
+# 1. 回填历史用量：28 个任务 / 169372 token
+python -m scripts.backfill_used_tokens --dry-run   # 先看规模
+python -m scripts.backfill_used_tokens             # 执行（幂等：只写 used_tokens=0 的行）
+
+# 2. 恢复被回填刷掉的 updated_at：28 行
+python -m scripts.restore_task_updated_at --dry-run
+python -m scripts.restore_task_updated_at
+```
+
+**回查证据**（AGENTS §5 #11：不能只打印成功）：
+
+```
+[verify] 仍为污染时刻的任务数: 0
+[verify] updated_at < created_at 的任务数: 0
+[verify] 耗时超过 7 天的任务数: 0
+payload_total | recorded_total | match
+       169372 |         169372 | t        ← 与子任务载荷独立核对一致
+tasks | demo_tasks | users  →  53 | 27 | 27   ← 数据行数未被改动
+```
+
+**配额不动**：已结算任务只修看板数字，**不反向补扣**用户额度
+（那会让用户莫名欠费）。这一点写在脚本输出里，避免误读。
+
+### 测试
+
+| 类型 | 数量 | 关键断言 |
+| --- | --- | --- |
+| 后端单测 | +6 | 生产载荷形状（嵌套）必须算出 4300；嵌套与顶层并存时**只算一次**（防翻倍多扣）；`by_status` 之和 == total；`terminal_count` 使分母可核对；`recent` 带 title/created_at；`recorded_task_count` 区分「没用过」与「没记录」 |
+| 前端单测 | +7（13 条） | 成功率带分母；分布含 `waiting_approval` 且合计 == total；行显示标题；行可跳转；**行必须是 BUTTON**；历史 0 有说明；刷新按钮重新拉数据 |
+| E2E | 3+2 | 页面数字与真实接口逐一比对；`by_status` 之和 == total；分布合计文本 == total；分母 == terminal_count；行 token == 后端值；点击行进详情；**行可聚焦且焦点环可见** |
+
+**诚实性验证（5 组回退，全部确认变红）**：
+
+| # | 回退内容 | 变红的断言 |
+| --- | --- | --- |
+| 1 | `sum_actual_tokens` 改回只读顶层 | 后端 `assert 0 == 4300` |
+| 2 | 状态分布改回 4 个固定状态 | 「待确认」不出现 |
+| 3 | 行标题改回只显示 UUID | 行文本不含标题 |
+| 4 | 去掉「历史任务未记录」提示 | `observability-token-hint` 不存在 |
+| 5 | 行改回 `<div>` | `expected 'DIV' to be 'BUTTON'` |
+
+### 踩的坑（都记录在案）
+
+| 坑 | 表现 | 修法 |
+| --- | --- | --- |
+| **本地门禁与 Docker 不一致** | 本地 `tsc --noEmit` 通过，镜像构建 `vue-tsc -b` 报 TS18048 | 本地门禁必须跑 **`vue-tsc -b`**（等价于 `npm run build` 的类型检查段） |
+| 可选字段直接比较 | `tokens.recorded_task_count > 0` 在模板里报「possibly undefined」 | 提成 computed 并给 0 默认值 |
+| ssh 单行带 glob | `git fetch '+refs/heads/*:…'` 被远端 zsh 拒绝（`no matches found`） | 写 `.sh` 文件再 `bash`（AGENTS 已记录，本轮又踩一次） |
+| 脚本导入路径猜错 | `app.db.models.subtask` / `app.db.models.execution_log` 都不存在 | `Subtask` 在 `task.py`，`ExecutionLog` 在 `log.py` |
+| 时区导致「假通过」 | 恢复脚本报告「污染 0 行」，实际 28 行（naive vs tz-aware） | 改成**自动检测**批量更新特征，不再硬编码时刻 |
+| 测量脚本自身失效 | 行改 `<button>` 后选择器 `p.font-medium` 匹配不到 → `ROWS_WITH_TITLE=0` | 测量脚本必须和 DOM 同步改；否则会把「脚本坏了」误读成「页面坏了」 |
+
+### 一个必须说明的验证限制
+
+本轮使用的模型**不支持图片输入**，`read_image` 不可用，因此**没有肉眼看过截图**。
+替代方案是把渲染结果**结构化导出**（每个区块的几何/字号/字重/颜色、完整可见文本、
+状态徽标实际色值、Tab 序列、焦点环样式、对比度）并写成硬断言。
+这比「看一眼觉得还行」更严格（字号和对比度是量出来的），
+但**不等于视觉审美已验收**——配色是否好看、留白是否舒服，仍需人眼确认。
+截图已落在 `frontend/e2e/screenshots/observability-*.png`。
+

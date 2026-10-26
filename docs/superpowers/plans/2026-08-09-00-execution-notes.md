@@ -3265,6 +3265,138 @@ lang-zh/lang-en/style-select/offline/verify-references/submit/validation-error/f
 早截图会拍到「加载中…」，一度误以为页面坏了。改为先等
 `[data-test^="task-row-"]` 出现再截图。
 
+---
+
+## 2026-10-26 · 用量看板重设计（前端重设计第六阶段）+ 修复 token 用量从未落库
+
+**范围**：`backend/app/orchestration/services/task_execution.py`（`sum_actual_tokens`）、
+`backend/app/api/v1/endpoints/observability.py`、`frontend/src/views/ObservabilityView.vue`、
+`frontend/src/api/types.ts`、两个新脚本、4 个测试文件。
+设计记录：`docs/superpowers/specs/2026-10-23-frontend-redesign-design.md` §4.14。
+
+### 最重要的发现：`task.used_tokens` 在生产从未被写入
+
+`sum_actual_tokens()` 读 `output["prompt_tokens"]`（顶层），而生产载荷
+（`LiteratureNodeExecutor._run`）把 token 放在 `output["execution_result"]` 里。
+于是：
+
+| 后果 | 证据 |
+| --- | --- |
+| 看板「累计 token」永远 0 | `/observability/overview` → `tokens.total_used = 0` |
+| **配额结算每次退满** | 退款额 = `100k − used_tokens` = `100k`，用户白嫖算力 |
+
+服务器实测：`task.used_tokens` 全库 53 行合计 **0**，而 `subtask.output_data`
+里能算出 **169372** token。
+
+**既有测试为什么全绿**：`test_quota_correction_on_completion.py` 的三条用例
+载荷是 `{"prompt_tokens": 100, ...}` —— **测试替身的形状**，生产从来不是。
+（AGENTS §5 #13「假测试」的又一实例：为通过而设计的载荷，恰好绕过了真缺陷。）
+
+修法：嵌套优先、只算一次（两处都加会翻倍 → 多扣用户额度）。
+
+### 契约扩展（4 个字段，全部向后兼容）
+
+`by_status`（全状态，之和 == total）/ `terminal_count`（成功率分母）/
+`recent[].title` + `created_at` / `tokens.recorded_task_count`。
+
+**`avg_per_task` 口径变更（设计变更）**：分母从「全部任务」→「有用量记录的任务」。
+历史任务全 0，按全部平均会把均值拉成假低值。既有断言 `45000//4` → `45000//3`。
+
+### 数据修复（两步，均带回查）
+
+```bash
+python -m scripts.backfill_used_tokens --dry-run && python -m scripts.backfill_used_tokens
+python -m scripts.restore_task_updated_at --dry-run && python -m scripts.restore_task_updated_at
+```
+
+实测结果：
+
+```
+[scan] 可回填任务数: 28   可回填 token 总量: 169372
+[apply] 实际更新行数: 28
+[verify] 回查仍为 0 的任务数: 0   全库合计: 169372
+[verify] 仍为污染时刻的任务数: 0 / updated_at<created_at: 0 / 耗时>7天: 0
+
+独立核对：payload_total=169372, recorded_total=169372, match=t
+数据完整性：tasks=53, demo_tasks=27, users=27（行数未变）
+```
+
+### 本轮自己引入的两个缺陷（都靠「量数值」抓到，不是靠看）
+
+**① 回填脚本污染了 `task.updated_at`（业务数据，不只是统计）**
+
+`Base.updated_at` 带 `onupdate=func.now()`，**Core `update()` 同样触发**。
+28 个历史任务的 `updated_at` 被刷成同一时刻，而看板耗时用
+`updated_at − created_at` → 真实 90 秒显示成 **9708 分（6.7 天）**。
+
+- 修脚本：`values(used_tokens=..., updated_at=Task.updated_at)` 压掉 onupdate；
+- 修数据：`restore_task_updated_at.py`，依据 `completed_at` → `execution_log.logged_at`
+  → `subtask.updated_at`，取不到就跳过并报出（不瞎填）；
+- **这个缺陷只看「回填成功 28 行」永远发现不了**，必须量页面上的耗时。
+
+**② 任务行键盘不可达**
+
+首版行是 `<li @click>`。`FOCUSABLE` 导出实测：列表里只有导航链接、退出登录、
+刷新按钮，**没有任何任务行**。改 `<button type="button">` 后：
+
+```
+ROW_FOCUSABLE={"tag":"BUTTON","isActive":true}
+FOCUS_RING={"outlineStyle":"solid","outlineWidth":"2px"}
+FOCUSABLE=[…, {tag:"BUTTON",testid:"observability-row-2361d17a-…"}, …]  ← 10 行全部进入 Tab 序列
+```
+
+### 服务器实测证据（真实浏览器，1440×900 + 390×844）
+
+```
+CARD_GEOMETRY   四卡等宽 242px、同 y=100、无重叠
+STATUS_BADGES   ["待确认 1","待人工 4","已完成 20","已取消 2"]   （旧版只有后三个）
+STATUS_SUM      合计 27 / 共 27 个                               ← 自洽
+SUCCESS_DENOM   已完成 20 / 26 个终态任务
+TOKEN_HINT      23 个任务有用量记录
+ROW_COUNT 10 / ROWS_WITH_TITLE 10                                ← 全部有标题
+DESKTOP_OVERFLOW_PX 0 / MOBILE_OVERFLOW_PX 0
+CONTRAST        正文 19.68:1，次要文字 6.01:1（AA 要求 4.5:1）
+token           144,259（修复前 0）
+耗时            「1 分 30 秒」（污染时「9708 分 12 秒」）
+```
+
+### 门禁
+
+```
+后端：black/ruff/mypy 全过；pytest 2641 passed, 8 skipped；覆盖率 89.34%
+前端：vitest 381 passed（+6 skipped）；vue-tsc -b 0 错；vite build OK
+E2E：observability 3 + measure 1 + structure 1 全绿（真实服务器）
+```
+
+### 诚实性验证（5 组回退，全部确认变红）
+
+| # | 回退 | 变红的断言 |
+| --- | --- | --- |
+| 1 | `sum_actual_tokens` 只读顶层 | `assert 0 == 4300` |
+| 2 | 分布改回 4 个固定状态 | 「待确认」不出现 |
+| 3 | 行标题改回 UUID | 行文本不含标题 |
+| 4 | 去掉历史 0 提示 | `observability-token-hint` 不存在 |
+| 5 | 行改回 `<div>` | `expected 'DIV' to be 'BUTTON'` |
+
+### 本轮踩的坑
+
+| 坑 | 表现 | 修法 |
+| --- | --- | --- |
+| **本地门禁 ≠ Docker 门禁** | 本地 `tsc --noEmit` 过，镜像 `vue-tsc -b` 报 TS18048（可选字段在模板里直接比较） | 本地必须跑 **`vue-tsc -b`** |
+| ssh 单行带 glob | `git fetch '+refs/heads/*:…'` → 远端 zsh `no matches found`，代码没更新（AGENTS 已记录，本轮又踩） | 写 `.sh` 再 `bash` |
+| 脚本导入路径靠猜 | `app.db.models.subtask` / `app.db.models.execution_log` 都不存在 | `Subtask` 在 `task.py`、`ExecutionLog` 在 `log.py` |
+| 时区造成「假通过」 | 恢复脚本报「污染 0 行」，实际 28 行（naive vs tz-aware 比较永远不等） | 改为**自动检测**批量更新特征（多任务共享同一 `updated_at`），不硬编码时刻 |
+| 测量脚本自身失效 | 行改 `<button>` 后 `p.font-medium` 匹配不到 → `ROWS_WITH_TITLE=0` | 测量脚本必须跟 DOM 同步改，否则把「脚本坏了」误读成「页面坏了」 |
+
+### 验证限制（必须写明）
+
+本轮模型**不支持图片输入**，`read_image` 不可用，**没有肉眼看过截图**。
+替代方案：把渲染结果结构化导出（区块几何/字号/字重/颜色、完整可见文本、
+徽标实际色值、Tab 序列、焦点环、对比度）并写成硬断言。
+比「看一眼觉得还行」更严格（数值是量的），但**不等于视觉审美已验收** ——
+配色是否好看、留白是否舒服仍需人眼确认。截图在
+`frontend/e2e/screenshots/observability-*.png`。
+
 
 
 
