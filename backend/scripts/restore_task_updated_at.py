@@ -23,9 +23,20 @@
 
 ## 安全性
 
-- 只改 `updated_at` 一列，且只改**被污染的那一批**（`updated_at` 等于污染时刻）；
+- 只改 `updated_at` 一列，且只改**被污染的那一批**；
 - `--dry-run` 先列出将改的行与依据，人工确认后再执行；
 - 恢复后回查：`updated_at >= created_at` 且耗时在合理范围（< 7 天）。
+
+## 怎么认定「被污染的那一批」（不硬编码时刻）
+
+批量 UPDATE 的特征是**多个任务共享完全相同的 `updated_at`**，而正常业务流程
+每个任务的更新时间互不相同。脚本因此**自动检测**：找出 `updated_at` 出现次数
+超过阈值（默认 5）的时刻作为污染时刻。
+
+首版硬编码了一个时刻字符串，且按 naive datetime 构造 —— 而该列是
+`TIMESTAMP WITH TIME ZONE`，asyncpg 返回带时区的值，比较永远不相等，
+脚本报告「被污染任务数: 0」（比报错更危险：看起来像没事）。
+自动检测同时解决了「时区怎么填」和「时刻记错」两个问题。
 """
 
 from __future__ import annotations
@@ -41,8 +52,9 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-#: 事故时刻（回填脚本跑的那一次）。只恢复 updated_at 恰好等于它的行。
-POLLUTED_AT = "2026-10-26 10:47:51.909607"
+#: 同一 `updated_at` 出现多少次算「批量 UPDATE」而不是正常业务。
+#: 正常流程每个任务的更新时间互不相同；同秒并发最多两三个。
+SUSPICIOUS_SHARED_COUNT = 5
 
 #: 合理耗时上限（超过就说明恢复逻辑取错了时间源）
 MAX_REASONABLE_DURATION = timedelta(days=7)
@@ -56,10 +68,34 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true", help="只列出将改的行与依据")
     parser.add_argument(
         "--polluted-at",
-        default=POLLUTED_AT,
-        help=f"污染时刻（默认 {POLLUTED_AT}）",
+        default=None,
+        help=(
+            "手动指定污染时刻（ISO 格式，可带时区）。" "默认自动检测：找出多个任务共享的 updated_at"
+        ),
     )
     return parser.parse_args(argv)
+
+
+async def _detect_polluted_at() -> list[datetime]:
+    """自动检测污染时刻：`updated_at` 被多个任务共享的时刻。
+
+    为什么要自动检测而不是硬编码：批量 UPDATE 的时刻取决于脚本什么时候跑，
+    写死在代码里既会过期、又要人肉填时区。而「多个任务共享同一 updated_at」
+    这个特征本身就是异常——正常业务里每个任务更新时间互不相同。
+    """
+    from sqlalchemy import func, select
+
+    from app.db.models.task import Task
+    from app.db.session import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as session:
+        rows = await session.execute(
+            select(Task.updated_at, func.count().label("n"))
+            .group_by(Task.updated_at)
+            .having(func.count() >= SUSPICIOUS_SHARED_COUNT)
+            .order_by(func.count().desc())
+        )
+        return [timestamp for timestamp, _count in rows]
 
 
 async def _plan(polluted_at: datetime) -> list[dict[str, Any]]:
@@ -130,7 +166,7 @@ async def _apply(plan: list[dict[str, Any]]) -> int:
     return changed
 
 
-async def _verify(polluted_at: datetime) -> int:
+async def _verify(polluted_times: list[datetime]) -> int:
     """回查：仍等于污染时刻的行数（期望 0）+ 耗时是否合理。"""
     from sqlalchemy import select
 
@@ -139,7 +175,9 @@ async def _verify(polluted_at: datetime) -> int:
 
     async with AsyncSessionLocal() as session:
         remaining = await session.execute(
-            select(Task.id, Task.created_at, Task.updated_at).where(Task.updated_at == polluted_at)
+            select(Task.id, Task.created_at, Task.updated_at).where(
+                Task.updated_at.in_(polluted_times)
+            )
         )
         left = list(remaining)
 
@@ -172,13 +210,32 @@ async def _verify(polluted_at: datetime) -> int:
 
 async def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
-    polluted_at = datetime.fromisoformat(args.polluted_at)
 
-    plan = await _plan(polluted_at)
-    restorable = [item for item in plan if item["restored"] is not None]
-    unclaimable = [item for item in plan if item["restored"] is None]
+    # 污染时刻：手动指定优先，否则自动检测（见 _detect_polluted_at 的注释）
+    if args.polluted_at:
+        # 允许用户给「无时区」的本地时间：按系统本地时区补全，
+        # 避免首版「naive 与 tz-aware 比较永远不等」的坑
+        parsed = datetime.fromisoformat(args.polluted_at)
+        polluted_list = [parsed if parsed.tzinfo else parsed.astimezone()]
+    else:
+        polluted_list = await _detect_polluted_at()
 
-    print(f"[scan] 被污染任务数: {len(plan)}")
+    if not polluted_list:
+        print("[scan] 未检测到批量更新痕迹（没有多个任务共享同一 updated_at）")
+        print("[scan] 若确认有污染，请用 --polluted-at 手动指定时刻")
+        return 0
+
+    print(f"[scan] 检测到 {len(polluted_list)} 个可疑批量更新时刻")
+    total_plan: list[dict[str, Any]] = []
+    for polluted_at in polluted_list:
+        plan = await _plan(polluted_at)
+        print(f"[scan] {polluted_at.isoformat()} → {len(plan)} 个任务")
+        total_plan.extend(plan)
+
+    restorable = [item for item in total_plan if item["restored"] is not None]
+    unclaimable = [item for item in total_plan if item["restored"] is None]
+
+    print(f"[scan] 被污染任务数: {len(total_plan)}")
     print(f"[scan] 可恢复: {len(restorable)}，无法恢复: {len(unclaimable)}")
     for item in restorable:
         duration = (item["restored"] - item["created_at"]).total_seconds()
@@ -193,11 +250,11 @@ async def main(argv: list[str] | None = None) -> int:
         print("[dry-run] 未写库。")
         return 0
 
-    changed = await _apply(plan)
+    changed = await _apply(total_plan)
     print(f"[apply] 实际恢复行数: {changed}")
 
     # AGENTS §5 #11：必须回查，不能只打印成功
-    return await _verify(polluted_at)
+    return await _verify(polluted_list)
 
 
 if __name__ == "__main__":
