@@ -1,7 +1,7 @@
 # AGENTS.md — 项目上下文与开发约定
 
 > 本文件是**给 AI 编码助手看的交接文档**。新会话开始时请先读完本文件再动手。
-> 最后更新：2026-10-19
+> 最后更新：2026-10-26（本轮：前端重设计五阶段 + 复盘，见文末「文档入口」）
 
 ---
 
@@ -16,7 +16,7 @@
 
 ---
 
-## 2. 当前状态快照（2026-10-19）
+## 2. 当前状态快照（2026-10-26）
 
 | 项 | 值 |
 | --- | --- |
@@ -310,6 +310,40 @@ frontend/src/
 | `FilePicker`（common） | 文件选择（解决原生 file input 的英文文案问题） |
 | `StatusBadge`（common） | 业务状态 → Badge 变体映射 |
 
+### 6.5.7 前端改动的「完成」标准（**2026-10-26 复盘新增，必守**）
+
+> 背景：前端重设计五个阶段里，**前三个每次报完成后各补了 2~3 个修复提交**
+> （共 8 个）；后两个改成「先拿证据再改」后一次成型。
+> 教训不是能力，是**顺序**。详见 [复盘](docs/retrospective/2026-10-26-frontend-redesign-retro.md)。
+
+**报完成之前，下面五条必须都满足：**
+
+| # | 要求 | 做法 |
+| --- | --- | --- |
+| 1 | **真实浏览器截图**看过渲染结果 | Playwright 登录 → 目标页 → `screenshot`，然后 `read_image` 亲自看 |
+| 2 | **量过关键数值**，不是凭推理 | 元素可见性、节点个数、溢出宽度都用 `boundingBox()` / `count()` 取数 |
+| 3 | **每次调整尺寸后重新量** | DAG 节点加高后必须重新确认容器够不够高（踩过：修好叠字又裁切） |
+| 4 | **改 DOM 前 grep 过 E2E 断言** | `Select-String -Path e2e/*.spec.ts`；区分「设计变更（改测试）」与「回归（改实现）」 |
+| 5 | **诚实性验证做过**：回退修复 → 测试必须变红 | 抓不住的断言删掉，不要留着装门面（§5 #13） |
+
+**必须验证的页面清单**（改任一处都要重跑）：
+
+```powershell
+# 全量单测 + 类型
+cd frontend
+node node_modules/vitest/vitest.mjs run
+node node_modules/typescript/bin/tsc --noEmit
+
+# 关键 E2E（无需 LLM 余额）
+$env:E2E_BASE_URL='http://10.0.10.2:48080'
+node node_modules/@playwright/test/cli.js test e2e/m2-all-preview.spec.ts `
+  e2e/team-workspace.spec.ts e2e/phase1-pages.spec.ts --project=chromium
+```
+
+**跨用户/真实数据的验证不能用 mock 代替**：涉及金额、席位数、索引状态、配额这类
+「显示的数字必须与实际一致」的地方，必须在服务器用 demo 账号打真实接口核对
+（例：知识库页的 `vector_index_ready` 曾硬编码为 `true`，只在真实接口上才暴露）。
+
 ---
 
 ## 7. 关键文件地图
@@ -346,3 +380,18 @@ docs/superpowers/plans/             # 计划 + 执行记录（execution-notes）
 - 每轮结束给出**明确的下一步**
 - 发现真实缺陷时：**先复现 → 定位根因 → 写失败测试 → 修复 → 补回归测试**，并把根因写进 `execution-notes`
 - 不确定的信息明确标注"未确认"，**不要编造**
+
+---
+
+## 9. 文档入口（按需读，不必全读）
+
+| 想知道什么 | 读哪个 |
+| --- | --- |
+| **接手新会话**（当前状态 / 剩余任务 / 命令 / 阻塞项） | [docs/runbooks/2026-10-26-handoff.md](docs/runbooks/2026-10-26-handoff.md) |
+| **前端重设计怎么做的**（5 个阶段的设计取舍与实测证据） | [docs/superpowers/specs/2026-10-23-frontend-redesign-design.md](docs/superpowers/specs/2026-10-23-frontend-redesign-design.md) §4.5~§4.13 |
+| **为什么会返工**（我的错 + 环境坑 + 打分） | [docs/retrospective/2026-10-26-frontend-redesign-retro.md](docs/retrospective/2026-10-26-frontend-redesign-retro.md) |
+| 产品化路线与竞品 | [docs/product/2026-10-18-demo-to-product-roadmap.md](docs/product/2026-10-18-demo-to-product-roadmap.md) |
+| 架构决策（为什么不用 citeproc-js 等） | [docs/adr/](docs/adr/) |
+| 部署 / 恢复 / 答辩 / 复现 | [docs/runbooks/](docs/runbooks/) |
+| 用路径巡检找缺陷的方法与历史结果 | [docs/runbooks/usage-path-audit.md](docs/runbooks/usage-path-audit.md) / [...-2.md](docs/runbooks/usage-path-audit-2.md) |
+| 各 Task 的计划与执行记录 | [docs/superpowers/plans/](docs/superpowers/plans/) |
