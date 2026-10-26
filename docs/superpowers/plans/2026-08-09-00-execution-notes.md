@@ -3397,6 +3397,98 @@ E2E：observability 3 + measure 1 + structure 1 全绿（真实服务器）
 配色是否好看、留白是否舒服仍需人眼确认。截图在
 `frontend/e2e/screenshots/observability-*.png`。
 
+---
+
+## 2026-10-26 · 套餐页重设计（前端重设计第七阶段）
+
+**范围**：`backend/app/billing/services/plan_service.py`（`get_usage`）、
+`backend/app/schemas/billing.py`（`UsageOut`）、`frontend/src/views/PlanView.vue`、
+`frontend/src/api/types.ts`、3 个测试文件 + 1 个新 E2E。
+设计记录：`docs/superpowers/specs/2026-10-23-frontend-redesign-design.md` §4.15。
+
+### 取证先行（按交接文档的提醒：先查「数字有没有出处」）
+
+真实接口（服务器）：
+
+```
+demo    → institution / monthly_reviews=-1 / reviews_used=3 / period_end=2026-11-22
+e2efull → free / monthly_reviews=1 / reviews_used=1 / reviews_remaining=0
+其余 25 个用户 → 无订阅（免费档）
+```
+
+真实浏览器结构导出（Playwright，非肉眼）：
+
+```
+DEMO_CURRENT_CARD = {text:"机构版 2026-10 3 / 不限 篇",
+                     mentionsTeam:false, mentionsApi:false,
+                     mentionsSeats:false, mentionsWorkspace:false}
+FREE_ACTIONS      = [9 个导航 <a>, {tag:"BUTTON", text:"", testid:null}]
+FREE_PROGRESS_BAR = {backgroundColor:"oklch(0.62 0.19 250)"}   ← 主色蓝
+LOADING_STATE     = {textLen:8, hasLoading:false, hasSkeleton:0, hasSpinner:0}
+ERROR_STATE       = {planCardCount:0}                          ← usage 500 连累 plans
+```
+
+### 6 个缺陷与根因
+
+| # | 缺陷 | 根因 | 修法 |
+| --- | --- | --- | --- |
+| 1 | 当前卡**零权益** | `UsageOut` 只返回用量+名字，权益字段没给（`Plan` 表里其实都有） | 后端补 7 字段；前端直接渲染，**不**拿 `plan_id` 去 `plans` 里查（那是第二份配置） |
+| 2 | 无订阅到期日 | 页面只有 `period_key`（用量周期），被当成到期日 | 后端返回 `period_end`；前端分两个元素显示 |
+| 3 | 用尽时进度条还是健康蓝 | 固定 `bg-primary` | `reviews_remaining === 0` → `bg-warning`（不是「越高越红」） |
+| 4 | 说升级但无入口 | 只有一句文案 | 引导条加真按钮，滚到对比区 + 说明手工开通流程 |
+| 5 | 加载中空白 | 无加载态 | spinner + 文案 |
+| 6 | usage 失败连坐 plans | `Promise.all` | `Promise.allSettled`，分别处理 |
+
+### 契约变更（7 字段，全部向后兼容）
+
+`allow_team` / `allow_api_access` / `max_workspaces` / `max_seats_per_workspace` /
+`price_cents` / `period_end`（免费档 null）/ `seats_purchased`（免费档 null）。
+
+### 修复前后实测对照
+
+| 缺陷 | 修复前 | 修复后 |
+| --- | --- | --- |
+| 1 | 权益 mentions 全 false | `entitlementsCount=4`（团队✅/API✅/工作区100/席位200） |
+| 2 | 只有 `2026-10` | `2026/11/22 到期` + 独立 `用量周期 2026-10` |
+| 3 | `oklch(0.62 0.19 250)` | `bg-warning` = `oklch(0.62 0.14 70)` |
+| 4 | 无可点入口 | 可聚焦、焦点环 2px solid、点击 `scrollY 0→16` |
+| 5 | `textLen=8` | `plan-loading` 含「加载」 |
+| 6 | `planCardCount=0` | 4 张卡保留 |
+
+其他数值：桌面/移动溢出均 **0**；对比度 **6.01:1**（AA 要求 4.5）。
+
+### 门禁
+
+```
+后端：black/ruff/mypy 全过；pytest 2646 passed, 8 skipped
+前端：vitest 392 passed（+6 skipped）；vue-tsc -b 0 错；vite build OK
+E2E：plan.spec 5 条 + plan-measure 2 条全绿（真实服务器）
+```
+
+### 诚实性验证（6 组回退，全部确认变红）
+
+| # | 回退 | 变红的断言 |
+| --- | --- | --- |
+| 1 | 进度条固定 `bg-primary` | 用尽时必须是警示色 |
+| 2 | `allSettled` → `Promise.all` | usage 失败不连坐 + 加载失败横幅 |
+| 3 | 删权益区 | 当前卡必须显示权益 |
+| 4 | 加载态 `v-if="false"` | 加载中要显示加载态 |
+| 5 | 到期日 `v-if="false"` | 到期日必须显示 + 免费档无到期日 |
+| 6 | 升级按钮 `v-if="false"` | 提供升级入口 + 点击滚动 |
+
+### 本轮踩的坑
+
+| 坑 | 表现 | 修法 |
+| --- | --- | --- |
+| 回退验证用 PowerShell 正则改 `.vue` | 正则改坏模板 → 编译失败 → `Tests no tests`（看起来像「测试没覆盖」） | 回退用 `edit` 做精确替换（AGENTS §5 #1 的又一次验证） |
+| 测量脚本选择器写死结构 | DOM 改标签后 `count=0`，易误读成「页面坏了」 | 测量脚本与 DOM 同步改，优先 `data-test` |
+| 免费档 `period_end=null` | 若 fallback 到「本月底」就是编假日期 | 显式显示「免费档（无到期日）」并写测试锁死 |
+
+### 验证限制
+
+同前：模型不支持图片输入，**未肉眼看过截图**，视觉验收靠结构化导出 + 硬断言。
+截图在 `frontend/e2e/screenshots/plan-*.png`。
+
 
 
 
