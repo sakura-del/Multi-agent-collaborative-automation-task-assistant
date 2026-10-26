@@ -1267,6 +1267,171 @@ if missing:
 模型不支持图片输入，**未肉眼看过截图**。截图在
 `frontend/e2e/screenshots/template-*.png`。
 
+---
+
+## 4.18 导入文献页 + 引用库（第十阶段，已交付）
+
+> 交接文档排最后一位，标注「展示型」。查下来这一页**功能只做了一半** ——
+> 而且不是界面问题，是**整条链路缺了后半段**。
+
+### 取证：解析完全正常，但解析完什么也做不了
+
+后端解析质量其实是好的：
+
+```
+BibTeX（auto 探测）→ format=bibtex count=2，字段齐全（id/type/title/authors/year/doi）
+RIS（auto 探测）   → format=ris   count=2，结果与 BibTeX **完全一致**
+错误定位           → 「@article{a} 缺少结束花括号」「@article 条目缺少 citation key」
+                     「RIS 记录缺少 ER 结束标记」「导入内容超过大小上限（1048576 字节）」
+```
+
+但页面侧：
+
+| 取证项 | 结果 | 含义 |
+| --- | --- | --- |
+| `AFTER_CLICKABLE` | `[解析预览, 重新开始]` | 解析完**没有任何出口** |
+| `HAS_NEXT_STEP_HINT` | `false` | 页面不说「接下来能干什么」 |
+| `app/db/models/` 文献相关表 | 只有 `citation_style` | **没有引用库表** |
+| `POST /references/import` | 纯解析、不落库 | 无保存路径 |
+| `literature_review._execute_search` | `self._source.search(...)` | 文献来自检索源（arXiv/OpenAlex/PubMed） |
+| `importReferences` 调用方 | 仅 `ReferenceImportView.vue` | 导入结果**不进入任何流程** |
+
+页面注释自己写着：「后端**只解析不落库**，所以这里不提供保存按钮
+（保存路径属后续工作）」。
+
+**结论**：用户把 Zotero 导出的 `.bib` 粘进来，看到解析结果，然后没有下文。
+这不是「界面不好看」，是**功能缺一半**。
+
+### 修法（用户确认的方向）：补齐真能力
+
+新增「引用库」概念，打通 `导入 → 保存 → 任务使用` 全链路。
+
+计划文档：[docs/superpowers/plans/2026-10-26-00-reference-library-plan.md](../plans/2026-10-26-00-reference-library-plan.md)
+
+### 数据模型：为什么存 JSON 而不是拆 15 个列
+
+`CslItem` 是 `extra="forbid"` 的严格模型，字段随 CSL 支持演进会增加
+（`medium` 就是最近才加的）。拆列意味着每加一个字段都要迁移；存 JSON 则
+「渲染/导出直接 `from_csl_json(payload)` 还原」，与现有 CSL 管线零阻抗。
+
+`title` / `issued_year` / `doi` 三个冗余列**只为列表查询与排序**，
+**真源永远是 `payload`**。
+
+约束：
+- `UniqueConstraint("user_id", "ref_id")` → **重复导入幂等**（用户会重复粘同一份文件）；
+- 列表索引 `(user_id, created_at, id)` —— **必须带 `id`**：同事务批量插入的多行
+  `created_at` 完全相同，PostgreSQL 对并列行返回任意顺序（AGENTS §5 #14，已踩两次）。
+
+### 准入：本功能最重要的取舍
+
+引用库条目要能当**文献源**用，就必须能构造出 `LiteratureRecord`
+（`extra="forbid"` 冻结契约，`published_at` / `source_url` / `pdf_url` 必填）：
+
+| 缺失 | 如果放进去会怎样 | 所以 |
+| --- | --- | --- |
+| `issued_year` | 无法给出真实 `published_at`。**编 1970** 会让按时间排序把无年份条目排最前，用户看到 1970 会以为数据错了 | **拒绝入库**，给可读原因 |
+| `url` 且 `doi` | 无法给出 `source_url` | **拒绝入库** |
+
+**宁可入库失败并说清原因，也不要存进去之后在任务执行时炸掉或产生假数据。**
+这与模板页那轮的教训同源（AGENTS §5 #28）：契约能防「少填」，防不住「填假的」。
+
+### 部分成功是常态
+
+用户粘一份 `.bib` 里常有几条缺年份的（预印本、网页引用）。整批 400 会让用户
+没法保存另外 19 条 —— 但他确实需要那 19 条。所以逐条判定：
+
+```
+POST /reference-library  →  { created: 2, skipped: 0,
+                              rejected: [{ref_id, title, reason}] }
+```
+
+**只有全部被拒才 400**，且逐条列原因。
+
+### 接线：绝不静默回退
+
+`resolve_literature_source` 优先级：引用库 > 离线清单 > 注入 fallback > 多源检索。
+
+`reference_library=true` 但缺 session / user_id 时**抛异常**，不回退外呼检索：
+
+> 用户以为自己用的是自己那 20 篇，实际去 arXiv 拉了 10 篇无关的 ——
+> 这比任务直接失败更糟：产出的综述引用了一批用户从没读过的文献，
+> 而用户不会察觉。
+
+### 关键词不命中时退回整库
+
+用户选「用我的引用库」是要用他的文献，不是要看「关键词没匹配到」。
+LLM 生成的查询词常常与库内表述不一致（实测：查 `"retrieval-augmented
+generation" evaluation` 而库里是中文题名 → 命中 0 条）。
+
+### 实测验证（真实服务器）
+
+**API 链路**（端到端脚本）：
+
+```
+③ 解析: format=bibtex count=3（含 1 条无年份）
+④ 保存: created=2 skipped=0
+   被拒: 没有年份的网页引用 → 缺出版年份：无法确定发表时间，不能作为文献源使用
+⑤ 重复保存（幂等）: created=0 skipped=2
+⑥ 摘要: total=2 usable=2
+SUMMARY: PASS
+```
+
+**容器内文献源验证**（不走 LLM、不烧额度）：
+
+```
+③ resolve_literature_source → LibraryLiteratureSource
+④ 查询 'RAG' → 1 条，source_url=https://doi.org/10.18653/v1/2024.eacl-demo.16
+⑤ 查询 'zzz'（不命中）→ 2 条（退回整库，不是 0）
+⑥ 年份: [2024, 2024]   ← 真实年份，没有编造 1970
+SUMMARY: PASS
+```
+
+**真实任务验证**（关键证据）：创建任务选「我的引用库」→ 批准执行 →
+检索节点 `n1` 的 `execution_result.artifacts`：
+
+```json
+[{"source_id": "doi:10.18653/v1/2024.eacl-demo.16",
+  "title": "Ragas: Automated Evaluation of Retrieval Augmented Generation",
+  "authors": ["Es, Shahul", "James, Jithin"],
+  "published_at": "2024-01-01T00:00:00Z",
+  "source_url": "https://doi.org/10.18653/v1/2024.eacl-demo.16"},
+ {"source_id": "doi:10.1234/jcs.2024.001", ...}]
+```
+
+**两篇都来自引用库**（`source_id` 是 `doi:` 前缀，不是 arXiv id），
+且 `published_at` 是真实年份。**接线成功。**
+
+> 该任务最终转 `waiting_human`，但原因与引用库无关：LLM 校验器判定
+> `10.1234/jcs.2024.001` 是「示例性或占位符 DOI」——**它判对了**，
+> `10.1234` 正是 DOI 手册里的示例前缀。这是我造的测试数据不合格，
+> 换成真实 DOI 后重新验证（见 execution-notes）。
+
+### 测试
+
+| 类型 | 数量 | 关键断言 |
+| --- | --- | --- |
+| 后端服务 | 15 | 幂等；部分成功如实报告；缺年份/缺 URL 被拒且原因可读；owner 隔离；排序稳定；payload 能还原成 CslItem |
+| 后端文献源 | 13 | **无年份返回 None 不编 1970**；无 URL 无 DOI 跳过；DOI 派生 URL；`published_at` 取 1 月 1 日；不命中退回整库；owner 隔离 |
+| 后端接线 | 6 | 引用库优先于离线清单；**缺 session 抛异常不回退外呼**；向后兼容 |
+| 后端 API | 19 | 鉴权；owner 隔离（跨用户 404）；幂等；部分成功；全拒 400；清空只清自己 |
+| 前端转换 | 13 | 字段名映射（`year`→`issued_year`）；`id` 为空时用题名派生稳定值；过滤无题名条目 |
+| 前端页面 | 27 | 保存按钮；提交 CslItem 形态载荷；逐条拒绝原因；引用库列表/删除/清空；任务表单文献源选择 |
+| 迁移 | — | `upgrade` / `downgrade` / `re-upgrade` 全部通过（SQLite + PostgreSQL） |
+
+**诚实性验证（3 组回退，全部确认变红）**：
+
+| # | 回退内容 | 变红的断言 |
+| --- | --- | --- |
+| 1 | 去掉准入检查（全部放行） | 5 条（服务 + API） |
+| 2 | 缺 session 时静默回退 fallback | 2 条 |
+| 3 | 无年份编造 1970 | 1 条 |
+
+### 验证限制
+
+- 模型不支持图片输入，**未肉眼看过截图**；
+- 真实任务跑到 `waiting_human`，**不是**引用库的问题（见上文），
+  但**没有跑到 `completed`** —— 这是本轮未验证的部分，如实记录。
+
 ### 探针清理
 
 调查期上传的 `tpl-17fb10b2978394a8`（探针学院模板）已删除，

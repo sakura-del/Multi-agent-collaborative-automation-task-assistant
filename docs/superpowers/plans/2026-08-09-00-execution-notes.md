@@ -3655,6 +3655,117 @@ E2E 里写了最小 zip 解析（扫 `PK\x03\x04` + `inflateRawSync`），
 模型不支持图片输入，**未肉眼看过截图**。截图在
 `frontend/e2e/screenshots/template-*.png`。
 
+---
+
+## 2026-10-26 · 导入文献页 + 引用库（前端重设计第十阶段）
+
+**范围**：新建引用库（表 + 迁移 + 服务 + 4 个端点 + 文献源 + 任务接线）
++ 前端 3 处（导入页保存、引用库页、任务表单文献源选择）。
+计划：[2026-10-26-00-reference-library-plan.md](2026-10-26-00-reference-library-plan.md)
+设计记录：spec §4.18。
+
+### 取证：解析完全正常，但解析完什么也做不了
+
+后端解析质量是好的（BibTeX 与 RIS 结果**完全一致**，错误定位到具体条目）。
+但页面 `AFTER_CLICKABLE = [解析预览, 重新开始]`，`HAS_NEXT_STEP_HINT = false`，
+后端没有引用库表，`importReferences` 只被这一个页面调用 ——
+**导入结果不进入任何流程**。页面注释自己写着「保存路径属后续工作」。
+
+### 修法
+
+新增 `reference_library_item` 表 + `LibraryLiteratureSource` + 任务
+`reference_library=true` 开关，打通 `导入 → 保存 → 任务使用`。
+
+关键取舍（三条都是「宁可失败也不造假」）：
+
+| 决定 | 理由 |
+| --- | --- |
+| 缺年份条目**拒绝入库** | 无法构造 `LiteratureRecord.published_at`。**编 1970** 会让按时间排序把无年份排最前，用户看到 1970 会以为数据错了 |
+| 缺 URL 且缺 DOI **拒绝入库** | 无法构造 `source_url` |
+| 缺 session 时**抛异常不回退外呼** | 否则用户以为在用自己 20 篇，实际去 arXiv 拉了 10 篇无关的 —— 综述引用了他从没读过的文献而他不会察觉 |
+
+### 实测（真实服务器，三段证据）
+
+**① API 链路**：
+
+```
+解析 count=3（含 1 条无年份）
+保存 created=2 skipped=0，被拒 1 条：缺出版年份：无法确定发表时间，不能作为文献源使用
+重复保存 created=0 skipped=2（幂等）
+摘要 total=2 usable=2
+```
+
+**② 容器内文献源**（不烧额度）：
+
+```
+resolve_literature_source → LibraryLiteratureSource
+查询 'RAG' → 1 条，source_url=https://doi.org/10.18653/v1/2024.eacl-demo.16
+查询 'zzz'（不命中）→ 2 条（退回整库，不是 0）
+年份 [2024, 2024]  ← 真实年份，没有编造 1970
+```
+
+**③ 真实任务跑完（`completed`）**：
+
+```
+任务 3b20abc0-7ef7-41b9-9139-b0c562f50cab
+节点 n1 有 3 条 artifacts，节点 n2 有 3 条
+全部 6 条 source_id 都是 doi: 前缀（来自引用库，不是 arXiv id）
+来自引用库的 artifacts: 6 / 6
+FINAL_STATUS=completed
+```
+
+### 一个必须记录的「假失败」
+
+第一次真实任务（用 `10.1234/jcs.2024.001`）跑到 `waiting_human`。
+查校验报告：
+
+```
+semantic_consistency: false
+"第二条文献的 DOI '10.1234/jcs.2024.001' 看起来是示例性或占位符 DOI"
+```
+
+**校验器判对了** —— `10.1234` 正是 DOI 手册里的示例前缀。这是我造的测试数据
+不合格，**不是产品缺陷**。换成真实 DOI 后同一流程跑到 `completed`。
+
+> 教训：验证「引用可核验」这类能力时，**测试数据本身必须真实可核验**，
+> 否则会把校验器的正确判断误当成系统缺陷。
+
+### 门禁
+
+```
+后端：2705 passed（+53）/ 8 skipped；mypy 0 错（205 文件）；ruff 全过
+前端：448 passed（+39）；vue-tsc -b 0 错；vite build OK
+迁移：upgrade / downgrade / re-upgrade 全过（SQLite + PostgreSQL）
+```
+
+### 诚实性验证（3 组回退，全部确认变红）
+
+| # | 回退 | 变红的断言 |
+| --- | --- | --- |
+| 1 | 去掉准入检查（全部放行） | 5 条 |
+| 2 | 缺 session 时静默回退 fallback | 2 条 |
+| 3 | 无年份编造 1970 | 1 条 |
+
+### 清理（回查确认，AGENTS §5 #11）
+
+```
+probe_tasks = 0          （清理前 2）
+task_total = 53          （回到基线）
+demo_tasks = 27          （回到基线，演示数据未误删）
+reference_library_item = 0
+quota key 已删除，回查 KEYS 为空
+```
+
+清理脚本第一版失败过一次：`screening_decision` 的列名是 `record_id`，
+我写了 `screening_record_id` → 事务回滚（**未删任何数据**）→ 查表结构后修正。
+
+### 验证限制
+
+- 模型不支持图片输入，**未肉眼看过截图**；
+- 前端页面改动只有单元测试覆盖，**没有跑 E2E**（引用库 E2E 需要造数据 +
+  真实任务，本轮用 API + 容器内脚本 + 真实任务替代，证据更强但少了浏览器层）；
+- 真实任务只验证了「检索节点取到引用库文献」，**最终综述正文质量未评估**。
+
 
 
 
