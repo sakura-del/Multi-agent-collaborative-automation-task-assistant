@@ -133,6 +133,19 @@ describe("ObservabilityView", () => {
     });
   });
 
+  it("最近任务行必须是可聚焦的按钮（键盘可达是硬要求）", async () => {
+    // 实测缺陷：首版用 <li @click>，FOCUSABLE 列表里没有这些行 ——
+    // 键盘用户完全进不去任务详情。AGENTS §6.5.3 要求所有可交互元素键盘可达。
+    vi.mocked(getObservabilityOverview).mockResolvedValue(overview() as never);
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const row = wrapper.find('[data-test="observability-row-aaaaaaaa-1111"]');
+    expect(row.element.tagName).toBe("BUTTON");
+    expect(row.attributes("type")).toBe("button");
+  });
+
   it("展示最近任务行（按 task_id 定位）", async () => {
     vi.mocked(getObservabilityOverview).mockResolvedValue(overview() as never);
 

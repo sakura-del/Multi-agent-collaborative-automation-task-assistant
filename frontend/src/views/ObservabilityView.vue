@@ -335,35 +335,45 @@ async function refresh() {
       </section>
 
       <!-- 最近任务：标题是唯一能认出「哪次运行」的信息，UUID 只作辅助 -->
-      <section v-if="overview.recent.length" class="overflow-hidden rounded-lg border border-border bg-card">
+      <section
+        v-if="overview.recent.length"
+        class="overflow-hidden rounded-lg border border-border bg-card"
+      >
         <h2 class="border-b border-border px-3 py-2 text-sm font-medium">最近任务</h2>
         <ul class="divide-y divide-border">
-          <li
-            v-for="row in overview.recent"
-            :key="row.task_id"
-            :data-test="`observability-row-${row.task_id}`"
-            class="cursor-pointer px-3 py-2 transition-colors hover:bg-muted/40 focus-within:bg-muted/40"
-            @click="openTask(row.task_id)"
-          >
-            <div class="flex flex-wrap items-start justify-between gap-2">
-              <div class="flex min-w-0 flex-1 items-start gap-2">
+          <li v-for="row in overview.recent" :key="row.task_id">
+            <!-- 用 <button> 而不是给 <li> 加 @click：**键盘可达是无障碍硬要求**
+                 （AGENTS §6.5.3）。首版用 div+click，实测 FOCUSABLE 列表里
+                 没有这些行 —— 键盘用户完全进不去任务详情。 -->
+            <button
+              type="button"
+              :data-test="`observability-row-${row.task_id}`"
+              class="flex w-full flex-wrap items-start justify-between gap-2 px-3 py-2 text-left transition-colors hover:bg-muted/40"
+              @click="openTask(row.task_id)"
+            >
+              <span class="flex min-w-0 flex-1 items-start gap-2">
                 <StatusBadge :status="row.status" class="mt-0.5 shrink-0" />
-                <div class="min-w-0">
+                <span class="min-w-0">
                   <!-- 标题优先：没有标题时才退回 UUID -->
-                  <p class="truncate text-sm font-medium text-foreground" :title="row.title">
+                  <span
+                    class="block truncate text-sm font-medium text-foreground"
+                    :title="row.title"
+                  >
                     {{ row.title || `任务 ${shortId(row.task_id)}` }}
-                  </p>
-                  <p class="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-muted-foreground">
+                  </span>
+                  <span
+                    class="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-muted-foreground"
+                  >
                     <code class="rounded bg-muted px-1 py-0.5">{{ shortId(row.task_id) }}</code>
                     <span v-if="row.created_at">{{ formatDateTime(row.created_at) }}</span>
-                  </p>
-                </div>
-              </div>
-              <div class="flex shrink-0 items-center gap-3 text-xs text-muted-foreground">
+                  </span>
+                </span>
+              </span>
+              <span class="flex shrink-0 items-center gap-3 text-xs text-muted-foreground">
                 <span class="tabular-nums">{{ formatTokens(row.used_tokens) }} token</span>
                 <span class="tabular-nums">{{ formatDuration(row.duration_seconds) }}</span>
-              </div>
-            </div>
+              </span>
+            </button>
           </li>
         </ul>
       </section>

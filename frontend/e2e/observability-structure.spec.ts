@@ -93,9 +93,8 @@ test("用量看板：完整渲染结构导出", async ({ page }) => {
   // 最近任务行的布局：确认「标题在上、UUID 与时间在下、右侧 token/耗时」的层级
   const rowLayout = await page.evaluate(() => {
     const row = document.querySelector('[data-test^="observability-row-"]') as HTMLElement;
-    const title = row.querySelector("p.font-medium") as HTMLElement;
+    const title = row.querySelector("span.font-medium") as HTMLElement;
     const code = row.querySelector("code") as HTMLElement;
-    const badge = row.querySelector("span.inline-flex, [class*='inline-flex']") as HTMLElement;
     const box = (el: HTMLElement | null) =>
       el
         ? (() => {
@@ -104,13 +103,13 @@ test("用量看板：完整渲染结构导出", async ({ page }) => {
           })()
         : null;
     return {
+      tagName: row.tagName,
       row: box(row),
       title: box(title),
       titleText: title?.textContent?.trim(),
       titleFontSize: title ? getComputedStyle(title).fontSize : null,
       code: box(code),
       codeText: code?.textContent?.trim(),
-      badge: box(badge),
       // 标题必须在 UUID 上方（层级：先认标题，再认 id）
       titleAboveCode: !!(title && code && title.getBoundingClientRect().y <= code.getBoundingClientRect().y),
     };
@@ -142,6 +141,29 @@ test("用量看板：完整渲染结构导出", async ({ page }) => {
       }));
   });
   console.log("FOCUSABLE=" + JSON.stringify(focusable));
+
+  // 硬断言：最近任务行必须是可聚焦的按钮（首版是 <li @click>，键盘进不去）
+  const rowFocusable = await page.evaluate(() => {
+    const row = document.querySelector('[data-test^="observability-row-"]') as HTMLElement;
+    row.focus();
+    return {
+      tag: row.tagName,
+      isActive: document.activeElement === row,
+    };
+  });
+  console.log("ROW_FOCUSABLE=" + JSON.stringify(rowFocusable));
+  expect(rowFocusable.tag).toBe("BUTTON");
+  expect(rowFocusable.isActive).toBe(true);
+
+  // 硬断言：焦点环可见（outline 生效，不是「按了但看不出来」）
+  const focusRing = await page.evaluate(() => {
+    const row = document.querySelector('[data-test^="observability-row-"]') as HTMLElement;
+    row.focus();
+    const s = getComputedStyle(row);
+    return { outlineStyle: s.outlineStyle, outlineWidth: s.outlineWidth, outlineColor: s.outlineColor };
+  });
+  console.log("FOCUS_RING=" + JSON.stringify(focusRing));
+  expect(focusRing.outlineStyle).not.toBe("none");
 
   await page.screenshot({ path: `${SHOTS}/observability-structure-desktop.png`, fullPage: true });
 
