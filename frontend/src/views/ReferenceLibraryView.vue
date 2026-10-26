@@ -140,15 +140,18 @@ async function confirmClear() {
       {{ successMessage }}
     </p>
 
-    <div
-      v-if="summary && summary.total > 0"
-      class="mb-3 flex flex-wrap items-center justify-between gap-2"
-    >
+    <!--
+      摘要始终渲染（0 条也显示）：用户需要知道「引用库为空」这个事实本身。
+      真实浏览器验证时发现：原先 `v-if="summary && summary.total > 0"` 把摘要
+      和清空按钮一起藏了，空库时页面只有一句「还是空的」，看不到计数。
+      清空按钮只在有条目时才显示（空库没什么可清）。
+    -->
+    <div v-if="summary" class="mb-3 flex flex-wrap items-center justify-between gap-2">
       <p class="text-xs text-muted-foreground" data-test="library-summary">
         共 <strong>{{ summary.total }}</strong> 条 · 可作文献源
         <strong>{{ summary.usable_as_source }}</strong> 条
       </p>
-      <div v-if="!confirmingClear" class="flex items-center gap-2">
+      <div v-if="summary.total > 0 && !confirmingClear" class="flex items-center gap-2">
         <Button
           variant="ghost"
           size="sm"
@@ -159,7 +162,7 @@ async function confirmClear() {
         </Button>
       </div>
       <div
-        v-else
+        v-else-if="summary.total > 0"
         class="flex flex-wrap items-center gap-2 rounded-md border border-destructive/30 bg-destructive/8 px-2.5 py-1.5"
       >
         <span class="text-xs">清空后无法恢复，确认删除全部 {{ summary.total }} 条？</span>

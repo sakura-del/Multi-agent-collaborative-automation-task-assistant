@@ -82,6 +82,28 @@ describe("ReferenceLibraryView", () => {
     expect(empty.text()).toMatch(/导入/);
   });
 
+  it("空库时摘要仍然显示（0 条是有效信息，不能藏起来）", async () => {
+    // 真实浏览器验证抓到的缺陷：原先 `v-if="summary.total > 0"` 把摘要卡
+    // 和清空按钮一起藏了，空库时页面只剩一句「还是空的」，看不到计数。
+    vi.mocked(listLibraryItems).mockResolvedValue({ items: [], total: 0 });
+    vi.mocked(getLibrarySummary).mockResolvedValue({ total: 0, usable_as_source: 0 });
+
+    const wrapper = await mountView();
+
+    const summary = wrapper.find('[data-test="library-summary"]');
+    expect(summary.exists()).toBe(true);
+    expect(summary.text()).toContain("0");
+  });
+
+  it("空库时不显示清空按钮（没什么可清）", async () => {
+    vi.mocked(listLibraryItems).mockResolvedValue({ items: [], total: 0 });
+    vi.mocked(getLibrarySummary).mockResolvedValue({ total: 0, usable_as_source: 0 });
+
+    const wrapper = await mountView();
+
+    expect(wrapper.find('[data-test="library-clear"]').exists()).toBe(false);
+  });
+
   it("页面说明要讲清「能怎么用」（创建任务时选它）", async () => {
     const wrapper = await mountView();
 
