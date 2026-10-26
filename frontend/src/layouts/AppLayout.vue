@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   Activity,
+  BookMarked,
   CreditCard,
   FileInput,
   FileText,
@@ -50,6 +51,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { name: "styles", label: "引用样式", icon: Palette },
       { name: "templates", label: "Word 模板", icon: FileText },
       { name: "reference-import", label: "导入文献", icon: FileInput },
+      { name: "reference-library", label: "引用库", icon: BookMarked },
     ],
   },
   {

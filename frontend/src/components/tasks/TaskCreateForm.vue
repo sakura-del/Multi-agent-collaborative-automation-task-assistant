@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { listCitationStyles } from "@/api/citation-styles";
+import { getLibrarySummary } from "@/api/reference-library";
 import type { CitationStyleSource, TaskCreate } from "@/api/types";
 
 // 创建表单：只做校验与 payload 组装，提交动作由父组件负责（保持可测）
@@ -50,6 +51,9 @@ const language = ref<"zh" | "en">("zh");
 const styleOptions = ref<StyleOption[] | null>(null);
 const citationStyle = ref("gbt7714");
 const offlineDataset = ref(false);
+// 引用库作为文献源（2026-10-26 引用库计划）：默认关，开启后完全不外呼检索
+const useReferenceLibrary = ref(false);
+const libraryCount = ref(0);
 // 引用核验默认关闭：与全局默认一致，避免用户无感知地引入外呼延迟（Issue #3 遗留项）
 const verifyReferences = ref(false);
 const selectedDocuments = ref<string[]>([]);
@@ -74,6 +78,14 @@ onMounted(async () => {
   } catch {
     // 列表不可用时静默降级为内置两项：创建任务不能被引用样式接口拖垮
     styleOptions.value = null;
+  }
+
+  // 引用库摘要：只为提示「将有 N 篇可用」，失败不影响表单（局部失败不连坐）
+  try {
+    const summary = await getLibrarySummary();
+    libraryCount.value = summary.usable_as_source;
+  } catch {
+    libraryCount.value = 0;
   }
 });
 
@@ -145,6 +157,7 @@ function handleSubmit() {
     output_language: language.value,
     citation_style: citationStyle.value,
     offline_dataset: offlineDataset.value,
+    reference_library: useReferenceLibrary.value,
     document_ids: [...selectedDocuments.value],
     verify_references: verifyReferences.value,
   };
@@ -285,11 +298,27 @@ function handleSubmit() {
     </div>
 
     <div class="grid gap-2">
+      <label class="flex items-start gap-2 text-sm" data-test="reference-library-label">
+        <input
+          v-model="useReferenceLibrary"
+          data-test="reference-library"
+          type="checkbox"
+          class="mt-0.5 size-4 rounded border-input accent-primary"
+        />
+        <span>
+          使用我的引用库（{{ libraryCount }} 篇，不访问外部检索源）
+          <span v-if="libraryCount === 0" class="text-muted-foreground">
+            —— 引用库为空，先去「导入文献」保存几条再启用
+          </span>
+        </span>
+      </label>
+
       <label class="flex items-center gap-2 text-sm">
         <input
           v-model="offlineDataset"
           data-test="offline"
           type="checkbox"
+          :disabled="useReferenceLibrary"
           class="size-4 rounded border-input accent-primary"
         />
         <span>使用离线演示语料（冻结 10 篇，不访问 arXiv）</span>

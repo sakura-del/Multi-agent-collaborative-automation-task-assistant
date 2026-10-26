@@ -21,6 +21,8 @@
   api_key.py:     API_KEY（Phase 2：开放 API / MCP 凭证，只存哈希）
   billing.py:     PLAN / SUBSCRIPTION / USAGE_COUNTER
                   （Phase 2：计费套餐——篇数为主、token 为辅）
+  reference_library.py: REFERENCE_LIBRARY_ITEM
+                  （2026-10-26：个人引用库——导入的 BibTeX/RIS 可存下来供任务使用）
 """
 
 from app.db.models.agent import Agent, AgentInteraction
@@ -32,6 +34,7 @@ from app.db.models.email_token import EmailToken
 from app.db.models.feedback import HumanFeedback
 from app.db.models.knowledge import DocChunk, KnowledgeDoc, VectorIndex
 from app.db.models.log import ExecutionLog, FailureCase, ValidationResult
+from app.db.models.reference_library import ReferenceLibraryItem
 from app.db.models.screening import (
     ScreeningDecision,
     ScreeningRecord,
@@ -54,6 +57,7 @@ __all__ = [
     "HumanFeedback",
     "KnowledgeDoc",
     "Plan",
+    "ReferenceLibraryItem",
     "ScreeningDecision",
     "ScreeningRecord",
     "SearchLog",

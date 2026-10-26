@@ -791,19 +791,24 @@ class TaskExecution:
 
             observer = self.container.create_observer()
             scheduler = self.container.create_scheduler(observer)
-            workflow = self._literature_execution_workflow(task)
-            if workflow is not None:
-                scheduler = TaskScheduler(
-                    agent_factory=self._literature_agent_factory(workflow, task),
-                    observer=observer,
+            # 引用库文献源需要 DB 会话（2026-10-26 引用库计划 §3.3）：
+            # 任务执行期间保持一个会话打开，供 `LibraryLiteratureSource` 查询用户引用库。
+            # 不用 `async with` 包整个执行流程：执行可能持续数分钟，
+            # 长事务会占住连接；这里只把它传下去，读取时由 source 自己发查询。
+            async with self._session_factory() as source_session:
+                workflow = self._literature_execution_workflow(task, source_session=source_session)
+                if workflow is not None:
+                    scheduler = TaskScheduler(
+                        agent_factory=self._literature_agent_factory(workflow, task),
+                        observer=observer,
+                    )
+                result = await scheduler.run(
+                    dag,
+                    task_id=str(task_id),
+                    pre_completed=completed,
+                    trace_id=trace_id,
+                    subtask_ids=subtask_ids,
                 )
-            result = await scheduler.run(
-                dag,
-                task_id=str(task_id),
-                pre_completed=completed,
-                trace_id=trace_id,
-                subtask_ids=subtask_ids,
-            )
 
             # 先记账再判断成败：转人工 / 失败路径同样要按已用额度结算，
             # 若放在成功分支里就会漏记（「跑了 30k 然后转人工」被当成 0 用量全额退款）。
@@ -880,8 +885,15 @@ class TaskExecution:
         """构造规划用工作流（Task 3 只接规划；执行接线见 `_literature_execution_workflow`）。"""
         return LiteratureReviewWorkflow(planner=self.container.create_planner())
 
-    def _literature_execution_workflow(self, task: Any | None) -> LiteratureReviewWorkflow | None:
-        """文献任务且容器提供知识库时，返回证据约束执行工作流；否则 None（走通用 Agent）。"""
+    def _literature_execution_workflow(
+        self, task: Any | None, *, source_session: Any | None = None
+    ) -> LiteratureReviewWorkflow | None:
+        """文献任务且容器提供知识库时，返回证据约束执行工作流；否则 None（走通用 Agent）。
+
+        `source_session` 用于引用库文献源（`reference_library=true` 时需要 DB 访问）。
+        不传时引用库任务会抛 `ReferenceLibraryUnavailableError` —— 这是有意的：
+        **绝不静默回退到外部检索**（否则用户以为在用自己导入的文献）。
+        """
         if task is None or getattr(task, "task_type", "") != "literature_review":
             return None
         knowledge = self.container.knowledge_query
@@ -901,8 +913,12 @@ class TaskExecution:
                 citation_validator=CitationValidator(reference_mode=self._reference_mode()),
             ),
             context_builder=LiteratureContextBuilder(knowledge),
-            # 离线演示任务走冻结清单；其余用容器注入的源或 arXiv 适配器
-            source=resolve_literature_source(task, fallback=self.container.literature_source),
+            # 离线演示任务走冻结清单；引用库任务走用户引用库；其余用容器注入的源或 arXiv 适配器
+            source=resolve_literature_source(
+                task,
+                fallback=self.container.literature_source,
+                session=source_session,
+            ),
             # 引用真实性核验（Issue #3）：核验器未启用或离线任务（R6）时为 None
             reference_verifier=self._reference_verifier_for_task(task),
         )

@@ -8,6 +8,7 @@ import LoginView from "@/views/LoginView.vue";
 import ObservabilityView from "@/views/ObservabilityView.vue";
 import PasswordResetView from "@/views/PasswordResetView.vue";
 import ReferenceImportView from "@/views/ReferenceImportView.vue";
+import ReferenceLibraryView from "@/views/ReferenceLibraryView.vue";
 import ScreeningView from "@/views/ScreeningView.vue";
 import StyleView from "@/views/StyleView.vue";
 import TaskDetailView from "@/views/TaskDetailView.vue";
@@ -67,6 +68,12 @@ export const router = createRouter({
         { path: "styles", name: "styles", component: StyleView },
         { path: "templates", name: "templates", component: TemplateView },
         { path: "references/import", name: "reference-import", component: ReferenceImportView },
+        // 引用库（2026-10-26）：导入的文献存下来，可作为任务文献源
+        {
+          path: "references/library",
+          name: "reference-library",
+          component: ReferenceLibraryView,
+        },
         // 用量与健康看板（Phase 2 可观测性）：owner-scoped，只显示自己的任务统计
         { path: "observability", name: "observability", component: ObservabilityView },
         // 团队工作区（Phase 2 协作）：列表 + 成员/席位管理

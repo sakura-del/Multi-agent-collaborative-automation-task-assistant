@@ -69,6 +69,11 @@ export interface TaskCreate {
   citation_style?: string;
   document_ids?: string[];
   offline_dataset?: boolean;
+  /**
+   * 用用户自己的引用库作为文献源（2026-10-26 引用库计划）。
+   * `true` 时检索节点从引用库取文献、完全不外呼。
+   */
+  reference_library?: boolean;
   /** 本任务是否做外部引用核验：true 时即使离线语料也与 CrossRef/OpenAlex 比对（Issue #3 遗留项） */
   verify_references?: boolean;
 }
@@ -341,6 +346,43 @@ export interface ReferenceImportResponse {
   format: Exclude<ReferenceImportFormat, "auto">;
   count: number;
   items: ImportedReferenceItem[];
+}
+
+// ===== 引用库契约（与后端 app/api/v1/endpoints/reference_library.py 对齐，2026-10-26）=====
+
+export interface LibraryItemOut {
+  item_id: string;
+  ref_id: string;
+  title: string;
+  authors: string[];
+  year: number | null;
+  container_title: string | null;
+  doi: string | null;
+  type: string;
+}
+
+export interface LibraryListOut {
+  items: LibraryItemOut[];
+  total: number;
+}
+
+export interface LibrarySummaryOut {
+  total: number;
+  /** 可作文献源的条数（入库准入已保证与 total 相等，分两字段为将来放宽留口） */
+  usable_as_source: number;
+}
+
+export interface LibraryRejectedItem {
+  ref_id: string;
+  title: string;
+  reason: string;
+}
+
+export interface LibrarySaveResponse {
+  created: number;
+  skipped: number;
+  /** 逐条拒绝原因 —— 必须展示，否则用户不知道哪些没进去 */
+  rejected: LibraryRejectedItem[];
 }
 
 

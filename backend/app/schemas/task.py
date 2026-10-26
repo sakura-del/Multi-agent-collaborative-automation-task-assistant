@@ -53,6 +53,12 @@ class TaskCreate(BaseModel):
     citation_style: str = Field(default="gbt7714", min_length=1, max_length=64)
     document_ids: list[UUID] = Field(default_factory=list, max_length=50)
     offline_dataset: bool = False
+    reference_library: bool = False
+    """是否用用户自己的引用库作为文献源（2026-10-26 引用库计划 §3.3）。
+
+    `True` 时检索节点从引用库取文献、完全不外呼。引用库为空时任务会失败并给出
+    可读原因（不是静默回退到外部检索 —— 那会让用户以为在用自己导入的文献）。
+    """
     verify_references: bool | None = None
     """是否做外部引用核验（Issue #3）：None=沿用全局配置；True=强制核验（含离线任务）；False=跳过。"""
 

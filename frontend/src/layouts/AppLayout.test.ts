@@ -25,6 +25,7 @@ function buildRouter() {
       { path: "/styles", name: "styles", component: stub },
       { path: "/templates", name: "templates", component: stub },
       { path: "/reference-import", name: "reference-import", component: stub },
+      { path: "/reference-library", name: "reference-library", component: stub },
       { path: "/workspaces", name: "workspaces", component: stub },
       { path: "/observability", name: "observability", component: stub },
       { path: "/settings/api-keys", name: "api-keys", component: stub },
@@ -53,7 +54,7 @@ describe("AppLayout 侧栏", () => {
     expect(wrapper.find(".app-nav__links").exists()).toBe(true);
   });
 
-  it("九个导航目的地一个都不能少", async () => {
+  it("十个导航目的地一个都不能少", async () => {
     const wrapper = await mountLayout();
     const labels = wrapper.findAll(".app-nav__links a").map((a) => a.text());
 
@@ -63,6 +64,8 @@ describe("AppLayout 侧栏", () => {
       "引用样式",
       "Word 模板",
       "导入文献",
+      // 设计变更（2026-10-26 引用库计划）：导入的文献需要地方可查可删
+      "引用库",
       "团队",
       "用量",
       "API Key",
@@ -70,7 +73,7 @@ describe("AppLayout 侧栏", () => {
     ]) {
       expect(labels).toContain(expected);
     }
-    expect(labels).toHaveLength(9);
+    expect(labels).toHaveLength(10);
   });
 
   it("按使用频率分组：工作台 → 素材 → 协作 → 设置", async () => {

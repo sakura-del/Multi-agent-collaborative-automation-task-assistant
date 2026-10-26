@@ -195,6 +195,16 @@ class LiteratureReviewRequest(BaseModel):
     citation_style: str = Field(default="gbt7714", min_length=1, max_length=64)
     document_ids: list[UUID] = Field(default_factory=list, max_length=50)
     offline_dataset: bool = False
+    reference_library: bool = False
+    """是否用**用户自己的引用库**作为文献源（2026-10-26 引用库计划 §3.3）。
+
+    ``True`` 时检索节点从 `reference_library_item` 取文献，**完全不外呼** ——
+    天然可复现，且引用的都是用户自己挑过的文献。
+
+    与 ``offline_dataset`` 的区别：离线清单是**产品内置的演示语料**（固定 10 篇），
+    引用库是**用户导入的**（BibTeX/RIS）。两者同时为真时以引用库为准
+    （用户显式选择优先），并在日志里记 warning。
+    """
     verify_references: bool | None = None
     """本任务是否做外部引用核验（Issue #3）。
 

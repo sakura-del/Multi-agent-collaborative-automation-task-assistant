@@ -1,12 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 
+import { saveLibraryItems } from "@/api/reference-library";
 import { importReferences } from "@/api/references";
 import type { ReferenceImportResponse } from "@/api/types";
 import ReferenceImportView from "@/views/ReferenceImportView.vue";
 
 vi.mock("@/api/references", () => ({
   importReferences: vi.fn(),
+}));
+
+vi.mock("@/api/reference-library", () => ({
+  saveLibraryItems: vi.fn(),
+}));
+
+vi.mock("vue-router", () => ({
+  useRouter: () => ({ push: vi.fn() }),
 }));
 
 function importResult(overrides: Partial<ReferenceImportResponse> = {}): ReferenceImportResponse {
@@ -167,5 +176,131 @@ describe("ReferenceImportView", () => {
     await flushPromises();
 
     expect(wrapper.find('[data-test="import-preview"]').exists()).toBe(false);
+  });
+});
+
+/**
+ * 保存到引用库（2026-10-26 引用库计划）。
+ *
+ * ## 为什么加这个
+ *
+ * 取证发现导入页解析完全正常，但**解析完什么也做不了**：
+ * 可点元素只有「解析预览」和「重新开始」（`AFTER_CLICKABLE`），
+ * 后端没有引用库表，任务文献只来自检索源。
+ *
+ * 所以本页必须有真实出口：保存到引用库。
+ */
+describe("ReferenceImportView 保存到引用库", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(importReferences).mockResolvedValue(importResult());
+    vi.mocked(saveLibraryItems).mockResolvedValue({ created: 2, skipped: 0, rejected: [] });
+  });
+
+  async function importFirst(wrapper: ReturnType<typeof mount>) {
+    await wrapper.find('[data-test="import-content"]').setValue("@article{a, title={T}}");
+    await wrapper.find('[data-test="import-submit"]').trigger("submit");
+    await flushPromises();
+  }
+
+  it("解析后出现保存按钮", async () => {
+    const wrapper = mount(ReferenceImportView);
+    await flushPromises();
+
+    // 解析前没有保存按钮
+    expect(wrapper.find('[data-test="import-save"]').exists()).toBe(false);
+
+    await importFirst(wrapper);
+    expect(wrapper.find('[data-test="import-save"]').exists()).toBe(true);
+  });
+
+  it("保存时提交 CslItem 形态的载荷（不是展示结构）", async () => {
+    const wrapper = mount(ReferenceImportView);
+    await flushPromises();
+    await importFirst(wrapper);
+
+    await wrapper.find('[data-test="import-save"]').trigger("click");
+    await flushPromises();
+
+    expect(saveLibraryItems).toHaveBeenCalledTimes(1);
+    const payload = vi.mocked(saveLibraryItems).mock.calls[0][0];
+    expect(payload).toHaveLength(2);
+    // 必须是 CslItem 形态：author 是对象数组、字段名 issued_year
+    expect(payload[0]).toHaveProperty("author");
+    expect(payload[0]).toHaveProperty("issued_year");
+    expect(payload[0]).not.toHaveProperty("authors");
+    expect(payload[0]).not.toHaveProperty("year");
+  });
+
+  it("保存成功后展示新增条数并给出去引用库的入口", async () => {
+    const wrapper = mount(ReferenceImportView);
+    await flushPromises();
+    await importFirst(wrapper);
+
+    await wrapper.find('[data-test="import-save"]').trigger("click");
+    await flushPromises();
+
+    const result = wrapper.find('[data-test="import-save-result"]');
+    expect(result.exists()).toBe(true);
+    expect(result.text()).toContain("新增 2 条");
+    expect(wrapper.find('[data-test="import-goto-library"]').exists()).toBe(true);
+  });
+
+  it("部分成功时逐条展示拒绝原因", async () => {
+    // 这是本功能最重要的展示：用户要知道哪些没进去、为什么
+    vi.mocked(saveLibraryItems).mockResolvedValue({
+      created: 1,
+      skipped: 0,
+      rejected: [
+        { ref_id: "doi:10.1/x", title: "某预印本", reason: "缺出版年份：无法确定发表时间" },
+      ],
+    });
+
+    const wrapper = mount(ReferenceImportView);
+    await flushPromises();
+    await importFirst(wrapper);
+    await wrapper.find('[data-test="import-save"]').trigger("click");
+    await flushPromises();
+
+    const result = wrapper.find('[data-test="import-save-result"]');
+    expect(result.text()).toContain("新增 1 条");
+    expect(result.text()).toContain("未能入库 1 条");
+    expect(result.text()).toContain("缺出版年份");
+    expect(result.text()).toContain("某预印本");
+  });
+
+  it("已存在的条目计入 skipped 并展示", async () => {
+    vi.mocked(saveLibraryItems).mockResolvedValue({ created: 0, skipped: 2, rejected: [] });
+
+    const wrapper = mount(ReferenceImportView);
+    await flushPromises();
+    await importFirst(wrapper);
+    await wrapper.find('[data-test="import-save"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find('[data-test="import-save-result"]').text()).toContain("已存在 2 条");
+  });
+
+  it("保存失败时展示可读原因", async () => {
+    vi.mocked(saveLibraryItems).mockRejectedValue(
+      new Error("全部条目都无法入库：缺出版年份")
+    );
+
+    const wrapper = mount(ReferenceImportView);
+    await flushPromises();
+    await importFirst(wrapper);
+    await wrapper.find('[data-test="import-save"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find('[data-test="import-save-error"]').text()).toContain("缺出版年份");
+  });
+
+  it("页面说明要提到「创建任务时可用引用库」（用户需要知道出口在哪）", async () => {
+    const wrapper = mount(ReferenceImportView);
+    await flushPromises();
+
+    const text = wrapper.text();
+    expect(text).toContain("引用库");
+    expect(text).toMatch(/创建任务/);
   });
 });

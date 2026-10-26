@@ -132,6 +132,8 @@ describe("TaskCreateForm", () => {
       output_language: "en",
       citation_style: "apa",
       offline_dataset: true,
+      // 设计变更（2026-10-26 引用库计划）：新增文献源开关，默认 false
+      reference_library: false,
       document_ids: ["doc-1"],
       verify_references: false,
     });
@@ -258,5 +260,109 @@ describe("TaskCreateForm · 引用核验开关", () => {
     expect(label).toContain("CrossRef");
     expect(label).toContain("OpenAlex");
     expect(label).toContain("耗时");
+  });
+});
+
+/**
+ * 引用库作为文献源（2026-10-26 引用库计划 §3.6）。
+ *
+ * 这是整个引用库功能对用户可见的**最后一环**：导入 → 保存 → 创建任务时选它。
+ * 之前这条链路完全不存在（导入页解析完什么也做不了）。
+ */
+describe("TaskCreateForm 引用库文献源", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(api.get).mockImplementation((url: string) => {
+      if (url === "/citation-styles") {
+        return Promise.resolve({ data: { styles: [apiStyleRow()], default_style_id: "gbt7714-2025-numeric" } });
+      }
+      if (url === "/reference-library/summary") {
+        return Promise.resolve({ data: { total: 7, usable_as_source: 7 } });
+      }
+      return Promise.reject(new Error(`unexpected url ${url}`));
+    });
+  });
+
+  it("展示引用库条数（用户需要知道将有多少篇可用）", async () => {
+    const wrapper = mountForm();
+    await flushPromises();
+
+    const label = wrapper.find('[data-test="reference-library-label"]');
+    expect(label.exists()).toBe(true);
+    expect(label.text()).toContain("7");
+  });
+
+  it("引用库为空时给出引导", async () => {
+    vi.mocked(api.get).mockImplementation((url: string) => {
+      if (url === "/citation-styles") {
+        return Promise.resolve({ data: { styles: [apiStyleRow()], default_style_id: "gbt7714-2025-numeric" } });
+      }
+      return Promise.resolve({ data: { total: 0, usable_as_source: 0 } });
+    });
+
+    const wrapper = mountForm();
+    await flushPromises();
+
+    expect(wrapper.find('[data-test="reference-library-label"]').text()).toMatch(/导入文献/);
+  });
+
+  it("默认不启用引用库", async () => {
+    const wrapper = mountForm();
+    await flushPromises();
+
+    const checkbox = wrapper.find('[data-test="reference-library"]');
+    expect((checkbox.element as HTMLInputElement).checked).toBe(false);
+  });
+
+  it("勾选后提交的 payload 带 reference_library: true", async () => {
+    const wrapper = mountForm();
+    await flushPromises();
+
+    await wrapper.find('[data-test="topic"]').setValue("检索增强生成的质量评估方法");
+    await wrapper.find('[data-test="keyword-input"]').setValue("RAG");
+    await wrapper.find('[data-test="keyword-input"]').trigger("keydown.enter");
+    await wrapper.find('[data-test="reference-library"]').setValue(true);
+    await wrapper.find("form").trigger("submit");
+
+    const payload = wrapper.emitted("submit")?.[0]?.[0] as Record<string, unknown>;
+    expect(payload.reference_library).toBe(true);
+  });
+
+  it("不勾选时 payload 里 reference_library 为 false", async () => {
+    const wrapper = mountForm();
+    await flushPromises();
+
+    await wrapper.find('[data-test="topic"]').setValue("检索增强生成的质量评估方法");
+    await wrapper.find('[data-test="keyword-input"]').setValue("RAG");
+    await wrapper.find('[data-test="keyword-input"]').trigger("keydown.enter");
+    await wrapper.find("form").trigger("submit");
+
+    const payload = wrapper.emitted("submit")?.[0]?.[0] as Record<string, unknown>;
+    expect(payload.reference_library).toBe(false);
+  });
+
+  it("摘要接口失败不影响表单（局部失败不连坐）", async () => {
+    vi.mocked(api.get).mockImplementation((url: string) => {
+      if (url === "/citation-styles") {
+        return Promise.resolve({ data: { styles: [apiStyleRow()], default_style_id: "gbt7714-2025-numeric" } });
+      }
+      return Promise.reject(new Error("summary 500"));
+    });
+
+    const wrapper = mountForm();
+    await flushPromises();
+
+    // 表单仍可提交
+    expect(wrapper.find('[data-test="submit"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="reference-library"]').exists()).toBe(true);
+  });
+
+  it("启用引用库时禁用离线语料（两者互斥，避免配置冲突）", async () => {
+    const wrapper = mountForm();
+    await flushPromises();
+
+    await wrapper.find('[data-test="reference-library"]').setValue(true);
+    const offline = wrapper.find('[data-test="offline"]');
+    expect((offline.element as HTMLInputElement).disabled).toBe(true);
   });
 });
