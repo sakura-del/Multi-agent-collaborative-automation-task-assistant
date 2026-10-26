@@ -179,11 +179,15 @@ async def test_list_is_owner_scoped(session: AsyncSession) -> None:
 
 
 async def test_list_orders_stably_by_created_at_then_id(session: AsyncSession) -> None:
-    """同事务批量插入的 `created_at` 完全相同，必须再按 `id` 排（AGENTS §5 #14）。"""
+    """同事务批量插入的 `created_at` 完全相同，必须再按 `id` 排（AGENTS §5 #14）。
+
+    ⚠️ 每条必须有**不同的 DOI**：同 DOI 会被合并逻辑并成一条（§3.4），
+    那样这个测试就测不到排序了。
+    """
     service = ReferenceLibraryService(session)
     await service.save(
         USER_A,
-        [csl_item(ref_id=f"doi:10.1/{index}") for index in range(5)],
+        [csl_item(ref_id=f"doi:10.1/{index}", doi=f"10.1/{index}") for index in range(5)],
     )
     await session.commit()
 
@@ -196,7 +200,10 @@ async def test_list_orders_stably_by_created_at_then_id(session: AsyncSession) -
 
 async def test_list_pagination(session: AsyncSession) -> None:
     service = ReferenceLibraryService(session)
-    await service.save(USER_A, [csl_item(ref_id=f"doi:10.1/{index}") for index in range(5)])
+    await service.save(
+        USER_A,
+        [csl_item(ref_id=f"doi:10.1/{index}", doi=f"10.1/{index}") for index in range(5)],
+    )
     await session.commit()
 
     page = await service.list_items(USER_A, limit=2, offset=0)
@@ -238,7 +245,10 @@ async def test_summary_counts_usable_items(session: AsyncSession) -> None:
     service = ReferenceLibraryService(session)
     await service.save(
         USER_A,
-        [csl_item(ref_id="doi:10.1/a"), csl_item(ref_id="doi:10.1/b")],
+        [
+            csl_item(ref_id="doi:10.1/a", doi="10.1/a"),
+            csl_item(ref_id="doi:10.1/b", doi="10.1/b"),
+        ],
     )
     await session.commit()
 
@@ -247,6 +257,88 @@ async def test_summary_counts_usable_items(session: AsyncSession) -> None:
     assert summary.total == 2
     # 能入库的都是「可作文献源」的（准入已保证），这里两个数字应当相等
     assert summary.usable_as_source == 2
+
+
+# ===== 合并去重（2026-10-26 引用库遗留计划 §3.4）=====
+
+
+async def test_save_merges_same_doi_different_form(session: AsyncSession) -> None:
+    """同一文献的三种 DOI 写法只存一条（这是用户真实会遇到的情况）。"""
+    service = ReferenceLibraryService(session)
+    first = csl_item(ref_id="doi:10.1234/A", doi="10.1234/A")
+    result = await service.save(USER_A, [first])
+    await session.commit()
+    assert result.created == 1
+
+    for ref_id, doi in [
+        ("doi:10.1234/a", "10.1234/a"),
+        ("doi:https://doi.org/10.1234/a", "https://doi.org/10.1234/a"),
+        ("doi:DOI: 10.1234/a", "DOI: 10.1234/a"),
+    ]:
+        result = await service.save(USER_A, [csl_item(ref_id=ref_id, doi=doi)])
+        await session.commit()
+        assert result.created == 0
+        assert result.merged == 1
+
+    items = await service.list_items(USER_A)
+    assert len(items) == 1
+
+
+async def test_merge_does_not_overwrite_user_edits(session: AsyncSession) -> None:
+    """合并只补空字段，不覆盖用户已编辑的值。"""
+    service = ReferenceLibraryService(session)
+    await service.save(
+        USER_A,
+        [csl_item(ref_id="doi:10.1/a", doi="10.1/a", title="用户改过的题名")],
+    )
+    await session.commit()
+
+    # 再导入同一 DOI 但题名不同（旧数据）→ 不应覆盖
+    result = await service.save(
+        USER_A,
+        [csl_item(ref_id="doi:10.1/a2", doi="10.1/a", title="原始题名")],
+    )
+    await session.commit()
+
+    assert result.merged == 1
+    items = await service.list_items(USER_A)
+    assert len(items) == 1
+    assert items[0].title == "用户改过的题名"
+
+
+async def test_merge_fills_missing_fields(session: AsyncSession) -> None:
+    """旧条目缺的字段应当被补上（这是合并的价值）。"""
+    service = ReferenceLibraryService(session)
+    sparse = csl_item(ref_id="doi:10.1/a", doi="10.1/a")
+    sparse = sparse.model_copy(update={"container_title": None, "volume": None})
+    await service.save(USER_A, [sparse])
+    await session.commit()
+
+    richer = csl_item(ref_id="doi:10.1/a2", doi="10.1/a")
+    result = await service.save(USER_A, [richer])
+    await session.commit()
+
+    assert result.merged == 1
+    restored = (await service.list_items(USER_A))[0].to_csl_item()
+    assert restored.container_title == "计算机学报"
+    assert restored.volume == "47"
+
+
+async def test_merge_skips_entries_without_doi(session: AsyncSession) -> None:
+    """没有 DOI 的条目靠 URL 入库，不参与合并（无法可靠判重）。"""
+    service = ReferenceLibraryService(session)
+    no_doi = csl_item(ref_id="title:a-survey", doi=None, url="https://example.org/a")
+    await service.save(USER_A, [no_doi])
+    await session.commit()
+
+    result = await service.save(
+        USER_A,
+        [csl_item(ref_id="title:a-survey-2", doi=None, url="https://example.org/b")],
+    )
+    await session.commit()
+
+    assert result.created == 1
+    assert len(await service.list_items(USER_A)) == 2
 
 
 # ===== 还原成 CslItem =====

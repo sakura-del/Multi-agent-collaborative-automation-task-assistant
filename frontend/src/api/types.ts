@@ -381,6 +381,14 @@ export interface LibraryRejectedItem {
 export interface LibrarySaveResponse {
   created: number;
   skipped: number;
+  /**
+   * 按归一化 DOI 合并进已有条目的数量（2026-10-26 遗留计划 §3.4）。
+   *
+   * 与 `skipped` 是**两种不同的去重**：
+   * - `skipped`：`ref_id` 完全相同（重复导入同一份文件）；
+   * - `merged`：`ref_id` 不同但归一化 DOI 相同（同一文献的不同写法）。
+   */
+  merged: number;
   /** 逐条拒绝原因 —— 必须展示，否则用户不知道哪些没进去 */
   rejected: LibraryRejectedItem[];
 }

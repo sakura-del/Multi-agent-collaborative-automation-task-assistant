@@ -17,20 +17,31 @@
  *
  * ⚠️ 测试契约（不要改）：`library-row-<item_id>` / `library-delete-<item_id>` /
  * `library-delete-confirm-<item_id>` / `library-delete-cancel-<item_id>` /
- * `library-empty` / `library-load-error` / `library-summary` / `library-hint`。
+ * `library-empty` / `library-load-error` / `library-summary` / `library-hint` /
+ * `library-edit-<item_id>` / `library-edit-form-<item_id>` /
+ * `library-edit-title-<item_id>` / `library-edit-year-<item_id>` /
+ * `library-edit-save-<item_id>` / `library-edit-cancel-<item_id>`。
+ *
+ * ## 编辑为什么只开三个字段（2026-10-26 遗留计划 §3.5）
+ *
+ * 真实需求是「改个错字」和「补一个漏掉的年份」，不是完整书目编辑器。
+ * 开全部 15 个字段会让这一行变成表单墙，反而没人用。
+ * 需要改冷门字段时删了重导更直接。
  */
 import { computed, onMounted, ref } from "vue";
-import { Loader2, Trash2 } from "lucide-vue-next";
+import { Loader2, Pencil, Trash2 } from "lucide-vue-next";
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   clearLibrary,
   deleteLibraryItem,
   getLibrarySummary,
   listLibraryItems,
+  updateLibraryItem,
 } from "@/api/reference-library";
 import type { LibraryItemOut, LibrarySummaryOut } from "@/api/types";
 
@@ -44,6 +55,13 @@ const deletingId = ref<string | null>(null);
 const confirmingDeleteId = ref<string | null>(null);
 const clearing = ref(false);
 const confirmingClear = ref(false);
+
+// ===== 编辑状态 =====
+const editingId = ref<string | null>(null);
+const editTitle = ref("");
+const editYear = ref("");
+const editContainerTitle = ref("");
+const savingEdit = ref(false);
 
 const hint = computed(() => {
   if (!summary.value || summary.value.total === 0) {
@@ -118,6 +136,65 @@ async function confirmClear() {
     actionError.value = (error as Error).message || "清空失败";
   } finally {
     clearing.value = false;
+  }
+}
+
+// ===== 编辑 =====
+
+function startEdit(item: LibraryItemOut) {
+  actionError.value = null;
+  successMessage.value = null;
+  confirmingDeleteId.value = null;
+  editingId.value = item.item_id;
+  editTitle.value = item.title;
+  editYear.value = item.year === null ? "" : String(item.year);
+  editContainerTitle.value = item.container_title ?? "";
+}
+
+function cancelEdit() {
+  editingId.value = null;
+}
+
+async function saveEdit(item: LibraryItemOut) {
+  // 只发**真正改了的**字段：后端用 exclude_unset 判断，
+  // 发全量会把用户没动的字段覆盖成空值。
+  const changes: Record<string, unknown> = {};
+  const title = editTitle.value.trim();
+  if (title !== item.title) {
+    changes.title = title;
+  }
+  const yearText = editYear.value.trim();
+  const yearNumber = yearText === "" ? null : Number(yearText);
+  if (yearNumber !== item.year) {
+    if (yearNumber !== null && (!Number.isInteger(yearNumber) || yearNumber < 1000 || yearNumber > 2200)) {
+      actionError.value = "年份需为 1000–2200 之间的整数";
+      return;
+    }
+    changes.issued_year = yearNumber;
+  }
+  const containerTitle = editContainerTitle.value.trim();
+  if (containerTitle !== (item.container_title ?? "")) {
+    changes.container_title = containerTitle || null;
+  }
+
+  if (Object.keys(changes).length === 0) {
+    editingId.value = null;
+    return;
+  }
+
+  savingEdit.value = true;
+  actionError.value = null;
+  successMessage.value = null;
+  try {
+    await updateLibraryItem(item.item_id, changes);
+    successMessage.value = `已更新「${title || item.ref_id}」`;
+    editingId.value = null;
+    await refresh();
+  } catch (error) {
+    // 后端会重新跑准入检查（把年份改空 → 400），原因要如实展示
+    actionError.value = (error as Error).message || "保存失败";
+  } finally {
+    savingEdit.value = false;
   }
 }
 </script>
@@ -214,17 +291,84 @@ async function confirmClear() {
               <code v-if="item.doi" class="rounded bg-muted px-1 py-0.5">{{ item.doi }}</code>
             </div>
           </div>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            :data-test="`library-delete-${item.item_id}`"
-            :disabled="deletingId === item.item_id"
-            :title="`删除 ${item.title || item.ref_id}`"
-            :aria-label="`删除 ${item.title || item.ref_id}`"
-            @click="requestDelete(item.item_id)"
-          >
-            <Trash2 :size="15" />
-          </Button>
+          <div class="flex shrink-0 items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              :data-test="`library-edit-${item.item_id}`"
+              :disabled="editingId === item.item_id"
+              :title="`编辑 ${item.title || item.ref_id}`"
+              :aria-label="`编辑 ${item.title || item.ref_id}`"
+              @click="startEdit(item)"
+            >
+              <Pencil :size="15" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              :data-test="`library-delete-${item.item_id}`"
+              :disabled="deletingId === item.item_id"
+              :title="`删除 ${item.title || item.ref_id}`"
+              :aria-label="`删除 ${item.title || item.ref_id}`"
+              @click="requestDelete(item.item_id)"
+            >
+              <Trash2 :size="15" />
+            </Button>
+          </div>
+        </div>
+
+        <!-- 编辑表单：只开三个最常改的字段（见文件头注释） -->
+        <div
+          v-if="editingId === item.item_id"
+          class="mt-2 space-y-2 rounded-md border border-border bg-muted/30 px-2.5 py-2"
+          :data-test="`library-edit-form-${item.item_id}`"
+        >
+          <label class="block text-xs">
+            <span class="text-muted-foreground">题名</span>
+            <Input
+              v-model="editTitle"
+              :data-test="`library-edit-title-${item.item_id}`"
+              class="mt-0.5 h-8 text-sm"
+            />
+          </label>
+          <div class="grid grid-cols-2 gap-2">
+            <label class="block text-xs">
+              <span class="text-muted-foreground">年份（留空将无法作为文献源）</span>
+              <Input
+                v-model="editYear"
+                :data-test="`library-edit-year-${item.item_id}`"
+                inputmode="numeric"
+                class="mt-0.5 h-8 text-sm"
+              />
+            </label>
+            <label class="block text-xs">
+              <span class="text-muted-foreground">期刊 / 会议</span>
+              <Input
+                v-model="editContainerTitle"
+                :data-test="`library-edit-container-${item.item_id}`"
+                class="mt-0.5 h-8 text-sm"
+              />
+            </label>
+          </div>
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              :data-test="`library-edit-save-${item.item_id}`"
+              class="rounded bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground"
+              :disabled="savingEdit"
+              @click="saveEdit(item)"
+            >
+              {{ savingEdit ? "保存中…" : "保存" }}
+            </button>
+            <button
+              type="button"
+              :data-test="`library-edit-cancel-${item.item_id}`"
+              class="rounded border border-border px-2 py-0.5 text-xs font-medium"
+              @click="cancelEdit"
+            >
+              取消
+            </button>
+          </div>
         </div>
 
         <div

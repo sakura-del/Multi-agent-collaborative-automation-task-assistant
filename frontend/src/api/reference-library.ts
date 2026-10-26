@@ -1,5 +1,6 @@
 import api from "./client";
 import type {
+  LibraryItemOut,
   LibraryListOut,
   LibrarySaveResponse,
   LibrarySummaryOut,
@@ -56,6 +57,30 @@ export async function saveLibraryItems(
 /** 删除单条 */
 export function deleteLibraryItem(itemId: string): Promise<void> {
   return api.delete(`/reference-library/${encodeURIComponent(itemId)}`).then(() => undefined);
+}
+
+/**
+ * 部分更新条目（2026-10-26 引用库遗留计划 §3.5）。
+ *
+ * 只发**用户真正改了的**字段：后端用 `exclude_unset` 判断，
+ * 发全量会把用户没动的字段覆盖成 `null`。
+ *
+ * 改完后端会**重新跑准入检查**（把年份改空 → 400），
+ * 所以这里要处理 400 而不是假定一定成功。
+ */
+export async function updateLibraryItem(
+  itemId: string,
+  changes: Record<string, unknown>
+): Promise<LibraryItemOut> {
+  const response = await api.patch<LibraryItemOut>(
+    `/reference-library/${encodeURIComponent(itemId)}`,
+    changes,
+    { validateStatus: (status) => status < 400 || status === 400 }
+  );
+  if (response.status === 400) {
+    throw new Error(saveRejectionDetail(response.data) ?? "修改后不符合入库条件");
+  }
+  return response.data;
 }
 
 /** 清空引用库，返回删除条数 */

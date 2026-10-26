@@ -65,6 +65,12 @@ const saveSummary = computed(() => {
     return "";
   }
   const parts = [`新增 ${value.created} 条`];
+  // `merged` 与 `skipped` 是两种不同的去重，分开说：
+  // 「合并」意味着库里已有同一篇文献（不同写法），用户可能需要去引用库核对；
+  // 「已存在」意味着完全重复，用户不需要做任何事。
+  if (value.merged > 0) {
+    parts.push(`合并 ${value.merged} 条（库中已有同一篇）`);
+  }
   if (value.skipped > 0) {
     parts.push(`已存在 ${value.skipped} 条`);
   }

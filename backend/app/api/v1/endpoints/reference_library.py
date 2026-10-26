@@ -97,13 +97,56 @@ class SaveRequest(BaseModel):
     )
 
 
+class PatchRequest(BaseModel):
+    """部分更新条目（计划 §3.5）。
+
+    `extra="forbid"` 保证 `ref_id`（字段名 `id`）改不了 —— 它是幂等键，
+    改了会破坏「重复导入不重复入库」的语义。测试 `test_patch_cannot_change_ref_id`
+    锁住这一点。
+
+    所有字段都可选：只更新提供了的，没提的保持原值。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = None
+    type: str | None = None
+    container_title: str | None = None
+    volume: str | None = None
+    issue: str | None = None
+    page: str | None = None
+    publisher: str | None = None
+    publisher_place: str | None = None
+    issued_year: int | None = None
+    doi: str | None = None
+    url: str | None = None
+    language: str | None = None
+    medium: str | None = None
+    author: list[dict] | None = None
+
+    def changes(self) -> dict[str, object]:
+        """只返回**用户显式提供**的字段（`exclude_unset`）。
+
+        不能直接用 `model_dump()`：那样没提供的字段会以 `None` 出现，
+        把用户的既有值清空 —— 这就不是「部分更新」了。
+        """
+        return self.model_dump(exclude_unset=True)
+
+
 class SaveResponse(BaseModel):
-    """保存结果：三个数字都必须给，前端才能如实展示部分成功。"""
+    """保存结果：四个数字都必须给，前端才能如实展示部分成功。
+
+    `merged` 与 `skipped` 是**两种不同的去重**，不能合并成一个数字：
+    - `skipped`：`ref_id` 完全相同（重复导入同一份文件）；
+    - `merged`：`ref_id` 不同但归一化 DOI 相同（同一文献的不同写法）。
+    用户看到「合并了 2 条」和「跳过了 2 条」需要做出不同反应。
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     created: int
     skipped: int
+    merged: int = 0
     rejected: list[RejectedItemOut] = Field(default_factory=list)
 
 
@@ -220,7 +263,8 @@ async def save_items(
 
     result = await service.save(current_user.id, items)
 
-    if result.created == 0 and result.skipped == 0 and result.rejected:
+    # 只有**全部被拒**才 400。合并成功也算成功（用户的东西已经在库里了）。
+    if result.created == 0 and result.skipped == 0 and result.merged == 0 and result.rejected:
         reasons = "；".join(
             f"{item.title or item.ref_id}：{item.reason}" for item in result.rejected
         )
@@ -232,11 +276,31 @@ async def save_items(
     return SaveResponse(
         created=result.created,
         skipped=result.skipped,
+        merged=result.merged,
         rejected=[
             RejectedItemOut(ref_id=item.ref_id, title=item.title, reason=item.reason)
             for item in result.rejected
         ],
     )
+
+
+@router.patch(
+    "/{item_id}",
+    response_model=LibraryItemOut,
+    summary="编辑条目（部分更新）",
+)
+async def update_item(
+    item_id: uuid.UUID,
+    payload: PatchRequest,
+    service: ServiceDep,
+    current_user: CurrentUserDep,
+) -> LibraryItemOut:
+    """部分更新；改完后重新跑准入检查（不通过 → 400，且不留半改状态）。"""
+    try:
+        row = await service.update(current_user.id, item_id, payload.changes())
+    except ValidationException as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=exc.message) from exc
+    return _to_out(row)
 
 
 @router.delete("", status_code=status.HTTP_200_OK, summary="清空引用库")

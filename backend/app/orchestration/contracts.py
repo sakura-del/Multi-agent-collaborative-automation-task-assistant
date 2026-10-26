@@ -46,7 +46,21 @@ class TaskCommand(StrEnum):
 
 
 class Evidence(BaseModel):
-    """一条可回溯证据：绑定文档/分块/来源 URL 与原文片段。"""
+    """一条可回溯证据：绑定文档/分块/来源 URL 与原文片段。
+
+    ## 两类证据不能混用（2026-10-26 引用库遗留计划 §3.1）
+
+    - ``excerpt``：来自知识库分块的**原文片段**，可支撑「作者指出……」这类陈述；
+    - ``metadata``：来自文献检索结果的**书目元数据**（题名/作者/年份/URL），
+      **不含原文**，只能支撑「存在这样一篇文献」这类陈述。
+
+    引入 ``metadata`` 的原因：文献源（引用库/arXiv）检索到的记录此前从不进入
+    证据池 —— 证据只从用户知识库构造。结果引用库任务即使有 20 篇文献，
+    ``extract``/``write`` 节点仍在没有证据的情况下写作。
+
+    为什么不给 ``metadata`` 编一个摘要：CSL 条目里没有摘要字段，编出来就是假数据
+    （AGENTS §5 #28：契约能防「少填」，防不住「填假的」）。
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -54,6 +68,8 @@ class Evidence(BaseModel):
     chunk_id: UUID | None = None
     source_url: HttpUrl | None = None
     excerpt: str = Field(min_length=1, max_length=2000)
+    kind: Literal["excerpt", "metadata"] = "excerpt"
+    """证据类型；默认 ``excerpt`` 以保持既有知识库证据 100% 向后兼容。"""
 
 
 class EvidenceContext(BaseModel):

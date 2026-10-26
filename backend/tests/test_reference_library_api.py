@@ -240,9 +240,10 @@ def test_list_item_shape(library_env: LibraryEnv) -> None:
 
 
 def test_list_pagination(library_env: LibraryEnv) -> None:
+    # ⚠️ 每条必须有不同 DOI：同 DOI 会被合并逻辑并成一条（计划 §3.4）
     _save(
         library_env,
-        [csl_payload(ref_id=f"doi:10.1/{index}") for index in range(5)],
+        [csl_payload(ref_id=f"doi:10.1/{index}", doi=f"10.1/{index}") for index in range(5)],
     )
 
     page = library_env.client.get(
@@ -259,7 +260,10 @@ def test_list_pagination(library_env: LibraryEnv) -> None:
 def test_summary_counts(library_env: LibraryEnv) -> None:
     _save(
         library_env,
-        [csl_payload(ref_id="doi:10.1/a"), csl_payload(ref_id="doi:10.1/b")],
+        [
+            csl_payload(ref_id="doi:10.1/a", doi="10.1/a"),
+            csl_payload(ref_id="doi:10.1/b", doi="10.1/b"),
+        ],
     )
 
     body = library_env.client.get(f"{API}/summary", headers=_auth(TOKEN_A)).json()
@@ -326,3 +330,129 @@ def test_clear_only_affects_own_library(library_env: LibraryEnv) -> None:
     assert resp.json()["deleted"] == 1
     assert library_env.client.get(API, headers=_auth(TOKEN_A)).json()["total"] == 0
     assert library_env.client.get(API, headers=_auth(TOKEN_B)).json()["total"] == 1
+
+
+# ===== 编辑（PATCH，计划 §3.5）=====
+
+
+def _first_item_id(env: LibraryEnv, token: str = TOKEN_A) -> str:
+    return env.client.get(API, headers=_auth(token)).json()["items"][0]["item_id"]
+
+
+def test_patch_updates_title(library_env: LibraryEnv) -> None:
+    _save(library_env, [csl_payload()])
+    item_id = _first_item_id(library_env)
+
+    resp = library_env.client.patch(
+        f"{API}/{item_id}", json={"title": "改过的题名"}, headers=_auth(TOKEN_A)
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["title"] == "改过的题名"
+    # 其他字段不受影响
+    assert resp.json()["year"] == 2024
+
+
+def test_patch_is_partial(library_env: LibraryEnv) -> None:
+    """只更新提供了的字段，没提的保持不变。"""
+    _save(library_env, [csl_payload()])
+    item_id = _first_item_id(library_env)
+
+    resp = library_env.client.patch(
+        f"{API}/{item_id}", json={"container_title": "新期刊"}, headers=_auth(TOKEN_A)
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["container_title"] == "新期刊"
+    assert resp.json()["title"] == "检索增强生成评估方法综述"
+
+
+def test_patch_rejects_item_that_fails_admission(library_env: LibraryEnv) -> None:
+    """把年份改成空 → 重新准入检查必须拒绝（否则库里出现不可用条目）。"""
+    _save(library_env, [csl_payload()])
+    item_id = _first_item_id(library_env)
+
+    resp = library_env.client.patch(
+        f"{API}/{item_id}", json={"issued_year": None}, headers=_auth(TOKEN_A)
+    )
+
+    assert resp.status_code == 400
+    assert "年份" in resp.json()["detail"]
+    # 且条目没被改动
+    assert library_env.client.get(API, headers=_auth(TOKEN_A)).json()["items"][0]["year"] == 2024
+
+
+def test_patch_cannot_change_ref_id(library_env: LibraryEnv) -> None:
+    """`ref_id` 是幂等键，改它会破坏去重语义 → 契约层拒绝。"""
+    _save(library_env, [csl_payload()])
+    item_id = _first_item_id(library_env)
+
+    resp = library_env.client.patch(
+        f"{API}/{item_id}", json={"id": "doi:changed"}, headers=_auth(TOKEN_A)
+    )
+
+    assert resp.status_code == 422
+
+
+def test_patch_cross_user_is_404(library_env: LibraryEnv) -> None:
+    _save(library_env, [csl_payload()])
+    item_id = _first_item_id(library_env)
+
+    resp = library_env.client.patch(
+        f"{API}/{item_id}", json={"title": "B 改的"}, headers=_auth(TOKEN_B)
+    )
+
+    assert resp.status_code == 404
+
+
+def test_patch_requires_auth(library_env: LibraryEnv) -> None:
+    _save(library_env, [csl_payload()])
+    item_id = _first_item_id(library_env)
+
+    resp = library_env.client.patch(f"{API}/{item_id}", json={"title": "x"})
+
+    assert resp.status_code == 401
+
+
+def test_patch_missing_is_404(library_env: LibraryEnv) -> None:
+    resp = library_env.client.patch(
+        f"{API}/00000000-0000-0000-0000-000000000000",
+        json={"title": "x"},
+        headers=_auth(TOKEN_A),
+    )
+    assert resp.status_code == 404
+
+
+# ===== 合并计数（计划 §3.4）=====
+
+
+def test_save_reports_merged_separately_from_skipped(library_env: LibraryEnv) -> None:
+    """`merged` 与 `skipped` 是两种不同的去重，必须分开报告。"""
+    _save(library_env, [csl_payload(ref_id="doi:10.1234/A", doi="10.1234/A")])
+
+    # 同 DOI 不同写法 → merged
+    body = _save(
+        library_env, [csl_payload(ref_id="doi:10.1234/a", doi="https://doi.org/10.1234/a")]
+    ).json()
+    assert body["merged"] == 1
+    assert body["skipped"] == 0
+    assert body["created"] == 0
+
+    # ref_id 完全相同 → skipped
+    body = _save(library_env, [csl_payload(ref_id="doi:10.1234/A", doi="10.1234/A")]).json()
+    assert body["skipped"] == 1
+    assert body["merged"] == 0
+
+
+def test_save_merged_only_is_not_400(library_env: LibraryEnv) -> None:
+    """合并成功算成功，不能报 400。"""
+    _save(library_env, [csl_payload(ref_id="doi:10.1234/A", doi="10.1234/A")])
+
+    resp = library_env.client.post(
+        API,
+        json={"items": [csl_payload(ref_id="doi:10.1234/a", doi="10.1234/a")]},
+        headers=_auth(TOKEN_A),
+    )
+
+    assert resp.status_code == 201
+    assert resp.json()["merged"] == 1

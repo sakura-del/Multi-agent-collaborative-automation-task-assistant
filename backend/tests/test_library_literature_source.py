@@ -107,7 +107,14 @@ def test_abstract_is_empty_not_fabricated() -> None:
 
 async def test_source_returns_library_items(session: AsyncSession) -> None:
     service = ReferenceLibraryService(session)
-    await service.save(USER, [csl_item(ref_id="doi:10.1/a"), csl_item(ref_id="doi:10.1/b")])
+    # ⚠️ 每条必须有不同 DOI：同 DOI 会被合并逻辑并成一条（遗留计划 §3.4）
+    await service.save(
+        USER,
+        [
+            csl_item(ref_id="doi:10.1/a", doi="10.1/a"),
+            csl_item(ref_id="doi:10.1/b", doi="10.1/b"),
+        ],
+    )
     await session.commit()
 
     source = LibraryLiteratureSource(USER, session)
@@ -119,7 +126,13 @@ async def test_source_returns_library_items(session: AsyncSession) -> None:
 
 async def test_source_respects_max_results(session: AsyncSession) -> None:
     service = ReferenceLibraryService(session)
-    await service.save(USER, [csl_item(ref_id=f"doi:10.1/{index}") for index in range(5)])
+    await service.save(
+        USER,
+        [
+            csl_item(ref_id=f"doi:10.1/{index}", doi=f"10.1/{index}")
+            for index in range(5)
+        ],
+    )
     await session.commit()
 
     source = LibraryLiteratureSource(USER, session)

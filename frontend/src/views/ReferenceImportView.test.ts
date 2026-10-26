@@ -194,7 +194,7 @@ describe("ReferenceImportView 保存到引用库", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(importReferences).mockResolvedValue(importResult());
-    vi.mocked(saveLibraryItems).mockResolvedValue({ created: 2, skipped: 0, rejected: [] });
+    vi.mocked(saveLibraryItems).mockResolvedValue({ created: 2, skipped: 0, merged: 0, rejected: [] });
   });
 
   async function importFirst(wrapper: ReturnType<typeof mount>) {
@@ -251,6 +251,7 @@ describe("ReferenceImportView 保存到引用库", () => {
     vi.mocked(saveLibraryItems).mockResolvedValue({
       created: 1,
       skipped: 0,
+      merged: 0,
       rejected: [
         { ref_id: "doi:10.1/x", title: "某预印本", reason: "缺出版年份：无法确定发表时间" },
       ],
@@ -270,7 +271,7 @@ describe("ReferenceImportView 保存到引用库", () => {
   });
 
   it("已存在的条目计入 skipped 并展示", async () => {
-    vi.mocked(saveLibraryItems).mockResolvedValue({ created: 0, skipped: 2, rejected: [] });
+    vi.mocked(saveLibraryItems).mockResolvedValue({ created: 0, skipped: 2, merged: 0, rejected: [] });
 
     const wrapper = mount(ReferenceImportView);
     await flushPromises();

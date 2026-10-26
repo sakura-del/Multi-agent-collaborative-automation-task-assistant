@@ -6,6 +6,7 @@ import {
   deleteLibraryItem,
   getLibrarySummary,
   listLibraryItems,
+  updateLibraryItem,
 } from "@/api/reference-library";
 import type { LibraryItemOut } from "@/api/types";
 import ReferenceLibraryView from "@/views/ReferenceLibraryView.vue";
@@ -15,6 +16,7 @@ vi.mock("@/api/reference-library", () => ({
   getLibrarySummary: vi.fn(),
   deleteLibraryItem: vi.fn(),
   clearLibrary: vi.fn(),
+  updateLibraryItem: vi.fn(),
 }));
 
 // 引用库页（2026-10-26 引用库计划 §3.6）。
@@ -205,5 +207,127 @@ describe("ReferenceLibraryView", () => {
     resolveList({ items: [libraryItem()], total: 1 });
     await flushPromises();
     expect(wrapper.find('[data-test="library-row-item-1"]').exists()).toBe(true);
+  });
+});
+
+/**
+ * 条目编辑（2026-10-26 引用库遗留计划 §3.5）。
+ *
+ * 真实需求是「改个错字」和「补一个漏掉的年份」，不是完整书目编辑器。
+ * 关键约束：**只发用户真正改了的字段** —— 发全量会把没动的字段覆盖成 null。
+ */
+describe("ReferenceLibraryView 编辑条目", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(listLibraryItems).mockResolvedValue({
+      items: [libraryItem()],
+      total: 1,
+    });
+    vi.mocked(getLibrarySummary).mockResolvedValue({ total: 1, usable_as_source: 1 });
+    vi.mocked(updateLibraryItem).mockResolvedValue(libraryItem());
+  });
+
+  it("点编辑展开表单并预填当前值", async () => {
+    const wrapper = await mountView();
+
+    await wrapper.find('[data-test="library-edit-item-1"]').trigger("click");
+    await flushPromises();
+
+    const form = wrapper.find('[data-test="library-edit-form-item-1"]');
+    expect(form.exists()).toBe(true);
+    expect(
+      (wrapper.find('[data-test="library-edit-title-item-1"]').element as HTMLInputElement).value
+    ).toBe("检索增强生成评估方法综述");
+    expect(
+      (wrapper.find('[data-test="library-edit-year-item-1"]').element as HTMLInputElement).value
+    ).toBe("2024");
+  });
+
+  it("只发改过的字段（不覆盖未修改的字段）", async () => {
+    const wrapper = await mountView();
+
+    await wrapper.find('[data-test="library-edit-item-1"]').trigger("click");
+    await flushPromises();
+    await wrapper.find('[data-test="library-edit-title-item-1"]').setValue("改过的题名");
+    await wrapper.find('[data-test="library-edit-save-item-1"]').trigger("click");
+    await flushPromises();
+
+    expect(updateLibraryItem).toHaveBeenCalledWith("item-1", { title: "改过的题名" });
+  });
+
+  it("没改任何字段时不发请求", async () => {
+    const wrapper = await mountView();
+
+    await wrapper.find('[data-test="library-edit-item-1"]').trigger("click");
+    await flushPromises();
+    await wrapper.find('[data-test="library-edit-save-item-1"]').trigger("click");
+    await flushPromises();
+
+    expect(updateLibraryItem).not.toHaveBeenCalled();
+  });
+
+  it("改年份时发 issued_year（不是 year）", async () => {
+    const wrapper = await mountView();
+
+    await wrapper.find('[data-test="library-edit-item-1"]').trigger("click");
+    await flushPromises();
+    await wrapper.find('[data-test="library-edit-year-item-1"]').setValue("2023");
+    await wrapper.find('[data-test="library-edit-save-item-1"]').trigger("click");
+    await flushPromises();
+
+    expect(updateLibraryItem).toHaveBeenCalledWith("item-1", { issued_year: 2023 });
+  });
+
+  it("年份留空时发 null（后端会拒绝并给出原因）", async () => {
+    const wrapper = await mountView();
+
+    await wrapper.find('[data-test="library-edit-item-1"]').trigger("click");
+    await flushPromises();
+    await wrapper.find('[data-test="library-edit-year-item-1"]').setValue("");
+    await wrapper.find('[data-test="library-edit-save-item-1"]').trigger("click");
+    await flushPromises();
+
+    expect(updateLibraryItem).toHaveBeenCalledWith("item-1", { issued_year: null });
+  });
+
+  it("年份非法时本地拦截，不发请求", async () => {
+    const wrapper = await mountView();
+
+    await wrapper.find('[data-test="library-edit-item-1"]').trigger("click");
+    await flushPromises();
+    await wrapper.find('[data-test="library-edit-year-item-1"]').setValue("abc");
+    await wrapper.find('[data-test="library-edit-save-item-1"]').trigger("click");
+    await flushPromises();
+
+    expect(updateLibraryItem).not.toHaveBeenCalled();
+    expect(wrapper.find('[data-test="library-action-error"]').text()).toMatch(/年份/);
+  });
+
+  it("后端拒绝时如实展示原因（准入检查在服务端）", async () => {
+    vi.mocked(updateLibraryItem).mockRejectedValue(
+      new Error("修改后不符合入库条件：缺出版年份：无法确定发表时间，不能作为文献源使用")
+    );
+
+    const wrapper = await mountView();
+
+    await wrapper.find('[data-test="library-edit-item-1"]').trigger("click");
+    await flushPromises();
+    await wrapper.find('[data-test="library-edit-year-item-1"]').setValue("");
+    await wrapper.find('[data-test="library-edit-save-item-1"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find('[data-test="library-action-error"]').text()).toMatch(/缺出版年份/);
+  });
+
+  it("可以取消编辑", async () => {
+    const wrapper = await mountView();
+
+    await wrapper.find('[data-test="library-edit-item-1"]').trigger("click");
+    await flushPromises();
+    await wrapper.find('[data-test="library-edit-cancel-item-1"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find('[data-test="library-edit-form-item-1"]').exists()).toBe(false);
+    expect(updateLibraryItem).not.toHaveBeenCalled();
   });
 });

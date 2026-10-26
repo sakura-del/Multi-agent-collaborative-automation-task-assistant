@@ -38,6 +38,7 @@ from app.orchestration.contracts import (
     ValidationReport,
 )
 from app.orchestration.dag_engine import DAGCycleError, TaskDAG
+from app.orchestration.services.literature_evidence import metadata_evidence
 from app.orchestration.workflows.prompts import (
     render_executor_prompt,
     render_planner_prompt,
@@ -45,6 +46,7 @@ from app.orchestration.workflows.prompts import (
 from app.tools.literature.models import (
     MAX_SEARCH_RESULTS,
     MIN_SEARCH_RESULTS,
+    LiteratureRecord,
     LiteratureSearch,
 )
 
@@ -327,20 +329,95 @@ class LiteratureReviewWorkflow:
             prepared["dependency_outputs"] = dependency_outputs
 
         if plan_node.type in EVIDENCE_NODE_TYPES:
+            # ① 先收文献元数据证据（用户显式选择的文献，写作必须覆盖它们）
+            metadata_items, bad_artifacts = self._metadata_evidence_from(dependency_outputs or {})
+            if metadata_items:
+                prepared["evidence"].extend(item.model_dump(mode="json") for item in metadata_items)
+            if bad_artifacts:
+                # 形状不对的 artifact 不能静默丢弃 —— 留一条可观测痕迹，
+                # 否则「检索到了但没进证据池」会变成查不出的问题
+                prepared["warnings"].append("invalid_search_artifact")
+
+            # ② 再叠加知识库原文证据（补充材料：用户自己的笔记/PDF）
             if self._retrieval_mode(task) == "none":
-                # 实验画像 `no_rag`：**不检索**，evidence 为空。
-                # 与「检索了但没命中」区分开（后者会带 insufficient_evidence 警告），
-                # 这样实验指标能正确归因。
+                # 实验画像 `no_rag`：**不检索知识库**。
+                # 注意这关的是知识库检索，不是「用户明确选的文献」——
+                # 元数据证据在 ① 已经收好了，不受这个开关影响。
                 prepared["warnings"].append("retrieval_disabled")
             else:
                 context = await self._build_context(task, prepared["query"])
-                prepared["evidence_context"] = context.text
-                prepared["evidence"] = [item.model_dump(mode="json") for item in context.evidence]
+                prepared["evidence"].extend(
+                    item.model_dump(mode="json") for item in context.evidence
+                )
                 prepared["insufficient_evidence"] = context.insufficient
                 if context.insufficient:
                     prepared["warnings"].append("insufficient_evidence")
+
+            # ③ 证据足够就不再报「不足」：有 ≥2 条（含元数据）即视为够用
+            if len(prepared["evidence"]) >= 2:
+                prepared["insufficient_evidence"] = False
+                if "insufficient_evidence" in prepared["warnings"]:
+                    prepared["warnings"].remove("insufficient_evidence")
+
+            prepared["evidence_context"] = self._evidence_text(prepared["evidence"])
         self._prepared[plan_node.id] = prepared
         return prepared
+
+    # ===== 证据构造（2026-10-26 引用库遗留计划 §3.3）=====
+
+    @staticmethod
+    def _metadata_evidence_from(
+        dependency_outputs: dict[str, Any],
+    ) -> tuple[list[Evidence], int]:
+        """从依赖节点的 search artifacts 提取文献元数据证据。
+
+        为什么从这里取：检索节点已经把文献取回来了（`_execute_search` 的
+        `artifacts`），此前这些 artifacts **从不进入证据池** —— 证据只从
+        用户知识库构造，两条线互不相干。引用库任务因此有文献却没证据。
+
+        返回 `(证据列表, 坏 artifact 数)`。形状不对的 artifact 跳过而不抛异常
+        （一个坏 artifact 不该炸掉整个节点），但**必须计数**，
+        否则「检索到了却没进证据池」会变成查不出的问题。
+        """
+        items: list[Evidence] = []
+        bad = 0
+        for output in dependency_outputs.values():
+            if not isinstance(output, dict):
+                continue
+            artifacts = output.get("artifacts")
+            if not isinstance(artifacts, list):
+                continue
+            for artifact in artifacts:
+                if not isinstance(artifact, dict):
+                    bad += 1
+                    continue
+                try:
+                    record = LiteratureRecord.model_validate(artifact)
+                except PydanticValidationError:
+                    # 不是文献记录（可能是别的节点产出的 artifact）
+                    bad += 1
+                    continue
+                items.append(metadata_evidence(record))
+        return items, bad
+
+    @staticmethod
+    def _evidence_text(items: list[dict[str, Any]]) -> str:
+        """证据上下文文本：按类型标注，避免下游把元数据当原文。
+
+        格式 `[E1 metadata] ...` / `[E2 excerpt] ...` —— 类型必须出现在文本里，
+        因为写作 Agent 只读这段文本，读不到结构化字段。
+        """
+        lines: list[str] = []
+        for index, item in enumerate(items, start=1):
+            kind = item.get("kind", "excerpt")
+            if kind == "metadata":
+                lines.append(f"[E{index} metadata] {item['excerpt']}")
+            else:
+                lines.append(
+                    f"[E{index}] doc={item.get('doc_id')} chunk={item.get('chunk_id')}\n"
+                    f"{item['excerpt']}"
+                )
+        return "\n\n".join(lines)
 
     # ===== 实验画像开关（2026-10-22 实验矩阵）=====
 
