@@ -66,7 +66,7 @@ async def _plan(polluted_at: datetime) -> list[dict[str, Any]]:
     """为每个被污染的任务算出应恢复的 updated_at 与依据。"""
     from sqlalchemy import func, select
 
-    from app.db.models.execution_log import ExecutionLog
+    from app.db.models.log import ExecutionLog
     from app.db.models.task import Subtask, Task
     from app.db.session import AsyncSessionLocal
 
