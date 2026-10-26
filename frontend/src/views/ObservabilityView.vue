@@ -147,9 +147,18 @@ const tokensMissingForHistory = computed(() => {
   return (
     current.tokens.total_used === 0 &&
     current.tasks.total > 0 &&
-    (current.tokens.recorded_task_count ?? 0) === 0
+    recordedTaskCount.value === 0
   );
 });
+
+/**
+ * 有用量记录的任务数。
+ *
+ * 单独提成 computed 而不是在模板里直接读 `tokens.recorded_task_count`：
+ * 该字段在类型上是可选的（兼容老后端），模板里的 `> 0` 比较会被
+ * `vue-tsc` 判为「可能是 undefined」。这里一次归一化，模板就不用再管。
+ */
+const recordedTaskCount = computed(() => overview.value?.tokens.recorded_task_count ?? 0);
 
 /** token 千分位（看板上这些数字动辄几十万，不分组读不出来）。 */
 function formatTokens(value: number): string {
@@ -280,11 +289,11 @@ async function refresh() {
             <span>历史任务未记录用量，仅新任务开始统计</span>
           </p>
           <p
-            v-else-if="overview.tokens.recorded_task_count > 0"
+            v-else-if="recordedTaskCount > 0"
             class="mt-0.5 text-[11px] text-muted-foreground"
             data-test="observability-token-hint"
           >
-            {{ overview.tokens.recorded_task_count }} 个任务有用量记录
+            {{ recordedTaskCount }} 个任务有用量记录
           </p>
         </div>
 
