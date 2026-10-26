@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { Check, Copy, Plus, Users } from "lucide-vue-next";
 
 import EmptyState from "@/components/common/EmptyState.vue";
@@ -15,6 +15,8 @@ import {
   listWorkspaces,
 } from "@/api/collaboration";
 import type { Workspace, WorkspaceRole } from "@/api/types";
+import { deriveSlugOrFallback } from "@/utils/workspace-slug";
+import { formatDateTime } from "@/utils/task-status";
 
 /**
  * 团队工作区（Phase 2）：我的团队列表 + 创建 + 用邀请码加入。
@@ -61,7 +63,12 @@ const joining = ref(false);
 const slugTouched = ref(false);
 
 /** 刚生成的邀请码（只显示一次）。 */
-const generatedInvite = ref<{ workspaceId: string; code: string; role: string } | null>(null);
+const generatedInvite = ref<{
+  workspaceId: string;
+  code: string;
+  role: string;
+  expiresAt: string | null;
+} | null>(null);
 const copied = ref(false);
 
 const ROLE_LABELS: Record<WorkspaceRole, string> = {
@@ -97,33 +104,35 @@ async function refresh() {
 }
 
 /**
- * 从名字派生 slug（在 name 的 `@input` 上实时触发，**不用 `@blur`**）。
+ * 从名字派生 slug。
  *
- * ## 为什么不用 `@blur`
+ * ## 为什么用 `watch` 而不是 `@input`
  *
- * `@blur` 的派生发生在「焦点离开 name」那一刻。而自动化工具（Playwright
- * `fill()`）与快速用户的真实操作序列是：
+ * 原先挂在 `@input="syncSlug"` 上，`syncSlug` 读 `newName` 这个 ref ——
+ * 而浏览器的执行顺序是**模板 `@input` 监听器先于 `v-model` 的写入**
+ * （模板事件在 `mountElement` 阶段注册，`vModelText` 指令的监听在 `created`
+ * 钩子里更晚）。所以读到的永远是**上一个字符**：
  *
- * 1. 填 name → 焦点转移 → **blur 触发派生** → slug 被写入派生值
- * 2. 紧接着填 slug → 输入落在**已含派生值**的输入框上 → 变成两段拼接
+ * - `fill()`（整段值 + 单次 input）→ 读到空串 → slug 为空 → 创建报
+ *   「请填写团队名与标识」（实测截图确认）；
+ * - 逐字输入 → slug 永远少最后一个字符（实测断言 `'ab' !== 'abc'`）。
  *
- * 实测把 slug 拼成 `e2e-1792584014145-mobile-chromee2e-team-...`。
- * 改成 `@input` 后派生与用户输入同步发生，`slugTouched` 一置位就停止派生，
- * 不存在"派生值晚到"的窗口。
+ * 既有测试用「setValue 后再 trigger('input') 一次」掩盖了它。
  *
- * 规则：**用户手动改过 slug 就不再自动覆盖**。
+ * `watch` 在 ref 更新**之后**执行，与事件顺序解耦，且对粘贴 / 自动填充 /
+ * 程序化赋值都成立。
+ *
+ * ## 规则：用户手动改过 slug 就不再自动覆盖
+ *
+ * 保留原设计（用户回头改名字不该冲掉自己起的标识）。
  */
-function syncSlug() {
+watch(newName, (value) => {
   if (slugTouched.value) {
     return;
   }
-  newSlug.value = newName.value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 64);
-}
+  // 纯中文名推导为空 → 给兜底，保证「只填名字也能创建」
+  newSlug.value = value.trim() ? deriveSlugOrFallback(value) : "";
+});
 
 /** 用户手动输入 slug → 标记为已编辑，后续不再自动派生。 */
 function onSlugInput() {
@@ -186,6 +195,8 @@ async function generateInvite(workspaceId: string, role: "member" | "viewer" = "
       workspaceId,
       code: invite.code,
       role: invite.role,
+      // 有效期必须带上：接口返回了但原页面没显示，用户会以为永久有效
+      expiresAt: invite.expires_at ?? null,
     };
   } catch (err) {
     error.value = (err as Error).message || "生成邀请码失败";
@@ -212,6 +223,34 @@ function seatText(workspace: Workspace): string {
     ? `席位已满 ${workspace.seat_used}/${workspace.seat_limit}`
     : `席位 ${workspace.seat_used}/${workspace.seat_limit}`;
 }
+
+/** 席位是否已满（已满时不能生成邀请码 —— 生成了也兑不了）。 */
+function isSeatFull(workspace: Workspace): boolean {
+  return workspace.seat_used >= workspace.seat_limit;
+}
+
+/** 席位占用百分比（夹在 0–100，避免上限为 0 时除零）。 */
+function seatPercent(workspace: Workspace): number {
+  if (!workspace.seat_limit) {
+    return 0;
+  }
+  return Math.min(100, Math.round((workspace.seat_used / workspace.seat_limit) * 100));
+}
+
+/** 汇总：团队数 / 席位占用 / 已满团队数。 */
+const summary = computed(() => {
+  let seatsUsed = 0;
+  let seatsLimit = 0;
+  let fullTeams = 0;
+  for (const item of workspaces.value) {
+    seatsUsed += item.seat_used;
+    seatsLimit += item.seat_limit;
+    if (item.seat_used >= item.seat_limit) {
+      fullTeams += 1;
+    }
+  }
+  return { teams: workspaces.value.length, seatsUsed, seatsLimit, fullTeams };
+});
 </script>
 
 <template>
@@ -232,6 +271,46 @@ function seatText(workspace: Workspace): string {
     </header>
 
     <ErrorBanner :message="error" testid="workspaces-error" />
+
+    <!-- 汇总：机构版**按席位计费**，用户要能一眼看到自己一共占了多少席位。 -->
+    <div
+      v-if="!isEmpty"
+      data-test="workspace-summary"
+      class="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-3"
+    >
+      <div class="rounded-lg border border-border bg-card p-3">
+        <p class="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">团队</p>
+        <p class="mt-1 text-2xl font-semibold text-foreground tabular-nums">{{ summary.teams }}</p>
+      </div>
+      <div class="rounded-lg border border-border bg-card p-3">
+        <p class="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+          席位占用
+        </p>
+        <p class="mt-1 text-2xl font-semibold text-foreground tabular-nums">
+          {{ summary.seatsUsed }}
+          <span class="text-sm font-normal text-muted-foreground">/ {{ summary.seatsLimit }}</span>
+        </p>
+      </div>
+      <div
+        :class="[
+          'rounded-lg border p-3',
+          summary.fullTeams > 0 ? 'border-warning/30 bg-warning/8' : 'border-border bg-card',
+        ]"
+      >
+        <p class="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+          席位已满
+        </p>
+        <p
+          :class="[
+            'mt-1 text-2xl font-semibold tabular-nums',
+            summary.fullTeams > 0 ? 'text-warning' : 'text-muted-foreground',
+          ]"
+        >
+          {{ summary.fullTeams }}
+          <span class="text-sm font-normal text-muted-foreground">个团队</span>
+        </p>
+      </div>
+    </div>
 
     <p
       v-if="success"
@@ -256,7 +335,6 @@ function seatText(workspace: Workspace): string {
             id="ws-name"
             v-model="newName"
             placeholder="例如：张三课题组"
-            @input="syncSlug"
           />
         </div>
         <div>
@@ -318,6 +396,9 @@ function seatText(workspace: Workspace): string {
       <div class="mt-1 flex flex-wrap items-center gap-2">
         <code class="rounded bg-card px-2 py-1 text-sm">{{ generatedInvite.code }}</code>
         <Badge variant="outline">{{ ROLE_LABELS[generatedInvite.role as WorkspaceRole] }}</Badge>
+        <span v-if="generatedInvite.expiresAt" class="text-xs text-muted-foreground">
+          有效期至 {{ formatDateTime(generatedInvite.expiresAt) }}
+        </span>
         <Button variant="ghost" size="sm" @click="copyCode">
           <Copy />
           {{ copied ? "已复制" : "复制" }}
@@ -364,11 +445,32 @@ function seatText(workspace: Workspace): string {
             需扩容
           </Badge>
         </div>
+        <!-- 席位进度条：席位是计费单位，「还剩几个」比纯数字更快看出来 -->
+        <div
+          class="mt-1.5 h-1 overflow-hidden rounded-full bg-muted"
+          role="progressbar"
+          :aria-valuenow="workspace.seat_used"
+          aria-valuemin="0"
+          :aria-valuemax="workspace.seat_limit"
+          :aria-label="`${workspace.name} 席位占用`"
+        >
+          <div
+            :class="[
+              'h-full rounded-full transition-[width] duration-200',
+              isSeatFull(workspace) ? 'bg-warning' : 'bg-primary/60',
+            ]"
+            :style="{ width: `${seatPercent(workspace)}%` }"
+          />
+        </div>
         <div class="mt-2 flex gap-1.5">
+          <!-- 席位已满时禁用：生成的码对方也兑不了（accept 会因超席位被拒），
+               详情页早已如此处理，列表页原来漏了。 -->
           <Button
             v-if="workspace.my_role === 'owner' || workspace.my_role === 'admin'"
             variant="secondary"
             size="sm"
+            :disabled="isSeatFull(workspace)"
+            :title="isSeatFull(workspace) ? '席位已满，扩容后才能邀请' : '生成一次性邀请码'"
             @click="generateInvite(workspace.workspace_id)"
           >
             生成邀请码

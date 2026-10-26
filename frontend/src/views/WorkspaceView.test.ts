@@ -232,3 +232,164 @@ describe("WorkspaceView", () => {
     expect((wrapper.get("#ws-slug").element as HTMLInputElement).value).toBe("zhang-lab-2026");
   });
 });
+
+describe("WorkspaceView：真实缺陷修复（2026-10-26）", () => {
+  /**
+   * ## 缺陷 1：slug 自动派生失效
+   *
+   * 派生挂在 `@input="syncSlug"` 上，而 `syncSlug` 读的是 `newName` 这个 ref。
+   * 浏览器里 `@input` 监听器**先于** `v-model` 的写入执行（模板事件在
+   * `mountElement` 阶段注册，`vModelText` 指令的监听在 `created` 钩子里更晚），
+   * 所以 `syncSlug` 读到的是**上一个字符**的值：
+   *
+   * - Playwright `fill()`（整段值 + 单次 input）→ 读到空串 → slug 为空 →
+   *   点创建报「请填写团队名与标识」（实测截图确认）；
+   * - 真实逐字输入 → slug 永远少最后一个字符（"Zhang Lab" → `zhang-la`）。
+   *
+   * 既有测试用「setValue 后再 trigger('input') 一次」掩盖了它（第二次触发时
+   * ref 已更新）。本用例**只触发一次**，模拟真实浏览器。
+   */
+  it("单次 input 就要派生 slug（不能依赖第二次触发）", async () => {
+    vi.mocked(listWorkspaces).mockResolvedValue([] as never);
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("创建团队"))!
+      .trigger("click");
+
+    // 只触发一次 input —— 这就是浏览器里 fill() / 一次按键产生的行为
+    await wrapper.get("#ws-name").setValue("Zhang Lab 2026");
+
+    expect((wrapper.get("#ws-slug").element as HTMLInputElement).value).toBe("zhang-lab-2026");
+  });
+
+  it("逐字输入时 slug 不能少最后一个字符", async () => {
+    vi.mocked(listWorkspaces).mockResolvedValue([] as never);
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("创建团队"))!
+      .trigger("click");
+
+    const name = wrapper.get("#ws-name");
+    // 模拟逐字输入：每敲一个字发一次 input
+    for (let i = 1; i <= "abc".length; i += 1) {
+      (name.element as HTMLInputElement).value = "abc".slice(0, i);
+      await name.trigger("input");
+    }
+
+    expect((wrapper.get("#ws-slug").element as HTMLInputElement).value).toBe("abc");
+  });
+
+  /**
+   * ## 缺陷 2：中文团队名派生不出 slug
+   *
+   * `syncSlug` 把非 `[a-z0-9-]` 全折叠成 `-` 再去首尾，中文名会变成空串。
+   * 用户填「巡检课题组」→ 标识为空 → 创建失败（实测截图确认），
+   * 而且用户不一定知道「标识」要自己起个英文名。
+   *
+   * 修法：派生为空时给**可用兜底**（`team-` + 短随机/时间后缀），
+   * 保证「只填名字也能创建」。用户仍可手动改。
+   */
+  it("中文团队名也要得到可用 slug（兜底而非空值）", async () => {
+    vi.mocked(listWorkspaces).mockResolvedValue([] as never);
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("创建团队"))!
+      .trigger("click");
+
+    await wrapper.get("#ws-name").setValue("巡检课题组");
+
+    const slug = (wrapper.get("#ws-slug").element as HTMLInputElement).value;
+    expect(slug).not.toBe("");
+    expect(slug).toMatch(/^[a-z0-9-]+$/);
+    // **关键**：必须含字母/数字。只断言「非空 + 字符集合法」不够 ——
+    // 纯中文名折叠后是 `"----"`，那也满足上面的正则却是**不可用**的标识。
+    // （诚实性验证时发现前两条断言抓不住「去掉兜底」的回退。）
+    expect(slug).toMatch(/[a-z0-9]/);
+  });
+
+  /**
+   * ## 缺陷 3：席位已满时列表页仍能生成邀请码
+   *
+   * 详情页对 `seat_used >= seat_limit` 做了禁用，列表页没有 ——
+   * 用户会生成一个**兑不了**的码（对方 accept 时超席位被拒）。
+   */
+  it("席位已满时列表页禁止生成邀请码", async () => {
+    vi.mocked(listWorkspaces).mockResolvedValue([
+      workspace({ seat_used: 5, seat_limit: 5 }),
+    ] as never);
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const row = wrapper.find('[data-test="workspace-row-w1"]');
+    const inviteBtn = row
+      .findAll("button")
+      .find((b) => b.text().includes("生成邀请码"));
+
+    // 要么不渲染，要么 disabled —— 但不能是「可点但兑不了」
+    const unusable =
+      inviteBtn === undefined || inviteBtn.attributes("disabled") !== undefined;
+    expect(unusable).toBe(true);
+  });
+
+  /**
+   * ## 缺陷 4：列表页没有汇总
+   *
+   * 机构版**按席位计费**，用户需要一眼看到「我一共占了多少席位」。
+   */
+  it("展示团队数与席位占用汇总", async () => {
+    vi.mocked(listWorkspaces).mockResolvedValue([
+      workspace({ workspace_id: "w1", seat_used: 2, seat_limit: 5 }),
+      workspace({ workspace_id: "w2", seat_used: 3, seat_limit: 5 }),
+    ] as never);
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const summary = wrapper.find('[data-test="workspace-summary"]');
+    expect(summary.exists()).toBe(true);
+    expect(summary.text()).toContain("2"); // 团队数
+    expect(summary.text()).toContain("5"); // 席位已用合计（2+3）
+    expect(summary.text()).toContain("10"); // 席位上限合计（5+5）
+  });
+
+  /**
+   * ## 缺陷 5：邀请码有效期未展示
+   *
+   * 接口返回了 `expires_at`，两个页面都没显示 —— 用户以为邀请码永久有效，
+   * 过期后对方兑不了还不知道为什么。
+   */
+  it("生成的邀请码要显示有效期", async () => {
+    vi.mocked(listWorkspaces).mockResolvedValue([workspace()] as never);
+    vi.mocked(createInvite).mockResolvedValue({
+      invite_id: "i1",
+      code: "CODE123",
+      role: "member",
+      expires_at: "2026-11-02T00:00:00Z",
+      workspace_id: "w1",
+    } as never);
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const row = wrapper.find('[data-test="workspace-row-w1"]');
+    await row
+      .findAll("button")
+      .find((b) => b.text().includes("生成邀请码"))!
+      .trigger("click");
+    await flushPromises();
+
+    const box = wrapper.find('[data-test="workspace-new-invite"]');
+    expect(box.exists()).toBe(true);
+    expect(box.text()).toMatch(/2026|有效期|过期/);
+  });
+});
