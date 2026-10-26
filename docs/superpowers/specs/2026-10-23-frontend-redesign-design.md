@@ -1448,6 +1448,103 @@ SUMMARY: PASS
 > 这一条再次印证 §6.5.7 第一条：单元测试的 mock 数据是自己给的，
 > 只能测「我以为的路径」；真实浏览器才能发现「我没想到的路径」。
 
+---
+
+## 4.19 引用库遗留三项：证据闭环 / 去重合并 / 条目编辑
+
+> 计划：[2026-10-26-01-reference-library-followup-plan.md](../plans/2026-10-26-01-reference-library-followup-plan.md)
+
+### 取证：引用库任务有文献，却没证据
+
+上一轮引用库任务跑到 `completed`、检索节点 **6/6 artifacts 来自引用库**，
+但 `evidence_pool` 是空的。查数据来源：
+
+```
+search 节点   → self._source.search()              → artifacts（文献元数据）
+extract/write → LiteratureContextBuilder.build()   → evidence（证据）
+                        ↓
+        knowledge.search_for_context(user_id, query)   ← 只查用户知识库向量索引
+```
+
+**两条线互不相干。** `Evidence.excerpt` 有 `min_length=1`，而知识库为空时
+一条证据都构造不出来 —— 写作 Agent 在**没有任何证据**的情况下生成内容。
+
+这不是引用库独有的问题：arXiv 任务同样如此。引用库只是让它变得可见 ——
+因为用户明确知道自己给了 3 篇文献。
+
+### 修法：元数据证据，不编造摘要
+
+`csl_item_to_record()` 里 `abstract=""` 是**故意**的（CSL 条目没有摘要字段，
+编一个就是造假）。但 artifacts 里有真实可用的元数据：
+
+```
+《Ragas: Automated Evaluation of Retrieval Augmented Generation》
+— Es, Shahul、James, Jithin，2024，https://doi.org/10.18653/v1/2024.eacl-demo.16
+```
+
+它不含原文，所以**不能叫原文证据**；但它是**可核验的元数据证据**。
+契约新增 `kind: Literal["excerpt", "metadata"]`（默认 `"excerpt"` 保证向后兼容）。
+
+**证据文本里刻意不出现「原文」「引述」「摘录」「作者指出」** ——
+我们没有原文，任何暗示有原文的措辞都会让下游误判证据强度。测试
+`test_never_claims_original_text` 锁住这一点。
+
+### 三条容易做错的地方
+
+| 决定 | 如果做反了会怎样 |
+| --- | --- |
+| 元数据证据**排在知识库证据前面** | 用户显式选的文献可能被补充材料淹没 |
+| `retrieval_mode=none` **仍然收元数据证据** | `no_rag` 画像会把用户自己的文献也丢掉（那个开关关的是知识库检索，不是用户选择） |
+| 合并**只补空字段**，不覆盖 | 重复导入旧数据会冲掉用户手改的题名/卷期 |
+
+### 去重：只按归一化 DOI，绝不用题名
+
+```
+10.1234/A
+https://doi.org/10.1234/a
+DOI: 10.1234/a
+```
+
+三种写法归一后相同 → 合并。**不用题名判重**：同名不同文非常常见
+（"A Survey"、"Introduction"），靠题名合并会把不同文献错误并成一条 ——
+那比重复更糟（用户丢了文献）。
+
+`merged` 与 `skipped` **分开报**：
+- `skipped`：`ref_id` 完全相同 → 用户什么都不用做；
+- `merged`：不同写法同一篇 → 用户可能要去引用库核对一下。
+
+### 编辑：部分更新 + 重新准入
+
+`PATCH /reference-library/{id}` 只开三个字段（题名/年份/期刊），
+因为真实需求是「改个错字」和「补一个漏掉的年份」，不是完整书目编辑器。
+
+**改完后端重新跑准入检查**：否则用户能把年份 PATCH 成空，
+库里出现一条不可用条目，而 `usable_as_source` 仍把它算作可用。
+
+`ref_id` 不可改（幂等键），`extra="forbid"` 在契约层就拒绝。
+
+### 7 条既有测试变红 —— 是设计变更，不是回归
+
+改合并逻辑后 `test_reference_library_service.py` 3 条、`api.py` 2 条、
+`library_literature_source.py` 2 条变红。根因：测试夹具 `doi` 默认值固定，
+而测试用 `ref_id=f"doi:10.1/{index}"` 造多条 → **ref_id 不同但 DOI 全同**
+→ 被新的合并逻辑正确地并成一条。
+
+判断标准：**旧断言表达的行为是否仍是我们想要的**。「存 5 篇不同文献就该有 5 条」
+仍成立，只是测试数据不再是 5 篇不同文献。修法是给数据补上变化的 DOI 并注释原因。
+
+### 诚实性验证（3 组回退，全部变红）
+
+| # | 回退 | 变红 |
+| --- | --- | --- |
+| 1 | 元数据证据不进证据池 | **7 条** |
+| 2 | DOI 不做归一 | **5 条** |
+| 3 | PATCH 跳过准入检查 | **1 条** |
+
+> 回退 1 第一次跑出 9 个 ERROR，但那是 `PermissionError`（临时目录被占用），
+> **不是断言失败**。换成干净 `basetemp` 后才是真正的 7 failed。
+> 不看错误类型就把「9 errors」当验证通过，就是自欺。
+
 ### 探针清理
 
 调查期上传的 `tpl-17fb10b2978394a8`（探针学院模板）已删除，

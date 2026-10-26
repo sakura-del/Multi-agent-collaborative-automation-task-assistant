@@ -366,7 +366,41 @@ class LiteratureReviewWorkflow:
     # ===== 证据构造（2026-10-26 引用库遗留计划 §3.3）=====
 
     @staticmethod
+    def _artifacts_of(output: Any) -> list[Any] | None:
+        """从节点输出里取出 artifacts 列表（兼容生产形状与扁平形状）。
+
+        ## 为什么必须兼容两种形状（AGENTS §5 #16 的教训）
+
+        `scheduler._completed_outputs[nid] = nr.output`，而 `nr.output` 的
+        **生产形状**是：
+
+            {"result": ..., "status": ..., "execution_result": {"artifacts": [...]}}
+
+        artifacts 在 `execution_result` **里面**，不在顶层。
+
+        第一版实现只读顶层 `output["artifacts"]`，单元测试也用扁平形状当夹具，
+        于是测试全绿、真实任务里 metadata 证据 **一条都取不到**
+        （真实任务 `evidence_pool` 里 metadata = 0 才暴露）。
+
+        所以这里两种都认，并且**优先读生产形状** —— 扁平形状只作为兼容路径。
+        """
+        if not isinstance(output, dict):
+            return None
+        # ① 生产形状：artifacts 在 execution_result 里
+        execution_result = output.get("execution_result")
+        if isinstance(execution_result, dict):
+            artifacts = execution_result.get("artifacts")
+            if isinstance(artifacts, list):
+                return artifacts
+        # ② 兼容扁平形状（部分调用方直接传 ExecutionResult.model_dump()）
+        artifacts = output.get("artifacts")
+        if isinstance(artifacts, list):
+            return artifacts
+        return None
+
+    @classmethod
     def _metadata_evidence_from(
+        cls,
         dependency_outputs: dict[str, Any],
     ) -> tuple[list[Evidence], int]:
         """从依赖节点的 search artifacts 提取文献元数据证据。
@@ -382,10 +416,8 @@ class LiteratureReviewWorkflow:
         items: list[Evidence] = []
         bad = 0
         for output in dependency_outputs.values():
-            if not isinstance(output, dict):
-                continue
-            artifacts = output.get("artifacts")
-            if not isinstance(artifacts, list):
+            artifacts = cls._artifacts_of(output)
+            if artifacts is None:
                 continue
             for artifact in artifacts:
                 if not isinstance(artifact, dict):

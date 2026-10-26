@@ -128,10 +128,7 @@ async def test_source_respects_max_results(session: AsyncSession) -> None:
     service = ReferenceLibraryService(session)
     await service.save(
         USER,
-        [
-            csl_item(ref_id=f"doi:10.1/{index}", doi=f"10.1/{index}")
-            for index in range(5)
-        ],
+        [csl_item(ref_id=f"doi:10.1/{index}", doi=f"10.1/{index}") for index in range(5)],
     )
     await session.commit()
 

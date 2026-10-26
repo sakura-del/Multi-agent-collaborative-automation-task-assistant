@@ -39,6 +39,36 @@ def _record_payload(
     }
 
 
+def _search_output(*records: dict[str, Any]) -> dict[str, Any]:
+    """**生产形状**的检索节点输出（`nr.output`）。
+
+    ⚠️ 这是 AGENTS §5 #16 的教训：`scheduler._completed_outputs[nid] = nr.output`，
+    而 `nr.output` 的形状是
+
+        {"result": ..., "status": ..., "execution_result": {"artifacts": [...]}}
+
+    **artifacts 在 `execution_result` 里面，不在顶层。**
+    早期版本的本测试直接传 `{"artifacts": [...]}`，于是「只认顶层」的实现也能全绿，
+    但真实链路里一条都取不到 —— 真实任务 `evidence_pool` 里 metadata = 0 才暴露。
+    """
+    return {
+        "node_id": "n0",
+        "result": "- 文献列表",
+        "status": "completed",
+        "used_tools": [],
+        "warnings": [],
+        "execution_result": {
+            "node_id": "n0",
+            "content": "- 文献列表",
+            "evidence": [],
+            "artifacts": list(records),
+            "warnings": [],
+            "duration_ms": 0,
+            "node_type": "search",
+        },
+    }
+
+
 class _StubContextBuilder:
     """替代 `LiteratureContextBuilder`：只返回固定的知识库证据。"""
 
@@ -84,12 +114,10 @@ class TestMetadataEvidenceWiring:
             _FakeTask(user_id),
             {"id": "n1", "type": "extract", "title": "提取证据"},
             dependency_outputs={
-                "n0": {
-                    "artifacts": [
-                        _record_payload(),
-                        _record_payload(source_id="doi:10.1145/3626772.3657849", title="另一篇"),
-                    ]
-                }
+                "n0": _search_output(
+                    _record_payload(),
+                    _record_payload(source_id="doi:10.1145/3626772.3657849", title="另一篇"),
+                )
             },
         )
 
@@ -104,7 +132,7 @@ class TestMetadataEvidenceWiring:
         prepared = await workflow.prepare_node(
             _FakeTask(user_id),
             {"id": "n1", "type": "extract", "title": "提取证据"},
-            dependency_outputs={"n0": {"artifacts": [_record_payload()]}},
+            dependency_outputs={"n0": _search_output(_record_payload())},
         )
 
         item = prepared["evidence"][0]
@@ -140,7 +168,7 @@ class TestMetadataEvidenceWiring:
         prepared = await workflow.prepare_node(
             _FakeTask(user_id),
             {"id": "n1", "type": "extract", "title": "提取证据"},
-            dependency_outputs={"n0": {"artifacts": [_record_payload()]}},
+            dependency_outputs={"n0": _search_output(_record_payload())},
         )
 
         kinds = [item["kind"] for item in prepared["evidence"]]
@@ -157,7 +185,7 @@ class TestMetadataEvidenceWiring:
         prepared = await workflow.prepare_node(
             _FakeTask(user_id),
             {"id": "n1", "type": "extract", "title": "提取证据"},
-            dependency_outputs={"n0": {"artifacts": [_record_payload()]}},
+            dependency_outputs={"n0": _search_output(_record_payload())},
         )
 
         assert prepared["evidence"][0]["kind"] == "metadata"
@@ -171,7 +199,7 @@ class TestMetadataEvidenceWiring:
             _FakeTask(user_id),
             {"id": "n1", "type": "extract", "title": "提取证据"},
             dependency_outputs={
-                "n0": {"artifacts": [_record_payload(), _record_payload(source_id="doi:10.1/b")]}
+                "n0": _search_output(_record_payload(), _record_payload(source_id="doi:10.1/b"))
             },
         )
 
@@ -186,7 +214,7 @@ class TestMetadataEvidenceWiring:
         prepared = await workflow.prepare_node(
             _FakeTask(user_id),
             {"id": "n1", "type": "extract", "title": "提取证据"},
-            dependency_outputs={"n0": {"artifacts": [_record_payload()]}},
+            dependency_outputs={"n0": _search_output(_record_payload())},
         )
 
         assert "Ragas" in prepared["evidence_context"]
@@ -204,7 +232,7 @@ class TestMetadataEvidenceWiring:
         prepared = await workflow.prepare_node(
             _FakeTask(user_id, retrieval_mode="none"),
             {"id": "n1", "type": "extract", "title": "提取证据"},
-            dependency_outputs={"n0": {"artifacts": [_record_payload()]}},
+            dependency_outputs={"n0": _search_output(_record_payload())},
         )
 
         assert builder.calls == []  # 没查知识库
@@ -220,8 +248,45 @@ class TestMetadataEvidenceWiring:
         prepared = await workflow.prepare_node(
             _FakeTask(user_id),
             {"id": "n1", "type": "extract", "title": "提取证据"},
-            dependency_outputs={"n0": {"artifacts": [{"nonsense": True}, "not-a-dict"]}},
+            dependency_outputs={"n0": _search_output({"nonsense": True}, "not-a-dict")},
         )
 
         assert prepared["evidence"] == []
         assert "invalid_search_artifact" in prepared["warnings"]
+
+
+class TestProductionShapeContract:
+    """锁住 artifacts 的**生产形状**（AGENTS §5 #16）。
+
+    这一组是「假绿」的防线：第一版实现只认顶层 `artifacts`，
+    单元测试用扁平夹具全绿，真实任务里 metadata 证据一条都取不到。
+    """
+
+    def test_artifacts_read_from_execution_result(self) -> None:
+        """生产形状：`{"execution_result": {"artifacts": [...]}}`。"""
+        items, bad = LiteratureReviewWorkflow._metadata_evidence_from(
+            {"n0": _search_output(_record_payload())}
+        )
+        assert len(items) == 1
+        assert bad == 0
+
+    def test_flat_shape_still_supported(self) -> None:
+        """兼容扁平形状（部分调用方直接传 ExecutionResult.model_dump()）。"""
+        items, bad = LiteratureReviewWorkflow._metadata_evidence_from(
+            {"n0": {"artifacts": [_record_payload()]}}
+        )
+        assert len(items) == 1
+        assert bad == 0
+
+    def test_execution_result_takes_priority(self) -> None:
+        """两种形状同时存在时，以 `execution_result` 里的为准。"""
+        output = _search_output(_record_payload())
+        output["artifacts"] = [_record_payload(source_id="doi:decoy/should-not-win")]
+        items, _ = LiteratureReviewWorkflow._metadata_evidence_from({"n0": output})
+        assert len(items) == 1
+        assert "should-not-win" not in items[0].excerpt
+
+    def test_artifacts_of_returns_none_for_unknown_shape(self) -> None:
+        assert LiteratureReviewWorkflow._artifacts_of({"nonsense": True}) is None
+        assert LiteratureReviewWorkflow._artifacts_of("not-a-dict") is None
+        assert LiteratureReviewWorkflow._artifacts_of({"execution_result": {}}) is None
