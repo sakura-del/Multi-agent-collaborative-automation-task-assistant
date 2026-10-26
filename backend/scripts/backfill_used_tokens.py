@@ -129,7 +129,21 @@ async def _collect() -> list[tuple[Any, int]]:
 
 
 async def _apply(pairs: list[tuple[Any, int]]) -> int:
-    """把算出的用量写回 `task.used_tokens`（只写仍为 0 的行）。"""
+    """把算出的用量写回 `task.used_tokens`（只写仍为 0 的行）。
+
+    ## ⚠️ 必须显式保留 `updated_at`（2026-10-26 实测踩坑）
+
+    `Base.updated_at` 带 `onupdate=func.now()`，**Core 的 `update()` 也会触发它**。
+    首版没管这件事，结果 28 个历史任务的 `updated_at` 全被刷成同一个时刻，
+    而 `/observability/overview` 的耗时用 `updated_at - created_at` 计算 →
+    看板上的「耗时」从真实的 90 秒变成 **9708 分**（约 6.7 天）。
+
+    这是**改了业务数据**，不只是"统计不准"：`updated_at` 是审计字段，
+    任务列表的「更新时间」也用它排序展示。
+
+    修法：在 `values()` 里显式带上 `updated_at=Task.updated_at`（即库里的原值），
+    让 onupdate 被显式赋值覆盖。这样回填**只动 `used_tokens` 一列**。
+    """
     from sqlalchemy import update
 
     from app.db.models.task import Task
@@ -142,7 +156,11 @@ async def _apply(pairs: list[tuple[Any, int]]) -> int:
             result = await session.execute(
                 update(Task)
                 .where(Task.id == task_id, Task.used_tokens == 0)
-                .values(used_tokens=tokens)
+                .values(
+                    used_tokens=tokens,
+                    # 显式写回原值，压掉 onupdate=func.now()
+                    updated_at=Task.updated_at,
+                )
             )
             # CursorResult 才有 rowcount（mypy 只看到 Result 基类）
             updated += int(getattr(result, "rowcount", 0) or 0)
