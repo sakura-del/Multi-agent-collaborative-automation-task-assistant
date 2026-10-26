@@ -95,8 +95,7 @@ async def _collect() -> list[tuple[Any, int]]:
     """
     from sqlalchemy import select
 
-    from app.db.models.subtask import Subtask
-    from app.db.models.task import Task
+    from app.db.models.task import Subtask, Task
     from app.db.session import AsyncSessionLocal
 
     result: list[tuple[Any, int]] = []
