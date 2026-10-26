@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_active_user
 from app.core.exceptions import ValidationException
+from app.db.models.reference_library import ReferenceLibraryItem
 from app.db.models.user import User
 from app.db.session import get_db
 from app.knowledge.services.reference_library_service import (
@@ -119,9 +120,14 @@ CurrentUserDep = Annotated[User, Depends(get_current_active_user)]
 ServiceDep = Annotated[ReferenceLibraryService, Depends(get_reference_library_service)]
 
 
-def _to_out(row: object) -> LibraryItemOut:
-    """ORM 行 → 响应模型（从 `payload` 取真源字段）。"""
-    item = row.to_csl_item()  # type: ignore[attr-defined]
+def _to_out(row: ReferenceLibraryItem) -> LibraryItemOut:
+    """ORM 行 → 响应模型（从 `payload` 取真源字段）。
+
+    参数类型必须写成 `ReferenceLibraryItem`，不能写成 `object` 再用
+    `# type: ignore` 压 `to_csl_item()` —— 那样 `row.id` 这类属性访问压不住，
+    CI 上就是这样暴露的（AGENTS §5 #31）。
+    """
+    item = row.to_csl_item()
     return LibraryItemOut(
         item_id=str(row.id),
         ref_id=item.id,
