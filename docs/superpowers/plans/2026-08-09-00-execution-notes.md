@@ -3876,6 +3876,116 @@ PostgreSQL integration tests: 1 passed, 9 deselected
 
 本地 SQLite 上也独立验过同一往返，并确认 `alembic heads` **只有一个 head**。
 
+---
+
+## 2026-10-26 · 引用库遗留三项（证据闭环 / 去重合并 / 条目编辑）
+
+计划：[2026-10-26-01-reference-library-followup-plan.md](2026-10-26-01-reference-library-followup-plan.md)
+设计记录：spec §4.19。
+
+### 为什么要做：引用库有文献，却没证据
+
+上一轮引用库任务 `completed`、检索节点 6/6 artifacts 来自引用库，
+但 `evidence_pool` 是空的。取证发现两条线互不相干：
+
+```
+search 节点   → self._source.search()              → artifacts
+extract/write → LiteratureContextBuilder.build()   → evidence
+                        ↓
+        knowledge.search_for_context(user_id, query)   ← 只查知识库向量索引
+```
+
+写作 Agent 在**没有任何证据**的情况下生成内容。
+
+### 交付
+
+`Evidence.kind`（`excerpt`/`metadata`）+ `metadata_evidence()` +
+`prepare_node` 合并两类证据 + `normalize_doi()` 去重合并 +
+`PATCH` 条目编辑 + 前端编辑表单与合并计数。
+
+### 本轮踩的两个坑（都值得记）
+
+#### 坑 1：测试夹具用了产品不产生的形状（§5 #16 第二次）
+
+第一版 `_metadata_evidence_from` 读 `dependency_outputs[...]['artifacts']`（顶层），
+单元测试夹具也传扁平形状 → **9 条全绿**。
+
+但 `scheduler._completed_outputs[nid] = nr.output`，而 `nr.output` 的形状是：
+
+```json
+{"result": "...", "status": "completed",
+ "execution_result": {"artifacts": [...]}}
+```
+
+**artifacts 在 `execution_result` 里面。** 真实任务 `evidence_pool` 里
+metadata = 0 才暴露 —— 第一次部署后验证：
+
+```
+⑨ evidence_pool 总数 = 12，其中 metadata = 0
+   A1 evidence_pool 非空: True
+   A2 每条可追溯 source_url: 0/0
+SUMMARY: FAIL
+```
+
+修法：新增 `_artifacts_of()` 优先读 `execution_result.artifacts`、兼容扁平形状；
+测试改用 `_search_output()` 照抄 `nr.output`；新增
+`TestProductionShapeContract` 四组断言把形状本身锁住。
+
+**诚实性验证**：恢复「只认顶层」→ **10 条变红**（含两条形状契约测试）。
+
+> 同一轮里 §5 #16 犯了**第二次**（第一次是 token 统计）。已升级为 §5 #33：
+> **写提取逻辑前先 `print(json.dumps(真实载荷, indent=2))`**，测试夹具照抄。
+
+#### 坑 2：新证据类型撞上既有校验器
+
+形状修好后真实任务再次 `waiting_human`：
+
+```
+✗ evidence_ids_valid: 证据标识缺失: ['[E1]', '[E2]']
+```
+
+`citation_validator` 要求每条证据都有 `doc_id` + `chunk_id`。而元数据证据
+**按设计就没有** —— 它来自文献检索结果，不绑定知识库分块。
+
+**不能为了过检查填假 UUID**：那会让「可回溯」变成假话（§5 #28）。
+修法：检查只对 `kind="excerpt"` 生效；元数据证据仍必须有 `excerpt`
+（契约已保证，另加测试锁住）。
+
+**诚实性验证**：恢复无条件检查 → 新测试变红。
+
+### 7 条既有测试变红 —— 设计变更不是回归
+
+改合并逻辑后 7 条测试红（service 3 / api 2 / library_source 2）。根因：
+夹具 `doi` 默认值固定，测试用 `ref_id=f"doi:10.1/{index}"` 造多条 →
+**ref_id 不同但 DOI 全同** → 被合并逻辑正确并成一条。
+
+判断标准：**旧断言表达的行为是否仍是我们想要的**。
+「存 5 篇不同文献就该有 5 条」仍成立，只是数据不再是 5 篇不同文献。
+
+### 门禁
+
+```
+后端：black / ruff / mypy --no-incremental 0 错（206 文件）
+      pytest 全量 2753 passed / 8 skipped
+前端：458 passed（+8）；vue-tsc -b 0 错；vite build OK
+迁移：不需要 —— Evidence 在内存与快照 JSON，merged 是响应字段
+```
+
+### 一条未定论的测试
+
+全量跑时 `tests/evaluation/test_reporting.py::test_aggregate_csv_columns`
+失败过一次，后续三次全量都未复现（单独跑 / 目录跑 / 带覆盖率跑均通过）。
+该测试只依赖 `tmp_path` 与 `evaluation.reporting`，**不碰**本轮改动的任何模块。
+**机制未确认**，如实记录，不写成「偶发，已忽略」。
+
+### 验证限制
+
+- 模型不支持图片输入，**未肉眼看过截图**；
+- 前端编辑功能只有单元测试，**未跑 E2E**（编辑交互需要造数据 + 真实页面，
+  本轮用 API 测试 + 前端单测覆盖，浏览器层未验证）；
+- 元数据证据**只能支撑「存在这样一篇文献」**，不能支撑「作者指出……」
+  —— 这是设计边界，不是缺陷，但**最终综述正文的引用强度未评估**。
+
 
 
 

@@ -21,15 +21,15 @@
 | 项 | 值 |
 | --- | --- |
 | 分支 | `main`（工作分支 `codex/plan3-literature-workflow` 与 main 同点） |
-| HEAD | … → Word 模板页修复 `cd30286` → 引用库 `6fdd213` → 摘要修复 `65364ed` → **mypy 修复 `cd215a0`** |
+| HEAD | … → 引用库 `6fdd213` → 摘要修复 `65364ed` → mypy 修复 `cd215a0` → **引用库遗留三项 `8cfed9b`** |
 | 冻结 tag | `defense-v1` |
 | Plan 状态 | Plan 2 / 3 / 4 / 5 **全部 Exit Gate PASSED**；**Phase 1 五项全部端到端可用且遗留清零**；**Phase 2 五项全部交付完成**（PRISMA ✅ + 可观测性 ✅ + 团队工作区 ✅ + 开放 API ✅ + 计费套餐 ✅） |
 | 产品化进度 | **Issue #2~#7 全部关闭且遗留清零**；**P1-D 配额遗留已修复**；**`max_results` 已夹紧**；**PRISMA 完成**；**可观测性完成**（8 指标 + `/metrics` + 看板，**看板数字已全部为真**）；**团队工作区完成**；**开放 API 完成**；**计费套餐完成**（四档 + 四条功能门禁 + 手工开通 + **套餐页已重设计**）；**引用样式页已重设计**（**真实渲染预览** + 删除二次确认）；**Word 模板页已修**（**不再把示例填充谎称成稿** + 删除二次确认）；**前端已迁移到 Tailwind v4 + shadcn-vue** |
 | 数据库迁移 head | **`b7d4e9f1c6a2`**（`reference_library_item` 引用库表） |
-| 后端测试 | **2705 passed**, 8 skipped；覆盖率 **~89%**；`mypy` 0 错误（205 文件） |
-| 前端测试 | Vitest **450 passed**（+6 skipped）；**Playwright E2E 43 场景**（新增引用库 1 条，实测通过） |
-| CI | **6/6 作业全绿**（2026-10-26 `cd215a0` / run `40288096865`；4 个下游 job 首次真正执行） |
-| 服务器 | 已同步至 `65364ed`，五容器 healthy，`/api/v1/health/ready` → `{"status":"ready"}`，`alembic current` = **`b7d4e9f1c6a2 (head)`**，四套餐种子已就位，**向量库 id 级一致（28344 条，`ids_verified=True`）**，**`task.used_tokens` 已回填（169372，28 个任务）**，**6 个引用样式预览全部真实渲染（warnings=0）**，**模板页文案已如实标注示例**，**引用库端到端跑通（真实任务 `completed`，6/6 artifacts 来自引用库）**。`cd215a0` 只改后端类型标注，不影响运行行为，未重新部署 |
+| 后端测试 | **2753 passed**, 8 skipped；覆盖率 **~89%**；`mypy` 0 错误（206 文件） |
+| 前端测试 | Vitest **458 passed**（+6 skipped）；**Playwright E2E 43 场景**（新增引用库 1 条，实测通过） |
+| CI | **6/6 作业全绿**（2026-10-26 `cd215a0` / run `40288096865`；4 个下游 job 首次真正执行）。**`8cfed9b` 之后未复验** |
+| 服务器 | 已同步至 `8cfed9b`，五容器 healthy，`/api/v1/health/ready` → `{"status":"ready"}`，`alembic current` = **`b7d4e9f1c6a2 (head)`**，四套餐种子已就位，**向量库 id 级一致（28344 条）**，**`task.used_tokens` 已回填（169372，28 个任务）**，**6 个引用样式预览全部真实渲染（warnings=0）**，**引用库端到端跑通**，**元数据证据已生效（真实任务 evidence_pool 里 metadata 4/4 可追溯）** |
 
 **演示账号**：`demo` / `demo12345` —— **全权限管理员**（`role=admin` + `institution` 套餐：篇数不限 / 含团队 / 含开放 API）；知识库 11 篇 / 28341 分块
 **E2E 固定账号**：`e2efull` / `e2ereconn`，密码 `e2e-password-2026`（复用，不再每次注册——`auth_register` 限流 5 次/3600s）
@@ -167,7 +167,7 @@ docker compose build backend && docker compose up -d backend
 | P1-B 检索源扩展 | ✅ 已交付 `d44282a` | OpenAlex + S2 + PubMed + 多源聚合（三级去重、单源失败隔离、各源节流）。**遗留**：S2 需注入 `SEMANTIC_SCHOLAR_API_KEY`（公共档持续 429） |
 | P1-C 账号体系 | ✅ 已交付 `d44282a` + 修复 `112c398` + **前端 `f7323ff`** | 邮箱验证 + 密码重置（只存哈希/单次使用/恒定响应）；未配 SMTP 不阻塞注册 + **`/verify-email`、`/password-reset`、`/account/verify` 三页** + 登录页「忘记密码」入口。**遗留**：无 |
 | P1-D 限流 + 配额 | ✅ 已交付 `d44282a` + **缺口补齐 `63b1d95`** | 中间件 + Redis/内存实现 + fail-open + 熔断；429 带 Retry-After；**限流覆盖全部 19 条写端点**（新增 task_control/template_write/template_render）；**配额真扣减**（提交时预扣 100k、完成时按实际用量退还差额，`refund()` 原子且不扣到负数）。**遗留**：无 |
-| P1-E RIS/BibTeX 导入 | ✅ 已交付 `d44282a` + 端点 `fe56a67` + **前端 `08b7378`** + **引用库 `6fdd213`** | round-trip 与导出严格一致 + `POST /references/import` + **`/references/import` 预览页**。**`6fdd213` 补齐的能力缺口**：原先解析完**什么也做不了**（无引用库表、无保存路径、任务文献只来自检索源，页面注释自认「保存路径属后续工作」）→ 新增 `reference_library_item` 表（迁移 `b7d4e9f1c6a2`）+ 4 个端点 + `LibraryLiteratureSource` + 任务 `reference_library=true` 开关 + 引用库页。**实测真实任务 `completed`，6/6 artifacts 来自引用库**。**遗留**：引用库只存元数据（无摘要/全文）；无去重合并 UI；无条目编辑 |
+| P1-E RIS/BibTeX 导入 | ✅ 已交付 `d44282a` + 端点 `fe56a67` + **前端 `08b7378`** + **引用库 `6fdd213`** + **遗留三项 `8cfed9b`** | round-trip 与导出严格一致 + `POST /references/import` + **`/references/import` 预览页**。**`6fdd213` 补齐的能力缺口**：原先解析完**什么也做不了** → 新增 `reference_library_item` 表（迁移 `b7d4e9f1c6a2`）+ 4 个端点 + `LibraryLiteratureSource` + 任务 `reference_library=true` 开关 + 引用库页。**`8cfed9b` 补齐的三项遗留**：① 检索到的文献进证据池（`Evidence.kind` 区分 `excerpt`/`metadata`，`metadata` 不含编造摘要）；② 按归一化 DOI 去重合并（`merged` 与 `skipped` 分开报）；③ `PATCH` 条目编辑（改完重新准入）。**实测：真实任务 `evidence_pool` 里 metadata 4/4 可追溯 source_url**。**遗留**：引用库只存元数据（无摘要/全文，所以元数据证据只能支撑「存在这样一篇文献」，不能支撑「作者指出……」）；无跨用户去重 |
 | **P1-D 遗留（P1）** | ✅ **已修复** `8794cc1` | 原缺陷：`quota_refund_for_usage` 只在完成时调用，**取消/失败/转人工/放弃确认 → 预扣 100k 白扣**。修法：`task.used_tokens`（用量落库，结算依据）+ `task.quota_settled`（幂等标记）；**四条终止路径全部结算**；`WAITING_APPROVAL` 改为「进入即结算、确认时重新预扣」（额度不足 429 拒绝确认）。迁移 `d4b1e7f2a8c3`（存量 completed 置已结算）。计划：[quota-settlement](docs/superpowers/plans/2026-10-21-00-quota-settlement-plan.md)。**遗留**：规划阶段用量不统计（规划 API 不返回 token）；存量 5 个修复前任务不回补（跨日窗口） |
 
 **Issue 清单**（全部已关闭）：
