@@ -1,7 +1,7 @@
 # AGENTS.md — 项目上下文与开发约定
 
 > 本文件是**给 AI 编码助手看的交接文档**。新会话开始时请先读完本文件再动手。
-> 最后更新：2026-10-26（本轮：套餐页重设计，见文末「文档入口」）
+> 最后更新：2026-10-26（本轮：引用样式页重设计，见文末「文档入口」）
 
 ---
 
@@ -21,15 +21,15 @@
 | 项 | 值 |
 | --- | --- |
 | 分支 | `main`（工作分支 `codex/plan3-literature-workflow` 与 main 同点） |
-| HEAD | … → 用量看板重设计 `b5bf912` → **套餐页重设计 `f21b490`** |
+| HEAD | … → 套餐页重设计 `f21b490` → **引用样式页重设计 `e6bd1f7`** |
 | 冻结 tag | `defense-v1` |
 | Plan 状态 | Plan 2 / 3 / 4 / 5 **全部 Exit Gate PASSED**；**Phase 1 五项全部端到端可用且遗留清零**；**Phase 2 五项全部交付完成**（PRISMA ✅ + 可观测性 ✅ + 团队工作区 ✅ + 开放 API ✅ + 计费套餐 ✅） |
-| 产品化进度 | **Issue #2~#7 全部关闭且遗留清零**；**P1-D 配额遗留已修复**；**`max_results` 已夹紧**；**PRISMA 完成**；**可观测性完成**（8 指标 + `/metrics` + 看板，**看板数字已全部为真**）；**团队工作区完成**；**开放 API 完成**；**计费套餐完成**（四档 + 四条功能门禁 + 手工开通 + **套餐页已重设计：权益/到期日/升级入口/警示色/加载态/局部失败**）；**前端已迁移到 Tailwind v4 + shadcn-vue** |
+| 产品化进度 | **Issue #2~#7 全部关闭且遗留清零**；**P1-D 配额遗留已修复**；**`max_results` 已夹紧**；**PRISMA 完成**；**可观测性完成**（8 指标 + `/metrics` + 看板，**看板数字已全部为真**）；**团队工作区完成**；**开放 API 完成**；**计费套餐完成**（四档 + 四条功能门禁 + 手工开通 + **套餐页已重设计**）；**引用样式页已重设计**（**真实渲染预览** + 删除二次确认）；**前端已迁移到 Tailwind v4 + shadcn-vue** |
 | 数据库迁移 head | **`a3c9e6d2b8f1`**（plan / subscription / usage_counter 三表 + 四套餐种子） |
-| 后端测试 | **2646 passed**, 8 skipped；覆盖率 **~89%**；`mypy` 0 错误（200 文件） |
-| 前端测试 | Vitest **392 passed**（+6 skipped）；**Playwright E2E 33 场景**（chromium 30 passed / 2 需 LLM 余额 / 1 偶发资源耗尽） |
+| 后端测试 | **2652 passed**, 8 skipped；覆盖率 **~89%**；`mypy` 0 错误（201 文件） |
+| 前端测试 | Vitest **402 passed**（+6 skipped）；**Playwright E2E 38 场景**（chromium 35 passed / 2 需 LLM 余额 / 1 偶发资源耗尽） |
 | CI | **6/6 作业全绿**（2026-10-21 `8e25670` 复验；本轮未复验） |
-| 服务器 | 已同步至 `f21b490`，五容器 healthy，`/api/v1/health/ready` → `{"status":"ready"}`，`alembic current` = `a3c9e6d2b8f1 (head)`，四套餐种子已就位，**向量库 id 级一致（28344 条，`ids_verified=True`）**，**`task.used_tokens` 已回填（169372，28 个任务）** |
+| 服务器 | 已同步至 `e6bd1f7`，五容器 healthy，`/api/v1/health/ready` → `{"status":"ready"}`，`alembic current` = `a3c9e6d2b8f1 (head)`，四套餐种子已就位，**向量库 id 级一致（28344 条，`ids_verified=True`）**，**`task.used_tokens` 已回填（169372，28 个任务）**，**6 个引用样式预览全部真实渲染（warnings=0）** |
 
 **演示账号**：`demo` / `demo12345` —— **全权限管理员**（`role=admin` + `institution` 套餐：篇数不限 / 含团队 / 含开放 API）；知识库 11 篇 / 28341 分块
 **E2E 固定账号**：`e2efull` / `e2ereconn`，密码 `e2e-password-2026`（复用，不再每次注册——`auth_register` 限流 5 次/3600s）
@@ -143,6 +143,9 @@ docker compose build backend && docker compose up -d backend
 | 22 | **`period_key`（用量周期）≠ `period_end`（订阅到期）**（2026-10-26） | 页面只显示 `2026-10`，用户会以为「10 月底才续费」，而实际订阅 `2026-11-22` 到期。**凡「时间」字段先问它是什么周期**；免费档无到期概念 → 显示「免费档（无到期日）」，**不编假日期** |
 | 23 | **`Promise.all` 会让一个接口失败吞掉另一个的结果**（2026-10-26） | 套餐页 `usage` 返回 500 时 `plans` 明明成功，4 张套餐卡却全消失（`planCardCount=0`）——用户在最需要看套餐时看不到。**同页多个独立接口用 `Promise.allSettled`，分别报错** |
 | 24 | **回退验证必须用 `edit` 精确替换，不用 PowerShell `-replace`**（2026-10-26） | 用 `-replace` 改 `.vue` 模板把文件改坏 → 编译失败 → 输出 `Tests no tests`，看起来像「测试没覆盖」而实际是脚本坏了。与 §5 #1 同源 |
+| 25 | **探针脚本不要 `sys.path.insert` 项目根**（2026-10-26） | 镜像里 `site-packages/app` 是 `pip install` 的**另一份副本**（缺 `styles/` 等资产）。探针 `sys.path.insert(0, BACKEND_DIR)` 让 `app` 抢先解析到副本 → 6 个样式**全部静默回退兜底格式化器**，输出只有 2 种却报「6/6 渲染成功」。容器内 WORKDIR=`/app` 已在 sys.path，**直接跑即可** |
+| 26 | **`CitationRenderer` 兜底是静默的，必须检查 `warnings`**（2026-10-26） | citeproc 失败时 `render()` 回退极简格式化器并**返回非空条目** —— 看起来完全成功。凡涉及 CSL 渲染的验证，断言里必须加「`warnings` 为空」，否则测不出「所有样式长得一样」 |
+| 27 | **读取工具的输出层会做脱敏，不要据此改代码**（2026-10-26） | `read` 显示 `placeholder="选择 .csl 文件"`，一度当成真实缺陷。用字符码核实（`[112,108,97,99,101,...]` = `placeholder`）确认文件本身正确。**怀疑是脱敏时，先打印字符码/hex 再判断** |
 
 ---
 
@@ -398,9 +401,10 @@ docs/superpowers/plans/             # 计划 + 执行记录（execution-notes）
 | 想知道什么 | 读哪个 |
 | --- | --- |
 | **接手新会话**（当前状态 / 剩余任务 / 命令 / 阻塞项） | [docs/runbooks/2026-10-26-handoff.md](docs/runbooks/2026-10-26-handoff.md) |
-| **前端重设计怎么做的**（7 个阶段的设计取舍与实测证据） | [docs/superpowers/specs/2026-10-23-frontend-redesign-design.md](docs/superpowers/specs/2026-10-23-frontend-redesign-design.md) §4.5~§4.15 |
+| **前端重设计怎么做的**（8 个阶段的设计取舍与实测证据） | [docs/superpowers/specs/2026-10-23-frontend-redesign-design.md](docs/superpowers/specs/2026-10-23-frontend-redesign-design.md) §4.5~§4.16 |
 | **用量看板为什么重做**（token 用量从未落库 + 5 个缺陷 + 数据修复） | 同上 §4.14 + [execution-notes](docs/superpowers/plans/2026-08-09-00-execution-notes.md) |
-| **套餐页为什么重做**（当前卡零权益 + 到期日缺失 + 无升级入口 + 6 缺陷） | 同上 §4.15 + [execution-notes](docs/superpowers/plans/2026-08-09-00-execution-notes.md) 末节 |
+| **套餐页为什么重做**（当前卡零权益 + 到期日缺失 + 无升级入口 + 6 缺陷） | 同上 §4.15 + [execution-notes](docs/superpowers/plans/2026-08-09-00-execution-notes.md) |
+| **引用样式页为什么重做**（零预览 + 两个国标样式无法区分 + 删除无确认） | 同上 §4.16 + [execution-notes](docs/superpowers/plans/2026-08-09-00-execution-notes.md) 末节 |
 | **为什么会返工**（我的错 + 环境坑 + 打分） | [docs/retrospective/2026-10-26-frontend-redesign-retro.md](docs/retrospective/2026-10-26-frontend-redesign-retro.md) |
 | 产品化路线与竞品 | [docs/product/2026-10-18-demo-to-product-roadmap.md](docs/product/2026-10-18-demo-to-product-roadmap.md) |
 | 架构决策（为什么不用 citeproc-js 等） | [docs/adr/](docs/adr/) |

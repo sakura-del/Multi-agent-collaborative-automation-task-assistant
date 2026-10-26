@@ -3489,6 +3489,86 @@ E2E：plan.spec 5 条 + plan-measure 2 条全绿（真实服务器）
 同前：模型不支持图片输入，**未肉眼看过截图**，视觉验收靠结构化导出 + 硬断言。
 截图在 `frontend/e2e/screenshots/plan-*.png`。
 
+---
+
+## 2026-10-26 · 引用样式页重设计（前端重设计第八阶段）
+
+**范围**：`backend/app/knowledge/services/style_preview_service.py`（新）、
+`backend/app/api/v1/endpoints/citation_styles.py`、`backend/app/schemas/citation_style.py`、
+`frontend/src/views/StyleView.vue`、`frontend/src/api/{citation-styles,types}.ts`、
+2 个测试文件 + 2 个新 E2E。
+设计记录：`docs/superpowers/specs/2026-10-23-frontend-redesign-design.md` §4.16。
+
+### 取证（按交接文档的四个问题逐个查）
+
+```
+HAS_PREVIEW_WORD = false                     ← 页面上完全没有预览
+CLICKABLE        = [9 导航链接, 上传样式, 退出登录]   ← 样式行不可点不可展开
+VISIBLE_TEXT     = [..., "gbt7714-2025-numeric", "citation-number · citation-order · zh-CN", ...]
+META_DISTINCT    = 5 / 6                     ← 两个国标样式元信息完全相同
+LOADING_STATE    = {hasLoadingWord: true}    ← 加载态本身正常
+```
+
+### 两个缺陷
+
+| # | 缺陷 | 根因 | 修法 |
+| --- | --- | --- | --- |
+| 1 | **完全没有预览** | 前端从未调用渲染；后端也没有预览端点 | 新增 `GET /citation-styles/previews`，复用导出用的 `CitationRenderer` |
+| 2 | **删除无确认** | `@click="handleDelete"` 直接删 | 二次确认（确认/取消） |
+
+**缺陷 1 为什么严重**：两个国标样式元信息完全相同，而真实输出差异明显
+（2015 版无 `[J]` 类型标识）。用户在选择界面拿不到决策依据。
+
+### 关键决策
+
+- **预览必须后端渲染**：前端自写格式化器 = 第二份 CSL 实现，必然与导出漂移
+  → 用户看到「预览长这样、下载不是」比没预览更糟；
+- **固定样例两条**（中英各一条、期刊+会议）：差异全来自样式本身，空库用户也能看；
+- **`warnings` 必须透出**：`CitationRenderer` 兜底时仍返回非空条目，看起来成功。
+
+### 修复前后实测对照
+
+| 项 | 修复前 | 修复后 |
+| --- | --- | --- |
+| 预览 | 无 | 6 条，`w=966 h=80`，`textLen 225~267` |
+| 可区分性 | 元信息 5/6 去重 | **`AFTER_DISTINCT = 6/6`** |
+| 兜底告警 | 无从得知 | `AFTER_FALLBACK_WARNINGS = 0` |
+| 删除 | 一键直删 | 二次确认 |
+| 溢出 | 0 | 0（桌面 + 移动） |
+| 预览对比度 | — | **18.86:1**（AA 4.5） |
+
+### 门禁
+
+```
+后端：black/ruff/mypy 全过；pytest 2652 passed, 8 skipped
+前端：vitest 402 passed（+6 skipped）；vue-tsc -b 0 错；vite build OK
+E2E：style.spec 5 条 + style-measure 1 条全绿（真实服务器）
+```
+
+### 诚实性验证（4 组回退，全部确认变红）
+
+| # | 回退 | 变红的断言 |
+| --- | --- | --- |
+| 1 | 预览区 `v-if="false"` | 4 条 |
+| 2 | 删除改回直接删 | 4 条（含既有删除用例） |
+| 3 | 兜底告警隐藏 | 1 条 |
+| 4 | `allSettled` → 串行 await | 2 条 |
+
+### 本轮澄清的两个误报（避免下次重复排查）
+
+| 现象 | 真相 |
+| --- | --- |
+| `StyleView.vue:149` 显示 `placeholder="选择 .csl 文件"` | **不是缺陷**。字符码核实为 `placeholder`；是**读取工具输出层脱敏**。不要"修" |
+| 探针报 6 样式全部 `not found in bundled styles`，路径指向 `site-packages/app/` | **不是产品 bug**。镜像里 `site-packages/app` 是 pip 副本（**缺 `styles/`**），探针 `sys.path.insert` 让它抢先解析。真实路径 `/app/app/tools/csl/styles` 正常 |
+
+> 教训：**探针脚本不要 `sys.path.insert` 项目根**（容器 WORKDIR=/app 已在 sys.path），
+> 否则会静默拿到另一份包副本，产生大量假缺陷。
+
+### 验证限制
+
+模型不支持图片输入，**未肉眼看过截图**。截图在
+`frontend/e2e/screenshots/style-*.png`。
+
 
 
 
