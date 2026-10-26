@@ -97,20 +97,47 @@ _TERMINAL_STATUSES = frozenset({TaskStatus.COMPLETED, TaskStatus.CANCELLED, Task
 ESTIMATED_TOKENS_PER_TASK = 100_000
 
 
+def _tokens_from_payload(payload: Mapping[str, Any]) -> int:
+    """从一份 payload 读 token（`prompt_tokens + completion_tokens`，缺省按 0）。"""
+    return int(payload.get("prompt_tokens") or 0) + int(payload.get("completion_tokens") or 0)
+
+
 def sum_actual_tokens(node_results: Mapping[str, Any]) -> int:
     """从 DAG 各节点结果汇总**实际** token 用量。
 
-    `node_results[*].output` 是 `ExecutionResult` 的 dict 形态，含
-    `prompt_tokens` / `completion_tokens`。历史载荷可能没有这两个键
-    （字段有默认值 0），因此一律用 `.get` 读取、缺省按 0 计。
+    ## 两个位置都要看（2026-10-26 用量看板修）
+
+    生产载荷（`LiteratureNodeExecutor._run`）把 token 放在
+    `output["execution_result"]` **里面**：
+
+    ```python
+    {"node_id": ..., "result": ..., "status": "completed",
+     "execution_result": {"prompt_tokens": N, "completion_tokens": M, ...}}
+    ```
+
+    而历史测试替身与老 Agent 把 token **平铺在 output 顶层**。旧实现只读顶层 →
+    生产恒为 0 → `task.used_tokens` 永远是 0。后果有两层：
+
+    1. **成本失控**：配额结算按 `100k − used_tokens` 退差额，用量记 0 就是每次
+       任务白嫖满额算力（实测服务器 42 个任务共 169372 token 全被记成 0）；
+    2. **看板说谎**：`/observability/overview` 的「累计 token」直接读 `used_tokens`，
+       于是看板永远显示 0——用户看不出来，因为 0 看起来像「还没用过」。
+
+    ## 嵌套优先、只算一次
+
+    同一节点若两处都有值，**只取嵌套那一份**（生产权威来源）。两处相加会让用量
+    翻倍，等于多扣用户额度——比少记更糟。
     """
     total = 0
     for node_result in node_results.values():
         output = getattr(node_result, "output", None)
         if not isinstance(output, Mapping):
             continue
-        total += int(output.get("prompt_tokens") or 0)
-        total += int(output.get("completion_tokens") or 0)
+        nested = output.get("execution_result")
+        if isinstance(nested, Mapping):
+            total += _tokens_from_payload(nested)
+        else:
+            total += _tokens_from_payload(output)
     return total
 
 

@@ -16,6 +16,17 @@
 
 全部来自 `task` 表（`status` / `used_tokens` / `created_at` / `updated_at`），
 不另外建统计表 —— 避免"汇总与明细不一致"（与 PRISMA 计数派生的原则一致）。
+
+## 2026-10-26 看板重设计：契约补三处「不给就会说谎」的字段
+
+| 字段 | 为什么必须有 |
+| --- | --- |
+| `by_status`（全状态） | 旧契约只有 4 个固定状态 + total。实测 demo 有 1 个 `waiting_approval`，不在契约里 → 看板出现「总数 27 / 分布合计 26」的自相矛盾，且差值不可见 |
+| `terminal_count` | 成功率的分母是「已进入终态的任务」，不给分母用户无法核对 76.9% 是怎么来的 |
+| `recent[].title` / `created_at` | 旧行只有 8 位 UUID，一整列 `2361d17a` 认不出是哪次运行 |
+| `tokens.recorded_task_count` | 历史任务 `used_tokens` 恒 0（修复前就记成 0 了），前端要能区分「真没用量」与「老数据没记」 |
+
+**这些字段一律服务端算**：前端从 `recent`（只有 10 条）凑分布必然是假的。
 """
 
 from __future__ import annotations
@@ -41,6 +52,13 @@ _RECENT_LIMIT = 10
 #: waiting_human 是"等人工"，不算成功也不算失败）
 _SUCCESS_STATUS = "completed"
 
+#: 计入成功率分母的「已进入终态」状态。
+#:
+#: `waiting_human` 也算终态：它意味着本段执行已结束、等用户介入，不会再自己推进。
+#: `waiting_approval` / `planning` / `running` 等**不算**——它们还在系统手里，
+#: 拿它们当分母会让「刚提交 5 个任务」的成功率凭空变成 0%。
+_TERMINAL_STATUSES = ("completed", "failed", "cancelled", "waiting_human")
+
 
 @router.get("/overview", summary="我的任务健康与成本概览")
 async def overview(
@@ -54,11 +72,17 @@ async def overview(
     ```json
     {
       "tasks": {"total": 0, "completed": 0, "failed": 0, "cancelled": 0, "waiting_human": 0},
+      "by_status": {"completed": 0, "failed": 0, "cancelled": 0,
+                    "waiting_human": 0, "waiting_approval": 0, "running": 0, ...},
+      "terminal_count": 0,
       "success_rate": 0.0,
-      "tokens": {"total_used": 0, "avg_per_task": 0},
-      "recent": [{"task_id": "...", "status": "...", "used_tokens": 0, "duration_seconds": 0}]
+      "tokens": {"total_used": 0, "avg_per_task": 0, "recorded_task_count": 0},
+      "recent": [{"task_id": "...", "title": "...", "status": "...",
+                  "used_tokens": 0, "duration_seconds": 0, "created_at": "..."}]
     }
     ```
+
+    `by_status` 的计数之和**恒等于** `tasks.total`（前端据此断言自洽）。
     """
     # 各状态计数：一次查询用条件聚合拿全（避免 5 次往返）
     status_counts = await db.execute(
@@ -71,23 +95,23 @@ async def overview(
     )
     counts: dict[str, int] = {str(row.status): int(row.n) for row in status_counts}
 
+    # 总量 + token 汇总 + 「有用量记录的任务数」一次拿全。
+    # recorded_task_count 是 `used_tokens > 0` 的条数：历史任务恒为 0，
+    # 前端靠它区分「真没用过」与「老数据没记」。
     totals = await db.execute(
         select(
             func.count().label("total"),
             func.coalesce(func.sum(Task.used_tokens), 0).label("tokens"),
+            func.count().filter(Task.used_tokens > 0).label("recorded"),
         ).where(Task.user_id == current_user.id)
     )
     row = totals.one()
     total = int(row.total)
     total_tokens = int(row.tokens)
+    recorded_task_count = int(row.recorded)
 
-    terminal = (
-        counts.get("completed", 0)
-        + counts.get("failed", 0)
-        + counts.get("cancelled", 0)
-        + counts.get("waiting_human", 0)
-    )
     # 成功率的分母：只算**已进入终态**的任务（等待规划/执行中的不该拉低成功率）
+    terminal = sum(counts.get(status, 0) for status in _TERMINAL_STATUSES)
     rate = (counts.get(_SUCCESS_STATUS, 0) / terminal) if terminal else 0.0
 
     recent_rows = await db.execute(
@@ -99,9 +123,11 @@ async def overview(
     recent = [
         {
             "task_id": str(task.id),
+            "title": task.title or "",
             "status": task.status,
             "used_tokens": int(task.used_tokens or 0),
             "duration_seconds": _duration_seconds(task.created_at, task.updated_at),
+            "created_at": task.created_at.isoformat() if task.created_at else None,
         }
         for task in recent_rows.scalars().all()
     ]
@@ -114,10 +140,16 @@ async def overview(
             "cancelled": counts.get("cancelled", 0),
             "waiting_human": counts.get("waiting_human", 0),
         },
+        # 全状态分布（含旧契约没有的 waiting_approval / running / planning / ...）。
+        # 用 dict(counts) 而不是枚举常量：新增状态不该要求改这个端点。
+        "by_status": counts,
+        "terminal_count": terminal,
         "success_rate": round(rate, 4),
         "tokens": {
             "total_used": total_tokens,
-            "avg_per_task": int(total_tokens / total) if total else 0,
+            # 平均只在**有用量记录**的任务之间算：否则历史 0 会把均值拉成假的低值
+            "avg_per_task": (total_tokens // recorded_task_count) if recorded_task_count else 0,
+            "recorded_task_count": recorded_task_count,
         },
         "recent": recent,
     }

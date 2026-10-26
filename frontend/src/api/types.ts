@@ -420,9 +420,13 @@ export interface PrismaCounts {
 /** 最近任务条目（看板列表用） */
 export interface ObservabilityRecentTask {
   task_id: string;
+  /** 任务标题（没有标题时前端退回显示短 UUID）。2026-10-26 重设计新增。 */
+  title?: string;
   status: string;
   used_tokens: number;
   duration_seconds: number;
+  /** ISO 时间戳；判断「哪次运行」用。2026-10-26 重设计新增。 */
+  created_at?: string | null;
 }
 
 /** 我的任务健康与成本概览（owner-scoped，只含自己的数据） */
@@ -434,11 +438,32 @@ export interface ObservabilityOverview {
     cancelled: number;
     waiting_human: number;
   };
+  /**
+   * **全状态**计数（含 `waiting_approval` / `running` / `planning` 等）。
+   *
+   * 2026-10-26 重设计新增：旧的 `tasks` 只有 4 个固定状态，实测 demo 账号
+   * 有 1 个 `waiting_approval` 不在其中 → 看板出现「总数 27 / 分布合计 26」，
+   * 差值用户永远看不见。计数之和**恒等于** `tasks.total`。
+   */
+  by_status?: Record<string, number>;
+  /**
+   * 已进入终态的任务数（成功率的分母）。
+   *
+   * 2026-10-26 重设计新增：不给分母，用户无法核对 76.9% 是怎么来的。
+   */
+  terminal_count?: number;
   /** 成功率 = completed / 已进入终态的任务数（0 表示暂无终态任务） */
   success_rate: number;
   tokens: {
     total_used: number;
     avg_per_task: number;
+    /**
+     * 有实际用量记录（`used_tokens > 0`）的任务数。
+     *
+     * 2026-10-26 重设计新增：修复前落库的用量恒为 0，前端要靠它区分
+     * 「真没用过」与「老数据没记」。平均值也只在有记录的任务之间计算。
+     */
+    recorded_task_count?: number;
   };
   recent: ObservabilityRecentTask[];
 }

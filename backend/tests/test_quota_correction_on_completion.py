@@ -124,3 +124,90 @@ class TestActualTokenAggregation:
                 self.output = {"node_id": "n1", "content": "x"}
 
         assert sum_actual_tokens({"n1": _Node()}) == 0
+
+    def test_reads_production_payload_nested_execution_result(self) -> None:
+        """**生产真实载荷**：token 在 `output["execution_result"]` 里，不是顶层。
+
+        这条是本轮（用量看板）的核心回归测试。上面三条用例的载荷都是
+        「token 平铺在 output 顶层」——那是**测试替身**的形状，生产从来不是这样：
+
+        `LiteratureNodeExecutor._run` 返回的是
+
+        ```python
+        {"node_id": ..., "result": ..., "status": "completed", "used_tools": [],
+         "warnings": [...], "execution_result": {..., "prompt_tokens": N,
+                                                "completion_tokens": M},
+         "evidence_pool": [...]}
+        ```
+
+        于是 `sum_actual_tokens` 只看顶层 → 恒返回 0 → `task.used_tokens` 永远 0 →
+        配额结算退满额（用户白嫖算力）+ 用量看板「累计 token」永远是 0。
+
+        服务器实测（2026-10-26）：42 个任务的 `subtask.output_data` 里能算出
+        **169372** token，而 `task.used_tokens` 全部为 0。上面三条用例全绿，
+        缺陷却一直在——正是 AGENTS.md §5 #13 说的「假测试」。
+        """
+        from app.orchestration.services.task_execution import sum_actual_tokens
+
+        class _Node:
+            def __init__(self, output: dict[str, Any] | None) -> None:
+                self.output = output
+
+        node_results = {
+            "n1": _Node(
+                {
+                    "node_id": "n1",
+                    "result": "正文",
+                    "status": "completed",
+                    "used_tools": [],
+                    "warnings": [],
+                    "execution_result": {
+                        "node_id": "n1",
+                        "content": "正文",
+                        "duration_ms": 1200,
+                        "prompt_tokens": 1000,
+                        "completion_tokens": 500,
+                    },
+                    "evidence_pool": [],
+                }
+            ),
+            "n2": _Node(
+                {
+                    "node_id": "n2",
+                    "result": "正文2",
+                    "execution_result": {
+                        "node_id": "n2",
+                        "content": "正文2",
+                        "duration_ms": 800,
+                        "prompt_tokens": 2000,
+                        "completion_tokens": 800,
+                    },
+                }
+            ),
+        }
+
+        assert sum_actual_tokens(node_results) == 4300
+
+    def test_nested_and_flat_payloads_are_not_double_counted(self) -> None:
+        """同一节点同时有顶层与嵌套 token 时只算一次（防重复累加）。
+
+        为什么这条必要：修法若是「顶层 + 嵌套都加」，未来某个 agent 一旦把
+        两个位置都填上，用量就会翻倍 → 结算多扣用户额度。
+        """
+        from app.orchestration.services.task_execution import sum_actual_tokens
+
+        class _Node:
+            def __init__(self, output: dict[str, Any] | None) -> None:
+                self.output = output
+
+        node_results = {
+            "n1": _Node(
+                {
+                    "prompt_tokens": 1000,
+                    "completion_tokens": 500,
+                    "execution_result": {"prompt_tokens": 1000, "completion_tokens": 500},
+                }
+            )
+        }
+
+        assert sum_actual_tokens(node_results) == 1500
