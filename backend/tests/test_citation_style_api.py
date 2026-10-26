@@ -583,3 +583,96 @@ class TestServiceGuards:
 
         artifact_root = Path(get_settings().app.artifact_root)
         assert get_csl_storage_root() == (artifact_root.parent / "csl_styles").resolve()
+
+
+# ===== 样式预览（2026-10-26 样式页重设计）=====
+
+
+class TestStylePreviews:
+    """`GET /citation-styles/previews`：每个样式一条**真实渲染**样例。
+
+    ## 为什么必须加这个端点
+
+    实测（服务器 + 真实浏览器，2026-10-26）：样式页 6 个样式**只有名字和
+    `citation-number · citation-order · zh-CN` 这类元信息**，页面上
+    `HAS_PREVIEW_WORD=false`、可点元素只有导航 + 上传按钮。
+
+    后果：用户选样式时**看不到成品长什么样**。而 `gbt7714-2025-numeric` 与
+    `gbt7714-2015-numeric` 的 numbering/ordering/locale **完全相同**
+    （实测 `META_DISTINCT = 5/6`），光看元信息根本分不出区别。
+
+    ## 为什么在后端渲染
+
+    渲染必须走 citeproc + 真实 `.csl`。前端重写一套格式化器 = 第二份 CSL 实现，
+    必然与导出结果不一致（导出走的是 `CitationRenderer`）。用户会看到
+    「预览是这样、下载出来不是」——比没有预览更糟。
+    """
+
+    def test_requires_auth(self, style_env: StyleEnv) -> None:
+        resp = style_env.client.get(f"{API}/previews")
+        assert resp.status_code == 401
+
+    def test_returns_one_preview_per_style(self, style_env: StyleEnv) -> None:
+        """每个样式都要有预览，且 `style_id` 与列表接口一一对应。"""
+        listed = style_env.client.get(API, headers=_auth(TOKEN_A)).json()
+        resp = style_env.client.get(f"{API}/previews", headers=_auth(TOKEN_A))
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert set(body) >= {"previews", "sample_count"}
+
+        preview_ids = [item["style_id"] for item in body["previews"]]
+        assert preview_ids == [
+            item["style_id"] for item in listed["styles"]
+        ], "预览顺序与列表一致（前端按下标对齐，不靠二次查找）"
+
+    def test_preview_contains_rendered_entries(self, style_env: StyleEnv) -> None:
+        """预览必须是**渲染结果**，不是样式名或元信息回显。"""
+        resp = style_env.client.get(f"{API}/previews", headers=_auth(TOKEN_A))
+        body = resp.json()
+
+        for item in body["previews"]:
+            assert item["entries"], f"{item['style_id']} 预览为空"
+            # 每条都应该是「作者/题名/出处」级别的内容，而不是 id 或元信息
+            joined = " ".join(item["entries"])
+            assert (
+                "检索增强生成" in joined or "Ragas" in joined
+            ), f"{item['style_id']} 的预览里没有样例文献内容：{joined[:120]}"
+
+    def test_previews_are_distinct_across_styles(self, style_env: StyleEnv) -> None:
+        """**核心断言**：6 个样式的输出必须互不相同。
+
+        这是「6 种样式」这个说法的唯一证据。实测元信息只有 5 种不同组合，
+        若渲染也相同，那这 6 个样式对用户就是同一样式。
+        """
+        resp = style_env.client.get(f"{API}/previews", headers=_auth(TOKEN_A))
+        body = resp.json()
+
+        rendered = {item["style_id"]: tuple(item["entries"]) for item in body["previews"]}
+        distinct = {entries for entries in rendered.values()}
+        assert len(distinct) == len(rendered), (
+            "不同样式的预览输出重复了，说明渲染没真正生效："
+            f"{ {k: v for k, v in rendered.items()} }"
+        )
+
+    def test_previews_have_no_fallback_warnings(self, style_env: StyleEnv) -> None:
+        """预览不得带「已回退内置极简格式化器」告警。
+
+        `CitationRenderer` 在 citeproc 失败时会**静默回退**到极简格式化器并记
+        warning。回退后的输出看起来"成功"，但所有样式会长得一样。
+        预览必须把 warning 透出来，否则前端会把兜底文本当成真样式展示。
+        """
+        resp = style_env.client.get(f"{API}/previews", headers=_auth(TOKEN_A))
+        body = resp.json()
+
+        for item in body["previews"]:
+            assert not item["warnings"], f"{item['style_id']} 渲染走了兜底路径：{item['warnings']}"
+
+    def test_previews_are_public_to_any_authenticated_user(self, style_env: StyleEnv) -> None:
+        """预览不依赖用户自定义样式：任何登录用户看到同样的 6 个预置预览。"""
+        resp_a = style_env.client.get(f"{API}/previews", headers=_auth(TOKEN_A))
+        resp_b = style_env.client.get(f"{API}/previews", headers=_auth(TOKEN_B))
+
+        ids_a = [item["style_id"] for item in resp_a.json()["previews"]]
+        ids_b = [item["style_id"] for item in resp_b.json()["previews"]]
+        assert ids_a == ids_b

@@ -256,6 +256,35 @@ export interface CitationStyleList {
   default_style_id: string;
 }
 
+/**
+ * 单个样式的**真实渲染**预览（2026-10-26 样式页重设计）。
+ *
+ * 渲染在后端完成（与导出同一个 `CitationRenderer`），前端只负责展示。
+ * 前端自写格式化器会与导出结果漂移 —— 用户会看到「预览长这样、下载出来不是」。
+ */
+export interface CitationStylePreview {
+  style_id: string;
+  title: string;
+  source: CitationStyleSource;
+  is_default: boolean;
+  /** 按该样式渲染的参考文献条目（固定样例文献） */
+  entries: string[];
+  /** 正文行内标记：ref_id → 标记文本 */
+  markers: Record<string, string>;
+  /**
+   * 渲染告警。**非空即表示走了兜底格式化器** —— 此时输出不代表该样式，
+   * 前端必须显式提示，不能当正常预览展示。
+   */
+  warnings: string[];
+}
+
+export interface CitationStylePreviews {
+  /** 顺序与 `CitationStyleList.styles` 一致 */
+  previews: CitationStylePreview[];
+  /** 样例文献条数（用于说明预览口径） */
+  sample_count: number;
+}
+
 // ===== Word 模板契约（与后端 app/api/v1/endpoints/templates.py 对齐，Phase 1 P1-A）=====
 
 /** 模板中的一个 `{{ key }}` 占位符（UI 上映射到综述章节） */
@@ -623,8 +652,7 @@ export interface BillingUsage {
 }
 
 /** 订阅信息（管理员开通后返回）。 */
-export interface SubscriptionInfo {
-  subscription_id: string;
+export interface SubscriptionInfo {  subscription_id: string;
   user_id: string;
   plan_id: string;
   status: string;

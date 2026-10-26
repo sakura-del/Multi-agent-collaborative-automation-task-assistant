@@ -1,12 +1,26 @@
 import api from "./client";
-import type { CitationStyleList, CitationStyleOut } from "./types";
+import type { CitationStyleList, CitationStyleOut, CitationStylePreviews } from "./types";
 
-// 引用样式 API（Issue #4 M2 §1.3）：列表 / 上传 .csl / 删除自定义
+// 引用样式 API（Issue #4 M2 §1.3）：列表 / 预览 / 上传 .csl / 删除自定义
 // 全部 Bearer 鉴权由 client.ts 的请求拦截器统一注入
 
 /** 列出样式：预置样式 + 当前用户上传的自定义样式，并给出默认样式 id */
 export function listCitationStyles(): Promise<CitationStyleList> {
   return api.get<CitationStyleList>("/citation-styles").then((response) => response.data);
+}
+
+/**
+ * 每个样式的**真实渲染**预览（2026-10-26 样式页重设计）。
+ *
+ * 渲染在后端完成（与导出同一个 `CitationRenderer`）。前端只展示，**不要**自己格式化：
+ * 那会与导出结果漂移，用户会看到「预览长这样、下载出来不是」。
+ *
+ * 顺序与 `listCitationStyles()` 一致，可按 `style_id` 对齐。
+ */
+export function previewCitationStyles(): Promise<CitationStylePreviews> {
+  return api
+    .get<CitationStylePreviews>("/citation-styles/previews")
+    .then((response) => response.data);
 }
 
 /**
