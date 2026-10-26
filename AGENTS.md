@@ -151,6 +151,7 @@ docker compose build backend && docker compose up -d backend
 | 30 | **验证「引用可核验」时测试数据必须真实可核验**（2026-10-26） | 引用库端到端验证用 `10.1234/jcs.2024.001` 当 DOI，任务跑成 `waiting_human`。查校验报告：LLM 判定「10.1234 是示例性或占位符 DOI」——**它判对了**（10.1234 正是 DOI 手册的示例前缀）。换成真实 DOI 后同一流程 `completed`。**不要把校验器的正确判断当成系统缺陷**；造测试数据时先确认它在真实世界里站得住 |
 | 31 | **一条命令只跑一个门禁，不要用 `Select-Object -Last` 截断**（2026-10-26） | 我把 `mypy` 和 `ruff` 串在一条命令里、都 `2>&1 \| Select-Object -Last N`，ruff 的 stderr 混进同一流并把 mypy 的错误行挤出尾部窗口 → **我只看到 mypy 的 `Success`，向用户报告「mypy 0 错误」，实际 CI 当场红了**（`"object" has no attribute "id"`）。真实状态一直是坏的，是我的读法坏了。**门禁逐个跑、看完整输出；`Select-Object -Last` 只用于已知格式的稳定输出** |
 | 32 | **本地绿 ≠ CI 绿，push 后必须看 CI**（2026-10-26） | 本轮 3 个提交里前两个 CI 是 `failure`（同一个 mypy 错误），而我在简报里写的是「本轮未复验 CI」。**`gh` 已装且已认证（含 `workflow` 权限）**，`gh run list` / `gh run view --log-failed` 一条命令就能看。**不要把「没验证」写成「未复验」就当免责** —— 该查就查 |
+| 33 | **§5 #16 会反复犯：写提取逻辑前先打印真实载荷**（2026-10-26） | 修「引用库任务证据为空」时，`_metadata_evidence_from` 读 `dependency_outputs[...]['artifacts']`，而调度器存的是 `nr.output`，形状是 `{result, status, execution_result: {artifacts: [...]}}` —— **artifacts 在 `execution_result` 里面**。单元测试夹具用扁平形状，**9 条全绿**；真实任务 `evidence_pool` 里 metadata = 0 才暴露。**同一轮里 #16 犯了第二次**（第一次是 token 统计）。做法：写提取逻辑前先 `print(json.dumps(真实载荷, indent=2))`，并让测试夹具**照抄**那个输出 |
 
 ---
 

@@ -225,10 +225,13 @@ class CitationValidator:
         else:
             checks.append(_ok("duplicate_paragraph_ratio", f"重复段落比例 {ratio:.2f}"))
 
+        # 元数据证据（`kind="metadata"`）按设计**没有** doc_id/chunk_id ——
+        # 它来自文献检索结果，不绑定知识库分块。填一个假 UUID 会让
+        # 「可回溯」变成假话（AGENTS §5 #28）。所以只对原文证据要求标识完整。
         malformed = [
             index
             for index, item in enumerate(pool, start=1)
-            if item.doc_id is None or item.chunk_id is None
+            if item.kind != "metadata" and (item.doc_id is None or item.chunk_id is None)
         ]
         if malformed:
             checks.append(

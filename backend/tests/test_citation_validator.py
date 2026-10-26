@@ -136,6 +136,40 @@ class TestCitationRules:
         assert report.retryable is False
         assert _checks(report).get("evidence_ids_valid") is False
 
+    def test_metadata_evidence_without_ids_is_valid(self) -> None:
+        """元数据证据按设计没有 doc_id/chunk_id，不能判为「标识缺失」。
+
+        真实任务踩到过：引用库任务加了 `kind="metadata"` 证据后，
+        `evidence_ids_valid` 立刻失败（`证据标识缺失: ['[E1]', '[E2]']`），
+        任务转 `waiting_human`。
+
+        元数据证据来自文献检索结果、不绑定知识库分块 ——
+        填一个假 UUID 才能过检查的话，那「可回溯」就是假话（AGENTS §5 #28）。
+        """
+        pool = [
+            Evidence(
+                doc_id=None,
+                chunk_id=None,
+                source_url="https://doi.org/10.18653/v1/2024.eacl-demo.16",
+                excerpt="《Ragas》— Es, Shahul，2024",
+                kind="metadata",
+            ),
+            _evidence(2),
+        ]
+        report = CitationValidator().validate(
+            _result(GOOD_CONTENT), REQUIRED_SECTIONS, evidence_pool=pool
+        )
+
+        assert _checks(report).get("evidence_ids_valid") is True
+
+    def test_metadata_kind_does_not_excuse_missing_excerpt(self) -> None:
+        """元数据证据仍然必须有 excerpt（契约层已保证，这里锁语义）。"""
+        import pytest
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            Evidence(doc_id=None, chunk_id=None, excerpt="", kind="metadata")
+
     def test_ownership_violation_is_not_retryable(self) -> None:
         validator = CitationValidator(ownership_violation=True)
         report = validator.validate(_result(GOOD_CONTENT), REQUIRED_SECTIONS)
