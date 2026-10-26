@@ -3569,6 +3569,92 @@ E2E：style.spec 5 条 + style-measure 1 条全绿（真实服务器）
 模型不支持图片输入，**未肉眼看过截图**。截图在
 `frontend/e2e/screenshots/style-*.png`。
 
+---
+
+## 2026-10-26 · Word 模板页重设计（前端重设计第九阶段）
+
+**范围**：`frontend/src/views/TemplateView.vue` + 测试 + 2 个新 E2E。
+后端**未改**（契约本来就是严的）。
+设计记录：`docs/superpowers/specs/2026-10-23-frontend-redesign-design.md` §4.17。
+
+### 取证：复现前端载荷 + 解包下载的 docx
+
+上传真实模板 `school_template.docx`（7 个占位符），按前端逻辑构造载荷，
+再解包渲染出的 docx 读正文：
+
+```
+sections = {"abstract": "示例内容（abstract）", "author": "示例内容（author）",
+            "body_main": "示例内容（body_main）", "chapter_1": "示例内容（chapter_1）",
+            "chapter_1_1": "示例内容（chapter_1_1）", "title": "示例内容（title）"}
+bibliography = ["[1] 示例参考文献（references）"]
+
+成稿正文：目录占位内容 / 示例内容（title） / 示例内容（abstract） / 编号条目一 /
+         示例内容（chapter_1） / 示例内容（chapter_1_1） / 示例内容（body_main） /
+         撰写人：示例内容（author） / [1] 示例参考文献（references）
+正文总字符数 = 129
+```
+
+页面侧：`HAS_DEMO_WORD = false`（一个字都没提），按钮叫「渲染」，
+成功提示叫「已生成成稿」。
+
+### 根因
+
+后端 `_validate_contract` 已经拒绝「缺占位符内容」（「拒绝静默丢内容」）。
+缺陷 100% 在前端：**它主动填假内容去满足契约，然后把结果标成成稿**。
+
+> 契约校验的是形状，不是真实性。契约能防「少填」，防不住「填假的」。
+
+### 修法（用户确认）
+
+按钮改「校验模板」、下载名加 `-校验`、成功提示与页面说明都写明「示例文本」。
+**这次调用仍是真实结构校验**（后端缺占位符会 400），只是不再谎称产出成稿。
+
+### 修复前后实测对照
+
+| 项 | 修复前 | 修复后 |
+| --- | --- | --- |
+| 按钮 | `渲染` | **`校验模板`** |
+| `HAS_DEMO_WORD` | **false** | **true** |
+| `HAS_GENERATE_CLAIM` | 有 | **false** |
+| 说明条 | 无 | `w=992 h=50`，89 字，对比度 **5.51:1** |
+| 下载名 | `探针学院模板.docx` | **`探针学院模板-校验.docx`** |
+| 占位符展示 | 只有 key | 优先 `label` |
+| 删除 | 一键直删 | 二次确认（取消后接口回查仍在） |
+| 溢出 | 0 | 0（桌面 + 移动） |
+
+### 门禁
+
+```
+前端：vitest 409 passed（+7）；vue-tsc -b 0 错；vite build OK
+后端：41 条模板测试通过；mypy 0 错；ruff 全过（本轮未改后端）
+E2E：template.spec 4 条 + template-measure 1 条全绿（真实服务器）
+```
+
+### E2E 为什么要解包 docx
+
+只断言「下载成功 + 是 zip」不够 —— 真缺陷正是「文件完全合法、内容全假」。
+E2E 里写了最小 zip 解析（扫 `PK\x03\x04` + `inflateRawSync`），
+读 `word/document.xml` 的 `w:t` 文本，断言含「示例内容」且无残留 `{{ }}`。
+
+### 诚实性验证（5 组回退，全部确认变红）
+
+| # | 回退 | 变红的断言 |
+| --- | --- | --- |
+| 1 | 按钮文案改回「渲染」 | 1 条 |
+| 2 | 隐藏示例说明条 | 1 条 |
+| 3 | 成功提示改回「已生成成稿」 | 1 条 |
+| 4 | 删除改回直接删 | 4 条 |
+| 5 | 占位符只用 key | 1 条 |
+
+### 探针清理
+
+调查期上传的 `tpl-17fb10b2978394a8` 已删除，**回查 `template_count = 0`**。
+
+### 验证限制
+
+模型不支持图片输入，**未肉眼看过截图**。截图在
+`frontend/e2e/screenshots/template-*.png`。
+
 
 
 
