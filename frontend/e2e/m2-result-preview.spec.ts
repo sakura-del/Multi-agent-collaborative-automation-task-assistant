@@ -43,4 +43,10 @@ test("任务结果页（引用核验 + 质量评分）", async ({ page }) => {
     fullPage: true,
   });
   await expect(page.locator('[data-test="task-result"]')).toBeVisible({ timeout: 20_000 });
+
+  // 保留整行鼠标入口的真实回归覆盖；不增加第二次登录。
+  await page.goto("/tasks");
+  const rowClickTarget = page.locator('[data-test^="task-row-"]').filter({ hasText: "已完成" }).first();
+  await rowClickTarget.click();
+  await expect(page.locator('[data-test="tab-plan"]')).toBeVisible({ timeout: 20_000 });
 });

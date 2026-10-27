@@ -447,7 +447,7 @@ const rows = computed(() =>
                      两个 button 角色，`getByRole` 命中多个导致测试二义性失败。 -->
                 <button
                   type="button"
-                  class="rounded p-1 text-muted-foreground/40 transition-colors hover:bg-muted hover:text-foreground group-hover:text-foreground"
+                  class="inline-flex size-10 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground group-hover:text-foreground"
                   aria-label="打开"
                   :title="`打开：${row.task.title}`"
                   @click.stop="openTask(row.task.task_id)"

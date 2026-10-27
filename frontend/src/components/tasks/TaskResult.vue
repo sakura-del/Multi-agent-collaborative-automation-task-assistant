@@ -50,7 +50,7 @@ const SCORE_LABELS: Record<string, string> = {
 const scores = computed(() =>
   Object.entries(props.report.scores ?? {}).map(([key, value]) => {
     const numeric = Number(value);
-    const valid = Number.isFinite(numeric) && numeric >= 0 && numeric <= 1;
+    const valid = typeof value === "number" && Number.isFinite(numeric) && numeric >= 0 && numeric <= 1;
     return {
       key,
       label: SCORE_LABELS[key] ?? key,

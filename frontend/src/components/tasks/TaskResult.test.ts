@@ -115,7 +115,7 @@ describe("TaskResult", () => {
     expect(meters[1].attributes("aria-valuenow")).toBe("88");
   });
 
-  it.each([1.4, -0.1, "bad"])("marks an invalid score as unavailable instead of inventing a meter: %s", (value) => {
+  it.each([1.4, -0.1, "bad", null, "", false, true])("marks an invalid score as unavailable instead of inventing a meter: %s", (value) => {
     const wrapper = mountResult({
       report: report({
         scores: { citation_traceability: value as unknown as number, quality: 0.88 },
