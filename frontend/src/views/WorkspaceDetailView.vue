@@ -224,7 +224,7 @@ function formatDate(value: string): string {
         <ArrowLeft class="size-3.5" />
         返回团队列表
       </RouterLink>
-      <h1 class="mt-1 text-lg font-semibold tracking-tight" data-test="workspace-detail-name">
+      <h1 class="mt-1 font-display text-2xl font-medium tracking-[-0.025em]" data-test="workspace-detail-name">
         {{ workspace?.name ?? "工作区" }}
       </h1>
       <p

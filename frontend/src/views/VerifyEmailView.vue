@@ -60,7 +60,7 @@ async function handleRequest() {
 <template>
   <section class="max-w-xl">
     <header class="mb-4">
-      <h1 class="text-lg font-semibold tracking-tight">邮箱验证</h1>
+      <h1 class="font-display text-2xl font-medium tracking-[-0.025em]">邮箱验证</h1>
       <p class="mt-0.5 text-sm text-muted-foreground">
         验证邮箱后即可完整使用账号功能。邮件里的链接有效期 24 小时，过期可重新发送。
       </p>

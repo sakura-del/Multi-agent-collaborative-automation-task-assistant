@@ -73,7 +73,7 @@ async function handleConfirm() {
 <template>
   <section class="max-w-xl">
     <header class="mb-4">
-      <h1 class="text-lg font-semibold tracking-tight">重置密码</h1>
+      <h1 class="font-display text-2xl font-medium tracking-[-0.025em]">重置密码</h1>
       <p class="mt-0.5 text-sm text-muted-foreground">
         <template v-if="isConfirmPhase">
           设置新密码后，此前签发的登录令牌会全部失效，需要重新登录。
