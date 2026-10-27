@@ -172,7 +172,7 @@
 5. 对新增行为测试做回退验证：回退实现后测试必须变红；抓不住的断言删除。
 6. 对比度达到 WCAG AA，键盘焦点、图标按钮名称与减少动效偏好保持有效。
 
-## 10. 交付物与第一批实施结果
+## 10. 交付物与实施结果
 
 设计阶段交付：
 
@@ -181,4 +181,4 @@
 - `current-login.png` / `current-tasks.png`：改造前服务器截图，供前后对照。
 - `concept-validation.json`：三张概念稿的溢出检查与浏览器错误记录。
 
-用户确认后，阶段 A + B + C 已作为第一批完成并部署；生产截图以 `production-*.png` 命名，测试、E2E、对比度与服务器证据见 `docs/superpowers/plans/2026-08-09-00-execution-notes.md` 末节。阶段 D（其余页面一致化）未纳入第一批，不作为本轮已完成内容报告。
+用户确认后，阶段 A + B + C 已作为第一批完成并部署；生产截图以 `production-*.png` 命名。随后阶段 D 也已完成：共享 `PageHeader` 覆盖知识/引用/团队/设置页，特殊页与公开账号页完成一致化，13 个页面的 26 张桌面/移动截图位于 `docs/design/2026-10-27-premium-redesign/phase-d/`。全部测试、E2E、对比度、审查修复与服务器证据见 `docs/superpowers/plans/2026-08-09-00-execution-notes.md` 末节。
