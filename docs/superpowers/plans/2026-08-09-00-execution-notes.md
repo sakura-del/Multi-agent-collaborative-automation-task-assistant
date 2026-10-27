@@ -4091,6 +4091,57 @@ probe_tasks = 0 / task_total = 53 / demo_tasks = 27 / reference_library_item = 0
 quota key 已删除，回查 KEYS 为空
 ```
 
+## 2026-10-27 · 学术编辑感前端第一批（登录 / 任务索引 / 综述阅读）
+
+计划：[2026-10-27-academic-editorial-ui-plan.md](2026-10-27-academic-editorial-ui-plan.md)
+
+设计：[2026-10-27-academic-editorial-ui-design.md](../specs/2026-10-27-academic-editorial-ui-design.md)
+
+### 交付与提交
+
+| 提交 | 内容 |
+| --- | --- |
+| `f494f23` | 已确认设计、三页概念稿与实施计划 |
+| `eb9ebbc` | 暖纸/墨色/青蓝 tokens、衬线展示字体、品牌外壳、编辑式登录页 |
+| `1a599a7` | 任务汇总带、真实待办行动区、研究索引、可见终态文字 |
+| `8361dfd` | 论文纸页、证据边栏、真实评分 meter、阅读排版 |
+| `e49b8a7` | 两条既有 E2E 与当前二次确认/移动整行入口对齐 |
+
+没有改后端接口、任务流程、Markdown 消毒链或引用核验数据结构；没有新增依赖。
+
+### TDD 与诚实性证据
+
+- 基线：AppLayout / TaskListView / TaskResult **42/42 passed**。
+- 登录新价值主张与证据卡：先红（缺少「让每一句论断」），实现后 **8/8**。
+- 待办行动区 + 可见终态：先红 2 条，实现后 **17/17**。
+- 纸页/证据栏 + 真实评分 meter：先红 2 条，实现后 **20/20**。
+- 待办按钮临时回退为无效操作 → 行动区测试按预期变红；恢复后通过。
+- `aria-valuenow` 临时硬编码为 100 → 96 的真实评分断言按预期变红；恢复后通过。
+- 最终实现全量 Vitest：**461 passed / 6 skipped（40 文件）**；`vue-tsc -b` 0 错误；Vite build 成功（CSS 45.85 kB，JS 474.54 kB）。
+
+### 真实浏览器与服务器证据
+
+服务器部署 HEAD：`8361dfd`，`/api/v1/health/ready` → `ready`（database / redis / chroma 均 ok）。
+最终生产截图位于 `docs/design/2026-10-27-premium-redesign/`：
+
+- `production-login-desktop.png` / `production-login-mobile.png`
+- `production-tasks-desktop.png` / `production-tasks-mobile.png`
+- `production-result-desktop.png` / `production-result-mobile.png`
+- `production-validation.json`：几何、真实筛选、评分、核验空态、控制台错误与对比度记录。
+
+六个页面均人工查看；桌面 1440×1000、移动 390×844 均无横向溢出。生产待办按钮实测「期望 4 / 实际 4」；移动端正文在证据栏之前。对比度：正文 **14.92:1**、次要文字 **5.63:1**、检查按钮 **15.94:1**，均超过 WCAG AA。
+
+真实结果页使用当前 demo 用户的历史成稿，显示真实评分与 10 条参考文献；该任务没有 `reference_verification`，页面保持「本次任务未做外部引用核验」，没有套用概念稿的「全部通过」。源码/渲染切换实测可用。
+
+### E2E 与偏差
+
+- 桌面关键集合 `m2-preview + m2-result-preview + phase1-pages + team-workspace`：**8/8 passed**。
+- 移动任务列表：**1/1 passed**；移动结果页初次遇登录限流，限流窗口后复验。
+- 移动结果页随后暴露旧测试仍查找移动端正隐藏「打开」按钮；改为点击真实整行入口后，**chromium + mobile-chrome 2/2 passed**。
+- Word 模板初次失败是旧测试漏掉已存在的「确认删除」步骤，不是生产回归；补确认后通过。失败现场与后续测试产生的 E2E 模板已回查，残留 **0**，非 E2E 模板未误删。
+
+本地一次性验证脚本全部在 `$env:TEMP`，未放入仓库。后端未改，因此本轮不以后端全量测试冒充前端验收。
+
 
 
 

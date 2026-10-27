@@ -1,0 +1,69 @@
+{
+  "errors": {
+    "login": [],
+    "workspace": []
+  },
+  "pages": {
+    "login-desktop": {
+      "horizontalOverflow": false,
+      "accountVisible": true,
+      "visibleH1": 1
+    },
+    "login-mobile": {
+      "horizontalOverflow": false,
+      "accountVisible": true,
+      "visibleH1": 1
+    },
+    "tasks-desktop": {
+      "horizontalOverflow": false,
+      "rows": 20,
+      "terminalLabels": 15
+    },
+    "tasks-mobile": {
+      "horizontalOverflow": false,
+      "rows": 20,
+      "terminalLabels": 15
+    },
+    "attentionFilter": {
+      "expected": 4,
+      "actual": 4
+    },
+    "result-desktop": {
+      "horizontalOverflow": false,
+      "paperBeforeRail": true,
+      "meters": [
+        {
+          "label": "引用可追溯性",
+          "value": "100"
+        },
+        {
+          "label": "质量",
+          "value": "100"
+        }
+      ],
+      "verificationEmpty": true,
+      "verificationSummary": false
+    },
+    "result-mobile": {
+      "horizontalOverflow": false,
+      "paperBeforeRail": true,
+      "meters": [
+        {
+          "label": "引用可追溯性",
+          "value": "100"
+        },
+        {
+          "label": "质量",
+          "value": "100"
+        }
+      ],
+      "verificationEmpty": true,
+      "verificationSummary": false
+    },
+    "contrast": {
+      "body": 14.92,
+      "muted": 5.63,
+      "primaryButton": 15.94
+    }
+  }
+}
