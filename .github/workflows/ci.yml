@@ -10,6 +10,18 @@
 #         └─> frontend（Vitest + vue-tsc + vite build）
 #   build-check（Dockerfile 可构建）
 #   smoke（需要 test + frontend 通过，验证 Compose 全链路）
+#
+# ## 每个作业都必须有 timeout-minutes（2026-10-27 实测踩到）
+#
+# 不配超时就是 GitHub 默认的 **6 小时**。2026-10-27 一次纯文档提交里，
+# `test` 作业的 pytest 步骤卡了 **42 分钟**（正常 5m35s），我手动取消并重跑，
+# 同一作业 5m35s 正常完成 —— 是 runner 侧卡住，不是代码问题。
+#
+# 没有超时的话，这种卡死会白占 6 小时，而 CI 的 `concurrency.cancel-in-progress`
+# 又会让**后续 push 把卡住的 run 取消**，等于「看着一直在跑、实际什么都没验」。
+#
+# 取值 = 实测最慢值 × 约 3~5 倍余量，既能容忍 runner 抖动，又能在真卡死时
+# 尽快失败而不是挂到 6 小时。
 
 name: CI
 
@@ -31,6 +43,7 @@ jobs:
   lint:
     name: Lint, Format & Types
     runs-on: ubuntu-latest
+    timeout-minutes: 15  # 实测 1m22s
     steps:
       - uses: actions/checkout@v4
 
@@ -64,6 +77,8 @@ jobs:
     name: Unit Tests & Coverage
     runs-on: ubuntu-latest
     needs: lint
+    # 实测 5m35s。卡死时 30 分钟失败，而不是挂到 GitHub 默认的 6 小时。
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -109,6 +124,7 @@ jobs:
     name: Alembic Round-Trip (PostgreSQL 16)
     runs-on: ubuntu-latest
     needs: lint
+    timeout-minutes: 20  # 实测 1m41s
     services:
       postgres:
         image: postgres:16-alpine
@@ -163,6 +179,7 @@ jobs:
   frontend:
     name: Frontend Unit, Types & Build
     runs-on: ubuntu-latest
+    timeout-minutes: 20  # 实测 1m24s
     defaults:
       run:
         working-directory: frontend
@@ -192,6 +209,8 @@ jobs:
     name: Docker Build Check
     runs-on: ubuntu-latest
     needs: lint
+    # 实测 28s（缓存命中）~ 4m47s（冷缓存），差异大所以留足余量
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -220,6 +239,7 @@ jobs:
     name: Compose Release Smoke
     runs-on: ubuntu-latest
     needs: [test, frontend]
+    timeout-minutes: 30  # 实测 3m31s
     steps:
       - uses: actions/checkout@v4
 
