@@ -25,10 +25,16 @@ redis:
   default_ttl: 3600
 
 llm:
-  # 默认模型：正式实验模型（gpt-6-luna，经 model.rhzy.ai 兼容端点提供；
-  # 该端点 group 不支持 gpt-4o / gpt-4o-mini，详见执行注释）
+  # 默认模型（2026-10-27 切换，实测依据见 execution-notes）：
+  #   model.rhzy.ai/v1 上共 21 个模型，只有 3 个真正可用：
+  #     workbuddy-ai/deepseek-v4.1-flash    1.5s  ✅ 首选
+  #     workbuddy-ai/deepseek-v4.1-flash-sg 1.6s  ✅ 备选
+  #     workbuddy-ai/hy3                    2.0s  ⚠️ 内容在 reasoning_content 里，不适配
+  #   qoder/qfmodel 与 qoder/dfmodel 请求超时（180s 无响应）；
+  #   opencode-zen-free/* 全部 502 upstream_error。
+  # 旧值 gpt-6-luna 在该端点已不可用。
   default_provider: "openai"
-  default_model: "gpt-6-luna"
+  default_model: "workbuddy-ai/deepseek-v4.1-flash"
   request_timeout: 30
   max_retries: 3
   # 分级使用策略（阶段0任务4）
@@ -37,16 +43,21 @@ llm:
     monthly_token_limit: 20000000
     alert_threshold: 0.8
   # 降级链：主模型超时/失败后依次尝试。
-  # 注意（Plan 5 答辩保障）：原先首项 gpt-4o-mini 在该端点返回 404、
-  # glm/qwen 无有效密钥，等于降级链形同虚设。现改为 DeepSeek 打头（OpenAI 兼容，
-  # 已实测可用），保留其余作为末位兜底。
+  #
+  # 2026-10-27 逐个实测（容器内直接调各 provider）：
+  #   deepseek/deepseek-chat  ✅ 可用（注意：实际路由到 deepseek-flash）
+  #   glm/glm-4-flash         ❌ 401 令牌已过期
+  #   qwen/qwen-turbo         ❌ 401 Incorrect API key
+  #
+  # 所以只保留**实测可用**的项。无效项留着不是"多一层兜底"，
+  # 而是降级时会先浪费一次 401 才轮到下一个 —— 更慢，且日志里全是噪声。
+  # glm/qwen 的 key 是占位符（your-glm-... / your-qwen-...），
+  # 配了真 key 后再加回来。
   fallback_chain:
+    - provider: "openai"
+      model: "workbuddy-ai/deepseek-v4.1-flash-sg"
     - provider: "deepseek"
       model: "deepseek-chat"
-    - provider: "glm"
-      model: "glm-4-flash"
-    - provider: "qwen"
-      model: "qwen-turbo"
 
 rag:
   embedding_model: "BAAI/bge-large-zh"
