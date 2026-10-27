@@ -18,7 +18,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # 固定实验参数（roadmap §3：模型 / 温度 / 语料与 Prompt 版本 / 种子）
-FROZEN_MODEL = "gpt-6-luna"
+FROZEN_MODEL = "workbuddy-ai/deepseek-v4.1-flash"
 FROZEN_PROVIDER = "openai"
 FROZEN_TEMPERATURE = 0.2
 FROZEN_MAX_OUTPUT_TOKENS = 2048

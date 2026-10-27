@@ -6,8 +6,12 @@ validation_enabled: false
 review_enabled: false
 
 # 以下参数为可复现性固定值（roadmap §3），四组必须完全一致
+# model 必须等于 config/default.yaml 的 llm.default_model（测试锁住）：
+# 画像里的 model 会写进每个 run 的 config.json（论文记录实验条件），
+# 而实际执行走 settings.llm —— 两者不一致等于记录假的实验条件。
+# 2026-10-27：gpt-6-luna 被端点下架，改用 workbuddy-ai/deepseek-v4.1-flash。
 provider: openai
-model: gpt-6-luna
+model: workbuddy-ai/deepseek-v4.1-flash
 temperature: 0.2
 max_output_tokens: 2048
 prompt_version: lit-v1

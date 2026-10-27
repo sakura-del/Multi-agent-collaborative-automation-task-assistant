@@ -6,7 +6,7 @@ validation_enabled: true
 review_enabled: true
 
 provider: openai
-model: gpt-6-luna
+model: workbuddy-ai/deepseek-v4.1-flash
 temperature: 0.2
 max_output_tokens: 2048
 prompt_version: lit-v1
