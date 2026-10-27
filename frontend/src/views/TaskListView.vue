@@ -242,7 +242,7 @@ const rows = computed(() =>
         <span class="mt-1 block text-xs leading-5 text-muted-foreground">
           {{
             counts.needsMe > 0
-              ? "确认研究路径后，智能体才会开始检索与写作。"
+              ? "确认规划或处理暂停原因后，任务才会继续推进。"
               : "可以从下方研究索引继续查看已有成果。"
           }}
         </span>
@@ -424,7 +424,7 @@ const rows = computed(() =>
 
             <!-- 行尾箭头：替代 20 个重复的「打开」按钮的外观。
                  进行中的任务额外显示细进度条——此时百分比才真的有意义。 -->
-            <td class="px-2 py-2.5 max-md:hidden">
+            <td class="px-2 py-2.5 max-md:block max-md:px-0 max-md:pt-1">
               <div class="flex items-center justify-end gap-2">
                 <div
                   v-if="isActive(row.task.status)"

@@ -54,19 +54,19 @@
   --accent-foreground: oklch(0.37 0.055 180);
 
   /* 危险/错误 */
-  --destructive: oklch(0.577 0.245 27.325);
+  --destructive: oklch(0.48 0.19 27.325);
   --destructive-foreground: oklch(0.985 0 0);
 
   /* 边框与输入：带少量墨绿色相的发丝线，避免暖冷灰混用 */
   --border: oklch(0.235 0.018 160 / 10%);
   --input: oklch(0.235 0.018 160 / 14%);
-  --ring: oklch(0.44 0.065 180 / 45%);
+  --ring: oklch(0.44 0.065 180);
 
   /* 需要明确分割时用（表格外框、模态边界）；日常用 --border */
   --border-strong: oklch(0.235 0.018 160 / 16%);
 
   /* 语义状态（beUI 药丸徽标：淡底 + 同色文字） */
-  --success: oklch(0.55 0.14 155);
+  --success: oklch(0.46 0.12 155);
   --success-foreground: oklch(0.99 0 0);
   --warning: oklch(0.62 0.14 70);
   --warning-foreground: oklch(0.99 0 0);
@@ -99,7 +99,7 @@
   /* 深色下边框要略亮（beUI 深色用的是白 5%） */
   --border: oklch(1 0 0 / 6%);
   --input: oklch(1 0 0 / 10%);
-  --ring: oklch(0.7 0.07 180 / 55%);
+  --ring: oklch(0.75 0.07 180);
   --border-strong: oklch(1 0 0 / 12%);
   --success: oklch(0.68 0.14 155);
   --success-foreground: oklch(0.16 0 0);
@@ -219,6 +219,7 @@
     font-size: 0.9375rem;
     line-height: 2;
     color: var(--foreground);
+    overflow-wrap: anywhere;
     text-wrap: pretty;
   }
 
@@ -323,8 +324,11 @@
 
   /* 表格：只留横线（beUI 的轻线条语言） */
   .md-body table {
+    display: block;
     width: 100%;
+    max-width: 100%;
     margin: 0 0 0.75rem;
+    overflow-x: auto;
     border-collapse: collapse;
     font-size: 0.8125rem;
   }

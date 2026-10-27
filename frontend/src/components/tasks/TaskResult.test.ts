@@ -115,6 +115,34 @@ describe("TaskResult", () => {
     expect(meters[1].attributes("aria-valuenow")).toBe("88");
   });
 
+  it.each([1.4, -0.1, "bad"])("marks an invalid score as unavailable instead of inventing a meter: %s", (value) => {
+    const wrapper = mountResult({
+      report: report({
+        scores: { citation_traceability: value as unknown as number, quality: 0.88 },
+      }),
+    });
+
+    const meters = wrapper.findAll('[role="meter"]');
+    expect(meters).toHaveLength(1);
+    expect(meters[0].attributes("aria-valuenow")).toBe("88");
+    expect(wrapper.find('[data-test="result-score-unavailable"]').text()).toContain("不可用");
+    expect(wrapper.html()).not.toContain('aria-valuenow="140"');
+  });
+
+  it("shows an explicit empty state when no scores are available", () => {
+    const wrapper = mountResult({ report: report({ scores: {} }) });
+    expect(wrapper.find('[data-test="result-scores-empty"]').text()).toContain("暂无评分");
+    expect(wrapper.findAll('[role="meter"]')).toHaveLength(0);
+  });
+
+  it("shows an explicit empty state when no bibliography is available", () => {
+    const wrapper = mountResult({ report: report({ bibliography: [] }) });
+    expect(wrapper.find('[data-test="result-bibliography-empty"]').text()).toContain(
+      "暂无参考文献"
+    );
+    expect(wrapper.text()).not.toContain("0 ENTRIES");
+  });
+
   it("lists review issues", () => {
     const wrapper = mountResult();
     expect(wrapper.find('[data-test="result-issues"]').text()).toContain("第 2 节引用密度偏低");

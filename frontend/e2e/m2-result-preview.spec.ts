@@ -20,14 +20,20 @@ test("任务结果页（引用核验 + 质量评分）", async ({ page }) => {
   for (let i = 0; i < count; i += 1) {
     const row = rows.nth(i);
     if ((await row.innerText()).includes("已完成")) {
-      // 结果页验收不依赖右箭头：移动端按钮按设计隐藏，整行才是统一入口。
-      await row.click();
+      // 桌面覆盖按钮点击；移动端覆盖真实按钮的键盘聚焦与 Enter 触发。
+      const openButton = row.getByRole("button", { name: "打开" });
+      if (test.info().project.name === "mobile-chrome") {
+        await openButton.focus();
+        await openButton.press("Enter");
+      } else {
+        await openButton.click();
+      }
       opened = true;
       break;
     }
   }
   if (!opened) {
-    await rows.first().click();
+    await rows.first().getByRole("button", { name: "打开" }).click();
   }
 
   await page.locator('[data-test="tab-result"]').click({ timeout: 30_000 });

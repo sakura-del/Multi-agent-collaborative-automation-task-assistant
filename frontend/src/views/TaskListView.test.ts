@@ -165,6 +165,14 @@ describe("进度列：不再有说谎的百分比进度条", () => {
 });
 
 describe("汇总统计", () => {
+  it("待人工介入时说明处理暂停原因，不误导为尚未开始", async () => {
+    const wrapper = await mountWith([task({ task_id: "human", status: "waiting_human" })]);
+    const action = wrapper.find('[data-test="attention-needs-me"]');
+
+    expect(action.text()).toContain("暂停原因");
+    expect(action.text()).not.toContain("开始检索");
+  });
+
   it("待办行动区只筛选需要我处理的任务", async () => {
     const wrapper = await mountWith([
       task({ task_id: "wait", status: "waiting_approval" }),

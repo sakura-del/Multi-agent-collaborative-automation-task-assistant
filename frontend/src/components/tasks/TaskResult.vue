@@ -48,11 +48,16 @@ const SCORE_LABELS: Record<string, string> = {
 };
 
 const scores = computed(() =>
-  Object.entries(props.report.scores ?? {}).map(([key, value]) => ({
-    key,
-    label: SCORE_LABELS[key] ?? key,
-    percent: Math.round(Number(value) * 100),
-  }))
+  Object.entries(props.report.scores ?? {}).map(([key, value]) => {
+    const numeric = Number(value);
+    const valid = Number.isFinite(numeric) && numeric >= 0 && numeric <= 1;
+    return {
+      key,
+      label: SCORE_LABELS[key] ?? key,
+      valid,
+      percent: valid ? Math.round(numeric * 100) : null,
+    };
+  })
 );
 
 /** 只允许 http/https 链接，其余退化为纯文本（避免 javascript:/data: 注入） */
@@ -213,44 +218,56 @@ async function download(kind: "markdown" | "docx") {
         <ReferenceVerificationPanel :summary="verificationSummary" :entries="bibliography" />
       </section>
 
-      <section v-if="scores.length" class="border-b border-border pb-5">
+      <section class="border-b border-border pb-5">
         <div class="mb-3 flex items-center justify-between gap-2">
           <h3 class="text-sm font-medium">质量检查</h3>
           <span class="text-[9px] tracking-wider text-muted-foreground">SCORE / 100</span>
         </div>
-        <ul class="flex flex-col gap-2.5" data-test="result-scores">
+        <ul v-if="scores.length" class="flex flex-col gap-2.5" data-test="result-scores">
           <li
             v-for="score in scores"
             :key="score.key"
             class="grid grid-cols-[5rem_1fr_2rem] items-center gap-2 text-xs"
           >
             <span class="text-muted-foreground">{{ score.label }}</span>
-            <span
-              class="h-1 overflow-hidden rounded-full bg-muted"
-              role="meter"
-              :aria-label="score.label"
-              :aria-valuenow="score.percent"
-              aria-valuemin="0"
-              aria-valuemax="100"
-            >
+            <template v-if="score.valid">
               <span
-                class="block h-full rounded-full bg-primary"
-                :style="{ width: `${score.percent}%` }"
-              />
+                class="h-1 overflow-hidden rounded-full bg-muted"
+                role="meter"
+                :aria-label="score.label"
+                :aria-valuenow="score.percent ?? undefined"
+                aria-valuemin="0"
+                aria-valuemax="100"
+              >
+                <span
+                  class="block h-full rounded-full bg-primary"
+                  :style="{ width: `${score.percent}%` }"
+                />
+              </span>
+              <span class="text-right font-medium tabular-nums">{{ score.percent }}</span>
+            </template>
+            <span
+              v-else
+              data-test="result-score-unavailable"
+              class="col-span-2 text-right text-muted-foreground"
+            >
+              不可用
             </span>
-            <span class="text-right font-medium tabular-nums">{{ score.percent }}</span>
           </li>
         </ul>
+        <p v-else data-test="result-scores-empty" class="text-xs leading-5 text-muted-foreground">
+          暂无评分。当前报告未提供可用的质量分数。
+        </p>
       </section>
 
       <section class="border-b border-border pb-5">
         <div class="mb-3 flex items-center justify-between gap-2">
           <h3 class="text-sm font-medium">参考文献</h3>
-          <span class="text-[9px] tracking-wider text-muted-foreground">
+          <span v-if="bibliography.length" class="text-[9px] tracking-wider text-muted-foreground">
             {{ bibliography.length }} ENTRIES
           </span>
         </div>
-        <ol class="flex flex-col gap-3" data-test="result-bibliography">
+        <ol v-if="bibliography.length" class="flex flex-col gap-3" data-test="result-bibliography">
           <li
             v-for="entry in bibliography"
             :key="entry.index"
@@ -273,6 +290,13 @@ async function download(kind: "markdown" | "docx") {
             <span v-else class="min-w-0 font-display text-xs leading-5 break-words">{{ entry.title }}</span>
           </li>
         </ol>
+        <p
+          v-else
+          data-test="result-bibliography-empty"
+          class="text-xs leading-5 text-muted-foreground"
+        >
+          暂无参考文献。当前报告没有提供可展示的条目。
+        </p>
       </section>
 
       <section v-if="props.report.issues?.length" class="border-b border-border pb-5">
