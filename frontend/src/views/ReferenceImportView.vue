@@ -5,6 +5,7 @@ import { CircleCheck, FileInput, Loader2, RotateCcw, Save } from "lucide-vue-nex
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
+import PageHeader from "@/components/common/PageHeader.vue";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -166,13 +167,11 @@ function metaText(item: ImportedReferenceItem): string {
 
 <template>
   <section>
-    <header class="mb-4">
-      <h1 class="text-lg font-semibold tracking-tight">导入参考文献</h1>
-      <p class="mt-0.5 text-sm text-muted-foreground">
-        粘贴 BibTeX 或 RIS 文本即可解析预览；支持从 Zotero / EndNote 直接导出。
-        解析后可以<strong>保存到引用库</strong>，创建任务时选择「我的引用库」就会用这些文献。
-      </p>
-    </header>
+    <PageHeader
+      eyebrow="Reference import"
+      title="导入参考文献"
+      description="粘贴 BibTeX 或 RIS 文本即可解析预览；支持从 Zotero / EndNote 直接导出。解析后可以保存到引用库，创建任务时选择「我的引用库」就会用这些文献。"
+    />
 
     <form
       class="mb-3 flex flex-col gap-3 rounded-lg border border-border bg-card p-4"

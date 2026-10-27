@@ -4,6 +4,7 @@ import { AlertTriangle, CheckCircle2, FileText, Layers, Search } from "lucide-vu
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
+import PageHeader from "@/components/common/PageHeader.vue";
 import DocumentTable from "@/components/knowledge/DocumentTable.vue";
 import DocumentUpload from "@/components/knowledge/DocumentUpload.vue";
 import { useKnowledgeStore } from "@/stores/knowledge";
@@ -102,12 +103,11 @@ const isFiltered = computed(() => typeFilter.value !== "all" || keyword.value.tr
 
 <template>
   <section>
-    <header class="mb-5">
-      <h1 class="text-xl font-semibold tracking-tight">知识库</h1>
-      <p class="mt-1 text-sm text-muted-foreground">
-        文献综述的证据来源。支持 pdf / docx / md / txt，单文件 ≤ 30 MB。
-      </p>
-    </header>
+    <PageHeader
+      eyebrow="Evidence library"
+      title="知识库"
+      description="文献综述的证据来源。支持 pdf / docx / md / txt，单文件 ≤ 30 MB。"
+    />
 
     <ErrorBanner :message="actionError" />
 

@@ -33,6 +33,7 @@ import { Loader2, Pencil, Trash2 } from "lucide-vue-next";
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
+import PageHeader from "@/components/common/PageHeader.vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -201,10 +202,12 @@ async function saveEdit(item: LibraryItemOut) {
 
 <template>
   <section>
-    <header class="mb-4">
-      <h1 class="text-lg font-semibold tracking-tight">引用库</h1>
-      <p class="mt-0.5 text-sm text-muted-foreground" data-test="library-hint">{{ hint }}</p>
-    </header>
+    <PageHeader
+      eyebrow="Reference library"
+      title="引用库"
+      :description="hint"
+      description-testid="library-hint"
+    />
 
     <ErrorBanner :message="loadError" testid="library-load-error" />
     <ErrorBanner :message="actionError" testid="library-action-error" />

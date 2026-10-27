@@ -42,6 +42,7 @@ import { CircleCheck, Loader2, Trash2, Upload } from "lucide-vue-next";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import FilePicker from "@/components/common/FilePicker.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
+import PageHeader from "@/components/common/PageHeader.vue";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -216,10 +217,7 @@ async function confirmDelete(styleId: string) {
 
 <template>
   <section>
-    <header class="mb-4">
-      <h1 class="text-lg font-semibold tracking-tight">引用样式</h1>
-      <p class="mt-0.5 text-sm text-muted-foreground">{{ hint }}</p>
-    </header>
+    <PageHeader eyebrow="Citation styles" title="引用样式" :description="hint" />
 
     <ErrorBanner :message="loadError" testid="style-load-error" />
 
