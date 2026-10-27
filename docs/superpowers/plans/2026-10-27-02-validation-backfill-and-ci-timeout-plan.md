@@ -144,4 +144,76 @@ WHERE output_data::jsonb->'validation' IS NOT NULL
 
 ## 6. 实施结果
 
-（见文末）
+### 6.1 交付
+
+| 文件 | 改动 |
+| --- | --- |
+| `.github/workflows/ci.yml` | 6 个作业各加 `timeout-minutes` + 文件头说明 |
+| `backend/scripts/migrate_validation_results.py` | **新增** 迁移 CLI（`--dry-run` / `--verify` / `--limit`） |
+| `backend/tests/test_migrate_validation_results.py` | **新增 17 条**测试 |
+
+### 6.2 门禁
+
+```
+black：2 files reformatted
+ruff：All checks passed（含 scripts）
+mypy --no-incremental：0 错误（207 文件）
+pytest 全量：2809 passed / 8 skipped（+17）
+ci.yml：YAML 解析通过，6 个作业全部有 timeout-minutes
+```
+
+### 6.3 诚实性验证
+
+回退 `score` 归一化（改成直接 `float(...)`）→ **3 条变红**：
+
+```
+FAILED test_score_is_normalized_from_contract_range
+FAILED test_writes_rows
+FAILED test_migrates_failed_validations
+```
+
+其中后两条走**真实迁移路径**（不只是纯函数），说明测试覆盖了端到端。
+
+### 6.4 服务器真实迁移（核心证据）
+
+```
+=== ① 迁移前基线 ===
+             188 |          0     ← 188 个有校验，表 0 行
+
+=== ② dry-run ===
+[scan] 待迁移条数: 188
+[dry-run] 未写库。
+
+=== ③ 实际迁移 ===
+[apply] 实际写入行数: 188
+[verify] 回查仍待迁移: 0
+[verify] OK
+
+=== ④ 回查：SQL 独立核对（不信脚本自己的输出）===
+             188 |        188     ← 一致
+
+=== ⑤ score 是否全部落在 0-1 ===
+      188 |            0 |       0.8 |         1
+      ↑全部在范围内  ↑越界 0 条  ↑min  ↑max
+
+=== ⑥ passed 分布（迁移后可聚合了）===
+ f      |     6
+ t      |   182
+
+=== ⑦ 幂等性：再跑一次 ===
+[apply] 实际写入行数: 0     ← 幂等确认
+[verify] 回查 validation_result 行数: 188
+```
+
+**这一步的价值不是「多了一张表有数据」，而是第一次能回答「历史上有多少校验失败」：
+6 条。** 这个数字之前完全不可见。
+
+### 6.5 验证限制
+
+- **`validation_result` 里现在混着两类数据**：188 条历史迁移 + 之后新任务写入的。
+  没有 `source` 列区分，所以按时间过滤（`validated_at`）只能近似 ——
+  迁移时全部用 `datetime.now(UTC)`，**历史行的 `validated_at` 不是真实校验时间**。
+  这一点必须记住：**不要把迁移行的 `validated_at` 当校验发生时刻**；
+- **不修正历史行的 `validated_at`**：原始校验时间只在 `subtask.completed_at` 里，
+  本轮没做映射（没有明确需求时不动）；
+- 模型不支持图片输入，**未肉眼看过截图**（本轮无前端改动）。
