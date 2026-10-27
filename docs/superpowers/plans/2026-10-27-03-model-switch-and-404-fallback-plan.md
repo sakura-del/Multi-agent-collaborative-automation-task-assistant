@@ -209,29 +209,56 @@ n3 retry=2  error=校验未通过  score=90.0
 而是**新模型的生成质量在该任务上不足以稳定通过语义校验**。
 如实记录，不掩盖。
 
-### 5.3 404 降级的实测验证
+### 5.3 404 降级的实测验证（真实服务器）
 
-修好后重跑「主模型名故意写错」的探针 —— 但**这需要重新部署**，
-本轮已在本地测试层验证（12 条），真实降级路径见 §6 验证限制。
+修好后在服务器上重跑「主模型名故意写错」的探针：
 
-### 5.4 门禁
+```
+真实配置: primary=workbuddy-ai/deepseek-v4.1-flash
+真实降级链: [('openai', 'workbuddy-ai/deepseek-v4.1-flash-sg'), ('deepseek', 'deepseek-chat')]
+测试配置: primary=definitely-not-a-real-model-xyz（故意写错）
+
+llm_fallback_triggered  error='404 - Model "definitely-not-a-real-model-xyz"
+                        is not supported by any configured account in this group'
+                        next_model=workbuddy-ai/deepseek-v4.1-flash-sg
+llm_fallback_succeeded  fallback_model=workbuddy-ai/deepseek-v4.1-flash-sg
+✅ 降级成功: model='workbuddy-ai/deepseek-v4.1-flash-sg' content='ok'
+```
+
+**修复前这里会直接抛 404**（见 §3.1 的对照输出）。
+
+### 5.4 `qoder/*` 复查：不是临时故障
+
+隔了约 50 分钟再测一次：
+
+```
+FAIL qoder/qfmodel    status=  0  90.1s  TimeoutError
+FAIL qoder/dfmodel    status=  0  90.1s  TimeoutError
+OK   workbuddy-ai/deepseek-v4.1-flash  status=200  1.7s
+```
+
+**结论：`qoder/*` 持续不可用**，不是一次性抖动。具体原因（端点限流 / 上游故障 /
+需要额外参数）**无法判定** —— 没有任何响应体可查。
+
+### 5.5 门禁
 
 ```
 black：1 file reformatted
 ruff：All checks passed
 mypy --no-incremental：0 错误（207 文件）
-pytest 全量：见下（首次 1 failed，修正后重跑）
+pytest 全量：2821 passed / 8 skipped（+12）
 ```
 
 **首次全量遗留 1 条失败**：`test_config_priority.py::test_repository_yaml_is_loaded`
 —— 又一处「写死 `fallback_chain[0].provider == "deepseek"`」。
 
-这暴露了我上一轮的疏漏：**改配置里的约定值后，应该 grep 全部同类断言**，
-而不是改完眼前这一处就交（AGENTS §5 #35 讲的就是这个，我自己又犯了）。
-修正后 grep 全仓确认：只剩 `test_config_priority.py:114` 一处，
-那是 `monkeypatch` 注入 `deepseek` 的场景，**断言合法**。
+这暴露了我的疏漏：**改配置里的约定值后，应该 grep 全部同类断言**，
+而不是改完眼前这一处就交（AGENTS §5 #35 讲的就是这个，我又犯了）。
 
-### 5.5 诚实性验证
+修正后 grep 全仓确认：只剩 `test_config_priority.py:114` 一处，
+那是 `monkeypatch` 注入 `deepseek` 的场景，**断言合法**（环境变量里明确写了 deepseek）。
+
+### 5.6 诚实性验证
 
 回退 404 判定（`status in (404, 429)` → `status == 429`，
 并去掉类名判定）→ **1 条变红**：`test_404_model_not_found_is_retryable`。
