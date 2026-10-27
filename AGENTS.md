@@ -21,15 +21,15 @@
 | 项 | 值 |
 | --- | --- |
 | 分支 | `main`（工作分支 `codex/plan3-literature-workflow` 与 main 同点） |
-| HEAD | … → 引用库遗留三项 `8cfed9b` → review 长度上限修复 `f38491f` → **校验结论落库 `90dfd6a`** |
+| HEAD | … → review 长度上限修复 `f38491f` → 校验结论落库 `90dfd6a` → **引用库编辑 E2E `b6c8304`** |
 | 冻结 tag | `defense-v1` |
 | Plan 状态 | Plan 2 / 3 / 4 / 5 **全部 Exit Gate PASSED**；**Phase 1 五项全部端到端可用且遗留清零**；**Phase 2 五项全部交付完成**（PRISMA ✅ + 可观测性 ✅ + 团队工作区 ✅ + 开放 API ✅ + 计费套餐 ✅） |
 | 产品化进度 | **Issue #2~#7 全部关闭且遗留清零**；**P1-D 配额遗留已修复**；**`max_results` 已夹紧**；**PRISMA 完成**；**可观测性完成**（8 指标 + `/metrics` + 看板，**看板数字已全部为真**）；**团队工作区完成**；**开放 API 完成**；**计费套餐完成**（四档 + 四条功能门禁 + 手工开通 + **套餐页已重设计**）；**引用样式页已重设计**（**真实渲染预览** + 删除二次确认）；**Word 模板页已修**（**不再把示例填充谎称成稿** + 删除二次确认）；**前端已迁移到 Tailwind v4 + shadcn-vue**；**引用库 + 证据闭环完成**；**review 长度上限缺陷已修**（`max_length` 不再施加到机器汇总） |
 | 数据库迁移 head | **`b7d4e9f1c6a2`**（`reference_library_item` 引用库表） |
 | 后端测试 | **2792 passed**, 8 skipped；覆盖率 **~89%**；`mypy` 0 错误（207 文件） |
-| 前端测试 | Vitest **458 passed**（+6 skipped）；**Playwright E2E 43 场景**（新增引用库 1 条，实测通过） |
-| CI | **6/6 作业全绿**（run `40431579571`，`63968b2`）。**`90dfd6a` 之后未复验** |
-| 服务器 | 已同步至 `90dfd6a`，五容器 healthy，`/api/v1/health/ready` → `{"status":"ready"}`，`alembic current` = **`b7d4e9f1c6a2 (head)`**，四套餐种子已就位，**向量库 id 级一致（28344 条）**，**`task.used_tokens` 已回填（169372，28 个任务）**，**6 个引用样式预览全部真实渲染（warnings=0）**，**引用库端到端跑通**，**元数据证据已生效（metadata 4/4 可追溯）**，**review 长度上限已修（容器内 10230 字符验证通过）**，**校验结论已落库（真实任务 5 节点 → 表 5 行，score 全部 0–1）** |
+| 前端测试 | Vitest **458 passed**（+6 skipped）；**Playwright E2E 44 场景**（新增引用库编辑 1 条，chromium + mobile-chrome 双视口实测通过） |
+| CI | **6/6 作业全绿**（run `40437033599`，`c7f2e9e`）。**`b6c8304` 之后未复验** |
+| 服务器 | 已同步至 `b6c8304`，五容器 healthy，`/api/v1/health/ready` → `{"status":"ready"}`，`alembic current` = **`b7d4e9f1c6a2 (head)`**，四套餐种子已就位，**向量库 id 级一致（28344 条）**，**`task.used_tokens` 已回填（169372，28 个任务）**，**6 个引用样式预览全部真实渲染（warnings=0）**，**引用库端到端跑通**，**元数据证据已生效（metadata 4/4 可追溯）**，**review 长度上限已修（容器内 10230 字符验证通过）**，**校验结论已落库（真实任务 5 节点 → 表 5 行，score 全部 0–1）**，**引用库编辑 E2E 已通过（双视口）** |
 
 **演示账号**：`demo` / `demo12345` —— **全权限管理员**（`role=admin` + `institution` 套餐：篇数不限 / 含团队 / 含开放 API）；知识库 11 篇 / 28341 分块
 **E2E 固定账号**：`e2efull` / `e2ereconn`，密码 `e2e-password-2026`（复用，不再每次注册——`auth_register` 限流 5 次/3600s）
@@ -154,6 +154,8 @@ docker compose build backend && docker compose up -d backend
 | 33 | **§5 #16 会反复犯：写提取逻辑前先打印真实载荷**（2026-10-26） | 修「引用库任务证据为空」时，`_metadata_evidence_from` 读 `dependency_outputs[...]['artifacts']`，而调度器存的是 `nr.output`，形状是 `{result, status, execution_result: {artifacts: [...]}}` —— **artifacts 在 `execution_result` 里面**。单元测试夹具用扁平形状，**9 条全绿**；真实任务 `evidence_pool` 里 metadata = 0 才暴露。**同一轮里 #16 犯了第二次**（第一次是 token 统计）。做法：写提取逻辑前先 `print(json.dumps(真实载荷, indent=2))`，并让测试夹具**照抄**那个输出 |
 | 34 | **「没触发」不等于「已修好」**（2026-10-27） | 修 review 长度上限后跑真实任务 → `completed`、`rules_passed=True`，看着像验证通过。但 review 内容只有 **7497 字符，根本没超过 10000** —— 这一段只证明「没回归」，**不能证明修复在超限场景生效**。补做容器内直接构造 **10230 字符**（与真实缺陷同长度）才确认修复。**凡是「条件触发型」缺陷，真实环境的随机输入可能刚好绕开触发条件**；验证必须显式构造触发条件，或用 `aggregated`/`authored`/不传角色**三行对照**证明「放宽了该放宽的、没放宽不该放宽的」 |
 | 35 | **Issue 类修复要 grep 全部同类调用点**（2026-10-27） | Issue #6 引入 `content_role` 修「机器汇总被施加作者级检查」，但只改了 `citation_validator` 的 `duplicate_paragraph_ratio`；`ValidatorAgent._check_rules` 的 `max_length` **签名里根本没有这个参数**，于是同一类缺陷换了个检查项继续存在 8 天。**修「某类错误」时要 grep 该模式的所有出现位置**，不是只修眼前报错的那一处 |
+| 36 | **回退验证前必须确认「回退版本真的部署上去了」**（2026-10-27） | 做 E2E 诚实性验证时，我改坏代码后跑测试 → **仍然通过**，差点判定「这条 E2E 抓不住缺陷」。实际原因：改动**没提交**，`git bundle` 里没有它，`df.sh` 部署的还是旧代码 —— **回退根本没生效**。第二次提交后再跑，E2E 正常变红。**回退验证必须做两步确认**：① `ssh ... 'git log --oneline -1'` 看服务器 HEAD 是不是回退版本；② `grep` 关键代码确认改动在位。**「测试通过了」可能是「改动没上」，不是「测试不行」** |
+| 37 | **`git reset --hard` 会删掉未跟踪/未提交的新文件**（2026-10-27） | 回退验证后我用 `git reset --hard HEAD~1` 恢复，把**刚写好但只在那个 TEMP 提交里**的 E2E 文件一起删了（`git status` 干净，看起来像「什么都没丢」）。**新文件要先进 `$env:TEMP` 备份或先单独提交**，再动 reset。同类：`git reset --hard` 之后 `df.sh` 的 `merge --ff-only` 会失败（服务器 HEAD 成了本地不存在的提交）→ 部署静默不生效，需要用 `git reset --hard win/main` 强制对齐 |
 
 ---
 
