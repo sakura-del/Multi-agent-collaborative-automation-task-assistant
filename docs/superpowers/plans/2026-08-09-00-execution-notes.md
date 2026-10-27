@@ -4172,7 +4172,9 @@ quota key 已删除，回查 KEYS 为空
 - 特殊页：`1b717ad`（WorkspaceDetail、VerifyEmail、PasswordReset）。
 - 逐页实测修复：`c89149a` + `d70978d` 知识库宽表及绝对定位 sr-only；`ce7e254` 公开账号页居中卡片。
 
-阶段 D 相关分组测试：知识/引用 **86/86**、团队/设置 **75/75**、特殊页 **24/24**。全量门禁：**469 passed / 6 skipped（41 文件）**；`vue-tsc -b` 0 错误；Vite build 成功。
+阶段 D 相关分组测试：知识/引用 **86/86**、团队/设置 **75/75**、特殊页 **24/24**。全量门禁：**473 passed / 6 skipped（41 文件）**；`vue-tsc -b` 0 错误；Vite build 成功。
+
+独立阶段 D 审查：Critical / Important 均为 0。三个 Minor 已闭环：评分先限定 `typeof value === "number"`（null/空串/布尔不再变成真实分数）、移动打开按钮扩大到 40px、E2E 补回真实整行点击并保留移动键盘 Enter（`7befdc8`）。双视口结果页再次 **2/2 passed**。
 
 ### 逐页生产证据
 
