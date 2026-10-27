@@ -1545,6 +1545,83 @@ DOI: 10.1234/a
 > **不是断言失败**。换成干净 `basetemp` 后才是真正的 7 failed。
 > 不看错误类型就把「9 errors」当验证通过，就是自欺。
 
+---
+
+## 4.20 review 节点长度上限缺陷：作者级规则被施加到机器汇总
+
+> 计划：[2026-10-27-00-review-length-limit-plan.md](../plans/2026-10-27-00-review-length-limit-plan.md)
+
+### 缺陷
+
+真实任务 `bdeaa228` 的 `n7 review` 节点：
+
+```
+validation.passed = False  score = 96.0
+✗ rules: 长度超限：10230 > 10000
+retry_count = 2   → waiting_human
+```
+
+### 为什么不是「用户写太长」
+
+| 证据 | 说明 |
+| --- | --- |
+| 超限的是 `n7 review`，不是 `n5 write` | `write` 只有 4081 字符 |
+| `review` content = 上游所有节点输出拼接 | `_summarize_dependencies()` 机械汇总 |
+| 已完成任务成稿最长 **18413** 字符（5 个 > 10000） | 10000 不是成稿上限，只卡中间节点 |
+| `retry_count = 2` 仍失败 | 重试只会重新汇总同样内容 |
+
+### 根因：Issue #6 只修了一半
+
+Issue #6 引入 `content_role`（`authored`/`aggregated`）解决「机器汇总被施加作者级检查」，
+但只改了 `citation_validator` 的 `duplicate_paragraph_ratio`：
+
+```python
+# validate()
+content_role = self._content_role(input_data)             # ← 读了
+rule_report = self._check_rules(result)                   # ← 没传！max_length 在这
+citation_report = self._run_citation_checks(input_data)   # ← 内部传了
+```
+
+`_check_rules` 的签名**根本没有** `content_role` 参数。
+
+### 修法
+
+`max_length` 只对作者正文生效；`min_length` 与 `required_keywords` **仍对所有人**：
+
+| 规则 | 对汇总是否适用 | 理由 |
+| --- | --- | --- |
+| `min_length` | ✅ | 空汇总确实是问题，与谁写的无关 |
+| `required_keywords` | ✅ | 缺必需章节是内容缺陷 |
+| `max_length` | ❌ | 「别写太长」是**写作约束**；汇总长度由上游决定 |
+
+**不是调大阈值**：调大只是把问题推到更远处，上游再多两个节点照样超限。
+根因是**对错误的对象施加了这条规则**。
+
+### 取证边界（必须如实说明）
+
+| 查证项 | 结果 |
+| --- | --- |
+| 直接证据 | ✅ 完整 API 快照（`n7` 10230 字符、`retry_count=2`） |
+| 库里含「长度超限」的 subtask | **0 条** |
+| `validation_result` 表总行数 | **0 条**（校验结论从未落库） |
+| 近 7 天日志 | **0 条**（校验结论不进日志） |
+
+**「有 1 次确证」既不等于「只发生 1 次」，也不等于「经常发生」。**
+历史频次**无法量化**，因为没有历史数据可查。
+
+### 顺带发现：校验结论从未落库
+
+`validation_result` 表是空的，校验结论只存在 `subtask.output_data` 的 JSON 里。
+后果：排查「为什么转人工」只能逐个任务拉快照，无法按失败原因聚合，
+**统计校验通过率做不到**（`passed` 列形同虚设）。
+
+不列入本轮范围，但这是排查校验类缺陷的基础设施缺口。
+
+### 诚实性验证
+
+回退 `content_role != "aggregated" and` 这一处判断 → **5 条变红**，
+含一条端到端测试（把真实 10230 字符 review 载荷经工作流送进校验器）。
+
 ### 探针清理
 
 调查期上传的 `tpl-17fb10b2978394a8`（探针学院模板）已删除，

@@ -3986,6 +3986,111 @@ SUMMARY: FAIL
 - 元数据证据**只能支撑「存在这样一篇文献」**，不能支撑「作者指出……」
   —— 这是设计边界，不是缺陷，但**最终综述正文的引用强度未评估**。
 
+---
+
+## 2026-10-27 · review 节点长度上限缺陷
+
+计划：[2026-10-27-00-review-length-limit-plan.md](2026-10-27-00-review-length-limit-plan.md)
+设计记录：spec §4.20。
+
+### 缺陷
+
+真实任务 `bdeaa228` 的 `n7 review`：
+
+```
+✗ rules: 长度超限：10230 > 10000
+retry_count = 2 → waiting_human
+```
+
+超限的是 review 的**上游机械汇总**，不是作者正文（`n5 write` 只有 4081 字符）。
+
+### 根因：Issue #6 只修了一半
+
+Issue #6 引入 `content_role` 解决「机器汇总被施加作者级检查」，但只改了
+`citation_validator` 的 `duplicate_paragraph_ratio`：
+
+```python
+content_role = self._content_role(input_data)             # ← 读了
+rule_report = self._check_rules(result)                   # ← 没传！max_length 在这
+citation_report = self._run_citation_checks(input_data)   # ← 内部传了
+```
+
+`_check_rules` 的签名**根本没有** `content_role` 参数。
+
+### 修法：不是调大阈值
+
+| 规则 | 对汇总适用 | 理由 |
+| --- | --- | --- |
+| `min_length` | ✅ | 空汇总是真问题 |
+| `required_keywords` | ✅ | 缺必需章节是内容缺陷 |
+| `max_length` | ❌ | 「别写太长」是**写作约束**，汇总长度由上游决定 |
+
+调大阈值只是把问题推到更远处 —— 上游再多两个节点照样超限。
+根因是**对错误的对象施加了这条规则**。
+
+### 取证边界（这一条比修复本身更值得记）
+
+| 查证项 | 结果 |
+| --- | --- |
+| 直接证据 | ✅ 完整 API 快照（10230 字符、`retry_count=2`） |
+| 库里含「长度超限」的 subtask | **0 条** |
+| `validation_result` 表总行数 | **0 条** |
+| 近 7 天日志 | **0 条** |
+
+**「有 1 次确证」≠「只发生 1 次」≠「经常发生」。** 历史频次**无法量化**，
+因为校验结论既不落库也不进日志。
+
+> **顺带发现**：`validation_result` 表是空的 —— 校验结论只存在
+> `subtask.output_data` 的 JSON 里，从未写进专门的表。后果：
+> 排查「为什么转人工」只能逐个任务拉快照、无法按失败原因聚合、
+> **统计校验通过率做不到**（`passed` 列形同虚设）。
+> 这是排查校验类缺陷的基础设施缺口，建议单列任务。
+
+### 真实环境验证：两段，缺一不可
+
+**第一段 · 真实任务**：
+
+```
+任务 edd89520 → completed
+review 节点: n7 content_len=7497 rules_passed=True
+⚠️ 本轮 review 内容未超过 10000，**未复现触发条件**
+```
+
+任务**完成了**（上一轮同样配置卡在 `waiting_human`），但 review 只有 7497 字符，
+**没触发超限**。所以这一段**只能证明没有回归，不能证明修复在超限场景生效**。
+
+**第二段 · 容器内直接构造超限**（绕过 LLM，长度可控）：
+构造**与真实缺陷完全同长度**（10230 字符）的载荷，送进生产同一份代码：
+
+| 场景 | `rule_check.passed` | issues |
+| --- | --- | --- |
+| `aggregated`（10230） | **True** | `[]` ← 修复生效 |
+| `authored`（10230） | **False** | `长度超限：10230 > 10000` ← 仍被拦 |
+| 不传角色 | **False** | 按 `authored` 从严 |
+
+**三行对照才是完整证据**：第 2 行证明没有把规则整体关掉，第 3 行证明兜底仍从严。
+
+> 如果只拿第一段就宣布修好了，那是把「没触发」当成「已修好」。
+
+### 门禁
+
+```
+black 1 file reformatted；ruff 全过；mypy --no-incremental 0 错（206 文件）
+pytest 全量 2777 passed / 8 skipped（+17）
+```
+
+### 诚实性验证
+
+回退 `content_role != "aggregated" and` 一处判断 → **5 条变红**，
+含一条端到端测试（真实 10230 字符载荷经工作流送进校验器）。
+
+### 清理（回查确认）
+
+```
+probe_tasks = 0 / task_total = 53 / demo_tasks = 27 / reference_library_item = 0
+quota key 已删除，回查 KEYS 为空
+```
+
 
 
 
