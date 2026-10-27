@@ -4142,6 +4142,11 @@ quota key 已删除，回查 KEYS 为空
 
 本地一次性验证脚本全部在 `$env:TEMP`，未放入仓库。后端未改，因此本轮不以后端全量测试冒充前端验收。
 
+### CI 与备份
+
+- CI run `40468060684`（提交 `6e6fee8`）：Lint/Format/Types、Frontend Unit/Types/Build、Unit Tests/Coverage、Alembic Round-Trip、Docker Build、Compose Release Smoke **6/6 全绿**。
+- `backup/main` 已推送；最终文档提交与服务器同步在收尾提交中继续执行。临时浏览器登录态已删除，未保留本地凭证文件。
+
 
 
 

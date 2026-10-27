@@ -1,6 +1,6 @@
 # Academic Editorial UI Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 在不改变现有任务流程和 API 契约的前提下，把登录页、任务列表和综述结果页升级为已确认的「学术编辑感」设计，并用真实桌面/移动浏览器验收。
 
@@ -33,11 +33,11 @@
 - Create: `docs/superpowers/plans/2026-10-27-academic-editorial-ui-plan.md`
 - Create: `docs/design/2026-10-27-premium-redesign/*`
 
-- [ ] **Step 1: 检查设计文件与占位符**
+- [x] **Step 1: 检查设计文件与占位符**
 
 Run: `git status --short` 并搜索 `TBD|TODO|Lorem`。允许出现「待用户确认」等状态文字，但不允许未填写实现段落。
 
-- [ ] **Step 2: 提交已批准的设计**
+- [x] **Step 2: 提交已批准的设计**
 
 ```powershell
 git add docs/design/2026-10-27-premium-redesign docs/superpowers/specs/2026-10-27-academic-editorial-ui-design.md docs/superpowers/plans/2026-10-27-academic-editorial-ui-plan.md
@@ -54,7 +54,7 @@ Expected: 一次 `docs:` Conventional Commit；不把 TEMP 验证脚本加入提
 - Modify: `frontend/src/views/LoginView.vue`
 - Test: `frontend/src/layouts/AppLayout.test.ts`
 
-- [ ] **Step 1: 先写失败测试**
+- [x] **Step 1: 先写失败测试**
 
 把登录页身份断言改为新价值主张，并增加证据场景及表单契约：
 
@@ -71,7 +71,7 @@ expect(wrapper.find("#password").exists()).toBe(true);
 expect(wrapper.find('[data-test="forgot-password"]').exists()).toBe(true);
 ```
 
-- [ ] **Step 2: 运行并确认红灯**
+- [x] **Step 2: 运行并确认红灯**
 
 ```powershell
 node node_modules/vitest/vitest.mjs run src/layouts/AppLayout.test.ts
@@ -79,7 +79,7 @@ node node_modules/vitest/vitest.mjs run src/layouts/AppLayout.test.ts
 
 Expected: 新价值主张或 `login-evidence-proof` 断言失败；既有 10 个导航目的地仍通过。
 
-- [ ] **Step 3: 实现 tokens 与字体**
+- [x] **Step 3: 实现 tokens 与字体**
 
 在 `:root` 用 OKLCH 等价色替换现有背景/主色，保留变量名，深色只同步中性色与主色，不新增第二套类：
 
@@ -125,11 +125,11 @@ Expected: 新价值主张或 `login-evidence-proof` 断言失败；既有 10 个
 
 主标题使用 `font-display`，原 `handleSubmit`、模式切换、字段 id 与忘记密码链接保持原样。AppLayout 保留所有 RouterLink、`app-nav__links` 与登出按钮，只替换品牌标记、分组标签和间距类；不增加工作区选择器或新导航行为。
 
-- [ ] **Step 4: 运行测试并确认绿灯**
+- [x] **Step 4: 运行测试并确认绿灯**
 
 Run: 同 Step 2。Expected: AppLayout/Login **8/8 passed**，无字段或导航回归。
 
-- [ ] **Step 5: 真实浏览器检查第一阶段**
+- [x] **Step 5: 真实浏览器检查第一阶段**
 
 用 Playwright 打开 `/login`，截取 1440×1000 与 390×844。断言：
 
@@ -144,7 +144,7 @@ if (geometry.overflow) throw new Error('登录页横向溢出');
 
 人工 `read_image` 检查：桌面证据卡完整、移动表单不被挤出首屏、字体没有乱码。
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```powershell
 git add frontend/src/assets/main.css frontend/src/layouts/AppLayout.vue frontend/src/layouts/AppLayout.test.ts frontend/src/views/LoginView.vue
@@ -157,7 +157,7 @@ git commit -m "feat(ui): establish academic editorial shell"
 - Modify: `frontend/src/views/TaskListView.vue`
 - Test: `frontend/src/views/TaskListView.test.ts`
 
-- [ ] **Step 1: 先写行动区与设计变更测试**
+- [x] **Step 1: 先写行动区与设计变更测试**
 
 新增行动区点击行为测试（一次点击，不额外触发事件）：
 
@@ -187,7 +187,7 @@ expect(visibleLabel.text()).toBe("已完成");
 expect(doneRow.find('[data-test="status-icon"]').attributes("data-state")).toBe("completed");
 ```
 
-- [ ] **Step 2: 运行并确认红灯**
+- [x] **Step 2: 运行并确认红灯**
 
 ```powershell
 node node_modules/vitest/vitest.mjs run src/views/TaskListView.test.ts
@@ -195,7 +195,7 @@ node node_modules/vitest/vitest.mjs run src/views/TaskListView.test.ts
 
 Expected: `attention-needs-me` 不存在、可见终态标签不存在；其余既有筛选与搜索不应失败。
 
-- [ ] **Step 3: 实现汇总带、行动区和终态标签**
+- [x] **Step 3: 实现汇总带、行动区和终态标签**
 
 保留 `counts`、`FILTERS`、`visibleTasks` 和全部 `data-test`。汇总区改为同一容器中的四个按钮/项，仍保留 `stat-*`。新增行动区直接复用现有筛选状态：
 
@@ -236,11 +236,11 @@ Expected: `attention-needs-me` 不存在、可见终态标签不存在；其余�
 
 失败/取消不能都用绿色成功底：用查表式字面量映射 `completed/failed/cancelled` 到完整类名；进行中仍保留原进度条，行尾 `button[aria-label="打开"]` 不删除。
 
-- [ ] **Step 4: 运行测试并确认绿灯**
+- [x] **Step 4: 运行测试并确认绿灯**
 
 Run: 同 Step 2。Expected: 所有 TaskListView 用例通过，包括进行中 1 个 progressbar、终态无进度条、真实搜索和整行打开。
 
-- [ ] **Step 5: 浏览器测量与移动检查**
+- [x] **Step 5: 浏览器测量与移动检查**
 
 登录后进入 `/tasks`，读取：
 
@@ -255,7 +255,7 @@ if (!report.rows || report.overflow) throw new Error(JSON.stringify(report));
 
 桌面看行动区与列表层级；390px 下筛选项和搜索可换行、任务标题不被状态列挤出。若有缺陷先修再重新量。
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```powershell
 git add frontend/src/views/TaskListView.vue frontend/src/views/TaskListView.test.ts
@@ -270,7 +270,7 @@ git commit -m "feat(ui): turn task list into research index"
 - Modify: `frontend/src/assets/main.css`
 - Test: `frontend/src/components/tasks/TaskResult.test.ts`
 
-- [ ] **Step 1: 先写结构与真实评分测试**
+- [x] **Step 1: 先写结构与真实评分测试**
 
 ```ts
 it("places the reading sheet before the evidence rail", () => {
@@ -293,7 +293,7 @@ it("exposes only real score values on the meter elements", () => {
 
 既有「无核验时显示明确空态、无统计」用例必须原样保留。
 
-- [ ] **Step 2: 运行并确认红灯**
+- [x] **Step 2: 运行并确认红灯**
 
 ```powershell
 node node_modules/vitest/vitest.mjs run src/components/tasks/TaskResult.test.ts
@@ -301,7 +301,7 @@ node node_modules/vitest/vitest.mjs run src/components/tasks/TaskResult.test.ts
 
 Expected: `result-paper` / `evidence-rail` / meter 不存在；引用核验与下载基线仍绿。
 
-- [ ] **Step 3: 实现纸页与真实证据栏**
+- [x] **Step 3: 实现纸页与真实证据栏**
 
 外层保持 `data-test="task-result"`，桌面网格改为 `lg:grid-cols-[minmax(0,1fr)_17rem]`，窄屏单列。正文容器：
 
@@ -337,7 +337,7 @@ Expected: `result-paper` / `evidence-rail` / meter 不存在；引用核验与�
 
 右栏顺序：引用核验 Panel → 质量评分 → 参考文献 → 待改进 → 下载。无评分/无文献使用现有空数组行为，不补 0 或虚构条目；无核验继续由 `ReferenceVerificationPanel` 显示「本次任务未做外部引用核验」。TaskDetail 只改标题字体、头部/Tab 间距，保留 `tab-*`、`toggle-annotation`、`open-screening` 和抽屉。
 
-- [ ] **Step 4: 调整 `.md-body` 阅读排版**
+- [x] **Step 4: 调整 `.md-body` 阅读排版**
 
 仅在 `.md-body` 内增大正文行高与标题层级，所有颜色继续引用 tokens：
 
@@ -354,11 +354,11 @@ Expected: `result-paper` / `evidence-rail` / meter 不存在；引用核验与�
 
 不添加虚构页码、固定核验数或正文引用高亮；Markdown 里没有可靠结构时不臆造证据关联。
 
-- [ ] **Step 5: 运行测试并确认绿灯**
+- [x] **Step 5: 运行测试并确认绿灯**
 
 Run: 同 Step 2。Expected: TaskResult 全部通过，下载 URL 回收、http(s) 白名单、核验 null 与四态徽标均无回归。
 
-- [ ] **Step 6: 真实结果页验证**
+- [x] **Step 6: 真实结果页验证**
 
 从任务列表逐条找「已完成」且结果 Tab 可用的任务；不能把 disabled Tab 当成已验证。截取桌面与 390px 图并测量：
 
@@ -371,7 +371,7 @@ if (!result || !paper || !rail) throw new Error('结果页结构缺失');
 
 检查真实核验摘要是否与 Panel 一致、无核验任务是否仍显示空态、长英文标题是否换行、移动端正文先于证据栏。
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```powershell
 git add frontend/src/views/TaskDetailView.vue frontend/src/components/tasks/TaskResult.vue frontend/src/components/tasks/TaskResult.test.ts frontend/src/assets/main.css
@@ -384,7 +384,7 @@ git commit -m "feat(ui): refine review reading and evidence layout"
 - Create only outside repo: `$env:TEMP/maa_academic_visual.cjs`
 - Modify when design contract requires: `frontend/e2e/*.spec.ts`（仅在本批明确设计变更导致失败时）
 
-- [ ] **Step 1: 全量单测与类型分别运行**
+- [x] **Step 1: 全量单测与类型分别运行**
 
 ```powershell
 node node_modules/vitest/vitest.mjs run
@@ -393,7 +393,7 @@ node node_modules/vue-tsc/bin/vue-tsc.js -b
 
 Expected: Vitest 全绿；vue-tsc 0 错误。两条命令分开看完整输出，不串行截尾。
 
-- [ ] **Step 2: 构建**
+- [x] **Step 2: 构建**
 
 ```powershell
 node node_modules/vite/bin/vite.js build
@@ -401,19 +401,19 @@ node node_modules/vite/bin/vite.js build
 
 Expected: 构建成功，无 Tailwind 类扫描或 Vue 模板错误。
 
-- [ ] **Step 3: 关键 E2E**
+- [x] **Step 3: 关键 E2E**
 
 设置 `$env:E2E_BASE_URL='http://10.0.10.2:48080'`，在服务器部署后运行 `m2-preview`、`m2-result-preview`、`team-workspace`、`phase1-pages` 的 chromium 项目。每个文件只安排一次登录；总登录次数计入 5 次/小时限流，必要时复用视觉脚本会话而不是重复盲试。
 
 Expected: 新建任务、结果页、批注、模板/导入页面契约全绿。若是数据原因（首个完成任务无报告），记录并换一个真实有结果任务验证，不能改测试硬编码绕过。
 
-- [ ] **Step 4: 桌面与移动最终截图**
+- [x] **Step 4: 桌面与移动最终截图**
 
 TEMP 脚本一次登录，保存登录态，在同一 context 中依次截取登录页、任务页、真实结果页；`setViewportSize` 后重复任务与结果页。输出每页 `scrollWidth/innerWidth`、主要区域 `boundingBox`、控制台错误。脚本和截图不放仓库根目录。
 
 Expected: 三个核心页面均人工查看；无横向溢出、无文字遮挡、无不可见操作；尺寸调整后重新测量。
 
-- [ ] **Step 5: 诚实性与最终 diff 检查**
+- [x] **Step 5: 诚实性与最终 diff 检查**
 
 对新增的「待办行动区」和「真实评分 meter」各做一次临时回退：对应测试必须变红，恢复后再变绿。新文件先备份到 TEMP，不用 PowerShell 改写 UTF-8 文件。最后：
 
@@ -431,11 +431,11 @@ Expected: 无 TEMP 脚本、无无关后端改动、无空白错误。
 - Modify: `docs/superpowers/plans/2026-08-09-00-execution-notes.md`
 - Modify: `docs/superpowers/plans/2026-10-27-academic-editorial-ui-plan.md`（勾选项与证据）
 
-- [ ] **Step 1: 按标准 bundle 流程同步**
+- [x] **Step 1: 按标准 bundle 流程同步**
 
 本地创建 `maa.bundle` 并 scp 到服务器。服务器操作写入 TEMP `.sh` 后执行，避免 ssh 一行命令里的 glob 被 zsh 拒绝；脚本必须输出同步后的 `git log --oneline -1`，再构建 `nginx` 前端镜像并重启对应容器，不动其他项目容器。
 
-- [ ] **Step 2: 服务器健康与真实页面复验**
+- [x] **Step 2: 服务器健康与真实页面复验**
 
 ```bash
 curl -s http://127.0.0.1:48080/api/v1/health/ready
@@ -443,7 +443,7 @@ curl -s http://127.0.0.1:48080/api/v1/health/ready
 
 Expected: `status=ready`。随后从本机访问 `http://10.0.10.2:48080`，重复 Task 4 的真实页面检查与关键 E2E；服务器 HEAD 必须等于本地提交，不能只凭本地截图宣称部署完成。
 
-- [ ] **Step 3: 更新执行记录并提交文档**
+- [x] **Step 3: 更新执行记录并提交文档**
 
 记录：基线 42/42、最终 Vitest/vue-tsc/build 数字、E2E 结果、桌面/移动截图路径、服务器 HEAD、真实数据空态和任何偏差。提交：
 
@@ -452,7 +452,7 @@ git add docs/superpowers/plans/2026-08-09-00-execution-notes.md docs/superpowers
 git commit -m "docs: record academic editorial ui verification"
 ```
 
-- [ ] **Step 4: 推送备份并检查 CI**
+- [x] **Step 4: 推送备份并检查 CI**
 
 ```powershell
 git push backup main
