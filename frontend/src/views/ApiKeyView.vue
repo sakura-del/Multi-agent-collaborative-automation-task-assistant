@@ -4,6 +4,7 @@ import { Check, Copy, KeyRound, Plus, Trash2 } from "lucide-vue-next";
 
 import EmptyState from "@/components/common/EmptyState.vue";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
+import PageHeader from "@/components/common/PageHeader.vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -165,18 +166,16 @@ function formatTime(value: string | null): string {
 
 <template>
   <section>
-    <header class="mb-4 flex flex-wrap items-start justify-between gap-2">
-      <div>
-        <h1 class="text-lg font-semibold tracking-tight">API Key</h1>
-        <p class="mt-0.5 text-sm text-muted-foreground">
-          用 Key 从脚本、MCP 客户端或其他系统调用本服务。Key 只显示一次，请妥善保存。
-        </p>
-      </div>
+    <PageHeader
+      eyebrow="Developer settings"
+      title="API Key"
+      description="用 Key 从脚本、MCP 客户端或其他系统调用本服务。Key 只显示一次，请妥善保存。"
+    >
       <Button variant="secondary" size="sm" @click="showCreate = !showCreate">
         <Plus />
         生成 Key
       </Button>
-    </header>
+    </PageHeader>
 
     <ErrorBanner :message="error" testid="apikeys-error" />
 

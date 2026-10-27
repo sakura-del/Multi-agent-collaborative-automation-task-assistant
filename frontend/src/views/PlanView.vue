@@ -31,7 +31,8 @@
  * 前端会静默显示旧值。这些字段后端 `Plan` 表本来就有，只是之前没返回。
  */
 import { computed, onMounted, ref } from "vue";
-import { ArrowUpRight, Check, CreditCard, Loader2, X } from "lucide-vue-next";
+import { ArrowUpRight, Check, Loader2, X } from "lucide-vue-next";
+import PageHeader from "@/components/common/PageHeader.vue";
 
 import { getBillingUsage, listBillingPlans } from "@/api/billing";
 import type { BillingPlan, BillingUsage } from "@/api/types";
@@ -201,17 +202,11 @@ onMounted(load);
 
 <template>
   <div class="space-y-6">
-    <header class="flex flex-wrap items-center justify-between gap-2">
-      <div>
-        <h1 class="flex items-center gap-2 text-xl font-semibold tracking-tight">
-          <CreditCard :size="18" class="text-muted-foreground" aria-hidden="true" />
-          我的套餐
-        </h1>
-        <p class="mt-1 text-sm text-muted-foreground">
-          当前套餐、本月用量与可选套餐对比。
-        </p>
-      </div>
-    </header>
+    <PageHeader
+      eyebrow="Subscription & usage"
+      title="我的套餐"
+      description="当前套餐、本月用量与可选套餐对比。"
+    />
 
     <ErrorBanner v-if="error" :message="error" />
 

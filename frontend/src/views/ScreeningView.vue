@@ -4,6 +4,7 @@ import { Check, CircleX, MinusCircle } from "lucide-vue-next";
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
+import PageHeader from "@/components/common/PageHeader.vue";
 import { Alert } from "@/components/ui/alert";
 import { Badge, type BadgeVariants } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -176,10 +177,7 @@ async function submitDecision(
 
 <template>
   <section>
-    <header class="mb-4">
-      <h1 class="text-lg font-semibold tracking-tight">PRISMA 筛选</h1>
-      <p class="mt-0.5 text-sm text-muted-foreground">{{ hint }}</p>
-    </header>
+    <PageHeader eyebrow="PRISMA screening" title="PRISMA 筛选" :description="hint" />
 
     <ErrorBanner :message="error" testid="screening-error" />
 

@@ -4,6 +4,7 @@ import { Check, Copy, Plus, Users } from "lucide-vue-next";
 
 import EmptyState from "@/components/common/EmptyState.vue";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
+import PageHeader from "@/components/common/PageHeader.vue";
 import { Badge, type BadgeVariants } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -255,20 +256,16 @@ const summary = computed(() => {
 
 <template>
   <section>
-    <header class="mb-4 flex flex-wrap items-start justify-between gap-2">
-      <div>
-        <h1 class="text-lg font-semibold tracking-tight">团队</h1>
-        <p class="mt-0.5 text-sm text-muted-foreground">
-          团队工作区内的任务对所有成员可见；导师可作为「只读」成员查看并批注。
-        </p>
-      </div>
-      <div class="flex gap-1.5">
-        <Button variant="secondary" size="sm" @click="showCreate = !showCreate">
-          <Plus />
-          创建团队
-        </Button>
-      </div>
-    </header>
+    <PageHeader
+      eyebrow="Team workspaces"
+      title="团队"
+      description="团队工作区内的任务对所有成员可见；导师可作为「只读」成员查看并批注。"
+    >
+      <Button variant="secondary" size="sm" @click="showCreate = !showCreate">
+        <Plus />
+        创建团队
+      </Button>
+    </PageHeader>
 
     <ErrorBanner :message="error" testid="workspaces-error" />
 

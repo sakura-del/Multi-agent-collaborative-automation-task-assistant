@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import { Activity, Coins, RefreshCw, TriangleAlert } from "lucide-vue-next";
+import { Coins, RefreshCw, TriangleAlert } from "lucide-vue-next";
 
 import EmptyState from "@/components/common/EmptyState.vue";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
+import PageHeader from "@/components/common/PageHeader.vue";
 import StatusBadge from "@/components/common/StatusBadge.vue";
 import { Badge, type BadgeVariants } from "@/components/ui/badge";
 import { getObservabilityOverview } from "@/api/observability";
@@ -203,16 +204,11 @@ async function refresh() {
 
 <template>
   <section>
-    <header class="mb-5 flex flex-wrap items-start justify-between gap-3">
-      <div>
-        <h1 class="flex items-center gap-2 text-xl font-semibold tracking-tight">
-          <Activity :size="18" class="text-muted-foreground" aria-hidden="true" />
-          用量与健康
-        </h1>
-        <p class="mt-1 text-sm text-muted-foreground">
-          你的任务成功率与 token 消耗。数据由服务端统计，只包含你自己的任务。
-        </p>
-      </div>
+    <PageHeader
+      eyebrow="Usage & health"
+      title="用量与健康"
+      description="你的任务成功率与 token 消耗。数据由服务端统计，只包含你自己的任务。"
+    >
       <button
         type="button"
         data-test="observability-refresh"
@@ -227,7 +223,7 @@ async function refresh() {
         />
         {{ loading ? "刷新中…" : "刷新" }}
       </button>
-    </header>
+    </PageHeader>
 
     <ErrorBanner :message="error" testid="observability-error" />
 
