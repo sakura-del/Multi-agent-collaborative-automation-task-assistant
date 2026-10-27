@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.logging import get_logger
 from app.db.models.task import Subtask
 from app.db.repositories.event import EventRepository
+from app.db.repositories.validation import ValidationRepository
 from app.db.session import AsyncSessionLocal
 from app.orchestration.contracts import TaskEvent
 from app.orchestration.events import EventPublisher, NullEventPublisher
@@ -151,6 +152,21 @@ class DatabaseScheduleObserver:
                     subtask.started_at = now
                 if result.status in _TERMINAL_STATUSES and subtask.completed_at is None:
                     subtask.completed_at = now
+
+                # 校验结论结构化落库（2026-10-27）：`validation_result` 表此前
+                # 一条记录都没有 —— 校验只塞进 output_data 的 JSON，无法按
+                # 失败原因聚合，也统计不了通过率。落库是**新增**，
+                # `output_data` 里的校验保持不动（向后兼容）。
+                # 失败只记日志，不中断执行（与既有失败策略一致）。
+                if result.validation is not None:
+                    try:
+                        await ValidationRepository(session).save(subtask.id, result.validation)
+                    except Exception:
+                        logger.exception(
+                            "validation_result_persist_failed",
+                            task_id=task_id,
+                            node_id=result.node_id,
+                        )
 
                 event = await EventRepository(session).append(
                     parsed,
