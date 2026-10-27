@@ -21,15 +21,15 @@
 | 项 | 值 |
 | --- | --- |
 | 分支 | `main`（工作分支 `codex/plan3-literature-workflow` 与 main 同点） |
-| HEAD | … → mypy 修复 `cd215a0` → 引用库遗留三项 `8cfed9b` → **review 长度上限修复 `f38491f`** |
+| HEAD | … → 引用库遗留三项 `8cfed9b` → review 长度上限修复 `f38491f` → **校验结论落库 `90dfd6a`** |
 | 冻结 tag | `defense-v1` |
 | Plan 状态 | Plan 2 / 3 / 4 / 5 **全部 Exit Gate PASSED**；**Phase 1 五项全部端到端可用且遗留清零**；**Phase 2 五项全部交付完成**（PRISMA ✅ + 可观测性 ✅ + 团队工作区 ✅ + 开放 API ✅ + 计费套餐 ✅） |
 | 产品化进度 | **Issue #2~#7 全部关闭且遗留清零**；**P1-D 配额遗留已修复**；**`max_results` 已夹紧**；**PRISMA 完成**；**可观测性完成**（8 指标 + `/metrics` + 看板，**看板数字已全部为真**）；**团队工作区完成**；**开放 API 完成**；**计费套餐完成**（四档 + 四条功能门禁 + 手工开通 + **套餐页已重设计**）；**引用样式页已重设计**（**真实渲染预览** + 删除二次确认）；**Word 模板页已修**（**不再把示例填充谎称成稿** + 删除二次确认）；**前端已迁移到 Tailwind v4 + shadcn-vue**；**引用库 + 证据闭环完成**；**review 长度上限缺陷已修**（`max_length` 不再施加到机器汇总） |
 | 数据库迁移 head | **`b7d4e9f1c6a2`**（`reference_library_item` 引用库表） |
-| 后端测试 | **2777 passed**, 8 skipped；覆盖率 **~89%**；`mypy` 0 错误（206 文件） |
+| 后端测试 | **2792 passed**, 8 skipped；覆盖率 **~89%**；`mypy` 0 错误（207 文件） |
 | 前端测试 | Vitest **458 passed**（+6 skipped）；**Playwright E2E 43 场景**（新增引用库 1 条，实测通过） |
-| CI | **6/6 作业全绿**（run `40310639178`，`3511304`）。**`f38491f` 之后未复验** |
-| 服务器 | 已同步至 `f38491f`，五容器 healthy，`/api/v1/health/ready` → `{"status":"ready"}`，`alembic current` = **`b7d4e9f1c6a2 (head)`**，四套餐种子已就位，**向量库 id 级一致（28344 条）**，**`task.used_tokens` 已回填（169372，28 个任务）**，**6 个引用样式预览全部真实渲染（warnings=0）**，**引用库端到端跑通**，**元数据证据已生效（metadata 4/4 可追溯）**，**review 长度上限已修（容器内 10230 字符超限场景验证通过）** |
+| CI | **6/6 作业全绿**（run `40431579571`，`63968b2`）。**`90dfd6a` 之后未复验** |
+| 服务器 | 已同步至 `90dfd6a`，五容器 healthy，`/api/v1/health/ready` → `{"status":"ready"}`，`alembic current` = **`b7d4e9f1c6a2 (head)`**，四套餐种子已就位，**向量库 id 级一致（28344 条）**，**`task.used_tokens` 已回填（169372，28 个任务）**，**6 个引用样式预览全部真实渲染（warnings=0）**，**引用库端到端跑通**，**元数据证据已生效（metadata 4/4 可追溯）**，**review 长度上限已修（容器内 10230 字符验证通过）**，**校验结论已落库（真实任务 5 节点 → 表 5 行，score 全部 0–1）** |
 
 **演示账号**：`demo` / `demo12345` —— **全权限管理员**（`role=admin` + `institution` 套餐：篇数不限 / 含团队 / 含开放 API）；知识库 11 篇 / 28341 分块
 **E2E 固定账号**：`e2efull` / `e2ereconn`，密码 `e2e-password-2026`（复用，不再每次注册——`auth_register` 限流 5 次/3600s）

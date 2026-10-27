@@ -161,4 +161,98 @@ if result.validation is not None:
 
 ## 6. 实施结果
 
-（见文末，实施完成后填写）
+### 6.1 交付
+
+| 文件 | 改动 |
+| --- | --- |
+| `app/db/repositories/validation.py` | **新增** `ValidationRepository` + `normalize_score()` |
+| `app/orchestration/persistence.py` | `on_result` 增加落库调用（失败只记日志） |
+| `tests/test_validation_persistence.py` | **新增 11 条**（Repository 单测） |
+| `tests/test_validation_persistence_wiring.py` | **新增 4 条**（接线测试） |
+
+### 6.2 门禁
+
+```
+black：1 file reformatted
+ruff：All checks passed
+mypy --no-incremental：0 错误（207 文件，+1 新模块）
+pytest 全量：2792 passed / 8 skipped（+15）
+回归：test_scheduler.py 19 passed
+```
+
+### 6.3 诚实性验证
+
+回退 `on_result` 里的落库调用（加 `and False`）→ **1 条变红**：
+
+```
+FAILED test_validation_result_written_to_table
+```
+
+> 这条回退验证特别重要：**Repository 的 11 条单测仍然全绿**，
+> 只有接线测试变红。如果没有接线测试，就会出现「单测全过、表照样是空的」——
+> 正是本次缺陷的原样重演（AGENTS §5 #33/#34）。
+
+### 6.4 真实任务验证（核心证据）
+
+任务 `a849241a`，最终 `completed`，5 个节点带校验结果。
+
+**修复前**：
+
+```sql
+SELECT count(*) FROM validation_result;  -- 0
+```
+
+**修复后**：
+
+| 查证项 | 结果 |
+| --- | --- |
+| 本任务带校验的节点数 | **5**（n1–n5） |
+| 表里本任务记录数 | **5** ← 一致 |
+| `score` 落在 0–1 | **5/5**（`min=1, max=1`，无越界） |
+| `rule_results` 是 checks 明细 | ✅ 9 条（`citation_markers_resolve` / `evidence_is_cited` / …） |
+| `llm_report` 非空 | **5/5** |
+| `validated_at` 有值 | **5/5** |
+| `passed` 可聚合 | ✅ `GROUP BY passed` → `t: 5` |
+
+### 6.5 历史缺口的量化（这就是本轮的目的）
+
+```sql
+SELECT
+  (SELECT count(*) FROM subtask WHERE output_data::jsonb->'validation' <> 'null'::jsonb)
+    AS subtasks_with_validation,
+  (SELECT count(*) FROM validation_result) AS table_rows;
+```
+
+```
+ subtasks_with_validation | table_rows
+--------------------------+------------
+                      193 |          5
+```
+
+**193 个节点有过校验结论，表里只有 5 行（都是本轮刚写的）。**
+
+上一轮修 review 长度上限时，正是因为**没有这张表**，无法回答「影响过多少任务」。
+现在这个统计能做了 —— 这是本轮真正的交付价值，比「加了张表」更具体。
+
+> 注意：**不回溯补写历史数据**。193 个历史节点的校验结论仍在
+> `output_data` 的 JSON 里，可以按需迁移，但本轮不做 ——
+> 没有明确需求时不动历史数据。
+
+### 6.6 清理（回查确认）
+
+```
+probe_tasks = 0 / task_total = 53 / demo_tasks = 27
+validation_result = 0（探针记录已随 subtask 级联删除）
+reference_library_item = 0
+quota key 已删除，回查 KEYS 为空
+```
+
+### 6.7 验证限制
+
+- 模型不支持图片输入，**未肉眼看过截图**；
+- 只验证了**文献综述**这一条路径（`LiteratureNodeValidator`）。
+  通用（非文献）校验器 `ValidatorAgent` 走的也是同一个 `on_result`，
+  但**没有单独跑真实任务验证**；
+- `score` 归一化只验证了「1.0」这个值（本轮任务全部满分）。
+  **0–100 区间的中间值只由单测覆盖**（`85.5 → 0.855`），真实任务未出现部分分；
+- 历史 193 条校验结论**未迁移**，仍只在 JSON 里。
