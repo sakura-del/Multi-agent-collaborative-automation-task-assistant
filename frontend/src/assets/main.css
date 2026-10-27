@@ -68,7 +68,7 @@
   /* 语义状态（beUI 药丸徽标：淡底 + 同色文字） */
   --success: oklch(0.46 0.12 155);
   --success-foreground: oklch(0.99 0 0);
-  --warning: oklch(0.62 0.14 70);
+  --warning: oklch(0.47 0.12 70);
   --warning-foreground: oklch(0.99 0 0);
 
   /* 层次阴影：只在"浮起"的层用（弹层/下拉），卡片不用阴影 */
