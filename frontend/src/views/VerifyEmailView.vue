@@ -58,7 +58,7 @@ async function handleRequest() {
 </script>
 
 <template>
-  <section class="max-w-xl">
+  <section class="mx-auto mt-10 w-full max-w-md rounded-xl border border-border bg-card p-5 shadow-xs sm:p-7">
     <header class="mb-4">
       <h1 class="font-display text-2xl font-medium tracking-[-0.025em]">邮箱验证</h1>
       <p class="mt-0.5 text-sm text-muted-foreground">
