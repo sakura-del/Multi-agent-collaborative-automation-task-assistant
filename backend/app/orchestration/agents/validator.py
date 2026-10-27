@@ -93,9 +93,12 @@ class ValidatorAgent(BaseAgent):
         title = input_data.get("title", "")
         result = input_data.get("result", "")
         trace_id = input_data.get("trace_id", "")
+        # 内容角色（Issue #6）：规则校验与引用校验都必须知道这是作者正文还是机械汇总，
+        # 否则「作者级检查」会被施加到「机器汇总」上（2026-10-27 review 长度上限缺陷）。
+        content_role = self._content_role(input_data)
 
         # 步骤1：规则引擎校验（确定性，即时返回）
-        rule_report = self._check_rules(result)
+        rule_report = self._check_rules(result, content_role=content_role)
 
         # 步骤2：确定性引用校验（文献场景）
         citation_report = self._run_citation_checks(input_data)
@@ -277,8 +280,30 @@ class ValidatorAgent(BaseAgent):
             "suggestions": (semantic_report or {}).get("suggestions", []),
         }
 
-    def _check_rules(self, result: str) -> dict[str, Any]:
-        """规则引擎：格式/长度/关键词硬性校验。"""
+    def check_rules(
+        self,
+        result: str,
+        *,
+        content_role: ContentRole = "authored",
+    ) -> dict[str, Any]:
+        """规则引擎：格式/长度/关键词硬性校验（按内容角色区分）。
+
+        ## 为什么 `max_length` 只对作者正文生效（2026-10-27）
+
+        真实任务里 `review` 节点的**机械汇总**（上游输出拼接）撞上了
+        `max_length=10000`：`长度超限：10230 > 10000` → `waiting_human`。
+
+        这不是「阈值太小」：汇总长度随上游节点数量线性增长，**必然超限**，
+        且**重试无法修复**（重试只会重新汇总同样内容）。
+
+        `max_length` 是「别写太长」的**写作约束**，对机器汇总没有意义 ——
+        该有多长就有多长。这与 Issue #6 是同一类错误：把作者级检查施加到
+        机器汇总内容上。Issue #6 修了 `citation_validator` 的
+        `duplicate_paragraph_ratio`，但这里的 `max_length` 没跟着修。
+
+        `min_length` 与 `required_keywords` **仍对汇总生效**：
+        空汇总、缺失必需章节确实是问题，与「谁写的」无关。
+        """
         issues: list[str] = []
         length = len(result)
 
@@ -288,7 +313,8 @@ class ValidatorAgent(BaseAgent):
 
         if length < min_len:
             issues.append(f"长度不足：{length} < {min_len}")
-        if length > max_len:
+        # 只有作者正文受上限约束（见 docstring）
+        if content_role != "aggregated" and length > max_len:
             issues.append(f"长度超限：{length} > {max_len}")
         for kw in required_keywords:
             if kw not in result:
@@ -298,6 +324,12 @@ class ValidatorAgent(BaseAgent):
         # 规则评分：无问题 100，每个问题扣 20，最低 0
         score = max(0, 100 - len(issues) * 20)
         return {"passed": passed, "score": score, "issues": issues}
+
+    def _check_rules(
+        self, result: str, *, content_role: ContentRole = "authored"
+    ) -> dict[str, Any]:
+        """内部别名，保持既有调用点不变。"""
+        return self.check_rules(result, content_role=content_role)
 
     async def _check_semantic(self, title: str, result: str) -> dict[str, Any]:
         """LLM 语义自检：逻辑一致性/事实准确性。
