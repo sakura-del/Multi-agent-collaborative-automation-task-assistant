@@ -132,11 +132,15 @@ describe("登录页产品身份", () => {
     });
 
     const text = wrapper.text();
-    expect(text).toContain("生成即合规");
-    expect(text).toContain("引用可核验");
+    expect(text).toContain("让每一句论断");
+    expect(text).toContain("有迹可循");
     // 三个能力点必须来自真实功能，不能是营销词
     expect(text).toContain("证据约束");
     expect(text).toContain("GB/T 7714—2025");
+    const proof = wrapper.find('[data-test="login-evidence-proof"]');
+    expect(proof.exists()).toBe(true);
+    expect(proof.text()).toContain("示例");
+    expect(proof.text()).toContain("引用核验通过");
   });
 
   it("保留登录所需的表单字段 id（E2E 与自动化脚本依赖）", async () => {

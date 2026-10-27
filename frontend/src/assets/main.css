@@ -26,43 +26,44 @@
    工作台是读文献写综述的地方：安静、克制、信息密度优先。
    ============================================================ */
 :root {
-  --radius: 0.625rem; /* 10px：beUI 是 8px，本项目信息密度更高取略大 */
+  --radius: 0.625rem; /* 10px：工作台保持紧凑，标题与正文用衬线建立编辑气质 */
+  --font-family-display: "Noto Serif SC", "Source Han Serif SC", "Songti SC", STSong, SimSun, serif;
 
-  /* 底色与文字（beUI：底 99% / 卡片 97%，卡片略亮于底） */
-  --background: oklch(0.985 0 0);
-  --foreground: oklch(0.15 0 0);
-  --card: oklch(1 0 0); /* 卡片比底色亮：靠"更白"产生层次，而不是靠阴影 */
-  --card-foreground: oklch(0.15 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.15 0 0);
+  /* 学术编辑感：暖纸底 + 墨色文字。卡片仍略亮于底色，不靠厚阴影分层。 */
+  --background: oklch(0.964 0.008 120);
+  --foreground: oklch(0.235 0.018 160);
+  --card: oklch(0.988 0.006 105);
+  --card-foreground: oklch(0.235 0.018 160);
+  --popover: oklch(0.988 0.006 105);
+  --popover-foreground: oklch(0.235 0.018 160);
 
   /* 次要/弱化 */
-  --muted: oklch(0.968 0 0);
-  --muted-foreground: oklch(0.5 0 0);
+  --muted: oklch(0.94 0.008 120);
+  --muted-foreground: oklch(0.49 0.015 160);
 
-  /* 主色：beUI 的亮蓝（比旧 Nova 的沉蓝更醒目，用于唯一强调） */
-  --primary: oklch(0.62 0.19 250);
+  /* 唯一品牌强调：深青蓝绿；状态色仍只表达语义，不与品牌色混用。 */
+  --primary: oklch(0.44 0.065 180);
   --primary-foreground: oklch(0.99 0 0);
 
   /* 次要按钮 */
   --secondary: oklch(0.968 0 0);
   --secondary-foreground: oklch(0.205 0 0);
 
-  /* 强调（选中态/当前项底色）：beUI accent 偏青，这里取中性更克制 */
-  --accent: oklch(0.96 0.015 250);
-  --accent-foreground: oklch(0.35 0.1 250);
+  /* 强调（选中态/当前项底色）：与品牌同色相的浅青灰 */
+  --accent: oklch(0.925 0.018 170);
+  --accent-foreground: oklch(0.37 0.055 180);
 
   /* 危险/错误 */
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.985 0 0);
 
-  /* 边框与输入：**6% 发丝线**（beUI 核心特征） */
-  --border: oklch(0.15 0 0 / 6%);
-  --input: oklch(0.15 0 0 / 8%);
-  --ring: oklch(0.62 0.19 250 / 45%);
+  /* 边框与输入：带少量墨绿色相的发丝线，避免暖冷灰混用 */
+  --border: oklch(0.235 0.018 160 / 10%);
+  --input: oklch(0.235 0.018 160 / 14%);
+  --ring: oklch(0.44 0.065 180 / 45%);
 
   /* 需要明确分割时用（表格外框、模态边界）；日常用 --border */
-  --border-strong: oklch(0.15 0 0 / 12%);
+  --border-strong: oklch(0.235 0.018 160 / 16%);
 
   /* 语义状态（beUI 药丸徽标：淡底 + 同色文字） */
   --success: oklch(0.55 0.14 155);
@@ -75,7 +76,7 @@
 
   /* 品牌面板底色：登录页左栏等"要区别于工作区"的大面积区域。
      极浅的蓝调中性色 —— 只够形成分区，不抢内容注意力。 */
-  --surface-brand: oklch(0.972 0.012 250);
+  --surface-brand: oklch(0.955 0.012 145);
 }
 
 .dark {
@@ -87,18 +88,18 @@
   --popover-foreground: oklch(0.96 0 0);
   --muted: oklch(0.24 0 0);
   --muted-foreground: oklch(0.62 0 0);
-  --primary: oklch(0.68 0.17 250);
+  --primary: oklch(0.7 0.07 180);
   --primary-foreground: oklch(0.16 0 0);
   --secondary: oklch(0.24 0 0);
   --secondary-foreground: oklch(0.96 0 0);
-  --accent: oklch(0.28 0.04 250);
-  --accent-foreground: oklch(0.85 0.08 250);
+  --accent: oklch(0.3 0.025 180);
+  --accent-foreground: oklch(0.84 0.045 180);
   --destructive: oklch(0.65 0.22 27.325);
   --destructive-foreground: oklch(0.985 0 0);
   /* 深色下边框要略亮（beUI 深色用的是白 5%） */
   --border: oklch(1 0 0 / 6%);
   --input: oklch(1 0 0 / 10%);
-  --ring: oklch(0.68 0.17 250 / 55%);
+  --ring: oklch(0.7 0.07 180 / 55%);
   --border-strong: oklch(1 0 0 / 12%);
   --success: oklch(0.68 0.14 155);
   --success-foreground: oklch(0.16 0 0);
@@ -113,6 +114,7 @@
    → 这样可以用 bg-background / text-foreground / border-border 等语义类
    ============================================================ */
 @theme inline {
+  --font-display: var(--font-family-display);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);

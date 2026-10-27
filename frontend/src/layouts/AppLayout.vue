@@ -77,20 +77,25 @@ function handleLogout() {
 </script>
 
 <template>
-  <div class="grid min-h-screen grid-cols-1 bg-background md:grid-cols-[14rem_1fr]">
+  <div class="grid min-h-dvh grid-cols-1 bg-background md:grid-cols-[14.5rem_1fr]">
     <!-- 侧栏（窄屏折成单行横向滚动导航） -->
     <aside
       class="flex flex-col gap-6 border-b border-border bg-card px-3 py-4 max-md:gap-2 md:border-b-0 md:border-r md:py-6"
     >
-      <!-- 品牌：微缩标记 + 名称（beUI 用紧凑字标，不做大 logo） -->
-      <div class="hidden items-center gap-2 px-2 md:flex">
+      <!-- 品牌：引用书标 + 中英文两级字标，强调「证据驱动的学术写作」。 -->
+      <div class="hidden items-center gap-2.5 px-2 md:flex">
         <span
-          class="flex size-6 shrink-0 items-center justify-center rounded-md bg-primary text-[11px] font-bold text-primary-foreground"
+          class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-foreground text-background"
           aria-hidden="true"
         >
-          综
+          <BookMarked :size="16" :stroke-width="1.8" />
         </span>
-        <span class="text-sm font-semibold tracking-tight">文献综述工作台</span>
+        <span class="min-w-0">
+          <span class="block truncate text-sm font-semibold tracking-tight">文献综述工作台</span>
+          <span class="mt-0.5 block text-[8px] tracking-[0.16em] text-muted-foreground">
+            EVIDENCE-LED WRITING
+          </span>
+        </span>
       </div>
 
       <nav
@@ -128,13 +133,21 @@ function handleLogout() {
       <div
         class="flex items-center justify-between gap-2 border-t border-border px-2 pt-3 max-md:justify-end max-md:border-0 max-md:px-0 max-md:pt-0 md:mt-auto"
       >
-        <div class="hidden min-w-0 md:block">
-          <p class="truncate text-xs font-medium text-foreground" :title="auth.user?.email">
-            {{ auth.user?.username ?? "未登录" }}
-          </p>
-          <p class="truncate text-[11px] text-muted-foreground" :title="auth.user?.email">
-            {{ auth.user?.email ?? "" }}
-          </p>
+        <div class="hidden min-w-0 items-center gap-2 md:flex">
+          <span
+            class="flex size-7 shrink-0 items-center justify-center rounded-md bg-foreground font-display text-xs text-background"
+            aria-hidden="true"
+          >
+            {{ auth.user?.username?.slice(0, 1) ?? "访" }}
+          </span>
+          <div class="min-w-0">
+            <p class="truncate text-xs font-medium text-foreground" :title="auth.user?.email">
+              {{ auth.user?.username ?? "未登录" }}
+            </p>
+            <p class="truncate text-[10px] text-muted-foreground" :title="auth.user?.email">
+              {{ auth.user?.email ?? "" }}
+            </p>
+          </div>
         </div>
         <Button
           variant="ghost"
@@ -148,8 +161,10 @@ function handleLogout() {
       </div>
     </aside>
 
-    <main class="min-w-0 px-4 py-5 md:px-8 md:py-7">
-      <RouterView />
+    <main class="min-w-0 px-4 py-5 md:px-8 md:py-7 lg:px-10">
+      <div class="mx-auto w-full max-w-[1600px]">
+        <RouterView />
+      </div>
     </main>
   </div>
 </template>
