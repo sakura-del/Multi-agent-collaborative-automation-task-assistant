@@ -256,6 +256,10 @@ test.describe("Phase 1 页面", () => {
     const deleteButton = row.locator('[data-test^="template-delete-"]');
     await deleteButton.scrollIntoViewIfNeeded();
     await deleteButton.click({ force: true });
+    // 删除有二次确认（防止后端 unlink 磁盘文件）：先确认，再等待成功提示。
+    const confirmButton = row.locator('[data-test^="template-delete-confirm-"]');
+    await expect(confirmButton).toBeVisible();
+    await confirmButton.click();
     await expect(page.locator('[data-test="template-upload-success"]')).toContainText("已删除", {
       timeout: 30_000,
     });

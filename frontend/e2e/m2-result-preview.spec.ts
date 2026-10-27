@@ -20,13 +20,14 @@ test("任务结果页（引用核验 + 质量评分）", async ({ page }) => {
   for (let i = 0; i < count; i += 1) {
     const row = rows.nth(i);
     if ((await row.innerText()).includes("已完成")) {
-      await row.getByRole("button", { name: "打开" }).click();
+      // 结果页验收不依赖右箭头：移动端按钮按设计隐藏，整行才是统一入口。
+      await row.click();
       opened = true;
       break;
     }
   }
   if (!opened) {
-    await rows.first().getByRole("button", { name: "打开" }).click();
+    await rows.first().click();
   }
 
   await page.locator('[data-test="tab-result"]').click({ timeout: 30_000 });
