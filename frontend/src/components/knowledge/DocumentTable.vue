@@ -44,7 +44,7 @@ function requestRemove(docId: string) {
 </script>
 
 <template>
-  <div class="overflow-hidden rounded-lg border border-border bg-card">
+  <div class="overflow-x-auto rounded-lg border border-border bg-card">
     <table class="w-full border-collapse text-sm" data-test="document-table">
       <thead>
         <tr class="border-b border-border text-left">
