@@ -183,6 +183,6 @@ git commit -m "feat(ui): complete editorial consistency across remaining views"
 
 bundle → fetch → ff-only merge → build nginx → health ready → 正式环境重复截图和 E2E。服务器 HEAD 必须与本地一致。
 
-- [ ] **Step 4: 文档、备份和 CI**
+- [x] **Step 4: 文档、备份和 CI**
 
 更新 execution-notes 与本计划，提交生产证据，`git push backup main`，查看最终 run 的全部作业。不得把工作区中他人的 evaluation 改动加入提交。
