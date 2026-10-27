@@ -1,0 +1,344 @@
+{
+  "errors": [],
+  "targets": {
+    "knowledge": {
+      "desktop": {
+        "h1": "知识库",
+        "h1Visible": true,
+        "h1Font": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", STSong, SimSun, serif",
+        "documentWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false,
+        "headerWidth": {
+          "client": 1128,
+          "scroll": 1128
+        }
+      },
+      "mobile": {
+        "h1": "知识库",
+        "h1Visible": true,
+        "h1Font": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", STSong, SimSun, serif",
+        "documentWidth": 390,
+        "viewportWidth": 390,
+        "horizontalOverflow": false,
+        "headerWidth": {
+          "client": 358,
+          "scroll": 358
+        }
+      }
+    },
+    "reference-library": {
+      "desktop": {
+        "h1": "引用库",
+        "h1Visible": true,
+        "h1Font": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", STSong, SimSun, serif",
+        "documentWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false,
+        "headerWidth": {
+          "client": 1128,
+          "scroll": 1128
+        }
+      },
+      "mobile": {
+        "h1": "引用库",
+        "h1Visible": true,
+        "h1Font": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", STSong, SimSun, serif",
+        "documentWidth": 390,
+        "viewportWidth": 390,
+        "horizontalOverflow": false,
+        "headerWidth": {
+          "client": 358,
+          "scroll": 358
+        }
+      }
+    },
+    "reference-import": {
+      "desktop": {
+        "h1": "导入参考文献",
+        "h1Visible": true,
+        "h1Font": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", STSong, SimSun, serif",
+        "documentWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false,
+        "headerWidth": {
+          "client": 1128,
+          "scroll": 1128
+        }
+      },
+      "mobile": {
+        "h1": "导入参考文献",
+        "h1Visible": true,
+        "h1Font": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", STSong, SimSun, serif",
+        "documentWidth": 390,
+        "viewportWidth": 390,
+        "horizontalOverflow": false,
+        "headerWidth": {
+          "client": 358,
+          "scroll": 358
+        }
+      }
+    },
+    "styles": {
+      "desktop": {
+        "h1": "引用样式",
+        "h1Visible": true,
+        "h1Font": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", STSong, SimSun, serif",
+        "documentWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false,
+        "headerWidth": {
+          "client": 1128,
+          "scroll": 1128
+        }
+      },
+      "mobile": {
+        "h1": "引用样式",
+        "h1Visible": true,
+        "h1Font": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", STSong, SimSun, serif",
+        "documentWidth": 390,
+        "viewportWidth": 390,
+        "horizontalOverflow": false,
+        "headerWidth": {
+          "client": 358,
+          "scroll": 358
+        }
+      }
+    },
+    "templates": {
+      "desktop": {
+        "h1": "Word 模板",
+        "h1Visible": true,
+        "h1Font": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", STSong, SimSun, serif",
+        "documentWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false,
+        "headerWidth": {
+          "client": 1128,
+          "scroll": 1128
+        }
+      },
+      "mobile": {
+        "h1": "Word 模板",
+        "h1Visible": true,
+        "h1Font": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", STSong, SimSun, serif",
+        "documentWidth": 390,
+        "viewportWidth": 390,
+        "horizontalOverflow": false,
+        "headerWidth": {
+          "client": 358,
+          "scroll": 358
+        }
+      }
+    },
+    "workspaces": {
+      "desktop": {
+        "h1": "团队",
+        "h1Visible": true,
+        "h1Font": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", STSong, SimSun, serif",
+        "documentWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false,
+        "headerWidth": {
+          "client": 1128,
+          "scroll": 1128
+        }
+      },
+      "mobile": {
+        "h1": "团队",
+        "h1Visible": true,
+        "h1Font": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", STSong, SimSun, serif",
+        "documentWidth": 390,
+        "viewportWidth": 390,
+        "horizontalOverflow": false,
+        "headerWidth": {
+          "client": 358,
+          "scroll": 358
+        }
+      }
+    },
+    "workspace-detail": {
+      "desktop": {
+        "h1": "E2E 团队 1793086162749-chromium",
+        "h1Visible": true,
+        "h1Font": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", STSong, SimSun, serif",
+        "documentWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false,
+        "headerWidth": {
+          "client": 1128,
+          "scroll": 1128
+        }
+      },
+      "mobile": {
+        "h1": "E2E 团队 1793086162749-chromium",
+        "h1Visible": true,
+        "h1Font": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", STSong, SimSun, serif",
+        "documentWidth": 390,
+        "viewportWidth": 390,
+        "horizontalOverflow": false,
+        "headerWidth": {
+          "client": 358,
+          "scroll": 358
+        }
+      }
+    },
+    "observability": {
+      "desktop": {
+        "h1": "用量与健康",
+        "h1Visible": true,
+        "h1Font": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", STSong, SimSun, serif",
+        "documentWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false,
+        "headerWidth": {
+          "client": 1128,
+          "scroll": 1128
+        }
+      },
+      "mobile": {
+        "h1": "用量与健康",
+        "h1Visible": true,
+        "h1Font": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", STSong, SimSun, serif",
+        "documentWidth": 390,
+        "viewportWidth": 390,
+        "horizontalOverflow": false,
+        "headerWidth": {
+          "client": 358,
+          "scroll": 358
+        }
+      }
+    },
+    "plan": {
+      "desktop": {
+        "h1": "我的套餐",
+        "h1Visible": true,
+        "h1Font": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", STSong, SimSun, serif",
+        "documentWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false,
+        "headerWidth": {
+          "client": 1128,
+          "scroll": 1128
+        }
+      },
+      "mobile": {
+        "h1": "我的套餐",
+        "h1Visible": true,
+        "h1Font": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", STSong, SimSun, serif",
+        "documentWidth": 390,
+        "viewportWidth": 390,
+        "horizontalOverflow": false,
+        "headerWidth": {
+          "client": 358,
+          "scroll": 358
+        }
+      }
+    },
+    "api-keys": {
+      "desktop": {
+        "h1": "API Key",
+        "h1Visible": true,
+        "h1Font": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", STSong, SimSun, serif",
+        "documentWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false,
+        "headerWidth": {
+          "client": 1128,
+          "scroll": 1128
+        }
+      },
+      "mobile": {
+        "h1": "API Key",
+        "h1Visible": true,
+        "h1Font": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", STSong, SimSun, serif",
+        "documentWidth": 390,
+        "viewportWidth": 390,
+        "horizontalOverflow": false,
+        "headerWidth": {
+          "client": 358,
+          "scroll": 358
+        }
+      }
+    },
+    "account-verify": {
+      "desktop": {
+        "h1": "邮箱验证",
+        "h1Visible": true,
+        "h1Font": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", STSong, SimSun, serif",
+        "documentWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false,
+        "headerWidth": {
+          "client": 390,
+          "scroll": 390
+        }
+      },
+      "mobile": {
+        "h1": "邮箱验证",
+        "h1Visible": true,
+        "h1Font": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", STSong, SimSun, serif",
+        "documentWidth": 390,
+        "viewportWidth": 390,
+        "horizontalOverflow": false,
+        "headerWidth": {
+          "client": 316,
+          "scroll": 316
+        }
+      }
+    },
+    "password-reset": {
+      "desktop": {
+        "h1": "重置密码",
+        "h1Visible": true,
+        "h1Font": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", STSong, SimSun, serif",
+        "documentWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false,
+        "headerWidth": {
+          "client": 390,
+          "scroll": 390
+        }
+      },
+      "mobile": {
+        "h1": "重置密码",
+        "h1Visible": true,
+        "h1Font": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", STSong, SimSun, serif",
+        "documentWidth": 390,
+        "viewportWidth": 390,
+        "horizontalOverflow": false,
+        "headerWidth": {
+          "client": 348,
+          "scroll": 348
+        }
+      }
+    },
+    "screening": {
+      "desktop": {
+        "h1": "PRISMA 筛选",
+        "h1Visible": true,
+        "h1Font": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", STSong, SimSun, serif",
+        "documentWidth": 1440,
+        "viewportWidth": 1440,
+        "horizontalOverflow": false,
+        "headerWidth": {
+          "client": 1128,
+          "scroll": 1128
+        }
+      },
+      "mobile": {
+        "h1": "PRISMA 筛选",
+        "h1Visible": true,
+        "h1Font": "\"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", STSong, SimSun, serif",
+        "documentWidth": 390,
+        "viewportWidth": 390,
+        "horizontalOverflow": false,
+        "headerWidth": {
+          "client": 358,
+          "scroll": 358
+        }
+      }
+    }
+  },
+  "failures": []
+}

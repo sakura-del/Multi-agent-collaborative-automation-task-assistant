@@ -4147,6 +4147,46 @@ quota key 已删除，回查 KEYS 为空
 - CI run `40468060684`（提交 `6e6fee8`）：Lint/Format/Types、Frontend Unit/Types/Build、Unit Tests/Coverage、Alembic Round-Trip、Docker Build、Compose Release Smoke **6/6 全绿**。
 - `backup/main` 已推送；最终文档提交与服务器同步在收尾提交中继续执行。临时浏览器登录态已删除，未保留本地凭证文件。
 
+## 2026-10-27 · 学术编辑感阶段 D（其余页面一致化）
+
+计划：[2026-10-27-academic-editorial-phase-d-plan.md](2026-10-27-academic-editorial-phase-d-plan.md)
+
+### 前置审查修复
+
+两份独立审查返回后，先用实测复现再修：
+
+- 390px 注入长 URL + 8 列表格，页面宽度 **3592px**；`.md-body` 增加 `overflow-wrap:anywhere`，表格改为局部 `overflow-x:auto`。修复后页面保持 **390px**，非换行表格可视 316 / 内容 1128，仅表格自身滚动。
+- 实测 success / destructive / warning 文字与 ring 对比不足，调整后分别为 **5.39 / 5.75 / 6.29 / 6.78:1**，均过 AA；没有把测量脚本里的透明背景误当黑色。
+- 移动端唯一任务入口从隐藏状态改为真实可聚焦按钮，E2E 桌面点击 + 移动 `focus + Enter` **2/2 passed**。
+- 待人工介入说明改为「确认规划或处理暂停原因后…」，不再暗示任务尚未开始。
+- 异常评分显示「不可用」，不生成超范围 meter；无评分/无文献有明确空态。相关 3 文件测试 **51/51 passed**。
+
+提交：`d9defb2`、`28a95a5`。
+
+### 共享标题与页面覆盖
+
+新建无业务状态的 `PageHeader`，统一 eyebrow / 衬线 h1 / 描述 / 右侧操作插槽，并保留 `library-hint` 测试契约。
+
+- 知识与引用：`155c3d7`（Knowledge、ReferenceLibrary、ReferenceImport、Style、Template）。
+- 团队与设置：`73a0973`（Workspace、Observability、Plan、ApiKey、Screening）。
+- 特殊页：`1b717ad`（WorkspaceDetail、VerifyEmail、PasswordReset）。
+- 逐页实测修复：`c89149a` + `d70978d` 知识库宽表及绝对定位 sr-only；`ce7e254` 公开账号页居中卡片。
+
+阶段 D 相关分组测试：知识/引用 **86/86**、团队/设置 **75/75**、特殊页 **24/24**。全量门禁：**469 passed / 6 skipped（41 文件）**；`vue-tsc -b` 0 错误；Vite build 成功。
+
+### 逐页生产证据
+
+`docs/design/2026-10-27-premium-redesign/phase-d/` 保存 **13 页 × 桌面/移动 = 26 张截图**与 `validation.json`。页面：知识库、引用库、导入、样式、模板、团队列表、工作区详情、用量、套餐、API Key、账号验证、密码重置、PRISMA。
+
+全部人工逐张查看；无横向溢出、无浏览器脚本错误。知识库第一次修复只加 overflow 仍不够，继续量到 `.sr-only` 相对页面落在 x=592，补定位祖先后才通过——没有凭推理报完成。公开密码重置页原先贴左上角，也经截图发现后修复。
+
+### E2E 与收尾状态
+
+- 阶段 D 桌面真实流程首轮 14/17；其余 3 条均为登录限流。`plan.spec.ts` 在窗口后单独复验 **5/5 passed**，合计 **17/17 场景通过**。
+- 移动集合首轮 11/12；移动批注同样因登录 429 导致 token 缺失，窗口后复验通过，合计 **12/12 场景通过**。
+- 套餐覆盖真实接口数字、免费版额度用尽、升级入口、加载态、usage 局部失败与移动溢出；引用库编辑覆盖落库刷新与非法年份准入；用量覆盖几何、状态合计、键盘焦点和对比度。
+- 服务器已部署到 `ce7e254`，健康检查 ready。最终提交、备份和 CI 结果在收尾时补记。
+
 
 
 
