@@ -92,6 +92,17 @@ function terminalLabel(status: string): string {
   return TERMINAL_LABELS[status] ?? status;
 }
 
+// 终态文字恢复可见后，色调必须仍按语义区分；用完整类名查表，避免 Tailwind 扫描丢失。
+const TERMINAL_TONE_CLASS: Record<string, string> = {
+  completed: "bg-success/7 text-success",
+  failed: "bg-destructive/7 text-destructive",
+  cancelled: "bg-muted text-muted-foreground",
+};
+
+function terminalToneClass(status: string): string {
+  return TERMINAL_TONE_CLASS[status] ?? "bg-muted text-muted-foreground";
+}
+
 // ===== 汇总统计 =====
 
 const counts = computed(() => {
@@ -146,13 +157,11 @@ const rows = computed(() =>
   <section>
     <header class="mb-5 flex flex-wrap items-start justify-between gap-3">
       <div>
-        <h1 class="text-xl font-semibold tracking-tight">任务</h1>
-        <p class="mt-1 text-sm text-muted-foreground">
-          共 {{ counts.total }} 个任务<template v-if="counts.needsMe > 0">
-            ，其中
-            <span class="font-medium text-warning">{{ counts.needsMe }} 个待你确认</span>
-          </template>
+        <p class="mb-2 text-[10px] font-semibold tracking-[0.16em] text-primary uppercase">
+          Research workspace
         </p>
+        <h1 class="font-display text-3xl font-medium tracking-[-0.035em]">研究任务</h1>
+        <p class="mt-2 text-sm text-muted-foreground">检索、核验与写作，都从证据开始。</p>
       </div>
       <Button data-test="new-task" @click="showForm = !showForm">
         <Plus :size="16" aria-hidden="true" />
@@ -170,66 +179,78 @@ const rows = computed(() =>
       @submit="handleCreate"
     />
 
-    <!-- 汇总卡：四项计数。第一项「待我确认」用警示色强调，因为它是唯一
-         需要用户动手的状态；其余三项是中性信息。 -->
-    <div v-if="store.items.length" class="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+    <!-- 轻量汇总带：保留全部真实计数与快捷筛选，不再用四张等宽卡重复抢占视线。 -->
+    <div
+      v-if="store.items.length"
+      class="mb-5 grid grid-cols-2 gap-y-4 border-b border-border pb-5 sm:grid-cols-4"
+    >
       <button
         type="button"
         data-test="stat-needs-me"
-        :class="[
-          'rounded-lg border p-3 text-left transition-colors',
-          counts.needsMe > 0
-            ? 'border-warning/30 bg-warning/8 hover:bg-warning/12'
-            : 'border-border bg-card hover:bg-muted/40',
-        ]"
+        class="flex items-baseline gap-2 border-r border-border pr-4 text-left"
         @click="filter = filter === 'needs-me' ? 'all' : 'needs-me'"
       >
-        <p class="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-          待我确认
-        </p>
-        <p
+        <span
           :class="[
-            'mt-1 text-2xl font-semibold tabular-nums',
+            'font-display text-3xl leading-none tabular-nums',
             counts.needsMe > 0 ? 'text-warning' : 'text-muted-foreground',
           ]"
+          >{{ counts.needsMe }}</span
         >
-          {{ counts.needsMe }}
-        </p>
+        <span class="text-xs text-muted-foreground">待我确认</span>
       </button>
-
       <button
         type="button"
         data-test="stat-active"
-        :class="[
-          'rounded-lg border border-border bg-card p-3 text-left transition-colors hover:bg-muted/40',
-        ]"
+        class="flex items-baseline gap-2 border-border px-4 text-left sm:border-r"
         @click="filter = filter === 'active' ? 'all' : 'active'"
       >
-        <p class="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-          进行中
-        </p>
-        <p class="mt-1 text-2xl font-semibold text-foreground tabular-nums">{{ counts.active }}</p>
+        <span class="font-display text-3xl leading-none tabular-nums">{{ counts.active }}</span>
+        <span class="text-xs text-muted-foreground">进行中</span>
       </button>
-
       <button
         type="button"
         data-test="stat-done"
-        :class="[
-          'rounded-lg border border-border bg-card p-3 text-left transition-colors hover:bg-muted/40',
-        ]"
+        class="flex items-baseline gap-2 border-r border-border px-4 text-left"
         @click="filter = filter === 'done' ? 'all' : 'done'"
       >
-        <p class="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-          已完成
-        </p>
-        <p class="mt-1 text-2xl font-semibold text-foreground tabular-nums">{{ counts.done }}</p>
+        <span class="font-display text-3xl leading-none tabular-nums">{{ counts.done }}</span>
+        <span class="text-xs text-muted-foreground">已完成</span>
       </button>
-
-      <div data-test="stat-total" class="rounded-lg border border-border bg-card p-3 text-left">
-        <p class="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">全部</p>
-        <p class="mt-1 text-2xl font-semibold text-foreground tabular-nums">{{ counts.total }}</p>
+      <div data-test="stat-total" class="flex items-baseline gap-2 px-4 text-left">
+        <span class="font-display text-3xl leading-none tabular-nums">{{ counts.total }}</span>
+        <span class="text-xs text-muted-foreground">全部任务</span>
       </div>
     </div>
+
+    <!-- 唯一需要用户行动的状态集中成一个入口；数量与行为都来自现有 filter/counts。 -->
+    <button
+      v-if="store.items.length"
+      type="button"
+      data-test="attention-needs-me"
+      class="mb-6 flex w-full items-center gap-4 rounded-xl border border-primary/15 bg-accent/45 px-4 py-4 text-left transition-colors hover:bg-accent/70 sm:px-5"
+      :aria-pressed="filter === 'needs-me'"
+      @click="filter = filter === 'needs-me' ? 'all' : 'needs-me'"
+    >
+      <span class="min-w-10 font-display text-4xl leading-none text-primary tabular-nums">
+        {{ counts.needsMe }}
+      </span>
+      <span class="min-w-0 flex-1">
+        <span class="block text-sm font-semibold">
+          {{ counts.needsMe > 0 ? `有 ${counts.needsMe} 项任务等待你的判断` : "当前没有待处理任务" }}
+        </span>
+        <span class="mt-1 block text-xs leading-5 text-muted-foreground">
+          {{
+            counts.needsMe > 0
+              ? "确认研究路径后，智能体才会开始检索与写作。"
+              : "可以从下方研究索引继续查看已有成果。"
+          }}
+        </span>
+      </span>
+      <span class="shrink-0 text-xs font-medium text-primary">
+        {{ filter === "needs-me" ? "查看全部" : "查看待办" }} →
+      </span>
+    </button>
 
     <!-- 筛选 + 搜索 -->
     <div v-if="store.items.length" class="mb-4 flex flex-wrap items-center gap-2">
@@ -241,10 +262,10 @@ const rows = computed(() =>
           :data-test="`filter-${option.value}`"
           :aria-pressed="filter === option.value"
           :class="[
-            'rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
+            'relative px-1 py-1.5 text-xs font-medium transition-colors after:absolute after:right-0 after:-bottom-1 after:left-0 after:h-0.5 after:rounded-full',
             filter === option.value
-              ? 'bg-foreground text-background'
-              : 'bg-muted text-muted-foreground hover:text-foreground',
+              ? 'text-foreground after:bg-primary'
+              : 'text-muted-foreground after:bg-transparent hover:text-foreground',
           ]"
           @click="filter = option.value"
         >
@@ -314,7 +335,7 @@ const rows = computed(() =>
       </Button>
     </div>
 
-    <div v-else class="overflow-hidden rounded-lg border border-border bg-card">
+    <div v-else class="overflow-hidden rounded-xl border border-border bg-card/85">
       <!-- 桌面：表格。窄屏：卡片式（thead 隐藏，每行用 data-label 打标签） -->
       <table class="w-full border-collapse text-sm max-md:block">
         <thead class="max-md:hidden">
@@ -339,7 +360,12 @@ const rows = computed(() =>
             v-for="row in rows"
             :key="row.task.task_id"
             :data-test="`task-row-${row.task.task_id}`"
-            class="group cursor-pointer border-b border-border last:border-b-0 hover:bg-muted/40 focus-within:bg-muted/40 max-md:block max-md:px-3 max-md:py-2.5"
+            :class="[
+              'group cursor-pointer border-y-0 border-r-0 border-b border-l-2 border-border last:border-b-0 hover:bg-muted/40 focus-within:bg-muted/40 max-md:block max-md:px-3 max-md:py-2.5',
+              needsUserAction(row.task.status)
+                ? 'border-l-warning bg-warning/5'
+                : 'border-l-transparent',
+            ]"
             @click="openTask(row.task.task_id)"
           >
             <!-- 标题：主题（主）+ 括号标记（次，灰字小号） -->
@@ -365,20 +391,27 @@ const rows = computed(() =>
               </div>
             </td>
 
-            <!-- 状态：终态用图标 + **屏幕阅读器可见**的状态文字。
-                 - 视觉上去重（不再 `✓ 已完成` 并排）；
-                 - 但文字仍在 DOM 里（`sr-only`），因为：
-                   ① 无障碍：颜色/形状对读屏软件不可靠，必须有文字；
-                   ② 既有 E2E 依赖行文本含「已完成」来定位（m2-result-preview）；
-                   ③ 页面内 Ctrl+F 也还能搜到状态。 -->
+            <!-- 状态：终态用形状图标 + 可见文字，长列表里不必只靠颜色猜测。
+                 文字同时服务读屏、页面搜索与既有 E2E（m2-result-preview）。 -->
             <td
               class="px-3 py-2.5 max-md:flex max-md:items-center max-md:justify-between max-md:gap-3 max-md:px-0 max-md:py-1"
             >
               <span class="hidden text-xs text-muted-foreground max-md:inline">状态</span>
               <span class="inline-flex items-center gap-1.5">
-                <TaskStatusIcon :status="row.task.status" />
-                <StatusBadge v-if="!isTerminal(row.task.status)" :status="row.task.status" />
-                <span v-else class="sr-only">{{ terminalLabel(row.task.status) }}</span>
+                <span
+                  v-if="isTerminal(row.task.status)"
+                  :class="[
+                    'inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs',
+                    terminalToneClass(row.task.status),
+                  ]"
+                >
+                  <TaskStatusIcon :status="row.task.status" />
+                  <span data-test="terminal-status-label">{{ terminalLabel(row.task.status) }}</span>
+                </span>
+                <template v-else>
+                  <TaskStatusIcon :status="row.task.status" />
+                  <StatusBadge :status="row.task.status" />
+                </template>
               </span>
             </td>
 

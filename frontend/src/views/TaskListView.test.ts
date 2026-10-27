@@ -144,24 +144,20 @@ describe("进度列：不再有说谎的百分比进度条", () => {
     expect(wrapper.findAll('[role="progressbar"]')).toHaveLength(1);
   });
 
-  it("终态不重复渲染可见徽标，但文字仍在 DOM 里（无障碍 + E2E 契约）", async () => {
-    // 实测截图问题：`✓ 已完成` 并排，同一信息说两遍，降低可扫读性。
-    // 但文字**不能**从 DOM 里删掉：
-    //   ① 读屏软件读不出 SVG 图标语义，必须有文字；
-    //   ② 既有 E2E（m2-result-preview）按行文本含「已完成」定位已完成任务
-    //      —— 删掉后它找不到行，会退到打开第一条（可能没有结果）而失败。
-    // 所以：终态用 `sr-only` 文字（视觉隐藏、DOM 保留）。
+  it("终态同时显示形状图标与可见文字（2026-10-27 设计变更）", async () => {
+    // 旧设计只显示绿色勾，扫读长列表时语义不够明确；新设计恢复可见文字。
+    // 既有 E2E 仍按行文本含「已完成」定位，因此这一变更同时保留 E2E 契约。
     const wrapper = await mountWith([
       task({ task_id: "done", status: "completed", title: "完成的（x）" }),
       task({ task_id: "wait", status: "waiting_approval", title: "待确认的（y）" }),
     ]);
 
     const doneRow = wrapper.find('[data-test="task-row-done"]');
-    // 文本在（E2E / 读屏可用）
-    expect(doneRow.text()).toContain("已完成");
-    // 但走的是 sr-only 通道，不是可见徽标
-    const srOnly = doneRow.findAll("span.sr-only").filter((el) => el.text() === "已完成");
-    expect(srOnly).toHaveLength(1);
+    const visibleLabel = doneRow.find('[data-test="terminal-status-label"]');
+    expect(visibleLabel.exists()).toBe(true);
+    expect(visibleLabel.classes()).not.toContain("sr-only");
+    expect(visibleLabel.text()).toBe("已完成");
+    expect(doneRow.find('[data-test="status-icon"]').attributes("data-state")).toBe("completed");
 
     // 非终态仍需可见的文字徽标（用户要看懂系统正在做什么）
     expect(wrapper.find('[data-test="task-row-wait"]').text()).toContain("待确认规划");
@@ -169,6 +165,21 @@ describe("进度列：不再有说谎的百分比进度条", () => {
 });
 
 describe("汇总统计", () => {
+  it("待办行动区只筛选需要我处理的任务", async () => {
+    const wrapper = await mountWith([
+      task({ task_id: "wait", status: "waiting_approval" }),
+      task({ task_id: "done", status: "completed" }),
+    ]);
+
+    const action = wrapper.find('[data-test="attention-needs-me"]');
+    expect(action.exists()).toBe(true);
+    expect(action.text()).toContain("1");
+    await action.trigger("click");
+
+    expect(wrapper.find('[data-test="task-row-wait"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="task-row-done"]').exists()).toBe(false);
+  });
+
   it("把「待我确认」单独统计（唯一需要用户行动的状态）", async () => {
     const wrapper = await mountWith([
       task({ task_id: "a", status: "waiting_approval" }),
