@@ -86,11 +86,19 @@ class TestProjectRootResolution:
         assert DEFAULT_CONFIG_PATH.is_file()
 
     def test_fallback_chain_is_loaded_from_yaml(self) -> None:
+        """降级链要被 YAML 读到 —— 断言"非空且每项完整"，不写死具体厂商。
+
+        原断言 `chain[0].provider == "deepseek"` 把「加载成功」这条性质
+        绑在了具体厂商上；换默认模型后必然误报（2026-10-27 切到
+        workbuddy-ai，deepseek 退到第二位）。
+        """
         from app.core.config import get_settings
 
         chain = get_settings().llm.fallback_chain
         assert chain, "fallback_chain 不应为空（YAML 未被读到）"
-        assert chain[0].provider == "deepseek"
+        for item in chain:
+            assert item.provider, f"降级链项缺 provider: {item}"
+            assert item.model, f"降级链项缺 model: {item}"
 
     def test_container_layout_resolves_to_app_dir(self, tmp_path, monkeypatch) -> None:
         """模拟容器布局 /app/app/core/config.py + /app/config/default.yaml。"""

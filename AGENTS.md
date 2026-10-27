@@ -123,7 +123,9 @@ docker compose build backend && docker compose up -d backend
 | 2 | 本机访问服务器服务要用 **`10.0.10.2`**，不是 `127.0.0.1` | 服务跑在服务器上；`127.0.0.1` 指向你自己的电脑 → `ERR_CONNECTION_REFUSED` |
 | 3 | 密钥**只进 `.env`**（gitignore，600 权限） | 绝不写进代码、文档、提交、Issue |
 | 4 | 本机 `NO_PROXY` 含非法 `[::1]` → httpx 报 `InvalidURL: Invalid port ':1]'` | 用 `scripts/run_without_proxy.py` 绕过 |
-| 5 | 模型端点**只支持 `gpt-6-luna`** | `gpt-4o`/`gpt-4o-mini` 返回 404；已配 **DeepSeek 保底**（`config/default.yaml` 的 `fallback_chain` 首位） |
+| 5 | 模型端点 `model.rhzy.ai` 上**只有 3 个模型真正可用**（2026-10-27 实测 21 个） | 可用：`workbuddy-ai/deepseek-v4.1-flash`（1.5s）、`-sg`（1.6s）、`hy3`（2.0s，但内容在 `reasoning_content`）。`qoder/qfmodel` 与 `qoder/dfmodel` **180s 超时无响应**；`opencode-zen-free/*` 14 个全部 502；`gpt-6-luna` 已下架。**换模型前必须逐个实测**，不要只看 `/models` 列表 |
+| 5b | **404（模型不存在）现在会触发降级**（2026-10-27 修） | 原 `_is_retryable` 把 404 归为「参数错误」，不重试也不降级 → 主模型一下架，整个应用直接不可用（而降级链里明明有可用模型）。404 与 400/422 的本质区别：**400 是请求不合法（换谁都失败），404 是模型不存在（换一个就行）**。401/403/400/422 **仍不降级**，测试锁住 |
+| 5c | **`config/default.yaml` 的 fallback_chain 只放实测可用的项** | `glm`/`qwen` 的 key 在 `.env` 里是 `your-glm-...` / `your-qwen-...` 占位符，实测 **401**。留着不是「多一层兜底」，而是降级时**先浪费一次 401** 才轮到下一个。测试 `test_fallback_chain_first_entry_is_usable` 断言链里不含这两家 |
 | 6 | 容器内配置文件在 **`/app/config/`** | `PROJECT_ROOT` 已做多级探测（`MAA_PROJECT_ROOT` 环境变量 → app 包位置 → 文件位置 → cwd）；曾因 `parents[3]` 越界导致 `fallback_chain` 为空 |
 | 7 | 服务器上有**其他项目的容器**（portainer / qdrant / rsshub 等） | 不要动；曾出现的 200G 磁盘占用属于别的项目 |
 | 8 | 冒烟栈用独立 project `maa-test` + `ports: !override` | 防止 `down --volumes` 误删生产数据卷 |

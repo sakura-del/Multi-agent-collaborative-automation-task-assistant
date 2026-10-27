@@ -249,7 +249,21 @@ class TestDeepSeekFallback:
         assert cfg.deepseek_api_key is None
         assert cfg.deepseek_base_url == "https://api.deepseek.com/v1"
 
-    def test_fallback_chain_puts_deepseek_first(self) -> None:
+    def test_fallback_chain_first_entry_is_usable(self) -> None:
+        """降级链首项必须是一个**实测可用**的模型，且链条非空。
+
+        ## 为什么不再写死 deepseek（2026-10-27 改）
+
+        原断言是「首项必须是 deepseek/deepseek-chat」。切到
+        `workbuddy-ai` 主模型后首项改成同端点同族的 `-sg` 变体
+        （与主模型共用 key，最不容易因 key 失效而整链失效），
+        deepseek 退到第二位作兜底。
+
+        **测试意图从来不是「首项必须是 deepseek」**，而是「首项得是真能用的东西」。
+        写死具体厂商会让每次换模型都得改测试，而真正该守住的性质是：
+        链条非空、每项都有 provider 与 model、**不含已知的占位 key 厂商**
+        （glm/qwen 的 key 在 .env 里仍是 `your-xxx` 占位符，实测 401）。
+        """
         from pathlib import Path
 
         import yaml
@@ -258,8 +272,18 @@ class TestDeepSeekFallback:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
         chain = data["llm"]["fallback_chain"]
 
-        assert chain[0]["provider"] == "deepseek"
-        assert chain[0]["model"] == "deepseek-chat"
+        assert chain, "降级链不应为空（否则主模型失败即整任务失败）"
+        for item in chain:
+            assert item.get("provider"), f"降级链项缺 provider: {item}"
+            assert item.get("model"), f"降级链项缺 model: {item}"
+
+        # 占位 key 的厂商不该出现在降级链里：每项会先浪费一次 401 才轮到下一个
+        placeholders = {"glm", "qwen"}
+        providers = {item["provider"] for item in chain}
+        assert not (providers & placeholders), (
+            f"降级链含占位 key 厂商 {providers & placeholders}；"
+            "这些 key 在 .env 里仍是你 your-xxx 占位符，实测 401，配真 key 后再加回来"
+        )
 
     def test_manager_initializes_deepseek_base_url(self) -> None:
         from app.core.config import LLMConfig

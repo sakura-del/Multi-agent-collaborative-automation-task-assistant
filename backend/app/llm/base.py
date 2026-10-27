@@ -211,9 +211,30 @@ class BaseLLM(ABC):
     def _is_retryable(exc: Exception) -> bool:
         """判断异常是否可重试（同时决定是否触发降级链）。
 
-        可重试：超时、连接错误、限流（429）、上游 5xx（如 503 Service temporarily
-        unavailable —— 答辩保障实测该端点会间歇返回 503）。
-        不可重试：鉴权失败（401/403）、参数错误（400/422），重试与降级都无意义。
+        ## 可重试（会重试 → 耗尽后降级）
+
+        - 超时、连接错误、限流（429）
+        - 上游 5xx（如 503 Service temporarily unavailable）
+        - **模型不存在（404）** ← 见下方说明
+
+        ## 不可重试（直接抛出，不降级）
+
+        - 鉴权失败（401/403）：key 是同一个，换模型一样失败
+        - 请求体不合法（400/422）：换模型也一样不合法
+
+        ## 为什么 404 要降级（2026-10-27 实测修正）
+
+        原实现把 404 归为「参数错误」，不重试也不降级。但实测发现：
+        `model.rhzy.ai` 下架 `gpt-6-luna` 后，整个应用**直接不可用** ——
+        降级链明明配了可用模型，却因为主模型返回 404 而根本没被尝试。
+
+        **404 的含义是「这个模型在本账号/分组不存在」，这正是降级链存在的场景**：
+        主模型下线、改名、或换了分组，都该由下一个候选顶上。
+        与 400/422 的区别在于：400 是**请求**不合法（换谁都不行），
+        404 是**模型**不存在（换一个就行）。
+
+        识别方式：优先 `status_code`，其次类名（`NotFoundError`），
+        最后消息里的 `not found` / `is not supported` / `model_not_found`。
 
         实现说明：openai SDK 把 5xx 抛成 `InternalServerError`（类名不含 timeout 等
         关键字），早期只按类名匹配，导致 503 既不重试也不降级，任务直接转人工。
@@ -221,10 +242,16 @@ class BaseLLM(ABC):
         name = type(exc).__name__.lower()
         if any(k in name for k in ("timeout", "ratelimit", "connection", "retry")):
             return True
-        # 上游 5xx：优先看状态码，其次看类名/消息
+        # 404：模型不存在 → 换模型能解决（类名方式）
+        if "notfound" in name:
+            return True
+
+        # 优先看状态码
         status = getattr(exc, "status_code", None)
         if isinstance(status, int):
-            return status >= 500 or status == 429
+            # 404 与 5xx/429 一样触发降级；401/403/400/422 不降级
+            return status >= 500 or status in (404, 429)
+
         if any(k in name for k in ("internalserver", "serviceunavailable", "badgateway")):
             return True
         text = str(exc).lower()
@@ -236,6 +263,11 @@ class BaseLLM(ABC):
                 "504",
                 "service temporarily unavailable",
                 "temporarily unavailable",
+                # 404 的常见措辞（不同厂商/网关写法不同）
+                "model_not_found",
+                "not supported by any configured account",
+                "is not supported",
+                "model not found",
             )
         )
 

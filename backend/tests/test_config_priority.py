@@ -152,10 +152,17 @@ class TestYamlStillProvidesDefaults:
 
 class TestRealYamlStillWorks:
     def test_repository_yaml_is_loaded(self) -> None:
-        """回归：仓库真实 default.yaml 仍被读到（fallback_chain 非空是既有断言）。"""
+        """回归：仓库真实 default.yaml 仍被读到（fallback_chain 非空是既有断言）。
+
+        **不写死首项厂商**（2026-10-27）：原断言 `fallback_chain[0].provider == "deepseek"`
+        把「YAML 加载成功」这条性质绑在了具体厂商上；切默认模型后必然误报。
+        该守的性质是「链条非空且每项完整」。
+        """
         from app.core.config import get_settings
 
         settings = get_settings()
 
         assert settings.llm.fallback_chain, "真实 default.yaml 的 fallback_chain 未被加载"
-        assert settings.llm.fallback_chain[0].provider == "deepseek"
+        for item in settings.llm.fallback_chain:
+            assert item.provider, f"降级链项缺 provider: {item}"
+            assert item.model, f"降级链项缺 model: {item}"
