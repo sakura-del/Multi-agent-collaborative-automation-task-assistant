@@ -84,6 +84,18 @@ describe("TaskResult", () => {
     expect(wrapper.find('[data-test="bibliography-item-2"]').text()).toContain("危险链接");
   });
 
+  it("places the reading sheet before the evidence rail", () => {
+    const wrapper = mountResult();
+    const paper = wrapper.find('[data-test="result-paper"]');
+    const rail = wrapper.find('[data-test="evidence-rail"]');
+
+    expect(paper.exists()).toBe(true);
+    expect(rail.exists()).toBe(true);
+    expect(
+      paper.element.compareDocumentPosition(rail.element) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+  });
+
   it("labels quality scores in human-readable form", () => {
     const wrapper = mountResult();
     const scores = wrapper.find('[data-test="result-scores"]');
@@ -91,6 +103,16 @@ describe("TaskResult", () => {
     expect(scores.text()).toContain("引用可追溯性");
     expect(scores.text()).toContain("96");
     expect(scores.text()).toContain("质量");
+  });
+
+  it("exposes only real score values on meter elements", () => {
+    const wrapper = mountResult();
+    const meters = wrapper.findAll('[role="meter"]');
+
+    expect(meters).toHaveLength(2);
+    expect(meters[0].attributes("aria-valuenow")).toBe("96");
+    expect(meters[0].attributes("aria-label")).toBe("引用可追溯性");
+    expect(meters[1].attributes("aria-valuenow")).toBe("88");
   });
 
   it("lists review issues", () => {

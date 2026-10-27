@@ -216,9 +216,10 @@
    ============================================================ */
 @layer components {
   .md-body {
-    font-size: 0.875rem;
-    line-height: 1.75;
+    font-size: 0.9375rem;
+    line-height: 2;
     color: var(--foreground);
+    text-wrap: pretty;
   }
 
   /* 标题：层级靠字号 + 上间距拉开，不靠装饰 */
@@ -229,12 +230,14 @@
     color: var(--foreground);
   }
   .md-body h1 {
-    font-size: 1.25rem;
-    margin: 0 0 0.75rem;
+    font-size: 1.75rem;
+    line-height: 1.45;
+    letter-spacing: -0.025em;
+    margin: 0 0 1rem;
   }
   .md-body h2 {
-    font-size: 1.0625rem;
-    margin: 1.5rem 0 0.5rem;
+    font-size: 1.2rem;
+    margin: 2rem 0 0.65rem;
     padding-bottom: 0.35rem;
     border-bottom: 1px solid var(--border);
   }
@@ -253,7 +256,8 @@
 
   /* 段落与列表 */
   .md-body p {
-    margin: 0 0 0.75rem;
+    max-width: 72ch;
+    margin: 0 0 1rem;
   }
   .md-body :where(ul, ol) {
     margin: 0 0 0.75rem;
@@ -266,7 +270,8 @@
     list-style: decimal;
   }
   .md-body li {
-    margin: 0.2rem 0;
+    max-width: 72ch;
+    margin: 0.25rem 0;
   }
   .md-body li > :where(ul, ol) {
     margin: 0.2rem 0 0.2rem;

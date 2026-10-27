@@ -159,7 +159,10 @@ onBeforeUnmount(() => {
   <section>
     <header class="mb-4 flex flex-wrap items-start justify-between gap-3">
       <div class="min-w-0">
-        <h1 class="text-xl font-semibold tracking-tight">
+        <p class="mb-1.5 text-[9px] font-semibold tracking-[0.16em] text-primary uppercase">
+          Research task
+        </p>
+        <h1 class="font-display text-2xl leading-snug font-medium tracking-[-0.025em]">
           {{ store.snapshot?.title ?? "任务详情" }}
         </h1>
         <p class="mt-1.5 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
