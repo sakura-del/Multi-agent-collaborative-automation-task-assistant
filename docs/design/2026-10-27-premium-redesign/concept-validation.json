@@ -1,0 +1,29 @@
+{
+  "errors": [],
+  "metrics": {
+    "login": {
+      "width": 1440,
+      "height": 1000,
+      "scrollWidth": 1440,
+      "scrollHeight": 1000,
+      "horizontalOverflow": false,
+      "verticalOverflow": false
+    },
+    "tasks": {
+      "width": 1440,
+      "height": 1000,
+      "scrollWidth": 1440,
+      "scrollHeight": 1000,
+      "horizontalOverflow": false,
+      "verticalOverflow": false
+    },
+    "result": {
+      "width": 1440,
+      "height": 1000,
+      "scrollWidth": 1440,
+      "scrollHeight": 1000,
+      "horizontalOverflow": false,
+      "verticalOverflow": false
+    }
+  }
+}

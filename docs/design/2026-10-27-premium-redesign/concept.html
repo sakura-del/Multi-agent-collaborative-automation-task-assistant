@@ -1,0 +1,541 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>文献综述工作台 · 学术编辑感概念稿</title>
+  <style>
+    :root {
+      --paper: #f5f4ef;
+      --paper-deep: #eeeeE7;
+      --surface: #fdfcf9;
+      --surface-pure: #ffffff;
+      --ink: #19231f;
+      --ink-soft: #36423d;
+      --muted: #6e7872;
+      --faint: #929a94;
+      --accent: #236761;
+      --accent-deep: #184d49;
+      --accent-soft: #e6efea;
+      --accent-faint: #f0f5f1;
+      --success: #31735b;
+      --warning: #9a682c;
+      --warning-soft: #f5ecdc;
+      --line: rgba(25, 35, 31, 0.10);
+      --line-strong: rgba(25, 35, 31, 0.16);
+      --serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", STSong, SimSun, serif;
+      --sans: "Noto Sans SC", "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", sans-serif;
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html { background: #dfe3dd; }
+    body { margin: 0; color: var(--ink); font-family: var(--sans); font-size: 14px; -webkit-font-smoothing: antialiased; }
+    button, input { font: inherit; }
+    button { color: inherit; }
+    svg { display: block; }
+    .artboard {
+      position: relative;
+      width: 1440px;
+      height: 1000px;
+      margin: 0 auto 32px;
+      overflow: hidden;
+      background-color: var(--paper);
+      background-image: radial-gradient(rgba(35, 103, 97, 0.035) 0.55px, transparent 0.55px);
+      background-size: 5px 5px;
+    }
+    .concept-note {
+      position: absolute;
+      right: 22px;
+      bottom: 13px;
+      z-index: 20;
+      color: var(--faint);
+      font: 10px/1.4 var(--mono);
+      letter-spacing: .04em;
+    }
+    .serif { font-family: var(--serif); }
+    .mono { font-family: var(--mono); }
+    .kicker {
+      color: var(--accent);
+      font: 600 10px/1.4 var(--sans);
+      letter-spacing: .19em;
+      text-transform: uppercase;
+    }
+    .brand { display: flex; align-items: center; gap: 11px; }
+    .brand-mark {
+      position: relative;
+      display: grid;
+      place-items: center;
+      width: 33px;
+      height: 33px;
+      border-radius: 9px;
+      background: var(--ink);
+      color: #f8f7f2;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.08);
+    }
+    .brand-mark svg { width: 19px; height: 19px; }
+    .brand-name { font-size: 14px; font-weight: 650; letter-spacing: .02em; }
+    .brand-sub { margin-top: 1px; color: var(--faint); font: 8px/1.3 var(--sans); letter-spacing: .16em; }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      height: 40px;
+      padding: 0 17px;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      background: transparent;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .btn-primary { background: var(--accent); color: white; box-shadow: 0 5px 14px rgba(35,103,97,.14); }
+    .btn-secondary { border-color: var(--line-strong); background: rgba(255,255,255,.55); }
+    .icon { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+    .status-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+    /* ---------- shared workspace shell ---------- */
+    .workspace { display: grid; grid-template-columns: 232px 1fr; }
+    .sidebar {
+      position: relative;
+      z-index: 2;
+      display: flex;
+      flex-direction: column;
+      height: 1000px;
+      padding: 28px 18px 22px;
+      border-right: 1px solid var(--line);
+      background: rgba(250, 249, 245, .86);
+    }
+    .sidebar .brand { padding: 0 8px; }
+    .workspace-switch {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin: 28px 4px 24px;
+      padding: 10px 11px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255,255,255,.45);
+      color: var(--ink-soft);
+      font-size: 12px;
+    }
+    .workspace-switch span { display: flex; align-items: center; gap: 8px; }
+    .workspace-dot { width: 7px; height: 7px; border-radius: 2px; background: var(--accent); }
+    .nav-group { margin-bottom: 23px; }
+    .nav-label { margin: 0 10px 7px; color: var(--faint); font-size: 9px; font-weight: 600; letter-spacing: .16em; }
+    .nav-item {
+      position: relative;
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      height: 37px;
+      margin: 2px 0;
+      padding: 0 11px;
+      border-radius: 7px;
+      color: var(--muted);
+      font-size: 12.5px;
+    }
+    .nav-item .icon { width: 15px; height: 15px; }
+    .nav-item.active { background: var(--accent-soft); color: var(--accent-deep); font-weight: 650; }
+    .nav-item.active::before { position: absolute; left: 0; width: 2px; height: 15px; border-radius: 2px; background: var(--accent); content: ""; }
+    .nav-count { margin-left: auto; min-width: 19px; padding: 1px 5px; border-radius: 5px; background: var(--warning-soft); color: var(--warning); font: 10px/1.5 var(--mono); text-align: center; }
+    .sidebar-foot { margin-top: auto; }
+    .plan-card { margin: 0 4px 17px; padding: 13px; border: 1px solid var(--line); border-radius: 9px; background: rgba(255,255,255,.38); }
+    .plan-card .kicker { font-size: 8px; letter-spacing: .14em; }
+    .plan-card p { margin: 5px 0 0; color: var(--muted); font-size: 10px; }
+    .user-row { display: flex; align-items: center; gap: 10px; padding: 15px 7px 0; border-top: 1px solid var(--line); }
+    .avatar { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; background: var(--ink); color: white; font: 11px var(--serif); }
+    .user-name { font-size: 11px; font-weight: 650; }
+    .user-meta { margin-top: 2px; color: var(--faint); font-size: 9px; }
+    .main { min-width: 0; }
+    .topline { display: flex; align-items: center; gap: 8px; color: var(--faint); font-size: 10px; letter-spacing: .04em; }
+    .topline .slash { color: var(--line-strong); }
+
+    /* ---------- login ---------- */
+    .login { display: grid; grid-template-columns: 59% 41%; background: var(--paper); }
+    .login-story { position: relative; display: flex; flex-direction: column; padding: 42px 60px 38px; overflow: hidden; border-right: 1px solid var(--line); }
+    .login-story::before {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background-image: linear-gradient(rgba(35,103,97,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(35,103,97,.035) 1px, transparent 1px);
+      background-size: 80px 80px;
+      mask-image: linear-gradient(to bottom right, black, transparent 68%);
+      content: "";
+    }
+    .login-story::after { position: absolute; top: 142px; right: 59px; width: 1px; height: 90px; background: var(--accent); opacity: .4; content: ""; }
+    .login-hero { position: relative; z-index: 1; margin-top: 121px; }
+    .login-hero h1 { margin: 18px 0 21px; font: 500 56px/1.24 var(--serif); letter-spacing: -.045em; }
+    .login-hero h1 em { color: var(--accent); font-style: normal; }
+    .login-hero .lead { width: 510px; margin: 0; color: var(--muted); font-size: 14px; line-height: 1.95; letter-spacing: .015em; }
+    .proof-wrap { position: relative; z-index: 1; width: 642px; margin-top: 54px; }
+    .proof-ghost { position: absolute; inset: 12px -10px -10px 17px; transform: rotate(-1.2deg); border: 1px solid var(--line); border-radius: 13px; background: rgba(255,255,255,.32); }
+    .proof-card { position: relative; padding: 22px 25px 19px; border: 1px solid var(--line-strong); border-radius: 13px; background: rgba(253,252,249,.94); box-shadow: 0 18px 45px rgba(40,57,48,.07); }
+    .proof-head { display: flex; align-items: center; justify-content: space-between; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+    .proof-index { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 10px; }
+    .proof-index b { color: var(--accent); font: 600 11px var(--mono); }
+    .proof-verified { display: flex; align-items: center; gap: 5px; color: var(--success); font-size: 10px; }
+    .proof-text { margin: 18px 0 17px; color: var(--ink-soft); font: 15px/2 var(--serif); letter-spacing: .015em; }
+    .cite { display: inline-grid; place-items: center; min-width: 19px; height: 18px; margin: 0 2px; border-radius: 4px; background: var(--accent-soft); color: var(--accent); font: 10px var(--mono); vertical-align: 2px; }
+    .proof-source { display: flex; align-items: center; justify-content: space-between; color: var(--faint); font-size: 9px; }
+    .proof-source span:last-child { color: var(--accent); }
+    .login-foot { position: relative; z-index: 1; display: flex; gap: 22px; margin-top: auto; color: var(--faint); font-size: 9px; letter-spacing: .05em; }
+    .login-form-side { position: relative; display: flex; align-items: center; justify-content: center; padding: 40px; background: rgba(253,252,249,.66); }
+    .form-top { position: absolute; top: 45px; right: 49px; color: var(--faint); font-size: 10px; }
+    .login-form { width: 360px; margin-top: -15px; }
+    .login-form .kicker { margin-bottom: 14px; font-size: 9px; }
+    .login-form h2 { margin: 0; font: 500 31px/1.4 var(--serif); letter-spacing: -.025em; }
+    .form-sub { margin: 8px 0 30px; color: var(--muted); font-size: 12px; }
+    .segment { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 26px; padding: 4px; border: 1px solid var(--line); border-radius: 9px; background: var(--paper); }
+    .segment span { padding: 8px; border-radius: 6px; color: var(--faint); font-size: 12px; text-align: center; }
+    .segment .selected { background: var(--surface-pure); color: var(--ink); font-weight: 650; box-shadow: 0 1px 5px rgba(25,35,31,.06); }
+    .field { margin-bottom: 18px; }
+    .field label { display: block; margin-bottom: 7px; color: var(--ink-soft); font-size: 11px; font-weight: 600; }
+    .input { display: flex; align-items: center; height: 44px; padding: 0 13px; border: 1px solid var(--line-strong); border-radius: 8px; background: rgba(255,255,255,.65); color: var(--faint); font-size: 12px; }
+    .login-submit { width: 100%; height: 45px; margin-top: 7px; }
+    .form-meta { display: flex; align-items: center; justify-content: space-between; margin-top: 16px; color: var(--muted); font-size: 10px; }
+    .form-meta a { color: var(--accent); text-decoration: none; }
+    .secure-note { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 33px; color: var(--faint); font-size: 9px; }
+    .secure-note .icon { width: 12px; height: 12px; }
+
+    /* ---------- tasks ---------- */
+    .tasks-main { padding: 33px 43px 30px; }
+    .page-head { display: flex; align-items: flex-end; justify-content: space-between; margin-top: 29px; }
+    .page-head h1 { margin: 0; font: 500 35px/1.3 var(--serif); letter-spacing: -.035em; }
+    .page-head p { margin: 8px 0 0; color: var(--muted); font-size: 12px; }
+    .new-task { height: 42px; padding: 0 18px; }
+    .summary-strip { display: flex; align-items: center; gap: 0; margin-top: 28px; padding: 0 2px 22px; border-bottom: 1px solid var(--line); }
+    .summary-item { display: flex; align-items: baseline; gap: 8px; padding: 0 27px; border-right: 1px solid var(--line); }
+    .summary-item:first-child { padding-left: 0; }
+    .summary-item:last-child { border: 0; }
+    .summary-item b { font: 500 22px var(--serif); }
+    .summary-item span { color: var(--muted); font-size: 10px; }
+    .summary-note { margin-left: auto; color: var(--faint); font: 9px var(--mono); letter-spacing: .04em; }
+    .attention {
+      position: relative;
+      display: grid;
+      grid-template-columns: 76px 1fr auto;
+      align-items: center;
+      min-height: 106px;
+      margin-top: 24px;
+      padding: 18px 23px;
+      overflow: hidden;
+      border: 1px solid rgba(35,103,97,.16);
+      border-radius: 12px;
+      background: var(--accent-faint);
+    }
+    .attention::after { position: absolute; right: 142px; width: 190px; height: 190px; border: 1px solid rgba(35,103,97,.09); border-radius: 50%; content: ""; }
+    .attention-number { color: var(--accent); font: 500 43px var(--serif); letter-spacing: -.05em; }
+    .attention-copy { position: relative; z-index: 1; }
+    .attention-copy h2 { margin: 0 0 6px; font-size: 14px; font-weight: 650; }
+    .attention-copy p { margin: 0; color: var(--muted); font-size: 11px; }
+    .attention-action { position: relative; z-index: 1; display: flex; align-items: center; gap: 8px; color: var(--accent); font-size: 11px; font-weight: 650; }
+    .task-controls { display: flex; align-items: center; justify-content: space-between; margin-top: 28px; }
+    .filter-tabs { display: flex; align-items: center; gap: 25px; }
+    .filter-tab { position: relative; padding: 7px 0; color: var(--faint); font-size: 11px; }
+    .filter-tab.active { color: var(--ink); font-weight: 650; }
+    .filter-tab.active::after { position: absolute; right: 0; bottom: -10px; left: 0; height: 2px; border-radius: 2px; background: var(--accent); content: ""; }
+    .filter-tab span { margin-left: 4px; color: var(--faint); font: 9px var(--mono); }
+    .search { display: flex; align-items: center; gap: 8px; width: 235px; height: 34px; padding: 0 11px; border: 1px solid var(--line); border-radius: 7px; background: rgba(255,255,255,.5); color: var(--faint); font-size: 10px; }
+    .search .icon { width: 13px; height: 13px; }
+    .task-index { margin-top: 25px; overflow: hidden; border: 1px solid var(--line); border-radius: 11px; background: rgba(253,252,249,.84); }
+    .index-head, .task-row { display: grid; grid-template-columns: minmax(0,1fr) 110px 126px 24px; align-items: center; column-gap: 15px; }
+    .index-head { height: 37px; padding: 0 19px; border-bottom: 1px solid var(--line); color: var(--faint); font-size: 9px; letter-spacing: .05em; }
+    .task-row { position: relative; min-height: 70px; padding: 10px 19px; border-bottom: 1px solid var(--line); }
+    .task-row:last-child { border-bottom: 0; }
+    .task-row.waiting { background: linear-gradient(90deg, rgba(245,236,220,.55), transparent 55%); }
+    .task-row.waiting::before { position: absolute; top: 17px; bottom: 17px; left: 0; width: 2px; background: #b48343; content: ""; }
+    .task-title { display: flex; align-items: baseline; gap: 9px; min-width: 0; }
+    .task-title b { overflow: hidden; font-size: 14px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+    .task-title span { overflow: hidden; color: var(--faint); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+    .task-sub { display: none; }
+    .task-status { display: inline-flex; align-items: center; gap: 6px; width: fit-content; padding: 4px 7px; border-radius: 5px; color: var(--success); background: rgba(49,115,91,.07); font-size: 9.5px; }
+    .task-status.wait { color: var(--warning); background: var(--warning-soft); }
+    .task-status .icon { width: 11px; height: 11px; }
+    .task-date { color: var(--muted); font: 9.5px/1.5 var(--mono); }
+    .task-arrow { color: var(--faint); }
+    .task-arrow .icon { width: 14px; height: 14px; }
+    .index-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 13px; color: var(--faint); font-size: 9px; }
+    .index-foot span:last-child { color: var(--accent); }
+
+    /* ---------- result ---------- */
+    .result-main { padding: 27px 33px 26px; }
+    .result-top { display: flex; align-items: center; justify-content: space-between; }
+    .back-link { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 10px; }
+    .back-link .icon { width: 13px; height: 13px; }
+    .result-id { color: var(--faint); font: 9px var(--mono); }
+    .result-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-top: 24px; }
+    .result-title-row { display: flex; align-items: center; gap: 12px; }
+    .result-head h1 { margin: 0; font: 500 27px/1.4 var(--serif); letter-spacing: -.025em; }
+    .complete-badge { display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px; border-radius: 5px; background: rgba(49,115,91,.08); color: var(--success); font-size: 9px; white-space: nowrap; }
+    .complete-badge .icon { width: 10px; height: 10px; }
+    .result-meta { margin-top: 8px; color: var(--faint); font-size: 9.5px; }
+    .result-actions { display: flex; gap: 8px; padding-top: 2px; }
+    .result-actions .btn { height: 36px; padding: 0 13px; font-size: 11px; }
+    .result-tabs { display: flex; gap: 28px; margin-top: 25px; border-bottom: 1px solid var(--line); }
+    .result-tab { position: relative; padding: 0 1px 12px; color: var(--faint); font-size: 11px; }
+    .result-tab.active { color: var(--accent); font-weight: 650; }
+    .result-tab.active::after { position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; background: var(--accent); content: ""; }
+    .result-grid { display: grid; grid-template-columns: minmax(0,1fr) 265px; gap: 22px; margin-top: 22px; }
+    .paper-sheet { min-width: 0; height: 736px; padding: 37px 46px; overflow: hidden; border: 1px solid var(--line); border-radius: 4px 12px 12px 4px; background: var(--surface); box-shadow: 0 12px 30px rgba(40,57,48,.045); }
+    .paper-series { display: flex; align-items: center; justify-content: space-between; color: var(--faint); font: 8px var(--mono); letter-spacing: .08em; }
+    .paper-sheet h2 { margin: 22px 0 12px; font: 500 27px/1.5 var(--serif); letter-spacing: -.025em; }
+    .paper-abstract { margin: 0; color: var(--muted); font: 12px/1.9 var(--serif); }
+    .paper-rule { width: 37px; height: 2px; margin: 23px 0; background: var(--accent); }
+    .section-title { display: flex; align-items: baseline; gap: 11px; margin: 0 0 13px; }
+    .section-title span { color: var(--accent); font: 10px var(--mono); }
+    .section-title h3 { margin: 0; font: 600 16px var(--serif); }
+    .paper-text { margin: 0 0 15px; color: var(--ink-soft); font: 13px/2.08 var(--serif); text-align: justify; }
+    .paper-text .evidence { padding-bottom: 1px; background: linear-gradient(transparent 72%, rgba(35,103,97,.13) 72%); }
+    .paper-caption { margin-top: 23px; padding-top: 14px; border-top: 1px solid var(--line); color: var(--faint); font-size: 8.5px; }
+    .evidence-rail { padding-top: 3px; }
+    .rail-section { margin-bottom: 21px; padding-bottom: 19px; border-bottom: 1px solid var(--line); }
+    .rail-section:last-child { border: 0; }
+    .rail-title { display: flex; align-items: center; justify-content: space-between; margin: 0 0 14px; }
+    .rail-title h3 { margin: 0; font-size: 11px; font-weight: 650; }
+    .rail-title span { color: var(--faint); font: 8px var(--mono); letter-spacing: .08em; }
+    .verification { display: flex; align-items: center; gap: 13px; padding: 14px; border: 1px solid rgba(35,103,97,.14); border-radius: 9px; background: var(--accent-faint); }
+    .verification-ring { display: grid; place-items: center; width: 42px; height: 42px; border: 1px solid rgba(35,103,97,.25); border-radius: 50%; color: var(--accent); font: 600 11px var(--mono); }
+    .verification b { display: block; color: var(--accent-deep); font-size: 11px; }
+    .verification p { margin: 4px 0 0; color: var(--muted); font-size: 9px; }
+    .score-row { display: grid; grid-template-columns: 79px 1fr 24px; align-items: center; gap: 8px; margin: 11px 0; color: var(--muted); font-size: 9px; }
+    .score-track { height: 3px; overflow: hidden; border-radius: 3px; background: rgba(25,35,31,.08); }
+    .score-track span { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
+    .score-row b { color: var(--ink-soft); font: 9px var(--mono); text-align: right; }
+    .reference-item { display: grid; grid-template-columns: 21px 1fr; gap: 7px; margin: 0 0 13px; }
+    .reference-item > span { color: var(--accent); font: 9px var(--mono); }
+    .reference-item p { margin: 0; color: var(--ink-soft); font: 10px/1.55 var(--serif); }
+    .reference-item small { display: block; margin-top: 3px; color: var(--faint); font: 8px var(--sans); }
+    .rail-link { display: flex; align-items: center; gap: 5px; margin-top: 13px; color: var(--accent); font-size: 9px; }
+    .rail-link .icon { width: 11px; height: 11px; }
+  </style>
+</head>
+<body>
+  <!-- Reusable symbols are inline to keep the concept file self-contained. -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-citation" viewBox="0 0 24 24"><path d="M8 4H4v16h4M16 4h4v16h-4M10 8h4M10 12h4M10 16h2"/></symbol>
+    <symbol id="i-tasks" viewBox="0 0 24 24"><path d="M9 5h10M9 12h10M9 19h10M4 5l1 1 2-2M4 12l1 1 2-2M4 19l1 1 2-2"/></symbol>
+    <symbol id="i-library" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z"/></symbol>
+    <symbol id="i-style" viewBox="0 0 24 24"><path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3ZM19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8L19 16Z"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6M8 13h8M8 17h6"/></symbol>
+    <symbol id="i-import" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></symbol>
+    <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M6 3h12v18l-6-4-6 4V3Z"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+    <symbol id="i-activity" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 7l3 3M14 10l2 2"/></symbol>
+    <symbol id="i-card" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></symbol>
+    <symbol id="i-comment" viewBox="0 0 24 24"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v8Z"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M19 12H5M11 18l-6-6 6-6"/></symbol>
+  </svg>
+
+  <!-- ==================== LOGIN ==================== -->
+  <section class="artboard login" id="login">
+    <div class="login-story">
+      <div class="brand">
+        <div class="brand-mark"><svg class="icon"><use href="#i-citation"/></svg></div>
+        <div><div class="brand-name">文献综述工作台</div><div class="brand-sub">EVIDENCE-LED WRITING</div></div>
+      </div>
+      <div class="login-hero">
+        <div class="kicker">Research, grounded in evidence</div>
+        <h1>让每一句论断，<br/>都<em>有迹可循</em>。</h1>
+        <p class="lead">从文献检索、证据筛选到综述成稿，多智能体协同完成研究流程。你负责判断，系统负责让每条引用都能回到原始证据。</p>
+      </div>
+      <div class="proof-wrap">
+        <div class="proof-ghost"></div>
+        <div class="proof-card">
+          <div class="proof-head">
+            <div class="proof-index"><b>01</b><span>正文证据片段</span></div>
+            <div class="proof-verified"><svg class="icon" style="width:12px;height:12px"><use href="#i-check"/></svg>引用核验通过</div>
+          </div>
+          <p class="proof-text">检索增强生成的评估正从单一答案准确率，转向对<span class="cite">1</span>忠实度、证据完整性与上下文利用效率<span class="cite">2</span>的综合判断。</p>
+          <div class="proof-source"><span>GB/T 7714—2025 · 顺序编码制</span><span>查看原始证据 →</span></div>
+        </div>
+      </div>
+      <div class="login-foot"><span>证据约束</span><span>引用可核验</span><span>人机协同</span><span>Markdown / DOCX</span></div>
+    </div>
+    <div class="login-form-side">
+      <div class="form-top">学术研究工作空间 · 安全登录</div>
+      <div class="login-form">
+        <div class="kicker">Welcome back</div>
+        <h2>继续你的研究</h2>
+        <p class="form-sub">登录以访问任务、证据与引用库。</p>
+        <div class="segment"><span class="selected">登录</span><span>注册</span></div>
+        <div class="field"><label>用户名 / 邮箱</label><div class="input">请输入用户名或邮箱</div></div>
+        <div class="field"><label>密码</label><div class="input">至少 8 位</div></div>
+        <div class="btn btn-primary login-submit">进入工作台<svg class="icon"><use href="#i-arrow"/></svg></div>
+        <div class="form-meta"><span>首次使用？切换上方「注册」</span><a href="#">忘记密码？</a></div>
+        <div class="secure-note"><svg class="icon"><use href="#i-lock"/></svg>你的研究数据仅对当前工作空间可见</div>
+      </div>
+    </div>
+    <div class="concept-note">CONCEPT 01 · LOGIN / 示例内容，非生产页面</div>
+  </section>
+
+  <!-- ==================== TASKS ==================== -->
+  <section class="artboard workspace" id="tasks">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark"><svg class="icon"><use href="#i-citation"/></svg></div>
+        <div><div class="brand-name">文献综述工作台</div><div class="brand-sub">EVIDENCE-LED WRITING</div></div>
+      </div>
+      <div class="workspace-switch"><span><i class="workspace-dot"></i>个人工作区</span><span>⌄</span></div>
+      <nav>
+        <div class="nav-group">
+          <div class="nav-label">研究</div>
+          <div class="nav-item active"><svg class="icon"><use href="#i-tasks"/></svg>任务<span class="nav-count">2</span></div>
+          <div class="nav-item"><svg class="icon"><use href="#i-library"/></svg>知识库</div>
+        </div>
+        <div class="nav-group">
+          <div class="nav-label">素材</div>
+          <div class="nav-item"><svg class="icon"><use href="#i-style"/></svg>引用样式</div>
+          <div class="nav-item"><svg class="icon"><use href="#i-file"/></svg>Word 模板</div>
+          <div class="nav-item"><svg class="icon"><use href="#i-import"/></svg>导入文献</div>
+          <div class="nav-item"><svg class="icon"><use href="#i-bookmark"/></svg>引用库</div>
+        </div>
+        <div class="nav-group">
+          <div class="nav-label">协作</div>
+          <div class="nav-item"><svg class="icon"><use href="#i-users"/></svg>团队</div>
+          <div class="nav-item"><svg class="icon"><use href="#i-activity"/></svg>用量</div>
+        </div>
+        <div class="nav-group">
+          <div class="nav-label">设置</div>
+          <div class="nav-item"><svg class="icon"><use href="#i-key"/></svg>API Key</div>
+          <div class="nav-item"><svg class="icon"><use href="#i-card"/></svg>我的套餐</div>
+        </div>
+      </nav>
+      <div class="sidebar-foot">
+        <div class="plan-card"><div class="kicker">Institution</div><p>机构版 · 篇数不限<br/>含团队协作与开放 API</p></div>
+        <div class="user-row"><div class="avatar">演</div><div><div class="user-name">demo</div><div class="user-meta">管理员 · 个人工作区</div></div></div>
+      </div>
+    </aside>
+    <main class="main tasks-main">
+      <div class="topline"><span>研究工作台</span><span class="slash">/</span><span>任务索引</span></div>
+      <header class="page-head">
+        <div><h1>研究任务</h1><p>检索、核验与写作，都从证据开始。</p></div>
+        <div class="btn btn-primary new-task"><svg class="icon"><use href="#i-plus"/></svg>新建综述</div>
+      </header>
+      <div class="summary-strip">
+        <div class="summary-item"><b>20</b><span>全部任务</span></div>
+        <div class="summary-item"><b>0</b><span>进行中</span></div>
+        <div class="summary-item"><b>18</b><span>已完成</span></div>
+        <div class="summary-note">UPDATED · 2026/10/27</div>
+      </div>
+      <section class="attention">
+        <div class="attention-number">02</div>
+        <div class="attention-copy"><h2>有两项规划等待你的判断</h2><p>确认研究路径后，智能体才会开始检索与写作。</p></div>
+        <div class="attention-action">查看待办<svg class="icon"><use href="#i-arrow"/></svg></div>
+      </section>
+      <div class="task-controls">
+        <div class="filter-tabs">
+          <div class="filter-tab active">全部<span>20</span></div>
+          <div class="filter-tab">待我确认<span>02</span></div>
+          <div class="filter-tab">进行中<span>00</span></div>
+          <div class="filter-tab">已完成<span>18</span></div>
+        </div>
+        <div class="search"><svg class="icon"><use href="#i-search"/></svg>搜索研究主题…</div>
+      </div>
+      <section class="task-index">
+        <div class="index-head"><span>研究主题</span><span>当前状态</span><span>最近更新</span><span></span></div>
+        <div class="task-row waiting">
+          <div><div class="task-title"><b>P1D 配额验收任务 481869</b></div></div>
+          <div class="task-status wait"><svg class="icon"><use href="#i-clock"/></svg>待确认规划</div><div class="task-date">2026/10/20<br/>15:38</div><div class="task-arrow"><svg class="icon"><use href="#i-chevron"/></svg></div>
+        </div>
+        <div class="task-row waiting">
+          <div><div class="task-title"><b>检索增强生成评估方法综述</b><span>研究路径复验</span></div></div>
+          <div class="task-status wait"><svg class="icon"><use href="#i-clock"/></svg>待确认规划</div><div class="task-date">2026/10/20<br/>14:12</div><div class="task-arrow"><svg class="icon"><use href="#i-chevron"/></svg></div>
+        </div>
+        <div class="task-row">
+          <div><div class="task-title"><b>检索增强生成评估方法综述</b><span>gbt7714-2025-numeric 复验</span></div></div>
+          <div class="task-status"><svg class="icon"><use href="#i-check"/></svg>已完成</div><div class="task-date">2026/10/19<br/>17:01</div><div class="task-arrow"><svg class="icon"><use href="#i-chevron"/></svg></div>
+        </div>
+        <div class="task-row">
+          <div><div class="task-title"><b>检索增强生成评估方法综述</b><span>gbt7714-2025-author-date 复验</span></div></div>
+          <div class="task-status"><svg class="icon"><use href="#i-check"/></svg>已完成</div><div class="task-date">2026/10/19<br/>16:59</div><div class="task-arrow"><svg class="icon"><use href="#i-chevron"/></svg></div>
+        </div>
+        <div class="task-row">
+          <div><div class="task-title"><b>检索增强生成评估方法综述</b><span>gbt7714-2025-numeric 验收</span></div></div>
+          <div class="task-status"><svg class="icon"><use href="#i-check"/></svg>已完成</div><div class="task-date">2026/10/19<br/>16:52</div><div class="task-arrow"><svg class="icon"><use href="#i-chevron"/></svg></div>
+        </div>
+        <div class="task-row">
+          <div><div class="task-title"><b>检索增强生成评估方法综述</b><span>核验展示验收 · 开启核验</span></div></div>
+          <div class="task-status"><svg class="icon"><use href="#i-check"/></svg>已完成</div><div class="task-date">2026/10/19<br/>14:35</div><div class="task-arrow"><svg class="icon"><use href="#i-chevron"/></svg></div>
+        </div>
+      </section>
+      <div class="index-foot"><span>显示 6 / 20 项研究任务</span><span>查看全部任务 →</span></div>
+    </main>
+    <div class="concept-note">CONCEPT 02 · RESEARCH INDEX / 示例内容，非生产页面</div>
+  </section>
+
+  <!-- ==================== RESULT ==================== -->
+  <section class="artboard workspace" id="result">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark"><svg class="icon"><use href="#i-citation"/></svg></div>
+        <div><div class="brand-name">文献综述工作台</div><div class="brand-sub">EVIDENCE-LED WRITING</div></div>
+      </div>
+      <div class="workspace-switch"><span><i class="workspace-dot"></i>个人工作区</span><span>⌄</span></div>
+      <nav>
+        <div class="nav-group"><div class="nav-label">研究</div><div class="nav-item active"><svg class="icon"><use href="#i-tasks"/></svg>任务</div><div class="nav-item"><svg class="icon"><use href="#i-library"/></svg>知识库</div></div>
+        <div class="nav-group"><div class="nav-label">素材</div><div class="nav-item"><svg class="icon"><use href="#i-style"/></svg>引用样式</div><div class="nav-item"><svg class="icon"><use href="#i-file"/></svg>Word 模板</div><div class="nav-item"><svg class="icon"><use href="#i-import"/></svg>导入文献</div><div class="nav-item"><svg class="icon"><use href="#i-bookmark"/></svg>引用库</div></div>
+        <div class="nav-group"><div class="nav-label">协作</div><div class="nav-item"><svg class="icon"><use href="#i-users"/></svg>团队</div><div class="nav-item"><svg class="icon"><use href="#i-activity"/></svg>用量</div></div>
+        <div class="nav-group"><div class="nav-label">设置</div><div class="nav-item"><svg class="icon"><use href="#i-key"/></svg>API Key</div><div class="nav-item"><svg class="icon"><use href="#i-card"/></svg>我的套餐</div></div>
+      </nav>
+      <div class="sidebar-foot"><div class="plan-card"><div class="kicker">Institution</div><p>机构版 · 篇数不限<br/>含团队协作与开放 API</p></div><div class="user-row"><div class="avatar">演</div><div><div class="user-name">demo</div><div class="user-meta">管理员 · 个人工作区</div></div></div></div>
+    </aside>
+    <main class="main result-main">
+      <div class="result-top"><div class="back-link"><svg class="icon"><use href="#i-back"/></svg>返回任务索引</div><div class="result-id">TASK / 2026-1019-RAG-01</div></div>
+      <header class="result-head">
+        <div><div class="result-title-row"><h1>检索增强生成评估方法综述</h1><span class="complete-badge"><svg class="icon"><use href="#i-check"/></svg>已完成</span></div><div class="result-meta">修订 6 · 更新于 2026/10/19 17:01 · GB/T 7714—2025</div></div>
+        <div class="result-actions"><div class="btn btn-secondary"><svg class="icon"><use href="#i-comment"/></svg>批注 3</div><div class="btn btn-primary"><svg class="icon"><use href="#i-download"/></svg>导出 DOCX</div></div>
+      </header>
+      <nav class="result-tabs"><span class="result-tab">规划</span><span class="result-tab">执行</span><span class="result-tab">日志</span><span class="result-tab active">综述结果</span></nav>
+      <div class="result-grid">
+        <article class="paper-sheet">
+          <div class="paper-series"><span>FINAL REVIEW · 2026</span><span>01 / 12</span></div>
+          <h2>检索增强生成评估方法综述</h2>
+          <p class="paper-abstract">摘要：检索增强生成将外部知识引入大语言模型的生成过程。如何评价生成内容与证据之间的一致性，已成为该领域的重要问题。</p>
+          <div class="paper-rule"></div>
+          <div class="section-title"><span>01</span><h3>从答案准确到证据可信</h3></div>
+          <p class="paper-text">早期评估主要关注最终答案是否正确，却难以解释模型是否真正使用了检索材料。随着应用场景对可追溯性的要求提高，<span class="evidence">评估重点逐渐由单一结果指标转向证据质量、上下文相关性与生成忠实度的联合考察</span><span class="cite">1</span>。</p>
+          <p class="paper-text">Ragas 等提出的无参考评估框架，将答案忠实度与答案相关性拆分测量，为分析检索增强系统提供了可复用的维度<span class="cite">2</span>。这一变化意味着，高质量综述不仅要列出结论，还应呈现结论与证据之间的对应关系。</p>
+          <div class="section-title" style="margin-top:22px"><span>02</span><h3>证据约束下的综合评估</h3></div>
+          <p class="paper-text">现有方法通常结合自动指标与人工判断：前者提高大规模比较的效率，后者补足语义细微差别与领域适配性。二者的协同，是提升评估可靠性的关键<span class="cite">3</span>。</p>
+          <div class="paper-caption">本文中的引用标记可回溯至参考文献与原始证据；最终状态以引用核验报告为准。</div>
+        </article>
+        <aside class="evidence-rail">
+          <section class="rail-section">
+            <div class="rail-title"><h3>引用与核验</h3><span>VERIFIED</span></div>
+            <div class="verification"><div class="verification-ring">6/6</div><div><b>引用均已核验</b><p>CrossRef 元数据一致</p></div></div>
+          </section>
+          <section class="rail-section">
+            <div class="rail-title"><h3>质量检查</h3><span>SCORE / 100</span></div>
+            <div class="score-row"><span>引用可追溯</span><div class="score-track"><span style="width:92%"></span></div><b>92</b></div>
+            <div class="score-row"><span>内容质量</span><div class="score-track"><span style="width:88%"></span></div><b>88</b></div>
+            <div class="score-row"><span>结构连贯</span><div class="score-track"><span style="width:90%"></span></div><b>90</b></div>
+          </section>
+          <section class="rail-section">
+            <div class="rail-title"><h3>参考文献</h3><span>06 ENTRIES</span></div>
+            <div class="reference-item"><span>01</span><div><p>Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks</p><small>Lewis et al. · 2020</small></div></div>
+            <div class="reference-item"><span>02</span><div><p>RAGAS: Automated Evaluation of Retrieval Augmented Generation</p><small>Es et al. · 2023</small></div></div>
+            <div class="reference-item"><span>03</span><div><p>Measuring Faithfulness in Retrieval-Augmented Generation</p><small>研究方法 · 示例条目</small></div></div>
+            <div class="rail-link">查看全部 6 条文献<svg class="icon"><use href="#i-arrow"/></svg></div>
+          </section>
+          <section class="rail-section">
+            <div class="rail-title"><h3>导出与交付</h3></div>
+            <div class="rail-link" style="margin-top:0">Markdown 源文件<svg class="icon"><use href="#i-download"/></svg></div>
+            <div class="rail-link">DOCX 研究成稿<svg class="icon"><use href="#i-download"/></svg></div>
+          </section>
+        </aside>
+      </div>
+    </main>
+    <div class="concept-note">CONCEPT 03 · READING & EVIDENCE / 示例内容，非生产页面</div>
+  </section>
+</body>
+</html>

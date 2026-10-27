@@ -1,0 +1,18 @@
+{
+  "completedCount": 18,
+  "detailCaptured": false,
+  "consoleErrors": [],
+  "metrics": {
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "body": {
+      "fontFamily": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Noto Sans SC\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+      "fontSize": "15px",
+      "background": "oklch(0.985 0 0)",
+      "color": "oklch(0.15 0 0)"
+    },
+    "horizontalOverflow": false
+  }
+}
