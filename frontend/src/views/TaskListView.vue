@@ -154,20 +154,16 @@ const rows = computed(() =>
 </script>
 
 <template>
-  <section class="relative rounded-2xl bg-air-surface/55 px-3 py-4 sm:px-5 sm:py-5">
+  <section>
     <header class="mb-5 flex flex-wrap items-start justify-between gap-3">
       <div>
-        <p class="mb-2 text-[10px] font-semibold tracking-[0.16em] text-air-primary uppercase">
+        <p class="mb-2 text-[10px] font-semibold tracking-[0.16em] text-primary uppercase">
           Research workspace
         </p>
         <h1 class="font-display text-3xl font-medium tracking-[-0.035em]">研究任务</h1>
         <p class="mt-2 text-sm text-muted-foreground">检索、核验与写作，都从证据开始。</p>
       </div>
-      <Button
-        data-test="new-task"
-        class="rounded-full bg-air-primary text-air-primary-foreground hover:bg-air-primary/90"
-        @click="showForm = !showForm"
-      >
+      <Button data-test="new-task" @click="showForm = !showForm">
         <Plus :size="16" aria-hidden="true" />
         <span>{{ showForm ? "收起" : "新建任务" }}</span>
       </Button>
@@ -232,11 +228,11 @@ const rows = computed(() =>
       v-if="store.items.length"
       type="button"
       data-test="attention-needs-me"
-      class="mb-6 flex w-full items-center gap-4 rounded-2xl border border-air-accent bg-air-accent/45 px-4 py-4 text-left transition-colors hover:bg-air-accent/70 sm:px-5"
+      class="mb-6 flex w-full items-center gap-4 rounded-xl border border-primary/15 bg-accent/45 px-4 py-4 text-left transition-colors hover:bg-accent/70 sm:px-5"
       :aria-pressed="filter === 'needs-me'"
       @click="filter = filter === 'needs-me' ? 'all' : 'needs-me'"
     >
-      <span class="min-w-10 font-display text-4xl leading-none text-air-primary tabular-nums">
+      <span class="min-w-10 font-display text-4xl leading-none text-primary tabular-nums">
         {{ counts.needsMe }}
       </span>
       <span class="min-w-0 flex-1">
@@ -251,7 +247,7 @@ const rows = computed(() =>
           }}
         </span>
       </span>
-      <span class="shrink-0 text-xs font-medium text-air-primary">
+      <span class="shrink-0 text-xs font-medium text-primary">
         {{ filter === "needs-me" ? "查看全部" : "查看待办" }} →
       </span>
     </button>
@@ -268,7 +264,7 @@ const rows = computed(() =>
           :class="[
             'relative px-1 py-1.5 text-xs font-medium transition-colors after:absolute after:right-0 after:-bottom-1 after:left-0 after:h-0.5 after:rounded-full',
             filter === option.value
-              ? 'text-foreground after:bg-air-primary'
+              ? 'text-foreground after:bg-primary'
               : 'text-muted-foreground after:bg-transparent hover:text-foreground',
           ]"
           @click="filter = option.value"
@@ -278,10 +274,10 @@ const rows = computed(() =>
         </button>
       </div>
 
-      <div data-test="task-search-shell" class="relative ml-auto w-full rounded-full sm:w-80">
+      <div class="relative ml-auto w-full sm:w-64">
         <Search
           :size="14"
-          class="pointer-events-none absolute top-1/2 left-3.5 -translate-y-1/2 text-muted-foreground"
+          class="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground"
           aria-hidden="true"
         />
         <input
@@ -290,7 +286,7 @@ const rows = computed(() =>
           type="search"
           placeholder="搜索标题…"
           aria-label="搜索任务标题"
-          class="h-11 w-full rounded-full border border-air-accent bg-card/80 pr-3 pl-10 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-air-primary"
+          class="w-full rounded-md border border-input bg-card py-1.5 pr-2.5 pl-8 text-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring"
         />
       </div>
     </div>
@@ -339,7 +335,7 @@ const rows = computed(() =>
       </Button>
     </div>
 
-    <div v-else class="overflow-hidden rounded-2xl border border-air-accent bg-card/85">
+    <div v-else class="overflow-hidden rounded-xl border border-border bg-card/85">
       <!-- 桌面：表格。窄屏：卡片式（thead 隐藏，每行用 data-label 打标签） -->
       <table class="w-full border-collapse text-sm max-md:block">
         <thead class="max-md:hidden">

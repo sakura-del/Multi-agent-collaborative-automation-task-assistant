@@ -289,14 +289,3 @@ describe("既有测试契约必须保留", () => {
     expect(row.attributes("role")).not.toBe("button");
   });
 });
-
-describe("蓝色编辑感设计签名", () => {
-  it("搜索框使用大胶囊容器，搜索语义与数据流不变", async () => {
-    const wrapper = await mountWith([task()]);
-    const shell = wrapper.find('[data-test="task-search-shell"]');
-
-    expect(shell.exists()).toBe(true);
-    expect(shell.classes()).toContain("rounded-full");
-    expect(wrapper.find('[data-test="task-search"]').attributes("aria-label")).toBe("搜索任务标题");
-  });
-});
