@@ -451,14 +451,33 @@ def _build_report_markdown(
     significance_rows: list[dict[str, Any]],
 ) -> str:
     completed = _completed(records)
+    # 非 completed 的运行按状态分桶。**不能只认 "failed"**（2026-10-27 缺陷）：
+    # 校验失败转人工的运行 status 是 "waiting_human"，既不是 completed 也不是 failed，
+    # 旧写法会让它从三个计数里全部漏掉（56 + 0 + 0 ≠ 60），
+    # 报告显示「失败 0 / 无失败或不完整运行」，掩盖了真实失败。
     failed = [record for record in records if record["status"] == "failed"]
     incomplete = [record for record in records if record["status"] == "incomplete"]
+    # 其余非 completed 且非 failed/incomplete 的状态（如 waiting_human / cancelled）
+    known = {"completed", "failed", "incomplete"}
+    other_states: dict[str, list[dict[str, Any]]] = {}
+    for record in records:
+        status = str(record["status"])
+        if status in known:
+            continue
+        other_states.setdefault(status, []).append(record)
+    other_count = sum(len(items) for items in other_states.values())
 
     lines: list[str] = [
         f"# 实验结果报告（run-set `{run_set_id}`）",
         "",
         f"- 运行总数：**{len(records)}**",
         f"- 完成：**{len(completed)}**　失败：**{len(failed)}**　不完整：**{len(incomplete)}**",
+    ]
+    # 其他状态单独列出，保证「完成 + 失败 + 不完整 + 其他 == 总数」
+    if other_count:
+        detail = "、".join(f"{name} {len(items)}" for name, items in sorted(other_states.items()))
+        lines.append(f"- 其他未完成状态：**{other_count}**（{detail}）")
+    lines += [
         "- 指标口径：确定性指标与人工指标为主；LLM Judge 仅作补充（见文末单独章节）。",
         "",
         "## 1. 汇总表",
@@ -526,7 +545,7 @@ def _build_report_markdown(
         "## 4. 缺失与失败运行",
         "",
     ]
-    if not failed and not incomplete:
+    if not failed and not incomplete and not other_count:
         lines.append("无失败或不完整运行。")
     else:
         lines.append("以下运行**未计入聚合**，但保留在案以便复核：")
@@ -535,6 +554,18 @@ def _build_report_markdown(
             lines.append(f"- `{record['run_id']}` — 失败")
         for record in incomplete:
             lines.append(f"- `{record['run_id']}` — 产物不完整")
+        for status, items in sorted(other_states.items()):
+            for record in items:
+                lines.append(f"- `{record['run_id']}` — {status}（未完成，未计入聚合）")
+        # 明确提示幸存者偏差：聚合只统计 completed
+        if other_count or failed:
+            lines += [
+                "",
+                f"> ⚠️ **统计口径提醒**：聚合表与显著性检验**只统计 completed 的运行**"
+                f"（本次 {len(completed)}/{len(records)}）。"
+                "若未完成的运行在某个画像里集中出现，该画像的指标存在**幸存者偏差**，"
+                "解读时必须以「completed 数 / 总数」作为真实成功率，不能只看 `success` 均值。",
+            ]
 
     lines += [
         "",
