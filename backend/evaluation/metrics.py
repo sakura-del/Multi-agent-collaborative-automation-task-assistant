@@ -204,4 +204,13 @@ def summarize_run(record: dict[str, Any]) -> dict[str, float | None]:
             [record["completion_tokens"]] if record.get("completion_tokens") is not None else [],
         ),
         "retries": retry_count([record["attempts"]] if record.get("attempts") is not None else []),
+        # 恢复成功率（2026-10-27 接线）：此前 `recovery_success()` 函数存在，
+        # 但 summarize_run 从没调用它 → metrics.json 里恒为 null。
+        #
+        # 语义：**只统计真正发生过重试的运行**。attempts == 1（没重试）返回 None，
+        # 而不是 1.0 —— 一次没重试的运行不存在「恢复」，记 1.0 会让恢复成功率
+        # 看起来完美，实际什么都没恢复。
+        "recovery_success": recovery_success(
+            [record.get("status") == "completed"] if int(record.get("attempts") or 1) > 1 else []
+        ),
     }

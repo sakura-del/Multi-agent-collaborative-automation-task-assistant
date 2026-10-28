@@ -436,11 +436,48 @@ class TaskExecutionExecutor:
         markdown = str(review.get("final_markdown") or "")
         evidence_count = 0
         attempts = 0
+
+        # 指标采集（2026-10-27 修）。载荷形状照抄
+        # `app/orchestration/services/task_execution.py::sum_actual_tokens` 的文档：
+        # token / evidence / node_type 都在 `output["execution_result"]` **里面**
+        # （`execution_result` 是 `contracts.ExecutionResult` 的序列化）。
+        # 旧实现一个都不填，导致 60 个真实 run 的
+        # total_tokens / recall_at_5 / ndcg_at_5 / error_citation_rate 全为 null。
+        prompt_tokens_total = 0
+        completion_tokens_total = 0
+        saw_token_usage = False
+        retrieved_doc_ids: list[str] = []
+        allowed_chunk_ids: list[str] = []
+        seen_doc_ids: set[str] = set()
+        seen_chunk_ids: set[str] = set()
+
         for subtask in snapshot.subtasks:
             output = subtask.output or {}
             execution_payload = output.get("execution_result") or {}
-            evidence_count = max(evidence_count, len(execution_payload.get("evidence") or []))
+            evidence = execution_payload.get("evidence") or []
+            evidence_count = max(evidence_count, len(evidence))
             attempts = max(attempts, int(subtask.retry_count or 0) + 1)
+
+            if "prompt_tokens" in execution_payload or "completion_tokens" in execution_payload:
+                saw_token_usage = True
+                prompt_tokens_total += int(execution_payload.get("prompt_tokens") or 0)
+                completion_tokens_total += int(execution_payload.get("completion_tokens") or 0)
+
+            is_search_node = execution_payload.get("node_type") == "search"
+            for item in evidence:
+                if not isinstance(item, dict):
+                    continue
+                chunk_id = item.get("chunk_id")
+                if chunk_id and str(chunk_id) not in seen_chunk_ids:
+                    seen_chunk_ids.add(str(chunk_id))
+                    allowed_chunk_ids.append(str(chunk_id))
+                # 「检索到的文档」只认搜索节点的证据：其他节点复用同一 doc_id
+                # 不代表又检索了一次（去重后也不该重复计数）。
+                doc_id = item.get("doc_id")
+                if is_search_node and doc_id and str(doc_id) not in seen_doc_ids:
+                    seen_doc_ids.add(str(doc_id))
+                    retrieved_doc_ids.append(str(doc_id))
+
         return RunOutcome(
             status=snapshot.status,
             record={
@@ -453,6 +490,12 @@ class TaskExecutionExecutor:
                 "node_count": len(snapshot.subtasks),
                 "event_count": len(events),
                 "document_count": int((review.get("stats") or {}).get("documents") or 0),
+                # 没有用量时**不写 0**：0 会被下游读成「真的没消耗」，
+                # None 才是「未测量」（metrics.summarize_run 据此产出 null）。
+                "prompt_tokens": prompt_tokens_total if saw_token_usage else None,
+                "completion_tokens": completion_tokens_total if saw_token_usage else None,
+                "retrieved_ids": retrieved_doc_ids,
+                "allowed_chunk_ids": allowed_chunk_ids,
             },
             error=None if snapshot.status == "completed" else f"最终状态 {snapshot.status}",
         )

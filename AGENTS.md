@@ -189,8 +189,31 @@ docker compose build backend && docker compose up -d backend
 
 ### 6.2 论文相关（非开发）
 
-- 跑真实 120-run 实验矩阵：`cd backend && python -m evaluation.cli run --profiles all --repetitions 2` → `report`
+> **⏸ 实验矩阵：暂不重跑（2026-10-28 用户明确决定）**
+>
+> 60 run 已于 2026-10-27 跑完（`rs-20261027T061627Z`：56 completed / 4 waiting_human，
+> 73 分钟）。指标采集已修好，但**现在不要重跑** —— 交付在**次年 3 月**，
+> 现在重跑是白烧时间和模型额度。
+>
+> **重跑时机**：临近交付、或需要定稿数据时再跑。跑之前先看
+> [handoff §3.14](docs/runbooks/2026-10-26-handoff.md) 的「未修的两个缺口」。
+>
+> **不要主动提议重跑**，也不要因为「指标修好了」就顺手跑一遍验证 ——
+> 采集逻辑已有单测覆盖（`tests/test_evaluation_metrics_collection.py` 11 条）。
+
+- ~~跑真实 120-run 实验矩阵~~：**暂缓**（见上方说明）
 - 论文撰写与答辩彩排（两次，记录表见 `docs/runbooks/defense-demo.md` 附 C）
+
+**检索指标的硬阻塞（别当成 bug 去修）**：
+
+`recall_at_5` / `mrr` / `ndcg_at_5` 需要**每个课题的相关文档标注**（qrels），
+而 `evaluation/datasets/topics.json` 里**没有这个字段**（只有
+`topic_id`/`domain`/`topic_zh`/`query_en`/`corpus_manifest`）。
+
+所以这三个指标为 null **不是代码缺陷，是缺标注数据**。
+要算它们必须先补「课题 → 相关文档」的人工标注（研究设计工作），
+之后才能接进 `evaluation/metrics.py`。**在补标注之前，任何「修检索指标」的
+改动都只是把一个 null 换成另一个 null。**
 
 ---
 
