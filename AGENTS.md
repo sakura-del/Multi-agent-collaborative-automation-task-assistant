@@ -31,7 +31,7 @@
 | 数据库迁移 head | **`b7d4e9f1c6a2`**（`reference_library_item` 引用库表） |
 | 后端测试 | **2837 passed**, 8 skipped；覆盖率 **~89%**；`mypy` 0 错误（207 文件） |
 | 前端测试 | Vitest **458 passed**（+6 skipped）；**Playwright E2E 44 场景**（新增引用库编辑 1 条，chromium + mobile-chrome 双视口实测通过） |
-| CI | **6/6 作业全绿**（run `40624641598`，`5eeabae`）。**每个作业已配 `timeout-minutes`**。⚠️ **GitHub 直连不通，需走系统代理**：`git -c http.proxy=http://127.0.0.1:7894 -c https.proxy=... push`、`$env:HTTPS_PROXY='http://127.0.0.1:7894'` 后再用 `gh` |
+| CI | **最近一次全绿**：run `40653550585`（`73c5748` 前一个提交）。⚠️ **2026-10-28 起 CI 因 GitHub Actions 账单额度停摆**：报 `The job was not started because recent account payments have failed or your spending limit needs to be increased`，作业 0~2s 就 X，**不是代码问题**。等账单恢复或跨月后再看 CI。⚠️ **GitHub 直连时通时不通**：直连能用就直接 push；不通时走系统代理（`git -c http.proxy=http://127.0.0.1:7894 ...`，端口从注册表读，`gh` 需 `$env:HTTPS_PROXY`） |
 | 服务器 | 已部署至 `5eeabae`，五容器 healthy，`/api/v1/health/ready` → `{"status":"ready"}`，`alembic current` = **`b7d4e9f1c6a2 (head)`**，四套餐种子已就位，**向量库 id 级一致（28344 条）**，**`task.used_tokens` 已回填（169372，28 个任务）**，**6 个引用样式预览全部真实渲染（warnings=0）**，**引用库端到端跑通**，**元数据证据已生效（metadata 4/4 可追溯）**，**review 长度上限已修**，**校验结论已落库**，**历史校验已迁移（188 条）**，**模型 = `workbuddy-ai/deepseek-v4.1-flash`（容器内 FROZEN_MODEL 与 runtime 一致）**，**404 降级已实测生效**，**60 个实验任务在库（tasks 113 = 53 + 60）** |
 
 **演示账号**：`demo` / `demo12345` —— **全权限管理员**（`role=admin` + `institution` 套餐：篇数不限 / 含团队 / 含开放 API）；知识库 11 篇 / 28341 分块
