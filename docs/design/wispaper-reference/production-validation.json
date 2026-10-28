@@ -1,0 +1,70 @@
+{
+  "errors": [],
+  "pages": {
+    "login-desktop": {
+      "width": 1440,
+      "scrollWidth": 1440,
+      "surface": "oklch(0.955 0.025 220)"
+    },
+    "login-mobile": {
+      "width": 390,
+      "scrollWidth": 390,
+      "surface": "oklch(0.955 0.025 220)"
+    },
+    "tasks-desktop": {
+      "width": 1440,
+      "scrollWidth": 1440,
+      "search": {
+        "x": 1060,
+        "y": 330,
+        "width": 320,
+        "height": 44,
+        "top": 330,
+        "right": 1380,
+        "bottom": 374,
+        "left": 1060
+      },
+      "open": {
+        "x": 1331,
+        "y": 434,
+        "width": 40,
+        "height": 40,
+        "top": 434,
+        "right": 1371,
+        "bottom": 474,
+        "left": 1331
+      },
+      "openVisible": true
+    },
+    "tasks-mobile": {
+      "width": 390,
+      "scrollWidth": 390,
+      "search": {
+        "x": 28,
+        "y": 578,
+        "width": 334,
+        "height": 44,
+        "top": 578,
+        "right": 362,
+        "bottom": 622,
+        "left": 28
+      },
+      "open": {
+        "x": 309,
+        "y": 709,
+        "width": 40,
+        "height": 40,
+        "top": 709,
+        "right": 349,
+        "bottom": 749,
+        "left": 309
+      },
+      "openVisible": true
+    }
+  },
+  "contrast": {
+    "airButton": 6.22
+  },
+  "searchRows": 2,
+  "createFormVisible": true
+}

@@ -4189,6 +4189,39 @@ quota key 已删除，回查 KEYS 为空
 - 套餐覆盖真实接口数字、免费版额度用尽、升级入口、加载态、usage 局部失败与移动溢出；引用库编辑覆盖落库刷新与非法年份准入；用量覆盖几何、状态合计、键盘焦点和对比度。
 - 服务器已部署到 `ce7e254`，健康检查 ready。最终提交、备份和 CI 结果在收尾时补记。
 
+## 2026-10-28 · WisPaper 蓝色编辑感（登录页 + 任务首页）
+
+设计：[2026-10-28-wispaper-blue-editorial-design.md](../specs/2026-10-28-wispaper-blue-editorial-design.md)  
+计划：[2026-10-28-wispaper-blue-editorial-plan.md](2026-10-28-wispaper-blue-editorial-plan.md)
+
+### 范围与实现
+
+用户先选择「B · 蓝色编辑感」，再确认书面规范：保留暖纸、衬线和既有任务流程，仅迁移 WisPaper 的浅蓝氛围、胶囊控件与大圆角。没有改其他页面、侧栏结构、全局 primary、后端 API 或依赖。
+
+- `5458f77`：登录页浅蓝 surface、证据卡与胶囊表单控件；新增 `login-air-surface` 设计签名，认证字段不变。
+- `dbea26d`：任务首页大胶囊 `task-search-shell`、浅蓝待办和任务索引；`keyword`、new-task、筛选和行打开逻辑不变。
+
+air tokens 只服务两页，不替换 success/warning/destructive。证据卡继续标注「示例」，任务数量与状态继续来自真实 store。
+
+### TDD 与全量门禁
+
+- 基线：两页 **26/26 passed**。
+- 登录设计签名先红（无 air surface / rounded-2xl），实现后 AppLayout **9/9**。
+- 搜索胶囊设计签名先红（无 task-search-shell），实现后 TaskListView **19/19**。
+- 全量 Vitest：**475 passed / 6 skipped（41 文件）**；`vue-tsc -b` 0 错误；Vite build 成功（CSS 47.04 kB）。
+
+### 正式环境证据
+
+部署 HEAD `dbea26d`，健康 ready。`docs/design/wispaper-reference/` 下新增：
+
+- `production-login-desktop.png` / `production-login-mobile.png`
+- `production-tasks-desktop.png` / `production-tasks-mobile.png`
+- `production-validation.json`
+
+四张图均人工检查：保留暖纸衬线，浅蓝、胶囊和大圆角与确认稿一致；桌面/移动均无横向溢出。蓝色按钮白字对比度 **6.22:1**。移动端打开按钮实测 **40×40px** 且可见。搜索和新建表单在真实页面操作正常。
+
+关键 E2E `m2-preview + m2-result-preview` 在 chromium + mobile-chrome 双视口 **4/4 passed**，覆盖登录、任务列表、新建表单、结果页和移动键盘/整行入口。最终备份与 CI 结果在收尾时补记。
+
 
 
 

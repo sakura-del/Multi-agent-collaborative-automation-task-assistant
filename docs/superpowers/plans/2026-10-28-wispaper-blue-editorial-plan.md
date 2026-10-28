@@ -1,6 +1,6 @@
 # WisPaper Blue Editorial Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 仅把登录页与任务首页升级成已确认的 WisPaper 蓝色编辑感，保留暖纸衬线及全部业务流程。
 
@@ -24,7 +24,7 @@
 
 ### Task 1: 登录页蓝色编辑感
 
-- [ ] **Step 1: 写失败的设计签名测试**
+- [x] **Step 1: 写失败的设计签名测试**
 
 在 AppLayout 登录页测试中新增：
 
@@ -35,12 +35,12 @@ expect(root.classes()).toContain("bg-air-surface");
 expect(wrapper.find('[data-test="login-evidence-proof"]').classes()).toContain("rounded-2xl");
 ```
 
-- [ ] **Step 2: 确认红灯**
+- [x] **Step 2: 确认红灯**
 
 Run: `node node_modules/vitest/vitest.mjs run src/layouts/AppLayout.test.ts`
 Expected: `login-air-surface` 不存在，证据卡仍为 rounded-xl；其他认证契约不变。
 
-- [ ] **Step 3: 添加 air tokens**
+- [x] **Step 3: 添加 air tokens**
 
 ```css
 :root {
@@ -59,17 +59,17 @@ Expected: `login-air-surface` 不存在，证据卡仍为 rounded-xl；其他认
 }
 ```
 
-- [ ] **Step 4: 实现登录页视觉**
+- [x] **Step 4: 实现登录页视觉**
 
 根节点加 `data-test="login-air-surface" class="... bg-air-surface"`；标题局部改 `text-air-primary`；证据卡改 `rounded-2xl border-air-accent bg-card/85`；tabs 和提交按钮改胶囊形，保留原 id、提交函数和静态「示例」说明。不得改全局 primary。
 
-- [ ] **Step 5: 确认绿灯并提交**
+- [x] **Step 5: 确认绿灯并提交**
 
 Run: 同 Step 2，Expected: **9/9 passed**（新增一条）。提交 `feat(ui): add blue editorial login`。
 
 ### Task 2: 任务首页蓝色编辑感
 
-- [ ] **Step 1: 写失败的设计签名测试**
+- [x] **Step 1: 写失败的设计签名测试**
 
 ```ts
 const shell = wrapper.find('[data-test="task-search-shell"]');
@@ -78,30 +78,30 @@ expect(shell.classes()).toContain("rounded-full");
 expect(wrapper.find('[data-test="task-search"]').attributes("aria-label")).toBe("搜索任务标题");
 ```
 
-- [ ] **Step 2: 确认红灯**
+- [x] **Step 2: 确认红灯**
 
 Run: `node node_modules/vitest/vitest.mjs run src/views/TaskListView.test.ts`
 Expected: `task-search-shell` 不存在；既有 18 条业务测试不修改。
 
-- [ ] **Step 3: 实现大搜索与卡片层级**
+- [x] **Step 3: 实现大搜索与卡片层级**
 
 在现有搜索父容器上加 `data-test="task-search-shell"`，改为全宽大圆角；搜索 input 保留 `v-model="keyword"`、data-test 和 aria-label。新建按钮与统计/待办/任务索引改浅蓝胶囊和大圆角，所有 click handler 原样保留。
 
-- [ ] **Step 4: 确认绿灯并提交**
+- [x] **Step 4: 确认绿灯并提交**
 
 Run: 同 Step 2，Expected: **19/19 passed**。提交 `feat(ui): add blue editorial task home`。
 
 ### Task 3: 正式环境验收与交付
 
-- [ ] **Step 1: 全量门禁**
+- [x] **Step 1: 全量门禁**
 
 分别运行 Vitest、`vue-tsc -b`、Vite build；不得用 `tsc --noEmit` 替代。
 
-- [ ] **Step 2: 部署与双视口截图**
+- [x] **Step 2: 部署与双视口截图**
 
 bundle → ff-only → build nginx → health ready。截取两页 1440×1000 与 390×844 图，逐张人工检查并记录 scrollWidth、搜索框和打开按钮几何。
 
-- [ ] **Step 3: 颜色与流程验证**
+- [x] **Step 3: 颜色与流程验证**
 
 用 canvas 将 OKLCH 转 sRGB，验证 air-primary 白字按钮 ≥4.5:1、焦点环 ≥3:1。跑 `m2-preview` 与 `m2-result-preview` 双视口，覆盖登录、搜索、创建、按钮和移动键盘入口。
 
