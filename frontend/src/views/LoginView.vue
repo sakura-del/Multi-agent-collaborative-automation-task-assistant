@@ -53,13 +53,13 @@ async function handleSubmit() {
 </script>
 
 <template>
-  <div class="grid min-h-dvh bg-background lg:grid-cols-[1.15fr_1fr]">
+  <div data-test="login-air-surface" class="grid min-h-dvh bg-air-surface lg:grid-cols-[1.15fr_1fr]">
     <!-- 左侧：产品身份与一张明确标注的证据示例。窄屏整栏隐藏，避免挤压表单。 -->
     <section
       class="relative hidden flex-col overflow-hidden border-r border-border bg-surface-brand px-10 py-8 lg:flex xl:px-14 xl:py-10"
     >
       <div
-        class="pointer-events-none absolute top-32 right-12 h-28 w-px bg-primary/25"
+        class="pointer-events-none absolute top-32 right-12 h-28 w-px bg-air-primary/25"
         aria-hidden="true"
       />
       <div class="relative flex items-center gap-2.5">
@@ -78,11 +78,11 @@ async function handleSubmit() {
       </div>
 
       <div class="relative my-auto max-w-2xl py-10">
-        <p class="text-[10px] font-semibold tracking-[0.2em] text-primary uppercase">
+        <p class="text-[10px] font-semibold tracking-[0.2em] text-air-primary uppercase">
           Research, grounded in evidence
         </p>
         <h1 class="mt-5 font-display text-5xl leading-[1.3] font-medium tracking-[-0.045em] xl:text-6xl">
-          让每一句论断，<br />都<span class="text-primary">有迹可循</span>。
+          让每一句论断，<br />都<span class="text-air-primary">有迹可循</span>。
         </h1>
         <p class="mt-6 max-w-lg text-sm leading-7 text-muted-foreground">
           从文献检索、证据筛选到综述成稿，多智能体协同完成研究流程。你负责判断，
@@ -92,7 +92,7 @@ async function handleSubmit() {
         <!-- 这里只是登录页的静态产品示例，明确标注，绝不冒充真实任务核验结果。 -->
         <div
           data-test="login-evidence-proof"
-          class="relative mt-10 max-w-xl rounded-xl border border-border-strong/60 bg-card/85 p-5 shadow-raised"
+          class="relative mt-10 max-w-xl rounded-2xl border border-air-accent bg-card/85 p-5 shadow-raised"
         >
           <div
             class="pointer-events-none absolute -right-2 -bottom-2 -z-10 h-full w-full rotate-[-1deg] rounded-xl border border-border bg-card/35"
@@ -110,7 +110,7 @@ async function handleSubmit() {
           </p>
           <div class="mt-4 flex items-center justify-between gap-3 text-[11px] text-muted-foreground">
             <span>GB/T 7714—2025 · 顺序编码制</span>
-            <span class="text-primary">证据可回溯</span>
+            <span class="text-air-primary">证据可回溯</span>
           </div>
         </div>
       </div>
@@ -140,13 +140,13 @@ async function handleSubmit() {
         </div>
 
         <div class="hidden lg:block">
-          <p class="text-[10px] font-semibold tracking-[0.18em] text-primary uppercase">Welcome back</p>
+          <p class="text-[10px] font-semibold tracking-[0.18em] text-air-primary uppercase">Welcome back</p>
           <h2 class="mt-3 font-display text-3xl font-medium tracking-[-0.025em]">继续你的研究</h2>
           <p class="mt-2 text-sm text-muted-foreground">登录以访问任务、证据与引用库。</p>
         </div>
 
         <form class="mt-7 flex flex-col gap-4" @submit.prevent="handleSubmit">
-          <div class="grid grid-cols-2 gap-1 rounded-lg border border-border bg-muted p-1" role="tablist">
+          <div class="grid grid-cols-2 gap-1 rounded-full border border-border bg-muted p-1" role="tablist">
             <button
               v-for="option in [
                 { value: 'login', label: '登录' },
@@ -157,7 +157,7 @@ async function handleSubmit() {
               role="tab"
               :aria-selected="mode === option.value"
               :class="[
-                'rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                'rounded-full px-3 py-2 text-sm font-medium transition-colors',
                 mode === option.value
                   ? 'bg-card text-foreground shadow-xs'
                   : 'text-muted-foreground hover:text-foreground',
@@ -177,7 +177,7 @@ async function handleSubmit() {
               required
               autocomplete="username"
               placeholder="请输入用户名或邮箱"
-              class="h-11 bg-card/70"
+              class="h-11 rounded-xl bg-card/70"
             />
           </div>
           <template v-else>
@@ -190,7 +190,7 @@ async function handleSubmit() {
                 required
                 minlength="3"
                 autocomplete="username"
-                class="h-11 bg-card/70"
+                class="h-11 rounded-xl bg-card/70"
               />
             </div>
             <div class="grid gap-1.5">
@@ -201,7 +201,7 @@ async function handleSubmit() {
                 type="email"
                 required
                 autocomplete="email"
-                class="h-11 bg-card/70"
+                class="h-11 rounded-xl bg-card/70"
               />
             </div>
           </template>
@@ -216,13 +216,17 @@ async function handleSubmit() {
               minlength="8"
               placeholder="至少 8 位"
               :autocomplete="mode === 'login' ? 'current-password' : 'new-password'"
-              class="h-11 bg-card/70"
+              class="h-11 rounded-xl bg-card/70"
             />
           </div>
 
           <ErrorBanner :message="errorMessage" />
 
-          <Button type="submit" :disabled="loading" class="h-11 w-full">
+          <Button
+            type="submit"
+            :disabled="loading"
+            class="h-11 w-full rounded-full bg-air-primary text-air-primary-foreground hover:bg-air-primary/90"
+          >
             <Loader2 v-if="loading" class="animate-spin" aria-hidden="true" />
             <span>{{ loading ? "处理中…" : submitLabel }}</span>
             <ArrowRight v-if="!loading" :size="15" aria-hidden="true" />
