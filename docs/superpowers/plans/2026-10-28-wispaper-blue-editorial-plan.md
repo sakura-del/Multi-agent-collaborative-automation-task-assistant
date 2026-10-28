@@ -1,5 +1,7 @@
 # WisPaper Blue Editorial Implementation Plan
 
+> 状态：用户最终未采用该视觉方向；`5458f77` 与 `dbea26d` 已通过 revert 提交回退，本计划不再继续执行。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 仅把登录页与任务首页升级成已确认的 WisPaper 蓝色编辑感，保留暖纸衬线及全部业务流程。

@@ -4191,7 +4191,8 @@ quota key 已删除，回查 KEYS 为空
 
 ## 2026-10-28 · WisPaper 蓝色编辑感（登录页 + 任务首页）
 
-设计：[2026-10-28-wispaper-blue-editorial-design.md](../specs/2026-10-28-wispaper-blue-editorial-design.md)  
+设计：[2026-10-28-wispaper-blue-editorial-design.md](../specs/2026-10-28-wispaper-blue-editorial-design.md)
+
 计划：[2026-10-28-wispaper-blue-editorial-plan.md](2026-10-28-wispaper-blue-editorial-plan.md)
 
 ### 范围与实现
@@ -4221,6 +4222,12 @@ air tokens 只服务两页，不替换 success/warning/destructive。证据卡�
 四张图均人工检查：保留暖纸衬线，浅蓝、胶囊和大圆角与确认稿一致；桌面/移动均无横向溢出。蓝色按钮白字对比度 **6.22:1**。移动端打开按钮实测 **40×40px** 且可见。搜索和新建表单在真实页面操作正常。
 
 关键 E2E `m2-preview + m2-result-preview` 在 chromium + mobile-chrome 双视口 **4/4 passed**，覆盖登录、任务列表、新建表单、结果页和移动键盘/整行入口。最终备份与 CI 结果在收尾时补记。
+
+### 用户取消与恢复
+
+用户在正式页面审阅后决定不采用 WisPaper 蓝色编辑感。仅回退本轮两张视觉提交：`1df68ba` 撤销任务首页、`dd0d720` 撤销登录页；阶段 D 与其他实验改动不受影响。
+
+恢复后两页测试 **26/26 passed**，服务器重新部署 `dd0d720`。`restored-login-desktop.png` / `restored-tasks-desktop.png` 已人工查看，恢复为此前暖纸学术编辑风；`restored-validation.json` 记录 air 选择器均为 0、正常搜索和新建入口均为 1、无横向溢出。设计文档与生产验证图仅保留作决策历史，**不再作为后续实施依据**。
 
 
 
