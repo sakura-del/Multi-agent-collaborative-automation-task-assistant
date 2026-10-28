@@ -143,27 +143,6 @@ describe("登录页产品身份", () => {
     expect(proof.text()).toContain("引用核验通过");
   });
 
-  it("登录页使用蓝色编辑感设计签名，但不改变认证结构", async () => {
-    setActivePinia(createPinia());
-    const router = createRouter({
-      history: createMemoryHistory(),
-      routes: [
-        { path: "/login", name: "login", component: { template: "<div/>" } },
-        { path: "/password-reset", name: "password-reset", component: { template: "<div/>" } },
-      ],
-    });
-    await router.push("/login");
-    await router.isReady();
-
-    const LoginView = (await import("@/views/LoginView.vue")).default;
-    const wrapper = mount(LoginView, { global: { plugins: [router] } });
-
-    const root = wrapper.find('[data-test="login-air-surface"]');
-    expect(root.exists()).toBe(true);
-    expect(root.classes()).toContain("bg-air-surface");
-    expect(wrapper.find('[data-test="login-evidence-proof"]').classes()).toContain("rounded-2xl");
-  });
-
   it("保留登录所需的表单字段 id（E2E 与自动化脚本依赖）", async () => {
     setActivePinia(createPinia());
     const router = createRouter({

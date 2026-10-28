@@ -77,13 +77,6 @@
   /* 品牌面板底色：登录页左栏等"要区别于工作区"的大面积区域。
      极浅的蓝调中性色 —— 只够形成分区，不抢内容注意力。 */
   --surface-brand: oklch(0.955 0.012 145);
-
-  /* WisPaper 蓝色编辑感：仅供登录页与任务首页使用，不替换全站主色。 */
-  --air-surface: oklch(0.955 0.025 220);
-  --air-primary: oklch(0.48 0.085 225);
-  --air-primary-foreground: oklch(0.99 0 0);
-  --air-accent: oklch(0.91 0.028 220);
-  --air-accent-foreground: oklch(0.4 0.07 225);
 }
 
 .dark {
@@ -158,11 +151,6 @@
 
   /* 品牌面板底色（登录页左栏） */
   --color-surface-brand: var(--surface-brand);
-  --color-air-surface: var(--air-surface);
-  --color-air-primary: var(--air-primary);
-  --color-air-primary-foreground: var(--air-primary-foreground);
-  --color-air-accent: var(--air-accent);
-  --color-air-accent-foreground: var(--air-accent-foreground);
 }
 
 /* ============================================================
