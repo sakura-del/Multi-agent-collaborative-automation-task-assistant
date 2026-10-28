@@ -1,7 +1,10 @@
 # AGENTS.md — 项目上下文与开发约定
 
 > 本文件是**给 AI 编码助手看的交接文档**。新会话开始时请先读完本文件再动手。
-> 最后更新：2026-10-26（本轮：导入文献页 + 引用库，见文末「文档入口」）
+> 最后更新：2026-10-28（本轮：模型切换 + 实验矩阵 60 run + 三个实验类缺陷修复 + 部署）
+>
+> **新会话请先读** → [docs/runbooks/2026-10-28-handoff.md](docs/runbooks/2026-10-28-handoff.md)
+> （紧凑版：现状 / 未完成项 / 硬约束 / 命令与坑）。本文件查约定与历史坑，handoff 查「现在该干什么」。
 
 ---
 
@@ -16,7 +19,7 @@
 
 ---
 
-## 2. 当前状态快照（2026-10-26）
+## 2. 当前状态快照（2026-10-28）
 
 | 项 | 值 |
 | --- | --- |
@@ -26,7 +29,7 @@
 | Plan 状态 | Plan 2 / 3 / 4 / 5 **全部 Exit Gate PASSED**；**Phase 1 五项全部端到端可用且遗留清零**；**Phase 2 五项全部交付完成**（PRISMA ✅ + 可观测性 ✅ + 团队工作区 ✅ + 开放 API ✅ + 计费套餐 ✅） |
 | 产品化进度 | **Issue #2~#7 全部关闭且遗留清零**；**P1-D 配额遗留已修复**；**`max_results` 已夹紧**；**PRISMA 完成**；**可观测性完成**（8 指标 + `/metrics` + 看板，**看板数字已全部为真**）；**团队工作区完成**；**开放 API 完成**；**计费套餐完成**（四档 + 四条功能门禁 + 手工开通 + **套餐页已重设计**）；**引用样式页已重设计**（**真实渲染预览** + 删除二次确认）；**Word 模板页已修**（**不再把示例填充谎称成稿** + 删除二次确认）；**前端已迁移到 Tailwind v4 + shadcn-vue**；**引用库 + 证据闭环完成**；**review 长度上限缺陷已修**（`max_length` 不再施加到机器汇总） |
 | 数据库迁移 head | **`b7d4e9f1c6a2`**（`reference_library_item` 引用库表） |
-| 后端测试 | **2821 passed**, 8 skipped；覆盖率 **~89%**；`mypy` 0 错误（207 文件） |
+| 后端测试 | **2837 passed**, 8 skipped；覆盖率 **~89%**；`mypy` 0 错误（207 文件） |
 | 前端测试 | Vitest **458 passed**（+6 skipped）；**Playwright E2E 44 场景**（新增引用库编辑 1 条，chromium + mobile-chrome 双视口实测通过） |
 | CI | **6/6 作业全绿**（run `40624641598`，`5eeabae`）。**每个作业已配 `timeout-minutes`**。⚠️ **GitHub 直连不通，需走系统代理**：`git -c http.proxy=http://127.0.0.1:7894 -c https.proxy=... push`、`$env:HTTPS_PROXY='http://127.0.0.1:7894'` 后再用 `gh` |
 | 服务器 | 已部署至 `5eeabae`，五容器 healthy，`/api/v1/health/ready` → `{"status":"ready"}`，`alembic current` = **`b7d4e9f1c6a2 (head)`**，四套餐种子已就位，**向量库 id 级一致（28344 条）**，**`task.used_tokens` 已回填（169372，28 个任务）**，**6 个引用样式预览全部真实渲染（warnings=0）**，**引用库端到端跑通**，**元数据证据已生效（metadata 4/4 可追溯）**，**review 长度上限已修**，**校验结论已落库**，**历史校验已迁移（188 条）**，**模型 = `workbuddy-ai/deepseek-v4.1-flash`（容器内 FROZEN_MODEL 与 runtime 一致）**，**404 降级已实测生效**，**60 个实验任务在库（tasks 113 = 53 + 60）** |
@@ -158,6 +161,9 @@ docker compose build backend && docker compose up -d backend
 | 35 | **Issue 类修复要 grep 全部同类调用点**（2026-10-27） | Issue #6 引入 `content_role` 修「机器汇总被施加作者级检查」，但只改了 `citation_validator` 的 `duplicate_paragraph_ratio`；`ValidatorAgent._check_rules` 的 `max_length` **签名里根本没有这个参数**，于是同一类缺陷换了个检查项继续存在 8 天。**修「某类错误」时要 grep 该模式的所有出现位置**，不是只修眼前报错的那一处 |
 | 36 | **回退验证前必须确认「回退版本真的部署上去了」**（2026-10-27） | 做 E2E 诚实性验证时，我改坏代码后跑测试 → **仍然通过**，差点判定「这条 E2E 抓不住缺陷」。实际原因：改动**没提交**，`git bundle` 里没有它，`df.sh` 部署的还是旧代码 —— **回退根本没生效**。第二次提交后再跑，E2E 正常变红。**回退验证必须做两步确认**：① `ssh ... 'git log --oneline -1'` 看服务器 HEAD 是不是回退版本；② `grep` 关键代码确认改动在位。**「测试通过了」可能是「改动没上」，不是「测试不行」** |
 | 37 | **`git reset --hard` 会删掉未跟踪/未提交的新文件**（2026-10-27） | 回退验证后我用 `git reset --hard HEAD~1` 恢复，把**刚写好但只在那个 TEMP 提交里**的 E2E 文件一起删了（`git status` 干净，看起来像「什么都没丢」）。**新文件要先进 `$env:TEMP` 备份或先单独提交**，再动 reset。同类：`git reset --hard` 之后 `df.sh` 的 `merge --ff-only` 会失败（服务器 HEAD 成了本地不存在的提交）→ 部署静默不生效，需要用 `git reset --hard win/main` 强制对齐 |
+| 38 | **禁止 `git add -A`：本仓库常有用户并行任务**（2026-10-28） | 用户同时在做 UI 重设计任务，工作区里有未跟踪的 `docs/design/`、`docs/superpowers/specs/*.md`。我用 `git add -A` 把它们一起提交进我的 fix commit，只能 `git reset --soft HEAD~1` 重做。**只 add 本任务的确切路径**，提交前 `git status --short` 逐条过一遍 |
+| 39 | **改画像/配置里的「约定值」要 grep 全部同类断言**（2026-10-28） | 切默认模型时把 `fallback_chain` 首项从 `deepseek` 改成 `workbuddy-ai/-sg`，有 4 处断言硬编码 `fallback_chain[0].provider == "deepseek"`，我只改了 3 处，**全量测试跑 14 分钟才暴露第 4 处**（`test_config_priority.py`）。改约定值前先 `grep -r 'fallback_chain\[0\]\|chain\[0\]' tests/` |
+| 40 | **实验类修复做完就停，不要顺手重跑矩阵**（2026-10-28） | 指标采集修好后我提议「重跑 60 run 验证」，被用户否决两次：交付在**次年 3 月**，现在重跑白烧 73 分钟和模型额度。采集逻辑有 11 条单测覆盖即可，**真实重跑等临近交付再做**。见 §6.2 |
 
 ---
 
@@ -435,7 +441,7 @@ docs/superpowers/plans/             # 计划 + 执行记录（execution-notes）
 
 | 想知道什么 | 读哪个 |
 | --- | --- |
-| **接手新会话**（当前状态 / 剩余任务 / 命令 / 阻塞项） | [docs/runbooks/2026-10-26-handoff.md](docs/runbooks/2026-10-26-handoff.md) |
+| **接手新会话**（当前状态 / 剩余任务 / 命令 / 阻塞项） | [docs/runbooks/2026-10-28-handoff.md](docs/runbooks/2026-10-28-handoff.md) ⭐ **先读这个**；历史细节查 [2026-10-26-handoff.md](docs/runbooks/2026-10-26-handoff.md) §3.1~§3.14 |
 | **前端重设计怎么做的**（10 个阶段的设计取舍与实测证据） | [docs/superpowers/specs/2026-10-23-frontend-redesign-design.md](docs/superpowers/specs/2026-10-23-frontend-redesign-design.md) §4.5~§4.18 |
 | **用量看板为什么重做**（token 用量从未落库 + 5 个缺陷 + 数据修复） | 同上 §4.14 + [execution-notes](docs/superpowers/plans/2026-08-09-00-execution-notes.md) |
 | **套餐页为什么重做**（当前卡零权益 + 到期日缺失 + 无升级入口 + 6 缺陷） | 同上 §4.15 + [execution-notes](docs/superpowers/plans/2026-08-09-00-execution-notes.md) |
