@@ -150,6 +150,8 @@ class ReferenceVerification(BaseModel):
     """人类可读判定理由（进入校验报告 feedback 与导出报告）。"""
 
     similarity: float = Field(default=0.0, ge=0.0, le=1.0)
+    is_retracted: bool | None = None
+    """与四态核验正交的撤稿状态；True/False/None 分别对应已撤稿/未标记/未知。"""
     matched: MetadataRecord | None = None
     cached: bool = False
     """是否来自核验缓存（缓存命中不得再次外呼）。"""

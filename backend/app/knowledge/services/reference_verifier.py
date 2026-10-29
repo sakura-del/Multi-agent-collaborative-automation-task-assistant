@@ -48,7 +48,8 @@ DEFAULT_SIMILARITY_THRESHOLD = 0.90
 
 # 缓存默认 TTL：7 天（与计划 §2.5 的 cache_ttl_seconds 默认值一致）
 _DEFAULT_CACHE_TTL = 604800
-_CACHE_KEY_PREFIX = "refverify:"
+# v2：载荷新增 `is_retracted` 字段，换命名空间避免旧缓存（无该字段）被当成有效命中
+_CACHE_KEY_PREFIX = "refverify:v2:"
 
 CACHE_REDIS_FAILURE_THRESHOLD = 2
 """连续 Redis 操作失败达到该次数即熔断（计划 §2.9 修订 R5②）。
@@ -313,7 +314,7 @@ def summarize_verifications(
 
 
 class ReferenceVerificationCache:
-    """Redis 优先、内存回退；键为 ``refverify:{reference_key}``。
+    """Redis 优先、内存回退；键为 ``refverify:v2:{reference_key}``。
 
     接口为 **async**（计划 §2.3 修订 R2）：项目 Redis 只有 ``redis.asyncio`` 客户端
     （``app/core/redis.py::RedisManager.get_client()``），同步接口无法消费 awaitable，
@@ -706,6 +707,7 @@ class ReferenceVerifier:
             verdict=verdict,
             reason=reason,
             similarity=score,
+            is_retracted=record.is_retracted,
             matched=record,
         )
 

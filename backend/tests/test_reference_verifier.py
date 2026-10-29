@@ -432,7 +432,7 @@ class TestBlockedKeysAndSummary:
 
 
 class TestReferenceVerificationCache:
-    """Redis 优先、内存回退；键为 `refverify:{reference_key}`；接口为 async（修订 R2）。"""
+    """Redis 优先、内存回退；键为 `refverify:v2:{reference_key}`；接口为 async（修订 R2）。"""
 
     async def test_memory_fallback_round_trip(self) -> None:
         cache = ReferenceVerificationCache()
@@ -450,7 +450,7 @@ class TestReferenceVerificationCache:
         redis = FakeAsyncRedis()
         cache = ReferenceVerificationCache(redis_client=redis, ttl=120)
         await cache.set("10.1/x", make_verification("10.1/x", ReferenceVerdict.NOT_FOUND))
-        assert redis.setex_calls[0][0] == "refverify:10.1/x"
+        assert redis.setex_calls[0][0] == "refverify:v2:10.1/x"
         assert redis.setex_calls[0][1] == 120
         cached = await cache.get("10.1/x")
         assert cached is not None
@@ -480,7 +480,7 @@ class TestReferenceVerificationCache:
         client = fakeredis.aioredis.FakeRedis(decode_responses=True)
         cache = ReferenceVerificationCache(redis_client=client)
         await cache.set("k", make_verification("k", ReferenceVerdict.VERIFIED))
-        assert await client.get("refverify:k") is not None
+        assert await client.get("refverify:v2:k") is not None
         cached = await cache.get("k")
         assert cached is not None
         assert cached.verdict is ReferenceVerdict.VERIFIED
@@ -989,6 +989,54 @@ class TestDegradation:
         assert crossref.calls == 4  # 降级态不写缓存，第二次仍会重试外呼
 
 
+# ===== 撤稿状态传播与 v2 缓存命名空间 =====
+
+
+async def test_verified_result_preserves_retraction_flag() -> None:
+    record = make_record(source="openalex").model_copy(update={"is_retracted": True})
+    verifier = ReferenceVerifier(openalex=FakeSource(doi_result=record))
+
+    result = await verifier.verify(make_candidate())
+
+    assert result.verdict is ReferenceVerdict.VERIFIED
+    assert result.is_retracted is True
+
+
+async def test_cache_uses_v2_namespace_and_preserves_unknown_retraction() -> None:
+    redis = FakeAsyncRedis()
+    cache = ReferenceVerificationCache(redis_client=redis)
+    verification = make_verification("k", ReferenceVerdict.VERIFIED).model_copy(
+        update={"is_retracted": None}
+    )
+
+    await cache.set("k", verification)
+    cached = await cache.get("k")
+
+    assert "refverify:v2:k" in redis.store
+    assert "refverify:k" not in redis.store
+    assert cached is not None
+    assert cached.is_retracted is None
+
+
+async def test_cached_verdict_keeps_retracted_true() -> None:
+    """已撤稿结论进缓存再读出仍为 True（Task 3 的徽标依赖该值，不能被丢成 None/False）。"""
+    redis = FakeAsyncRedis()
+    cache = ReferenceVerificationCache(redis_client=redis)
+    verifier = ReferenceVerifier(
+        openalex=FakeSource(
+            doi_result=make_record(source="openalex").model_copy(update={"is_retracted": True})
+        ),
+        cache=cache,
+    )
+
+    first = await verifier.verify(make_candidate())
+    second = await verifier.verify(make_candidate())
+
+    assert first.is_retracted is True
+    assert second.cached is True
+    assert second.is_retracted is True
+
+
 # ===== 缓存命中不重复外呼 =====
 
 
@@ -1020,7 +1068,7 @@ class TestVerifierCacheIntegration:
 
         assert second.cached is True
         assert crossref.calls == 1
-        assert redis.setex_calls[0][0] == "refverify:10.1234/abc"
+        assert redis.setex_calls[0][0] == "refverify:v2:10.1234/abc"
 
     async def test_second_verify_hits_fakeredis_without_external_call(self) -> None:
         """注入 fakeredis.aioredis：第二次 verify 零外呼且 cached=True（Redis 路径真生效）。"""
@@ -1035,7 +1083,7 @@ class TestVerifierCacheIntegration:
         assert first.cached is False
         assert second.cached is True
         assert crossref.calls == 1
-        assert await client.get("refverify:10.1234/abc") is not None
+        assert await client.get("refverify:v2:10.1234/abc") is not None
 
     async def test_different_keys_do_not_collide(self) -> None:
         crossref = FakeSource(doi_result=make_record())
