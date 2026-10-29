@@ -38,6 +38,18 @@ def _text(value: Any) -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
+_SKIP_ITEM_TYPES = frozenset({"attachment", "note", "annotation"})
+"""非文献条目：导出成 BibTeX 会污染导入，甚至因缺标题让整批解析失败。"""
+
+
+def _is_exportable(item: dict[str, Any]) -> bool:
+    """只保留有标题、且不是笔记/附件/批注的 Zotero 条目。"""
+    data = item.get("data") if isinstance(item.get("data"), dict) else {}
+    if _text(data.get("itemType")) in _SKIP_ITEM_TYPES:
+        return False
+    return bool(_text(data.get("title")))
+
+
 _BIBTEX_ESCAPE_MAP = {
     "\\": r"\textbackslash{}",
     "{": r"\{",
@@ -109,7 +121,7 @@ def zotero_item_to_bibtex(item: dict[str, Any]) -> str:
 
 
 def items_to_bibtex(items: Iterable[dict[str, Any]]) -> str:
-    return "\n".join(zotero_item_to_bibtex(item) for item in items)
+    return "\n".join(zotero_item_to_bibtex(item) for item in items if _is_exportable(item))
 
 
 # ===== 只读 Local API 客户端（Task 5）=====
@@ -194,15 +206,17 @@ def main(argv: list[str] | None = None, *, client: httpx.Client | None = None) -
     try:
         local = ZoteroLocalClient(http_client)
         local.check_version()
-        items = local.collection_items(args.collection)
+        raw_items = local.collection_items(args.collection)
+        items = [item for item in raw_items if _is_exportable(item)]
         if not items:
             keys = [
                 str(item.get("key"))
                 for item in local.collections()
                 if isinstance(item, dict) and item.get("key")
             ]
+            reason = "集合为空或不存在" if not raw_items else "集合内没有可导出的文献条目"
             raise ZoteroError(
-                f"集合为空或不存在：{args.collection or '全部条目'}；"
+                f"{reason}：{args.collection or '全部条目'}；"
                 f"可选集合：{', '.join(keys) or '无'}"
             )
         text = items_to_bibtex(items)
@@ -211,6 +225,7 @@ def main(argv: list[str] | None = None, *, client: httpx.Client | None = None) -
         # "x"：绝不覆盖已有文件（用户的导出文件可能已被手工整理过）
         with open(args.output, "x", encoding="utf-8", newline="\n") as handle:
             handle.write(text)
+        print(f"已导出 {len(items)} 条到 {args.output}")
         return 0
     except (ZoteroError, OSError, httpx.HTTPError, ValueError) as exc:
         print(str(exc), file=sys.stderr)

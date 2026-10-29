@@ -63,6 +63,32 @@ def test_unknown_type_does_not_fabricate_year() -> None:
     assert "1970" not in text
 
 
+def test_skips_non_bibliographic_items() -> None:
+    """集合里的笔记、附件、批注不能变成文献条目；无标题条目同样跳过。"""
+    items = [
+        {"key": "NOTE1", "data": {"itemType": "note", "title": "一条笔记"}},
+        {"key": "ATT1", "data": {"itemType": "attachment", "title": "paper.pdf"}},
+        {"key": "ANN1", "data": {"itemType": "annotation", "title": "批注"}},
+        {"key": "NOTITLE", "data": {"itemType": "journalArticle"}},
+        {
+            "key": "OK1",
+            "data": {
+                "itemType": "journalArticle",
+                "title": "Real Paper",
+                "date": "2024",
+                "DOI": "10.1234/ok",
+            },
+        },
+    ]
+
+    text = zotero_export.items_to_bibtex(items)
+
+    assert text.count("@") == 1
+    assert "@article{doi:10.1234/ok," in text
+    assert "一条笔记" not in text
+    assert "paper.pdf" not in text
+
+
 def test_export_is_parseable_by_existing_importer() -> None:
     items = [
         {
@@ -97,7 +123,9 @@ def _zotero_client(handler) -> httpx.Client:
     )
 
 
-def test_cli_reads_collection_and_writes_parseable_bibtex(tmp_path: Path) -> None:
+def test_cli_reads_collection_and_writes_parseable_bibtex(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/api/":
             return httpx.Response(200, headers={"Zotero-API-Version": "3"}, json={})
@@ -132,6 +160,7 @@ def test_cli_reads_collection_and_writes_parseable_bibtex(tmp_path: Path) -> Non
     parsed = parse_bibtex(output.read_text(encoding="utf-8"))
     assert len(parsed) == 1
     assert parsed[0].doi == "10.1234/abc"
+    assert "已导出 1 条" in capsys.readouterr().out
 
 
 def test_client_paginates_collection_items_with_start_and_limit() -> None:
