@@ -44,7 +44,8 @@ _SKIP_ITEM_TYPES = frozenset({"attachment", "note", "annotation"})
 
 def _is_exportable(item: dict[str, Any]) -> bool:
     """只保留有标题、且不是笔记/附件/批注的 Zotero 条目。"""
-    data = item.get("data") if isinstance(item.get("data"), dict) else {}
+    raw_data = item.get("data")
+    data: dict[str, Any] = raw_data if isinstance(raw_data, dict) else {}
     if _text(data.get("itemType")) in _SKIP_ITEM_TYPES:
         return False
     return bool(_text(data.get("title")))

@@ -239,11 +239,11 @@ class LiteratureExporter:
         for index, ref_id in enumerate(rendered.item_order):
             if index >= len(lines):
                 break
-            entry = entry_by_id.get(ref_id)
-            if entry is None:
+            matched_entry = entry_by_id.get(ref_id)
+            if matched_entry is None:
                 continue
             lines[index] += _verification_mark(
-                entry.get("verification_status"), entry.get("is_retracted")
+                matched_entry.get("verification_status"), matched_entry.get("is_retracted")
             )
         return lines
 
