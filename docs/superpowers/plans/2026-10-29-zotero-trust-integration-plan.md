@@ -373,6 +373,20 @@ _verification_mark(entry.get("verification_status"), entry.get("is_retracted"))
 
 无核验信息的历史 `LEGACY_LINES` 不含核验标记，保持不变。
 
+另外，导出默认会走 `citation_style` 的 CSL 渲染路径，该路径会**整段替换**参考文献；只改 `_bibliography_line` 会让真实任务产物丢失撤稿标记。`_render_bibliography` 必须建立 `item.id → bibliography entry` 映射，按 `rendered.item_order` 把 `_verification_mark(...)` 追加回对应行。对应测试放在 `test_csl_integration.py`：
+
+```python
+def test_csl_rendered_bibliography_keeps_retraction_marks(self, tmp_path) -> None:
+    report = _report()
+    report.bibliography[0]["is_retracted"] = True
+    report.bibliography[1]["is_retracted"] = False
+
+    text = _export(report, "gbt7714", tmp_path)
+
+    assert "（核验：已验证；已撤稿）" in text
+    assert "（核验：已验证；未标记撤稿）" in text
+```
+
 再用以下命令检查所有旧标记断言，按「设计变更」统一更新，不能只改当前失败的两处：
 
 ```powershell
