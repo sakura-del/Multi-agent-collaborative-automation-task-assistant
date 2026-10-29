@@ -81,11 +81,13 @@ class FakeVerifier:
         intercept: bool = False,
         error: Exception | None = None,
         cached_first: bool = False,
+        retractions: Mapping[str, bool | None] | None = None,
     ) -> None:
         self._verdicts = dict(verdicts or {})
         self._intercept = intercept
         self._error = error
         self._cached_first = cached_first
+        self._retractions = dict(retractions or {})
         self.calls = 0
         self.candidates: list[ReferenceCandidate] = []
 
@@ -107,6 +109,7 @@ class FakeVerifier:
                 verdict=self._verdicts.get(candidate.title, ReferenceVerdict.VERIFIED),
                 reason=f"核验理由：{candidate.title}",
                 cached=self._cached_first and index == 0,
+                is_retracted=self._retractions.get(candidate.title),
             )
             for index, candidate in enumerate(candidates)
         ]
@@ -274,7 +277,7 @@ class TestReviewerVerificationStats:
         markdown = report["final_markdown"]
         assert "## 引用核验" in markdown
         for label in ("已验证", "元数据不符", "未找到", "未核验"):
-            assert f"（核验：{label}）" in markdown
+            assert f"（核验：{label}；撤稿状态未知）" in markdown
         assert "已验证 1 条" in markdown
         assert "已拦截 0 条" in markdown
         assert "拦截开关：关闭" in markdown
@@ -352,6 +355,40 @@ class TestReviewerVerificationStats:
         assert "verification_status" not in bibliography[1]
         assert report["stats"]["reference_verification"]["total"] == 1
         assert report["stats"]["reference_verification"]["dropped"] == 0
+
+    async def test_bibliography_entries_include_independent_retraction_status(self) -> None:
+        """撤稿标记是四态核验之外的正交字段：True/False/None 三态原样写入 bibliography。"""
+        fake = FakeVerifier(
+            VERDICTS,
+            retractions={
+                VERIFIED_TITLE: True,
+                MISMATCH_TITLE: False,
+                NOT_FOUND_TITLE: None,
+            },
+        )
+        report = await ReviewerAgent(reference_verifier=fake).execute(make_input())
+
+        first, second, third, fourth = report["bibliography"]
+        assert first["is_retracted"] is True
+        assert second["is_retracted"] is False
+        assert third["is_retracted"] is None
+        # 第四条未出现在 retractions 映射里：缺失必须落成 None（未知），不得落成 False
+        assert fourth["is_retracted"] is None
+
+        # 四态核验结论不受撤稿字段影响（正交）
+        assert [entry["verification_status"] for entry in report["bibliography"]] == [
+            "verified",
+            "metadata_mismatch",
+            "not_found",
+            "unverified",
+        ]
+
+        # 逐行标记同时呈现四态结论与撤稿三态：False 只能是「未标记撤稿」，绝非「安全」
+        markdown = report["final_markdown"]
+        assert "（核验：已验证；已撤稿）" in markdown
+        assert "（核验：元数据不符；未标记撤稿）" in markdown
+        assert "（核验：未找到；撤稿状态未知）" in markdown
+        assert "（核验：未核验；撤稿状态未知）" in markdown
 
 
 # ===== 核验失败：绝不拖垮复盘 =====

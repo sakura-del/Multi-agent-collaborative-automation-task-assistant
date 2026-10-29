@@ -51,6 +51,22 @@ function verdictLabel(status: VerificationStatus | null): string {
   return status ? VERDICT_LABELS[status] : "";
 }
 
+/**
+ * 撤稿三态标签（与后端 `_retraction_label` 口径一致）。
+ *
+ * ⚠️ `false` 只表示来源未标记撤稿，**不等于安全**；`null` / 缺失一律显示「未知」，
+ * 不得把任一情况粉饰成「未撤稿」。
+ */
+function retractionLabel(value: boolean | null | undefined): string {
+  if (value === true) {
+    return "已撤稿";
+  }
+  if (value === false) {
+    return "未标记撤稿";
+  }
+  return "撤稿状态未知";
+}
+
 const counts = computed(() =>
   VERDICT_ORDER.map((verdict) => ({
     verdict,
@@ -124,6 +140,14 @@ const interceptedLabel = computed(() => {
             :data-test="`bibliography-verdict-${entry.index}`"
           >
             {{ verdictLabel(entry.verification_status) }}
+          </Badge>
+          <!-- 撤稿状态是独立徽标：只对已核验条目显示，且不覆盖四态结论 -->
+          <Badge
+            v-if="entry.verification_status"
+            :variant="entry.is_retracted === true ? 'destructive' : 'muted'"
+            :data-test="`bibliography-retraction-${entry.index}`"
+          >
+            {{ retractionLabel(entry.is_retracted) }}
           </Badge>
         </li>
       </ol>

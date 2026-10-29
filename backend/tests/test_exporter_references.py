@@ -69,10 +69,11 @@ EXPECTED_SECTION = (
 
 VERIFIED_LINE = (
     "- [1] RAG Evaluation Survey (10.1234/verified) — https://doi.org/10.1234/verified"
-    "（核验：已验证）"
+    "（核验：已验证；撤稿状态未知）"
 )
 NOT_FOUND_LINE = (
-    "- [2] Evidence Tracing (2401.12342v1) — https://arxiv.org/abs/2401.12342v1" "（核验：未找到）"
+    "- [2] Evidence Tracing (2401.12342v1) — https://arxiv.org/abs/2401.12342v1"
+    "（核验：未找到；撤稿状态未知）"
 )
 
 #: 无核验信息时的历史渲染（老数据必须逐字一致）
@@ -170,6 +171,27 @@ class TestMarkdownVerificationSection:
         with pytest.raises(ValidationException):
             exporter.export_markdown(USER_A, TASK_ID, report)
 
+    def test_reference_line_marks_retraction_independently(self, tmp_path: Path) -> None:
+        """撤稿状态与四态核验独立展示：已撤稿条目必须同时保留核验结论与撤稿标记。"""
+        report = make_report()
+        report.bibliography[0]["is_retracted"] = True
+
+        text = exported_text(tmp_path, report)
+
+        assert "（核验：已验证；已撤稿）" in text
+        # 其他条目没有撤稿信息 → 未知，而不是「未标记撤稿」
+        assert "（核验：未找到；撤稿状态未知）" in text
+
+    def test_reference_line_marks_false_as_not_marked_not_safe(self, tmp_path: Path) -> None:
+        """`False` 只代表来源未标记撤稿；标记里不得出现「安全」这类结论。"""
+        report = make_report()
+        report.bibliography[0]["is_retracted"] = False
+
+        text = exported_text(tmp_path, report)
+
+        assert "（核验：已验证；未标记撤稿）" in text
+        assert "安全" not in text
+
 
 class TestDocxVerificationSection:
     def test_docx_contains_verification_section(self, tmp_path: Path) -> None:
@@ -194,7 +216,7 @@ class TestDocxVerificationSection:
         assert "拦截开关：开启" in joined
         # 参考文献行的核验标记同样进入 DOCX
         assert "RAG Evaluation Survey" in joined
-        assert "（核验：已验证）" in joined
+        assert "（核验：已验证；撤稿状态未知）" in joined
 
     def test_docx_legacy_report_unchanged(self, tmp_path: Path) -> None:
         exporter = LiteratureExporter(tmp_path / "artifacts")

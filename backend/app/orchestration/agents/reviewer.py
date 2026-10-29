@@ -49,11 +49,28 @@ _REFERENCE_SECTION = "## 引用核验"
 _MAX_REASON_LENGTH = 200
 
 
-def _verification_mark(status: Any) -> str:
+def _retraction_label(value: Any) -> str:
+    """撤稿三态标签（与四态核验正交）。
+
+    - ``True`` → 已撤稿；
+    - ``False`` → 来源明确未标记撤稿，**不等于「安全」**；
+    - ``None`` / 缺失 → 撤稿状态未知（来源不可用或无该字段）。
+
+    与导出侧各保留一份实现：标签只有一个，没必要为它制造跨层依赖。
+    """
+    if value is True:
+        return "已撤稿"
+    if value is False:
+        return "未标记撤稿"
+    return "撤稿状态未知"
+
+
+def _verification_mark(status: Any, is_retracted: Any = None) -> str:
     """参考文献行的核验标记；无核验信息（老数据 / 未注入核验器）时返回空串。"""
     if not isinstance(status, str) or not status:
         return ""
-    return f"（核验：{dict(_VERDICT_LABELS).get(status, status)}）"
+    label = dict(_VERDICT_LABELS).get(status, status)
+    return f"（核验：{label}；{_retraction_label(is_retracted)}）"
 
 
 def _summary_count(summary: Mapping[str, Any], key: str) -> int:
@@ -478,6 +495,7 @@ class ReviewerAgent(BaseAgent):
                 continue
             entry["verification_status"] = verification.verdict.value
             entry["verification_reason"] = verification.reason
+            entry["is_retracted"] = verification.is_retracted
 
         summary = summarize_verifications(verifications, dropped=dropped, intercepted=intercept)
         return bibliography, summary.model_dump()
@@ -583,7 +601,9 @@ class ReviewerAgent(BaseAgent):
             for entry in bibliography:
                 title = entry.get("title") or entry.get("source_id") or "未命名文献"
                 url = entry.get("source_url") or ""
-                mark = _verification_mark(entry.get("verification_status"))
+                mark = _verification_mark(
+                    entry.get("verification_status"), entry.get("is_retracted")
+                )
                 lines.append(f"- [{entry['index']}] {title} — {url}".rstrip(" —") + mark)
             parts.append("## 参考文献\n" + "\n".join(lines))
         if reference_verification is not None:

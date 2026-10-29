@@ -25,12 +25,17 @@ function summary(
   };
 }
 
-function entry(index: number, status: VerificationStatus | null): BibliographyEntry {
+function entry(
+  index: number,
+  status: VerificationStatus | null,
+  is_retracted: boolean | null = null
+): BibliographyEntry {
   return {
     index,
     title: `文献 ${index}`,
     url: `https://arxiv.org/abs/2401.0000${index}v1`,
     verification_status: status,
+    is_retracted,
   };
 }
 
@@ -140,6 +145,51 @@ describe("ReferenceVerificationPanel", () => {
 
     expect(wrapper.find('[data-test="bibliography-verdict-1"]').exists()).toBe(false);
     expect(wrapper.find('[data-test="bibliography-entry-1"]').exists()).toBe(false);
+  });
+
+  it("renders independent retraction badges in three states", () => {
+    const wrapper = mountPanel({
+      entries: [
+        { ...entry(1, "verified"), is_retracted: true },
+        { ...entry(2, "verified"), is_retracted: false },
+        { ...entry(3, "verified"), is_retracted: null },
+      ],
+    });
+
+    expect(wrapper.find('[data-test="bibliography-retraction-1"]').text()).toBe("已撤稿");
+    expect(wrapper.find('[data-test="bibliography-retraction-2"]').text()).toBe("未标记撤稿");
+    expect(wrapper.find('[data-test="bibliography-retraction-3"]').text()).toBe("撤稿状态未知");
+
+    // 语义变体：只有确认撤稿用 destructive；False/None 都不得伪装成「安全」的绿色
+    expect(wrapper.find('[data-test="bibliography-retraction-1"]').classes()).toContain(
+      "text-destructive"
+    );
+    expect(wrapper.find('[data-test="bibliography-retraction-2"]').classes()).toContain(
+      "text-muted-foreground"
+    );
+    expect(wrapper.find('[data-test="bibliography-retraction-3"]').classes()).toContain(
+      "text-muted-foreground"
+    );
+
+    // 原四态徽标保持不变（撤稿是独立徽标，不替代也不改写核验结论）
+    expect(wrapper.find('[data-test="bibliography-verdict-1"]').text()).toBe("已验证");
+    expect(wrapper.find('[data-test="bibliography-verdict-2"]').text()).toBe("已验证");
+    expect(wrapper.find('[data-test="bibliography-verdict-3"]').text()).toBe("已验证");
+  });
+
+  it("treats a missing retraction field as unknown and hides it without a verdict", () => {
+    const withoutField: BibliographyEntry = {
+      index: 1,
+      title: "文献 1",
+      url: null,
+      verification_status: "verified",
+    };
+    const wrapper = mountPanel({ entries: [withoutField, entry(2, null)] });
+
+    // 字段缺失（老数据 / 未核验）只能显示未知，不能显示「未标记撤稿」或「安全」
+    expect(wrapper.find('[data-test="bibliography-retraction-1"]').text()).toBe("撤稿状态未知");
+    // 没有四态结论的条目不显示撤稿徽标（撤稿徽标只跟随已核验条目）
+    expect(wrapper.find('[data-test="bibliography-retraction-2"]').exists()).toBe(false);
   });
 
   it("survives an empty entries array and an omitted entries prop", () => {

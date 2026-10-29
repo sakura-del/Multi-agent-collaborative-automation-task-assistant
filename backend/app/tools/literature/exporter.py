@@ -44,11 +44,26 @@ _VERDICT_LABELS: tuple[tuple[str, str], ...] = (
 _REFERENCE_SECTION = "## 引用核验"
 
 
-def _verification_mark(status: Any) -> str:
+def _retraction_label(value: Any) -> str:
+    """撤稿三态标签（与复盘 Agent 口径一致，故各保留一份实现避免跨层依赖）。
+
+    - ``True`` → 已撤稿；
+    - ``False`` → 来源明确未标记撤稿，**不等于「安全」**；
+    - ``None`` / 缺失 → 撤稿状态未知（来源不可用或无该字段）。
+    """
+    if value is True:
+        return "已撤稿"
+    if value is False:
+        return "未标记撤稿"
+    return "撤稿状态未知"
+
+
+def _verification_mark(status: Any, is_retracted: Any = None) -> str:
     """参考文献行的核验标记；无核验信息（历史 payload）时返回空串，保持既有渲染不变。"""
     if not isinstance(status, str) or not status:
         return ""
-    return f"（核验：{dict(_VERDICT_LABELS).get(status, status)}）"
+    label = dict(_VERDICT_LABELS).get(status, status)
+    return f"（核验：{label}；{_retraction_label(is_retracted)}）"
 
 
 def _summary_count(summary: Mapping[str, Any], key: str) -> int:
@@ -260,7 +275,8 @@ class LiteratureExporter:
         prefix = f"[{index}] {title}"
         if source_id and source_id not in title:
             prefix = f"{prefix} ({source_id})"
-        return f"- {prefix}{suffix}{_verification_mark(entry.get('verification_status'))}"
+        mark = _verification_mark(entry.get("verification_status"), entry.get("is_retracted"))
+        return f"- {prefix}{suffix}{mark}"
 
     @staticmethod
     def _first_heading(body: str) -> str:

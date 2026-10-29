@@ -80,7 +80,7 @@ class TestBackwardCompatibility:
         text = _export(_report(), None, tmp_path)
 
         assert "旧的手写参考文献行" in text
-        assert "（核验：已验证）" not in text
+        assert "（核验：" not in text
         assert "[J]" not in text
 
     def test_no_placeholder_and_no_style_is_identity(self, tmp_path) -> None:

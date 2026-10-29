@@ -421,6 +421,12 @@ export interface BibliographyEntry {
   title: string;
   url: string | null;
   verification_status: VerificationStatus | null;
+  /**
+   * 撤稿状态（与四态核验正交）：true=已撤稿、false=来源未标记撤稿、null/缺失=未知。
+   *
+   * ⚠️ `false` 不等于「安全」：它只说明来源没有撤稿标记；`null` 表示来源不可用或无该字段。
+   */
+  is_retracted?: boolean | null;
 }
 
 /* ===== Phase 2 · PRISMA 筛选工作台 ===== */
