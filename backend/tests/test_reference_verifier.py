@@ -1037,6 +1037,17 @@ async def test_cached_verdict_keeps_retracted_true() -> None:
     assert second.is_retracted is True
 
 
+async def test_doi_confirmed_title_mismatch_keeps_retraction_flag() -> None:
+    """DOI 已确认文献存在但标题不符时，撤稿状态仍须保留（与四态正交）。"""
+    record = make_record(source="openalex").model_copy(update={"is_retracted": True})
+    verifier = ReferenceVerifier(openalex=FakeSource(doi_result=record))
+
+    result = await verifier.verify(make_candidate(title="完全不相关的标题"))
+
+    assert result.verdict is ReferenceVerdict.METADATA_MISMATCH
+    assert result.is_retracted is True
+
+
 # ===== 缓存命中不重复外呼 =====
 
 

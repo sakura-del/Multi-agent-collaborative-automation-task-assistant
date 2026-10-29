@@ -653,6 +653,7 @@ class ReferenceVerifier:
                         f"低于阈值 {self._similarity_threshold:.2f}"
                     ),
                     similarity=score,
+                    is_retracted=record.is_retracted,
                     matched=record,
                 )
             reason = (
