@@ -166,6 +166,25 @@ Expected: 第一个因缺少 `is_retracted` 失败；第二个因缓存键不是
             is_retracted=record.is_retracted,
 ```
 
+同时补上「DOI 已解析但标题相似度低于阈值」的 `METADATA_MISMATCH` 提前返回分支（该分支文献身份已由 DOI 确认，撤稿状态必须保留）：
+
+```python
+                    is_retracted=record.is_retracted,
+```
+
+不要给 `NOT_FOUND` 分支传播撤稿状态：该分支的 `matched` 只是低相似度候选，身份未确认，传播会造成误报。对应补一条测试：
+
+```python
+async def test_doi_confirmed_title_mismatch_keeps_retraction_flag() -> None:
+    record = make_record(source="openalex").model_copy(update={"is_retracted": True})
+    verifier = ReferenceVerifier(openalex=FakeSource(doi_result=record))
+
+    result = await verifier.verify(make_candidate(title="完全不相关的标题"))
+
+    assert result.verdict is ReferenceVerdict.METADATA_MISMATCH
+    assert result.is_retracted is True
+```
+
 把 `_CACHE_KEY_PREFIX` 改为：
 
 ```python
@@ -456,6 +475,7 @@ def test_items_to_bibtex_preserves_metadata_and_escapes() -> None:
     assert "year={2024}" in text
     assert "doi={10.1234/abc}" in text
     assert "url={https://example.org/paper}" in text
+    assert parse_bibtex(text)[0].title == "Evidence {RAG} 100%"
 
 
 def test_unknown_type_does_not_fabricate_year() -> None:
@@ -523,10 +543,23 @@ def _text(value: Any) -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
+_BIBTEX_ESCAPE_MAP = {
+    "\\": r"\textbackslash{}",
+    "{": r"\{",
+    "}": r"\}",
+    "%": r"\%",
+    "&": r"\&",
+    "$": r"\$",
+    "#": r"\#",
+    "_": r"\_",
+    "~": r"\textasciitilde{}",
+    "^": r"\textasciicircum{}",
+}
+
+
 def _escape(value: Any) -> str:
     text = re.sub(r"[\r\n]+", " ", _text(value))
-    text = text.replace("\\", r"\textbackslash ")
-    return text.replace("{", r"\{").replace("}", r"\}").replace("%", r"\%")
+    return "".join(_BIBTEX_ESCAPE_MAP.get(char, char) for char in text)
 
 
 def _year(value: Any) -> int | None:
