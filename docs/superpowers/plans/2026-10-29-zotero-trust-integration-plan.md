@@ -708,6 +708,21 @@ def test_cli_reads_collection_and_writes_parseable_bibtex(tmp_path) -> None:
     assert parsed[0].doi == "10.1234/abc"
 
 
+def test_client_paginates_collection_items() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        start = int(request.url.params.get("start", "0"))
+        page = [
+            {"key": f"K{start + 1}", "data": {"itemType": "misc", "title": "A"}},
+            {"key": f"K{start + 2}", "data": {"itemType": "misc", "title": "B"}},
+        ]
+        return httpx.Response(200, json=page if start == 0 else page[:1])
+
+    client = zotero_export.ZoteroLocalClient(_zotero_client(handler), page_size=2)
+    items = client.collection_items("ABC")
+
+    assert [item["key"] for item in items] == ["K1", "K2", "K3"]
+
+
 def test_cli_rejects_disabled_local_api(tmp_path) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(403)
@@ -762,11 +777,12 @@ class ZoteroError(RuntimeError):
 
 
 class ZoteroLocalClient:
-    def __init__(self, client: httpx.Client) -> None:
+    def __init__(self, client: httpx.Client, *, page_size: int = 100) -> None:
         self._client = client
+        self._page_size = max(1, page_size)
 
-    def _get_json(self, path: str) -> Any:
-        response = self._client.get(path)
+    def _get_json(self, path: str, *, params: dict[str, Any] | None = None) -> Any:
+        response = self._client.get(path, params=params)
         if response.status_code == 403:
             raise ZoteroError("Zotero Local API 未启用，请在 Zotero 设置中允许本机应用访问")
         if response.status_code >= 400:
@@ -775,6 +791,10 @@ class ZoteroLocalClient:
 
     def check_version(self) -> None:
         response = self._client.get("/")
+        if response.status_code == 403:
+            raise ZoteroError("Zotero Local API 未启用，请在 Zotero 设置中允许本机应用访问")
+        if response.status_code >= 400:
+            raise ZoteroError(f"Zotero Local API 返回 {response.status_code}: /")
         if response.headers.get("Zotero-API-Version") != "3":
             raise ZoteroError("仅支持 Zotero API v3；请检查桌面客户端版本")
 
@@ -786,10 +806,16 @@ class ZoteroLocalClient:
 
     def collection_items(self, collection: str | None) -> list[dict[str, Any]]:
         path = f"/users/0/collections/{collection}/items" if collection else "/users/0/items"
-        payload = self._get_json(path)
-        if not isinstance(payload, list):
-            raise ZoteroError("Zotero 返回的条目不是列表")
-        return payload
+        items: list[dict[str, Any]] = []
+        start = 0
+        while True:
+            page = self._get_json(path, params={"limit": self._page_size, "start": start})
+            if not isinstance(page, list):
+                raise ZoteroError("Zotero 返回的条目不是列表")
+            items.extend(page)
+            if len(page) < self._page_size:
+                return items
+            start += len(page)
 
 
 def main(argv: list[str] | None = None, *, client: httpx.Client | None = None) -> int:
