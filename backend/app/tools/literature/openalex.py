@@ -323,6 +323,11 @@ class OpenAlexClient:
                 container_title=_container_title(work.get("primary_location")),
                 cited_by_count=_as_non_negative_int(work.get("cited_by_count")),
                 is_open_access=_is_open_access(work.get("open_access")),
+                is_retracted=(
+                    work.get("is_retracted")
+                    if isinstance(work.get("is_retracted"), bool)
+                    else None
+                ),
                 source_url=_source_url(work.get("id"), doi),
             )
         except PydanticValidationError as exc:

@@ -102,6 +102,8 @@ class MetadataRecord(BaseModel):
 
     cited_by_count: int | None = Field(default=None, ge=0)
     is_open_access: bool | None = None
+    is_retracted: bool | None = None
+    """撤稿标记：True=明确撤稿，False=未标记撤稿，None=未知。"""
     source_url: HttpUrl | None = None
 
 

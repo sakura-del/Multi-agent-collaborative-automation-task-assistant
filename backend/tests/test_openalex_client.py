@@ -128,6 +128,23 @@ class TestLookupDoi:
         assert request.url.path == "/works/https://doi.org/10.7717/peerj.4375"
         assert request.url.params["mailto"] == "contact@example.org"
 
+    @pytest.mark.parametrize(
+        ("retracted", "expected"),
+        [(True, True), (False, False), (None, None)],
+    )
+    async def test_lookup_doi_parses_is_retracted(self, retracted, expected) -> None:
+        payload = dict(WORK_PAYLOAD)
+        if retracted is None:
+            payload.pop("is_retracted", None)
+        else:
+            payload["is_retracted"] = retracted
+
+        async with _openalex(_json_handler(payload, [])) as adapter:
+            record = await adapter.lookup_doi("10.7717/peerj.4375")
+
+        assert record is not None
+        assert record.is_retracted is expected
+
     async def test_404_returns_none(self) -> None:
         captured: list[httpx.Request] = []
         async with _openalex(_status_handler(404, captured)) as adapter:
