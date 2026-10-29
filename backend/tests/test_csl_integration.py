@@ -113,6 +113,17 @@ class TestCslRenderingIsApplied:
         assert "[E1]" in text
         assert "[E2]" in text
 
+    def test_csl_rendered_bibliography_keeps_retraction_marks(self, tmp_path) -> None:
+        """CSL 渲染替换参考文献段时，也必须保留每条的撤稿三态标记。"""
+        report = _report()
+        report.bibliography[0]["is_retracted"] = True
+        report.bibliography[1]["is_retracted"] = False
+
+        text = _export(report, "gbt7714", tmp_path)
+
+        assert "（核验：已验证；已撤稿）" in text
+        assert "（核验：已验证；未标记撤稿）" in text
+
     def test_reference_verification_section_is_preserved(self, tmp_path) -> None:
         """Issue #3 的 `## 引用核验` 段落必须保留（两个特性叠加）。"""
         body = (

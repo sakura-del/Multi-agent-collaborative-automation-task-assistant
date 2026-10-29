@@ -225,13 +225,27 @@ class LiteratureExporter:
         from app.tools.csl.renderer import CitationRenderer
 
         items = []
+        entry_by_id: dict[str, dict] = {}
         for entry in report.bibliography:
             item = csl_item_from_bibliography_entry(entry)
             if item is not None:
                 items.append(item)
+                entry_by_id[item.id] = entry
         renderer = CitationRenderer(resolver=self._style_resolver)
         rendered = renderer.render(items, style_id=citation_style)
-        return list(rendered.entries)
+        lines = list(rendered.entries)
+        # CSL 渲染会替换整段参考文献：逐条把核验/撤稿标记补回同一行，
+        # 否则默认样式导出会丢失刚加入的撤稿状态。
+        for index, ref_id in enumerate(rendered.item_order):
+            if index >= len(lines):
+                break
+            entry = entry_by_id.get(ref_id)
+            if entry is None:
+                continue
+            lines[index] += _verification_mark(
+                entry.get("verification_status"), entry.get("is_retracted")
+            )
+        return lines
 
     def _substitute_inline_citations(
         self, body: str, report: ReviewReport, citation_style: str
