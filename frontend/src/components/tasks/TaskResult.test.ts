@@ -3,7 +3,12 @@ import { mount } from "@vue/test-utils";
 
 import TaskResult from "@/components/tasks/TaskResult.vue";
 import ReferenceVerificationPanel from "@/components/tasks/ReferenceVerificationPanel.vue";
-import type { Artifact, ReferenceVerificationSummary, ReviewReport } from "@/api/types";
+import type {
+  Artifact,
+  BibliographyEntry,
+  ReferenceVerificationSummary,
+  ReviewReport,
+} from "@/api/types";
 
 const downloadArtifact = vi.fn();
 vi.mock("@/api/tasks", () => ({
@@ -214,10 +219,47 @@ describe("TaskResult · 引用核验集成", () => {
     expect(panel.exists()).toBe(true);
     expect(panel.props("summary")).toEqual(summary);
     expect(panel.props("entries")).toEqual([
-      { index: 1, title: "已验证文献", url: null, verification_status: "verified" },
-      { index: 2, title: "元数据不符文献", url: null, verification_status: "metadata_mismatch" },
-      { index: 3, title: "未核验文献", url: null, verification_status: null },
+      {
+        index: 1,
+        title: "已验证文献",
+        url: null,
+        verification_status: "verified",
+        is_retracted: null,
+      },
+      {
+        index: 2,
+        title: "元数据不符文献",
+        url: null,
+        verification_status: "metadata_mismatch",
+        is_retracted: null,
+      },
+      {
+        index: 3,
+        title: "未核验文献",
+        url: null,
+        verification_status: null,
+        is_retracted: null,
+      },
     ]);
+  });
+
+  it("maps retraction state from the report into panel entries", () => {
+    const wrapper = mountResult({
+      report: report({
+        stats: { reference_verification: verificationSummary() },
+        bibliography: [
+          { index: 1, title: "撤稿文献", is_retracted: true },
+          { index: 2, title: "未标记文献", is_retracted: false },
+          { index: 3, title: "未知文献", is_retracted: null },
+        ],
+      }),
+    });
+
+    const entries = wrapper
+      .findComponent(ReferenceVerificationPanel)
+      .props("entries") as BibliographyEntry[];
+
+    expect(entries.map((entry) => entry.is_retracted)).toEqual([true, false, null]);
   });
 
   it("renders the panel above the existing bibliography list", () => {
@@ -248,9 +290,22 @@ describe("TaskResult · 引用核验集成", () => {
         title: "RAG 评估",
         url: "https://arxiv.org/abs/2401.00001v1",
         verification_status: null,
+        is_retracted: null,
       },
-      { index: 2, title: "危险链接", url: null, verification_status: null },
-      { index: 3, title: "无链接", url: null, verification_status: null },
+      {
+        index: 2,
+        title: "危险链接",
+        url: null,
+        verification_status: null,
+        is_retracted: null,
+      },
+      {
+        index: 3,
+        title: "无链接",
+        url: null,
+        verification_status: null,
+        is_retracted: null,
+      },
     ]);
   });
 

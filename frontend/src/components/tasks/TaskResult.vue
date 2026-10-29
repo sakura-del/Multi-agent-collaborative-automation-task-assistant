@@ -140,6 +140,7 @@ const bibliography = computed<BibliographyEntry[]>(() =>
       title: String(record.title ?? record.source_id ?? `文献 ${index}`),
       url: safeUrl(record.source_url ?? record.url),
       verification_status: parseVerificationStatus(record.verification_status),
+      is_retracted: typeof record.is_retracted === "boolean" ? record.is_retracted : null,
     };
   })
 );
