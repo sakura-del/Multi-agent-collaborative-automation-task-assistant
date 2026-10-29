@@ -225,9 +225,11 @@ git commit -m "feat: propagate retraction through verification cache"
 - Modify: `backend/app/tools/literature/exporter.py`
 - Modify: `frontend/src/api/types.ts`
 - Modify: `frontend/src/components/tasks/ReferenceVerificationPanel.vue`
+- Modify: `frontend/src/components/tasks/TaskResult.vue`
 - Test: `backend/tests/test_reviewer_references.py`
 - Test: `backend/tests/test_exporter_references.py`
 - Test: `frontend/src/components/tasks/ReferenceVerificationPanel.test.ts`
+- Test: `frontend/src/components/tasks/TaskResult.test.ts`
 
 - [ ] **Step 1: 写后端展示失败测试**
 
@@ -386,6 +388,14 @@ python -c "from pathlib import Path; [(print(f'{p}:{i+1}: {line}')) for p in Pat
   is_retracted?: boolean | null;
 ```
 
+`TaskResult.vue` 的 `bibliography` computed 是真实调用路径，必须把报告条目里的撤稿字段映射给面板；否则面板永远收到 `undefined`：
+
+```ts
+      is_retracted: typeof record.is_retracted === "boolean" ? record.is_retracted : null,
+```
+
+并同步更新 `TaskResult.test.ts` 的精确对象期望（三处 entries 数组加上 `is_retracted: null`），再新增一条 true/false 映射断言，避免只测面板 props 而漏掉真实接线。
+
 在 `ReferenceVerificationPanel.vue` 添加：
 
 ```ts
@@ -418,16 +428,16 @@ cd backend
 
 ```powershell
 cd frontend
-node node_modules/vitest/vitest.mjs run src/components/tasks/ReferenceVerificationPanel.test.ts
+node node_modules/vitest/vitest.mjs run src/components/tasks/ReferenceVerificationPanel.test.ts src/components/tasks/TaskResult.test.ts
 node node_modules/vue-tsc/bin/vue-tsc.js -b
 ```
 
-Expected: 后端与前端全部 PASS；四态统计不变，三态徽标独立显示。
+Expected: 后端与前端全部 PASS；四态统计不变，三态徽标独立显示，TaskResult 真实接线有断言。
 
 - [ ] **Step 7: 提交 Task 3**
 
 ```powershell
-git add backend/app/orchestration/agents/reviewer.py backend/app/tools/literature/exporter.py backend/tests/test_reviewer_references.py backend/tests/test_exporter_references.py frontend/src/api/types.ts frontend/src/components/tasks/ReferenceVerificationPanel.vue frontend/src/components/tasks/ReferenceVerificationPanel.test.ts
+git add backend/app/orchestration/agents/reviewer.py backend/app/tools/literature/exporter.py backend/tests/test_reviewer_references.py backend/tests/test_exporter_references.py frontend/src/api/types.ts frontend/src/components/tasks/ReferenceVerificationPanel.vue frontend/src/components/tasks/TaskResult.vue frontend/src/components/tasks/ReferenceVerificationPanel.test.ts frontend/src/components/tasks/TaskResult.test.ts
 git commit -m "feat: show retraction badges in verification results"
 ```
 
@@ -919,7 +929,7 @@ Run:
 
 ```powershell
 cd frontend
-node node_modules/vitest/vitest.mjs run src/components/tasks/ReferenceVerificationPanel.test.ts
+node node_modules/vitest/vitest.mjs run src/components/tasks/ReferenceVerificationPanel.test.ts src/components/tasks/TaskResult.test.ts
 node node_modules/vue-tsc/bin/vue-tsc.js -b
 ```
 
