@@ -550,7 +550,8 @@ Expected: FAIL，找不到 `scripts/zotero_export.py`。
 ```python
 from __future__ import annotations
 import re
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 BIBTEX_TYPES = {
     "journalArticle": "article",
@@ -981,8 +982,10 @@ Run:
 
 ```powershell
 cd backend
-.\.venv\Scripts\python.exe -m black --check app tests ../scripts
-.\.venv\Scripts\python.exe -m ruff check app tests ../scripts
+.\.venv\Scripts\python.exe -m black --check app tests
+.\.venv\Scripts\python.exe -m ruff check app tests
+.\.venv\Scripts\python.exe -m black --check --config pyproject.toml ../scripts
+.\.venv\Scripts\python.exe -m ruff check --config pyproject.toml ../scripts
 .\.venv\Scripts\python.exe -m mypy app ../scripts
 ```
 
