@@ -1,6 +1,6 @@
 # 方案 A 验收集：OpenAlex 撤稿状态 + Zotero 本机只读导入
 
-> 日期：2026-10-29 ｜ 分支：`codex/zotero-trust-integration` ｜ 状态：代码与自动化验收通过，未推送/未部署
+> 日期：2026-10-29 ｜ 分支：`codex/zotero-trust-integration` ｜ 状态：代码与自动化验收通过，已 ff 合并到 `main`（本地），未推送/未部署
 >
 > 设计：[方案 A 设计](../superpowers/specs/2026-10-29-zotero-trust-integration-design.md) ·
 > 计划：[实施计划](../superpowers/plans/2026-10-29-zotero-trust-integration-plan.md) ·
@@ -125,5 +125,5 @@ zotero_installed=false
 ## 8. 未完成项
 
 1. 真实 Zotero 端到端冒烟（本机未安装/未启用 Local API）。
-2. 合并到 `main`（本轮在独立 worktree/branch，未合并、未推送、未部署）。
+2. 推送与服务器部署（按要求本轮不执行）。
 3. Scite/引文图谱等后续扩展（需另立设计）。
