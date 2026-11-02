@@ -8,13 +8,16 @@ vi.mock("@/api/screening", () => ({
   listScreeningRecords: vi.fn(),
   createDecision: vi.fn(),
   getPrismaCounts: vi.fn(),
+  getScreeningPriority: vi.fn(),
 }));
 
 import {
   createDecision,
   getPrismaCounts,
+  getScreeningPriority,
   listScreeningRecords,
 } from "@/api/screening";
+import type { ScreeningPriority } from "@/api/types";
 
 function recordRow(overrides: Record<string, unknown> = {}) {
   return {
@@ -52,6 +55,19 @@ describe("ScreeningView", () => {
     vi.mocked(listScreeningRecords).mockResolvedValue([recordRow()]);
     vi.mocked(getPrismaCounts).mockResolvedValue(PRISMA);
   });
+
+  function priorityResult(overrides: Partial<ScreeningPriority> = {}): ScreeningPriority {
+    return {
+      status: "ready",
+      algorithm: "tfidf-char-logreg-v1",
+      stage: "title_abstract",
+      items: [],
+      labels: { positive: 1, negative: 1, ignored: 0 },
+      candidates: 0,
+      message: "基于任务内 1 条纳入 / 1 条排除决策排序",
+      ...overrides,
+    };
+  }
 
   it("展示候选记录与当前阶段", async () => {
     const wrapper = mount(ScreeningView, { props: { taskId: "task-1" } });
@@ -306,5 +322,99 @@ describe("ScreeningView", () => {
 
     expect(vi.mocked(listScreeningRecords).mock.calls.length).toBe(recordsCallsBefore + 1);
     expect(vi.mocked(getPrismaCounts).mock.calls.length).toBe(prismaCallsBefore + 1);
+  });
+
+  it("默认关闭时不请求主动排序", async () => {
+    const wrapper = mount(ScreeningView, { props: { taskId: "task-1" } });
+    await flushPromises();
+
+    expect(getScreeningPriority).not.toHaveBeenCalled();
+    expect(wrapper.find('[data-test="screening-priority-toggle"]').attributes("aria-pressed")).toBe("false");
+  });
+
+  it("开启后把推荐候选置顶并保留其他记录", async () => {
+    vi.mocked(listScreeningRecords).mockResolvedValue([
+      recordRow({ record_id: "r1", title: "第一篇" }),
+      recordRow({ record_id: "r2", title: "第二篇" }),
+      recordRow({ record_id: "r3", title: "第三篇" }),
+    ]);
+    vi.mocked(getScreeningPriority).mockResolvedValue(
+      priorityResult({
+        items: [
+          { record_id: "r2", rank: 1 },
+          { record_id: "r1", rank: 2 },
+        ],
+        candidates: 2,
+      })
+    );
+
+    const wrapper = mount(ScreeningView, { props: { taskId: "task-1" } });
+    await flushPromises();
+    await wrapper.find('[data-test="screening-priority-toggle"]').trigger("click");
+    await flushPromises();
+
+    const ids = wrapper
+      .findAll('[data-test^="screening-row-"]')
+      .map((row) => row.attributes("data-test"));
+    expect(ids).toEqual(["screening-row-r2", "screening-row-r1", "screening-row-r3"]);
+    expect(wrapper.find('[data-test="screening-priority-rank-r2"]').text()).toContain("#1");
+    expect(wrapper.find('[data-test="screening-priority-rank-r3"]').exists()).toBe(false);
+  });
+
+  it("标签不足时保持原序并显示提示", async () => {
+    vi.mocked(listScreeningRecords).mockResolvedValue([
+      recordRow({ record_id: "r1", title: "第一篇" }),
+      recordRow({ record_id: "r2", title: "第二篇" }),
+    ]);
+    vi.mocked(getScreeningPriority).mockResolvedValue(
+      priorityResult({
+        status: "insufficient_labels",
+        items: [],
+        candidates: 2,
+        message: "至少需要 1 条纳入和 1 条排除决策（当前 1 / 0）",
+      })
+    );
+
+    const wrapper = mount(ScreeningView, { props: { taskId: "task-1" } });
+    await flushPromises();
+    await wrapper.find('[data-test="screening-priority-toggle"]').trigger("click");
+    await flushPromises();
+
+    const ids = wrapper
+      .findAll('[data-test^="screening-row-"]')
+      .map((row) => row.attributes("data-test"));
+    expect(ids).toEqual(["screening-row-r1", "screening-row-r2"]);
+    expect(wrapper.find('[data-test="screening-priority-status"]').text()).toContain("至少需要");
+  });
+
+  it("排序请求失败时保持原序并显示错误", async () => {
+    vi.mocked(getScreeningPriority).mockRejectedValue(new Error("排序服务不可用"));
+
+    const wrapper = mount(ScreeningView, { props: { taskId: "task-1" } });
+    await flushPromises();
+    await wrapper.find('[data-test="screening-priority-toggle"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find('[data-test="screening-priority-status"]').text()).toContain("排序服务不可用");
+    expect(wrapper.find('[data-test="screening-row-r1"]').exists()).toBe(true);
+  });
+
+  it("开启后提交决策会刷新排序", async () => {
+    vi.mocked(getScreeningPriority).mockResolvedValue(priorityResult());
+    vi.mocked(createDecision).mockResolvedValue({
+      record_id: "r1",
+      current_stage: "fulltext",
+    });
+
+    const wrapper = mount(ScreeningView, { props: { taskId: "task-1" } });
+    await flushPromises();
+    await wrapper.find('[data-test="screening-priority-toggle"]').trigger("click");
+    await flushPromises();
+    const before = vi.mocked(getScreeningPriority).mock.calls.length;
+
+    await wrapper.find('[data-test="screening-include-r1"]').trigger("click");
+    await flushPromises();
+
+    expect(vi.mocked(getScreeningPriority).mock.calls.length).toBe(before + 1);
   });
 });

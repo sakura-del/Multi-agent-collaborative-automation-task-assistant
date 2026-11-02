@@ -2,6 +2,7 @@ import api from "./client";
 import type {
   PrismaCounts,
   ScreeningDecisionPayload,
+  ScreeningPriority,
   ScreeningRecord,
   SearchLogCreatePayload,
   SearchLogOut,
@@ -60,5 +61,20 @@ export async function getPrismaCounts(
 ): Promise<PrismaCounts> {
   const params = new URLSearchParams({ task_id: taskId, language });
   const response = await api.get<PrismaCounts>(`/screening/prisma?${params.toString()}`);
+  return response.data;
+}
+
+/**
+ * 任务内「主动排序」推荐顺序（标题/摘要阶段）。
+ *
+ * 只返回占位名次（record_id + rank），前端不得据此自动纳入/排除；
+ * 后端可能返回 `insufficient_labels` / `no_candidates`，调用方需按状态展示提示。
+ */
+export async function getScreeningPriority(
+  taskId: string,
+  stage: "title_abstract" = "title_abstract"
+): Promise<ScreeningPriority> {
+  const params = new URLSearchParams({ task_id: taskId, stage });
+  const response = await api.get<ScreeningPriority>(`/screening/priority?${params.toString()}`);
   return response.data;
 }

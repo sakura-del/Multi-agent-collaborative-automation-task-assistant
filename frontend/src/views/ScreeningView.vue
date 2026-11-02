@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { Check, CircleX, MinusCircle } from "lucide-vue-next";
+import { Check, CircleX, MinusCircle, Sparkles } from "lucide-vue-next";
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
@@ -13,9 +13,10 @@ import { Label } from "@/components/ui/label";
 import {
   createDecision,
   getPrismaCounts,
+  getScreeningPriority,
   listScreeningRecords,
 } from "@/api/screening";
-import type { PrismaCounts, ScreeningRecord } from "@/api/types";
+import type { PrismaCounts, ScreeningPriority, ScreeningRecord } from "@/api/types";
 
 /**
  * PRISMA 筛选工作台（Phase 2）：候选列表 + 逐条决策 + PRISMA 计数。
@@ -26,7 +27,8 @@ import type { PrismaCounts, ScreeningRecord } from "@/api/types";
  * `screening-exclude-<id>` / `screening-maybe-<id>` / `screening-exclude-form-<id>` /
  * `screening-exclude-reason-<id>` / `screening-exclude-submit-<id>` /
  * `screening-prisma` / `screening-mermaid` / `screening-error` / `screening-empty` /
- * `screening-stage-filter`。
+ * `screening-stage-filter` / `screening-priority-toggle` / `screening-priority-status` /
+ * `screening-priority-rank-<id>`。
  */
 const props = defineProps<{ taskId: string }>();
 
@@ -39,6 +41,12 @@ const busyId = ref<string | null>(null);
 const excludeFormId = ref<string | null>(null);
 const excludeReason = ref("");
 const stageFilter = ref("");
+
+// 主动排序（默认关闭）：关闭时零额外请求，列表行为与旧版完全一致。
+const priorityEnabled = ref(false);
+const priority = ref<ScreeningPriority | null>(null);
+const priorityLoading = ref(false);
+const priorityError = ref<string | null>(null);
 
 const STAGE_LABELS: Record<string, string> = {
   title_abstract: "标题/摘要",
@@ -58,6 +66,45 @@ const hint = computed(() => {
     return "还没有候选记录。先在任务里执行检索，结果会自动进入筛选工作台。";
   }
   return `${records.value.length} 条候选记录 · 已纳入 ${prisma.value?.included ?? 0} 条`;
+});
+
+/** 推荐名次表：record_id → rank。只用于展示「推荐优先 #n」，不参与纳入/排除。 */
+const priorityRanks = computed(
+  () => new Map((priority.value?.items ?? []).map((item) => [item.record_id, item.rank]))
+);
+
+// 主动排序只在「标题/摘要」阶段有意义：全文/已纳入阶段后端语义不同，且全量已排序会掩盖阶段过滤。
+const priorityDisabled = computed(
+  () => priorityLoading.value || ["fulltext", "included"].includes(stageFilter.value)
+);
+
+/**
+ * 列表展示顺序。
+ *
+ * 关闭排序、或后端给不出排序（标签不足/无候选/出错）时**保持原顺序**；
+ * 只有 `ready` 才把有 rank 的记录按名次前置，其余记录原样追加在后面
+ * （已筛记录不会因为排序被隐藏）。
+ */
+const displayRecords = computed(() => {
+  if (!priorityEnabled.value || priority.value?.status !== "ready") {
+    return records.value;
+  }
+  const ranked = records.value
+    .filter((record) => priorityRanks.value.has(record.record_id))
+    .sort(
+      (left, right) =>
+        (priorityRanks.value.get(left.record_id) ?? 0) -
+        (priorityRanks.value.get(right.record_id) ?? 0)
+    );
+  const rest = records.value.filter((record) => !priorityRanks.value.has(record.record_id));
+  return [...ranked, ...rest];
+});
+
+const priorityTone = computed<"success" | "warning" | "muted" | "destructive">(() => {
+  if (priorityError.value) return "destructive";
+  if (priority.value?.status === "insufficient_labels") return "warning";
+  if (priority.value?.status === "ready") return "success";
+  return "muted";
 });
 
 /** 决策应提交到的阶段：已纳入的不再可决策（模板里按钮也不渲染）。 */
@@ -84,6 +131,52 @@ onMounted(() => {
   void refresh();
 });
 
+/**
+ * 拉取主动排序结果。
+ *
+ * 失败不写 `error`（那是列表/决策的错误条）：排序只是锦上添花，
+ * 出错时列表按原顺序照常可用，错误在排序状态提示里说明。
+ */
+async function loadPriority() {
+  if (!priorityEnabled.value) return;
+  priorityLoading.value = true;
+  priorityError.value = null;
+  try {
+    priority.value = await getScreeningPriority(props.taskId);
+  } catch (err) {
+    priorityError.value = (err as Error).message || "主动排序加载失败";
+    priority.value = null;
+  } finally {
+    priorityLoading.value = false;
+  }
+}
+
+async function togglePriority() {
+  if (priorityDisabled.value) return;
+  priorityEnabled.value = !priorityEnabled.value;
+  if (!priorityEnabled.value) {
+    priority.value = null;
+    priorityError.value = null;
+    return;
+  }
+  await loadPriority();
+}
+
+/**
+ * 切换阶段过滤。
+ *
+ * 全文/已纳入阶段禁用主动排序：进入这两个阶段时**关闭**开关（而不是留着开关
+ * 却悄悄不生效），避免用户以为排序还在起作用。
+ */
+async function handleStageChange() {
+  if (priorityEnabled.value && ["fulltext", "included"].includes(stageFilter.value)) {
+    priorityEnabled.value = false;
+    priority.value = null;
+    priorityError.value = null;
+  }
+  await refresh();
+}
+
 async function refresh() {
   loading.value = true;
   error.value = null;
@@ -98,6 +191,10 @@ async function refresh() {
     ]);
     records.value = nextRecords;
     prisma.value = nextPrisma;
+    // 排序依赖任务内决策标签：决策/刷新后必须重算，否则列表顺序会停在旧标签上。
+    if (priorityEnabled.value) {
+      await loadPriority();
+    }
   } catch (err) {
     error.value = (err as Error).message || "筛选数据加载失败";
   } finally {
@@ -221,7 +318,7 @@ async function submitDecision(
         v-model="stageFilter"
         data-test="screening-stage-filter"
         class="flex h-9 rounded-md border border-input bg-background px-3 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-        @change="refresh()"
+        @change="handleStageChange()"
       >
         <option value="">全部阶段</option>
         <option value="title_abstract">标题/摘要</option>
@@ -229,6 +326,35 @@ async function submitDecision(
         <option value="included">已纳入</option>
       </select>
     </div>
+
+    <div class="mb-3 flex flex-wrap items-center gap-2">
+      <Button
+        variant="outline"
+        size="sm"
+        type="button"
+        data-test="screening-priority-toggle"
+        :aria-pressed="priorityEnabled"
+        :disabled="priorityDisabled"
+        @click="togglePriority"
+      >
+        <Sparkles :size="15" aria-hidden="true" />
+        智能排序：{{ priorityEnabled ? "开" : "关" }}
+      </Button>
+      <span class="text-xs text-muted-foreground">
+        按标题/摘要排序，不自动纳入或排除
+      </span>
+    </div>
+
+    <Alert
+      v-if="priorityEnabled"
+      :variant="priorityTone"
+      class="mb-3"
+      data-test="screening-priority-status"
+    >
+      <span v-if="priorityLoading">正在计算优先级…</span>
+      <span v-else-if="priorityError">{{ priorityError }}</span>
+      <span v-else-if="priority">{{ priority.message }}</span>
+    </Alert>
 
     <p v-if="loading && !records.length" class="text-sm text-muted-foreground">加载中…</p>
 
@@ -241,7 +367,7 @@ async function submitDecision(
 
     <ul v-else class="space-y-2">
       <li
-        v-for="record in records"
+        v-for="record in displayRecords"
         :key="record.record_id"
         class="rounded-lg border border-border bg-card px-3 py-2.5"
         :data-test="`screening-row-${record.record_id}`"
@@ -252,6 +378,14 @@ async function submitDecision(
               <span class="text-sm font-medium">{{ record.title }}</span>
               <Badge :variant="STAGE_TONE[record.current_stage] ?? 'muted'">
                 {{ STAGE_LABELS[record.current_stage] ?? record.current_stage }}
+              </Badge>
+              <!-- 只展示推荐名次，不展示模型分数/概率，也不改变记录本身 -->
+              <Badge
+                v-if="priorityRanks.get(record.record_id)"
+                variant="success"
+                :data-test="`screening-priority-rank-${record.record_id}`"
+              >
+                推荐优先 #{{ priorityRanks.get(record.record_id) }}
               </Badge>
               <Badge
                 v-if="record.current_verdict === 'exclude'"

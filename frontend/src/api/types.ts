@@ -500,6 +500,32 @@ export interface PrismaCounts {
   mermaid: string;
 }
 
+/**
+ * 主动排序状态（与后端 `ScreeningPriorityOut.status` 对齐）。
+ *
+ * - `ready`：可以给出推荐顺序；
+ * - `insufficient_labels`：任务内纳入/排除标签不足，后端不给排序；
+ * - `no_candidates`：没有待筛候选。
+ */
+export type ScreeningPriorityStatus = "ready" | "insufficient_labels" | "no_candidates";
+
+/** 推荐条目：只有记录 id 与名次，**不含模型分数/概率**。 */
+export interface ScreeningPriorityItem {
+  record_id: string;
+  rank: number;
+}
+
+/** `GET /screening/priority` 响应：任务内主动排序（不自动纳入/排除）。 */
+export interface ScreeningPriority {
+  status: ScreeningPriorityStatus;
+  algorithm: string;
+  stage: string;
+  items: ScreeningPriorityItem[];
+  labels: { positive: number; negative: number; ignored: number };
+  candidates: number;
+  message: string;
+}
+
 // ===== 可观测性看板（Phase 2）=====
 
 /** 最近任务条目（看板列表用） */
