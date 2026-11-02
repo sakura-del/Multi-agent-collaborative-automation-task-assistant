@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -112,6 +112,47 @@ class DecisionOut(BaseModel):
 
     record_id: uuid.UUID
     current_stage: str
+
+
+class ScreeningPriorityItemOut(BaseModel):
+    """一条推荐排序结果。
+
+    只暴露 `rank`（1 起），**不暴露模型概率**：概率不是可解释证据，
+    展示它会让筛选者以为系统在做判断，而本功能只排顺序、不自动决策。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    record_id: uuid.UUID
+    rank: int = Field(ge=1)
+
+
+class ScreeningPriorityLabelsOut(BaseModel):
+    """训练标签计数（任务全员口径），供前端解释「为什么排不出来」。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    positive: int = Field(ge=0)
+    negative: int = Field(ge=0)
+    ignored: int = Field(ge=0)
+
+
+class ScreeningPriorityOut(BaseModel):
+    """主动排序结果（只读）：排序状态、算法版本与有序记录 id。
+
+    `status` 是枚举而非布尔：`insufficient_labels`（冷启动）与
+    `no_candidates`（没有未筛记录）对用户是两种不同的下一步指引。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["ready", "insufficient_labels", "no_candidates"]
+    algorithm: str
+    stage: str
+    items: list[ScreeningPriorityItemOut] = Field(default_factory=list)
+    labels: ScreeningPriorityLabelsOut
+    candidates: int = Field(ge=0)
+    message: str
 
 
 class PrismaOut(BaseModel):

@@ -562,3 +562,164 @@ def test_router_is_wired_into_api_router() -> None:
     assert "/api/v1/screening/records" in paths
     assert "/api/v1/screening/records/{record_id}/decisions" in paths
     assert "/api/v1/screening/prisma" in paths
+
+
+# ===== GET /priority =====
+
+
+def _post_screening_records(
+    client: TestClient,
+    task_id: uuid.UUID,
+    records: list[dict[str, Any]],
+) -> None:
+    response = _post_search(client, task_id, records=records)
+    assert response.status_code == 201, response.text
+
+
+def _record_by_title(client: TestClient, task_id: uuid.UUID, title: str) -> str:
+    items = client.get("/api/v1/screening/records", params={"task_id": str(task_id)}).json()[
+        "items"
+    ]
+    return str(next(item["record_id"] for item in items if item["title"] == title))
+
+
+def test_priority_returns_ranked_unreviewed_records(client: TestClient, task_id: uuid.UUID) -> None:
+    _post_screening_records(
+        client,
+        task_id,
+        [
+            _record("pos", "retrieval augmented generation evaluation", abstract="evidence"),
+            _record("neg", "clinical cancer trial patient outcome", abstract="medical"),
+            _record("c1", "retrieval augmented generation evidence", abstract="benchmark"),
+            _record("c2", "clinical trial patient treatment", abstract="cancer"),
+        ],
+    )
+    pos_id = _record_by_title(client, task_id, "retrieval augmented generation evaluation")
+    neg_id = _record_by_title(client, task_id, "clinical cancer trial patient outcome")
+    client.post(
+        f"/api/v1/screening/records/{pos_id}/decisions",
+        json={"stage": "title_abstract", "verdict": "include"},
+    )
+    client.post(
+        f"/api/v1/screening/records/{neg_id}/decisions",
+        json={
+            "stage": "title_abstract",
+            "verdict": "exclude",
+            "exclusion_reason": "not relevant",
+        },
+    )
+
+    response = client.get("/api/v1/screening/priority", params={"task_id": str(task_id)})
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "ready"
+    assert body["algorithm"] == "tfidf-char-logreg-v1"
+    assert body["labels"] == {"positive": 1, "negative": 1, "ignored": 0}
+    assert body["candidates"] == 2
+    assert [item["rank"] for item in body["items"]] == [1, 2]
+    assert all("score" not in item for item in body["items"])
+
+
+def test_priority_insufficient_labels(client: TestClient, task_id: uuid.UUID) -> None:
+    _post_screening_records(
+        client,
+        task_id,
+        [
+            _record("pos", "retrieval augmented generation"),
+            _record("c1", "another candidate one"),
+            _record("c2", "another candidate two"),
+        ],
+    )
+    pos_id = _record_by_title(client, task_id, "retrieval augmented generation")
+    client.post(
+        f"/api/v1/screening/records/{pos_id}/decisions",
+        json={"stage": "title_abstract", "verdict": "include"},
+    )
+
+    response = client.get("/api/v1/screening/priority", params={"task_id": str(task_id)})
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "insufficient_labels"
+    assert response.json()["items"] == []
+
+
+def test_priority_no_candidates(client: TestClient, task_id: uuid.UUID) -> None:
+    _post_screening_records(
+        client,
+        task_id,
+        [
+            _record("pos", "retrieval augmented generation"),
+            _record("neg", "clinical cancer trial"),
+        ],
+    )
+    pos_id = _record_by_title(client, task_id, "retrieval augmented generation")
+    neg_id = _record_by_title(client, task_id, "clinical cancer trial")
+    client.post(
+        f"/api/v1/screening/records/{pos_id}/decisions",
+        json={"stage": "title_abstract", "verdict": "include"},
+    )
+    client.post(
+        f"/api/v1/screening/records/{neg_id}/decisions",
+        json={
+            "stage": "title_abstract",
+            "verdict": "exclude",
+            "exclusion_reason": "not relevant",
+        },
+    )
+
+    response = client.get("/api/v1/screening/priority", params={"task_id": str(task_id)})
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "no_candidates"
+    assert response.json()["items"] == []
+
+
+def test_priority_rejects_other_task(client: TestClient, other_task_id: uuid.UUID) -> None:
+    response = client.get("/api/v1/screening/priority", params={"task_id": str(other_task_id)})
+
+    assert response.status_code == 404
+
+
+def test_priority_rejects_unknown_stage(client: TestClient, task_id: uuid.UUID) -> None:
+    response = client.get(
+        "/api/v1/screening/priority",
+        params={"task_id": str(task_id), "stage": "fulltext"},
+    )
+
+    assert response.status_code == 400
+    assert "title_abstract" in response.json()["detail"]
+
+
+def test_priority_requires_auth(app: FastAPI, client: TestClient, task_id: uuid.UUID) -> None:
+    original = app.dependency_overrides.pop(screening_endpoint.get_current_active_user)
+    try:
+        response = client.get("/api/v1/screening/priority", params={"task_id": str(task_id)})
+    finally:
+        app.dependency_overrides[screening_endpoint.get_current_active_user] = original
+
+    assert response.status_code == 401
+
+
+def test_priority_maps_model_error_to_503(
+    app: FastAPI, client: TestClient, task_id: uuid.UUID
+) -> None:
+    class _BoomService:
+        async def ensure_task_owned(self, *args: object, **kwargs: object) -> None:
+            return None
+
+        async def priority(self, *args: object, **kwargs: object) -> None:
+            from app.knowledge.services.screening_priority import (
+                PriorityUnavailableError,
+            )
+
+            raise PriorityUnavailableError("排序暂不可用")
+
+    app.dependency_overrides[screening_endpoint.get_screening_service] = lambda: _BoomService()
+    try:
+        response = client.get("/api/v1/screening/priority", params={"task_id": str(task_id)})
+    finally:
+        app.dependency_overrides.pop(screening_endpoint.get_screening_service, None)
+
+    assert response.status_code == 503
+    assert "排序暂不可用" in response.json()["detail"]

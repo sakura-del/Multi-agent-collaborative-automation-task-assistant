@@ -4,6 +4,7 @@
     GET  /api/v1/screening/records?task_id=…        列出候选记录
     POST /api/v1/screening/records/{id}/decisions   追加一条筛选决策
     GET  /api/v1/screening/prisma?task_id=…         PRISMA 计数 + 渲染结果
+    GET  /api/v1/screening/priority?task_id=…       主动学习优先级排序（只读）
 
 约定：
 - 全部要求 Bearer access token；
@@ -26,12 +27,16 @@ from app.api.deps import get_current_active_user
 from app.db.models.screening import DecisionStage
 from app.db.models.user import User
 from app.db.session import get_db
+from app.knowledge.services.screening_priority import PriorityUnavailableError
 from app.knowledge.services.screening_service import ScreeningService
 from app.schemas.screening import (
     DecisionCreate,
     DecisionOut,
     LiteratureRecordIn,
     PrismaOut,
+    ScreeningPriorityItemOut,
+    ScreeningPriorityLabelsOut,
+    ScreeningPriorityOut,
     ScreeningRecordListOut,
     ScreeningRecordOut,
     SearchLogCreate,
@@ -206,6 +211,49 @@ async def create_decision(
         # 排除必须给理由等业务规则
         raise _bad_request(str(exc)) from exc
     return DecisionOut(record_id=updated.id, current_stage=updated.current_stage)
+
+
+@router.get(
+    "/priority",
+    response_model=ScreeningPriorityOut,
+    summary="列出主动学习优先级排序（只读）",
+)
+async def get_priority(
+    service: ServiceDep,
+    current_user: CurrentUserDep,
+    task_id: Annotated[uuid.UUID, Query(description="任务 ID")],
+    stage: Annotated[str, Query(description="排序阶段")] = "title_abstract",
+) -> ScreeningPriorityOut:
+    """只排序标题/摘要阶段的未筛记录，不自动决策、不改 PRISMA 计数。
+
+    只读端点：不写库、不落决策。排序失败（模型/依赖不可用）映射 503，
+    不能伪装成「空结果」——否则前端会把故障显示成「没有推荐」。
+    """
+    await service.ensure_task_owned(current_user.id, task_id)
+    if stage != DecisionStage.TITLE_ABSTRACT.value:
+        raise _bad_request("主动排序仅支持 title_abstract 阶段")
+    try:
+        ranking = await service.priority(task_id)
+    except PriorityUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
+        ) from exc
+    return ScreeningPriorityOut(
+        status=ranking.status,
+        algorithm=ranking.algorithm,
+        stage=stage,
+        items=[
+            ScreeningPriorityItemOut(record_id=uuid.UUID(item.record_id), rank=item.rank)
+            for item in ranking.items
+        ],
+        labels=ScreeningPriorityLabelsOut(
+            positive=ranking.positive,
+            negative=ranking.negative,
+            ignored=ranking.ignored,
+        ),
+        candidates=ranking.candidates,
+        message=ranking.message,
+    )
 
 
 @router.get("/prisma", response_model=PrismaOut, summary="PRISMA 计数与流程图")
