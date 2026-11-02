@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createDecision,
   getPrismaCounts,
+  getScreeningPriority,
   listScreeningRecords,
   recordSearch,
 } from "@/api/screening";
@@ -139,5 +140,27 @@ describe("screening api", () => {
     await getPrismaCounts("task-1", "en");
 
     expect(api.get).toHaveBeenCalledWith("/screening/prisma?task_id=task-1&language=en");
+  });
+
+  it("getScreeningPriority 请求标题/摘要阶段并返回状态", async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      data: {
+        status: "insufficient_labels",
+        algorithm: "tfidf-char-logreg-v1",
+        stage: "title_abstract",
+        items: [],
+        labels: { positive: 1, negative: 0, ignored: 0 },
+        candidates: 2,
+        message: "至少需要 1 条纳入和 1 条排除决策（当前 1 / 0）",
+      },
+    });
+
+    const result = await getScreeningPriority("task/1 a");
+
+    expect(api.get).toHaveBeenCalledWith(
+      "/screening/priority?task_id=task%2F1+a&stage=title_abstract"
+    );
+    expect(result.status).toBe("insufficient_labels");
+    expect(result.items).toEqual([]);
   });
 });

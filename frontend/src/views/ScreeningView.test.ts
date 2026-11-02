@@ -417,4 +417,21 @@ describe("ScreeningView", () => {
 
     expect(vi.mocked(getScreeningPriority).mock.calls.length).toBe(before + 1);
   });
+
+  it("切到全文阶段会关闭并禁用智能排序", async () => {
+    vi.mocked(getScreeningPriority).mockResolvedValue(priorityResult());
+
+    const wrapper = mount(ScreeningView, { props: { taskId: "task-1" } });
+    await flushPromises();
+    await wrapper.find('[data-test="screening-priority-toggle"]').trigger("click");
+    await flushPromises();
+
+    await wrapper.find('[data-test="screening-stage-filter"]').setValue("fulltext");
+    await flushPromises();
+
+    const toggle = wrapper.find('[data-test="screening-priority-toggle"]');
+    expect(toggle.attributes("aria-pressed")).toBe("false");
+    expect(toggle.attributes("disabled")).toBeDefined();
+    expect(wrapper.find('[data-test="screening-priority-status"]').exists()).toBe(false);
+  });
 });

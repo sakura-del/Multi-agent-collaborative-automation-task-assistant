@@ -123,6 +123,44 @@ async def test_service_aggregates_task_wide_labels_and_excludes_decided_records(
     assert {item.record_id for item in ranking.items} == {str(records[3].id), str(records[4].id)}
 
 
+async def test_any_include_wins_over_exclude_for_same_record(
+    session: AsyncSession,
+) -> None:
+    """同一记录被一位筛选者纳入、另一位排除时，任务级标签必须按正样本保护召回。"""
+    task_id = uuid.uuid4()
+    records = await _seed(session, task_id)
+    reviewer_a = uuid.uuid4()
+    reviewer_b = uuid.uuid4()
+    service = ScreeningService(session)
+
+    await service.decide(
+        records[0].id,
+        stage=DecisionStage.TITLE_ABSTRACT,
+        verdict=ScreeningVerdict.INCLUDE,
+        reviewer_id=reviewer_a,
+    )
+    await service.decide(
+        records[0].id,
+        stage=DecisionStage.TITLE_ABSTRACT,
+        verdict=ScreeningVerdict.EXCLUDE,
+        reviewer_id=reviewer_b,
+        exclusion_reason="reviewer b disagrees",
+    )
+    await service.decide(
+        records[1].id,
+        stage=DecisionStage.TITLE_ABSTRACT,
+        verdict=ScreeningVerdict.EXCLUDE,
+        reviewer_id=reviewer_a,
+        exclusion_reason="not relevant",
+    )
+
+    ranking = await service.priority(task_id)
+
+    assert ranking.positive == 1
+    assert ranking.negative == 1
+    assert ranking.ignored == 0
+
+
 async def test_priority_is_task_scoped(session: AsyncSession) -> None:
     task_a = uuid.uuid4()
     task_b = uuid.uuid4()
