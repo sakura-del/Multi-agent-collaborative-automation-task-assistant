@@ -25,6 +25,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundException
+from app.core.logging import get_logger
 from app.db.models.screening import (
     DecisionStage,
     FulltextStatus,
@@ -34,7 +35,16 @@ from app.db.models.screening import (
 )
 from app.db.repositories.screening import ScreeningRepository
 from app.db.repositories.task import TaskRepository
+from app.knowledge.services.screening_priority import (
+    LabeledText,
+    PriorityCandidate,
+    PriorityRanking,
+    PriorityUnavailableError,
+    rank_candidates,
+)
 from app.tools.literature.models import LiteratureRecord
+
+logger = get_logger(__name__)
 
 #: 从 `source_url` 提取规范 DOI 链接（与 `source_registry` 同正则）。
 _DOI_URL_PATTERN = re.compile(r"^https?://(?:dx\.)?doi\.org/(?P<doi>.+)$", re.IGNORECASE)
@@ -223,6 +233,45 @@ class ScreeningService:
 
     async def list_search_logs(self, task_id: uuid.UUID) -> list[SearchLog]:
         return await self._repo.list_search_logs(task_id)
+
+    async def priority(self, task_id: uuid.UUID) -> PriorityRanking:
+        """按任务全员标签排序未筛的标题/摘要记录。
+
+        标签规则：
+        - 任一 include → 正样本（保护召回）；
+        - 无 include 且有 exclude → 负样本；
+        - 只有 maybe → 忽略；
+        - 候选必须是 title_abstract 且任务内无任何该阶段决策。
+        """
+        records = await self._repo.list_records(task_id, limit=1000)
+        decisions = await self._repo.list_decisions_for_task(task_id, DecisionStage.TITLE_ABSTRACT)
+        by_record: dict[uuid.UUID, list[Any]] = {}
+        for decision in decisions:
+            by_record.setdefault(decision.record_id, []).append(decision)
+
+        labeled: list[LabeledText] = []
+        candidates: list[PriorityCandidate] = []
+        ignored = 0
+        for record in records:
+            text = f"{record.title}\n{record.abstract}"
+            record_decisions = by_record.get(record.id, [])
+            if not record_decisions:
+                if record.current_stage == DecisionStage.TITLE_ABSTRACT.value:
+                    candidates.append(PriorityCandidate(record_id=str(record.id), text=text))
+                continue
+            verdicts = {decision.verdict for decision in record_decisions}
+            if ScreeningVerdict.INCLUDE.value in verdicts:
+                labeled.append(LabeledText(text=text, label="positive"))
+            elif ScreeningVerdict.EXCLUDE.value in verdicts:
+                labeled.append(LabeledText(text=text, label="negative"))
+            else:
+                ignored += 1
+
+        try:
+            return rank_candidates(labeled, candidates, ignored=ignored)
+        except (ValueError, RuntimeError) as exc:
+            logger.warning("screening_priority_unavailable", error=str(exc))
+            raise PriorityUnavailableError("主动排序暂不可用，请稍后重试") from exc
 
     async def get_record(self, record_id: uuid.UUID) -> ScreeningRecord:
         record = await self._repo.get(record_id)

@@ -175,6 +175,24 @@ class ScreeningRepository(BaseRepository[ScreeningRecord]):
         stmt = stmt.order_by(ScreeningDecision.seq.asc())
         return list((await self.db.execute(stmt)).scalars().all())
 
+    async def list_decisions_for_task(
+        self, task_id: uuid.UUID, stage: DecisionStage
+    ) -> list[ScreeningDecision]:
+        """一次查询任务内某阶段的全部决策（按记录、seq 正序）。
+
+        供主动排序聚合标签；不要按记录逐条查询，否则 1000 条会变成 N+1。
+        """
+        stmt = (
+            select(ScreeningDecision)
+            .join(ScreeningRecord, ScreeningDecision.record_id == ScreeningRecord.id)
+            .where(
+                ScreeningRecord.task_id == task_id,
+                ScreeningDecision.stage == stage.value,
+            )
+            .order_by(ScreeningDecision.record_id.asc(), ScreeningDecision.seq.asc())
+        )
+        return list((await self.db.execute(stmt)).scalars().all())
+
     async def latest_decision(
         self, record_id: uuid.UUID, stage: DecisionStage, reviewer_id: uuid.UUID
     ) -> ScreeningDecision | None:
