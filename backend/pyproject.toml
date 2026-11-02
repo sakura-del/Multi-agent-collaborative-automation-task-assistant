@@ -87,6 +87,10 @@ dependencies = [
     # 中文著者字顺（Issue #4 剩余项）：author-date 排序按拼音而非 Unicode 码位。
     # pypinyin 为 MIT、纯 Python、无运行时依赖（~840KB）；未安装时排序自动退化为码位（不崩）。
     "pypinyin==0.55.0",
+
+    # 主动筛选排序（ASReview 式）：字符 n-gram TF-IDF + 逻辑回归。
+    # scikit-learn 为 BSD-3-Clause；不引入 ASReview 的 Flask 应用栈。
+    "scikit-learn>=1.5,<2",
 ]
 
 [project.optional-dependencies]
