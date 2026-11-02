@@ -1,6 +1,6 @@
 # PRISMA 主动筛选排序验收记录
 
-> 日期：2026-11-02 ｜ 分支：`codex/screening-priority` ｜ 状态：自动化验收通过，未合并/未推送/未部署
+> 日期：2026-11-02 ｜ 分支：`codex/screening-priority` ｜ 状态：自动化验收通过，已合并并部署到服务器（代码提交 `a2c46d4`），未推送远端
 >
 > 设计：[主动筛选排序设计](../superpowers/specs/2026-11-02-screening-priority-design.md) ·
 > 计划：[实施计划](../superpowers/plans/2026-11-02-screening-priority-plan.md) ·
@@ -17,8 +17,8 @@
 | 前端默认关闭开关 | 完成 | 默认零请求；ready 置顶保留其余；不足/异常原序 |
 | 阶段边界 | 完成 | 全文/已纳入自动关闭并禁用；独立测试 |
 | 无数据库迁移 | 完成 | `git diff --name-only main...HEAD` 无 alembic/migration 文件 |
-| 真实浏览器/E2E | **未执行** | 本轮只做组件测试与类型检查，不声明浏览器验收 |
-| 真实部署 | **未执行** | 未推送、未部署 |
+| 真实浏览器冒烟 | 通过 | Playwright 登录 Preview 任务，确认开关、提示、4 条置顶名次实际渲染；完整 E2E 套件未重跑 |
+| 真实部署 | 通过 | 服务器 backend/nginx 重建，五容器健康；代码提交 `a2c46d4` |
 
 ## 2. 提交记录
 
@@ -89,6 +89,39 @@ ready 1000 0.058
 
 即纯排序器在 50 正 + 50 负训练样本、1000 条候选下实测 **0.058 秒**（不含 DB 查询与前端渲染）。该数字来自当前开发机，不是生产 SLA。
 
+### 3.5 部署与真实浏览器冒烟
+
+服务器代码与镜像：
+
+```text
+server HEAD = a2c46d4
+maa-backend healthy / maa-nginx running (rebuilt)
+sklearn = 1.9.1
+alembic current = b7d4e9f1c6a2 (head)
+alembic heads   = b7d4e9f1c6a2 (head)
+```
+
+接口与前端产物：
+
+```text
+GET /api/v1/screening/priority 无 token → 401（路由已挂载）
+有 demo token + 有筛选数据的任务 → 200, status=ready, 4 candidates
+nginx 静态 JS 包含“智能排序”字符串
+```
+
+真实浏览器（Playwright，headless Chromium）：
+
+```text
+登录 demo → /tasks/b698044a-2570-425a-a5b3-24d497b2f11f/screening
+状态提示：基于任务内 1 条纳入 / 1 条排除决策排序
+推荐徽标：推荐优先 #1 / #2 / #3 / #4
+```
+
+预览任务：`Preview: Active Screening Ranking`（`b698044a-2570-425a-a5b3-24d497b2f11f`）。
+该任务是独立 demo 数据，含 6 条记录、1 条纳入、1 条排除，可随时删除，不改动现有任务。
+
+访问入口：`http://10.0.10.2:48080/tasks/b698044a-2570-425a-a5b3-24d497b2f11f/screening`（需先登录 demo）。
+
 ## 4. 验收项对照
 
 | # | 验收项 | 结果 | 证据 |
@@ -109,10 +142,11 @@ ready 1000 0.058
 - 已被第一位筛选者处理的记录不会进入第二位筛选者的推荐队列，但仍出现在普通列表；
 - 请求时现算，不持久化模型/分数，历史顺序只能靠同数据/同版本复现；
 - 不做模拟评估、WSS@95、学习曲线、自动停止；
-- 真实浏览器截图、E2E 和服务器部署本轮未执行。
+- 真实浏览器已做一次 Preview 冒烟；**完整 Playwright E2E 套件未重跑**；
+- 未推送远端。
 
 ## 6. 下一步
 
-1. 在真实浏览器检查开关、提示、置顶和阶段过滤的实际观感；
-2. 合并到 `main`（本轮尚未合并/推送）；
-3. 如需要论文方法学结果，再独立设计 ASReview 模拟评估切片。
+1. 在 Preview 任务中检查实际观感，必要时删除 Preview demo 任务；
+2. 如需要论文方法学结果，再独立设计 ASReview 模拟评估切片；
+3. 后续正常开发时补跑完整 Playwright E2E 套件。
