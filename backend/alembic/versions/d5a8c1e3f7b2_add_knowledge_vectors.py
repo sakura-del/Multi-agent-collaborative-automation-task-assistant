@@ -20,10 +20,13 @@ Create Date: 2026-11-03 10:00:00.000000
 
 from __future__ import annotations
 
+import logging
 from typing import Sequence
 
 import sqlalchemy as sa
 from alembic import op
+
+logger = logging.getLogger("alembic.knowledge_vectors")
 
 # revision identifiers, used by Alembic.
 revision: str = "d5a8c1e3f7b2"
@@ -54,6 +57,17 @@ def _extension_schema() -> str | None:
     return bind.execute(sa.text(_EXTENSION_SCHEMA_SQL)).scalar()
 
 
+def _extension_installable() -> bool:
+    """服务端有没有 pgvector 的安装包（`postgres:16-alpine` 等镜像没有）。"""
+    bind = op.get_bind()
+    return (
+        bind.execute(
+            sa.text("SELECT 1 FROM pg_available_extensions WHERE name = 'vector'")
+        ).scalar()
+        is not None
+    )
+
+
 def upgrade() -> None:
     bind = op.get_bind()
     if bind.dialect.name != "postgresql":
@@ -61,13 +75,21 @@ def upgrade() -> None:
         return
 
     schema = _extension_schema()
-    if schema is None:
+    if schema is None and _extension_installable():
         bind.execute(sa.text("CREATE EXTENSION IF NOT EXISTS vector"))
         schema = _extension_schema()
     if schema is None:
-        raise RuntimeError(
-            "pgvector 扩展不可用：请在目标库执行 `CREATE EXTENSION vector`（Supabase 需在 extensions schema）"
+        # 迁移必须能在**没有 pgvector 的库**上跑完：本地/CI 用的是 postgres:16-alpine，
+        # 而且 Chroma 仍是默认后端。硬失败会让容器启动即崩溃循环
+        # （2026-11-03 部署实测：`extension "vector" is not available`）。
+        # 代价是这一版只盖章不建表；切到 pgvector 后端前必须装扩展并重跑，
+        # 运行期会以 VectorStoreConfigError 明确报「表不存在」，不会静默返回空结果。
+        logger.warning(
+            "pgvector 扩展不可用，跳过 %s 建表；"
+            "启用 RAG__VECTOR_BACKEND=pgvector 前需先安装扩展并重跑 alembic",
+            _TABLE,
         )
+        return
 
     vector = f"{_quote(schema)}.{_quote('vector')}"
     opclass = f"{_quote(schema)}.{_quote('vector_cosine_ops')}"
