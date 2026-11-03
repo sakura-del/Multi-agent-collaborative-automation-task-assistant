@@ -1,10 +1,11 @@
 # AGENTS.md — 项目上下文与开发约定
 
 > 本文件是**给 AI 编码助手看的交接文档**。新会话开始时请先读完本文件再动手。
-> 最后更新：2026-10-28（本轮：模型切换 + 实验矩阵 60 run + 三个实验类缺陷修复 + 部署）
+> 最后更新：2026-11-03（主动筛选已部署；新交接与蒸馏记录）
 >
-> **新会话请先读** → [docs/runbooks/2026-10-28-handoff.md](docs/runbooks/2026-10-28-handoff.md)
+> **新会话请先读** → [docs/runbooks/2026-11-03-handoff.md](docs/runbooks/2026-11-03-handoff.md)
 > （紧凑版：现状 / 未完成项 / 硬约束 / 命令与坑）。本文件查约定与历史坑，handoff 查「现在该干什么」。
+> 历史基线见 [2026-10-28-handoff.md](docs/runbooks/2026-10-28-handoff.md)。
 
 ---
 
@@ -19,7 +20,7 @@
 
 ---
 
-## 2. 当前状态快照（2026-10-28）
+## 2. 状态快照（2026-10-28 基线；最新见 2026-11-03 handoff）
 
 | 项 | 值 |
 | --- | --- |
@@ -441,7 +442,7 @@ docs/superpowers/plans/             # 计划 + 执行记录（execution-notes）
 
 | 想知道什么 | 读哪个 |
 | --- | --- |
-| **接手新会话**（当前状态 / 剩余任务 / 命令 / 阻塞项） | [docs/runbooks/2026-10-28-handoff.md](docs/runbooks/2026-10-28-handoff.md) ⭐ **先读这个**；历史细节查 [2026-10-26-handoff.md](docs/runbooks/2026-10-26-handoff.md) §3.1~§3.14 |
+| **接手新会话**（当前状态 / 剩余任务 / 命令 / 阻塞项） | [docs/runbooks/2026-11-03-handoff.md](docs/runbooks/2026-11-03-handoff.md) ⭐ **先读这个**；历史基线查 [2026-10-28-handoff.md](docs/runbooks/2026-10-28-handoff.md) |
 | **前端重设计怎么做的**（10 个阶段的设计取舍与实测证据） | [docs/superpowers/specs/2026-10-23-frontend-redesign-design.md](docs/superpowers/specs/2026-10-23-frontend-redesign-design.md) §4.5~§4.18 |
 | **用量看板为什么重做**（token 用量从未落库 + 5 个缺陷 + 数据修复） | 同上 §4.14 + [execution-notes](docs/superpowers/plans/2026-08-09-00-execution-notes.md) |
 | **套餐页为什么重做**（当前卡零权益 + 到期日缺失 + 无升级入口 + 6 缺陷） | 同上 §4.15 + [execution-notes](docs/superpowers/plans/2026-08-09-00-execution-notes.md) |
