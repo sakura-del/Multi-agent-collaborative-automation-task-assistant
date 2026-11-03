@@ -184,8 +184,9 @@ class RAGConfig(BaseModel):
     # 同步连接池：向量检索是同步调用，池大小按并发检索量给（不是按请求量）
     pgvector_pool_min_size: int = 1
     pgvector_pool_max_size: int = 5
-    pgvector_pool_timeout: float = 5.0
-    pgvector_connect_timeout: int = 5
+    # 15s：实测国内→Supabase eu-west-1 单次建连 6~8s，5s 会让池一直取不到连接
+    pgvector_pool_timeout: float = 15.0
+    pgvector_connect_timeout: int = 15
     # Supabase 的 statement_timeout 兜底：慢查询不应把请求线程长期占住
     pgvector_statement_timeout_ms: int = 15000
     # 留空 = 由 DSN 决定；Supabase 建议 "require"

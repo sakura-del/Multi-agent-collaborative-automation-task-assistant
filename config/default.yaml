@@ -95,8 +95,9 @@ rag:
   # 同步连接池（向量检索是同步调用）：按并发检索量给，不按请求量
   pgvector_pool_min_size: 1
   pgvector_pool_max_size: 5
-  pgvector_pool_timeout: 5.0
-  pgvector_connect_timeout: 5
+  # 15s：实测国内→Supabase eu-west-1 单次建连 6~8s；池等待时间必须大于建连时间
+  pgvector_pool_timeout: 15.0
+  pgvector_connect_timeout: 15
   pgvector_statement_timeout_ms: 15000
   # 留空 = 由 DSN 决定；Supabase 建议 "require"
   pgvector_sslmode: ""

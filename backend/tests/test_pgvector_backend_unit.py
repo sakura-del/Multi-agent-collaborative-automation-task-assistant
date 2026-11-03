@@ -23,7 +23,10 @@ from app.knowledge.services.vector_backends.base import (
     VectorStoreUnavailableError,
 )
 from app.knowledge.services.vector_backends.dsn import redact_dsn, to_sync_dsn
-from app.knowledge.services.vector_backends.pgvector_backend import PgVectorBackend
+from app.knowledge.services.vector_backends.pgvector_backend import (
+    PgVectorBackend,
+    split_table_name,
+)
 
 _DEFAULT_DIMENSION = 4
 
@@ -283,6 +286,19 @@ class TestDeleteAndReset:
 
 
 class TestSchemaAndErrors:
+    def test_probe_uses_schema_qualified_name(self) -> None:
+        """探测必须带 schema：Supabase pooler 会话的 search_path 是空的，
+        未限定的 to_regclass 会返回 NULL → 误判「表不存在」（2026-11-03 实测）。"""
+        backend, pool = _make_backend()
+        backend.count()
+
+        probes = [params for sql, params in pool.cursor.executed if "pg_class" in sql]
+        assert probes and probes[0] == ("public.knowledge_vectors",)
+
+    def test_split_table_name(self) -> None:
+        assert split_table_name("knowledge_vectors") == ("public", "knowledge_vectors")
+        assert split_table_name("other.knowledge_vectors") == ("other", "knowledge_vectors")
+
     def test_dimension_mismatch_detected_from_catalog(self) -> None:
         """表列维度与嵌入维度不一致 → 配置错误（不是运行期 500）。
 

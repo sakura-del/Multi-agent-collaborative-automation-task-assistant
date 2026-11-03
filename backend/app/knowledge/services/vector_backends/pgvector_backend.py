@@ -91,6 +91,20 @@ _UNDIMENSIONED_TYPMOD = -1
 _DEFAULT_TABLE = "knowledge_vectors"
 
 
+def split_table_name(table: str) -> tuple[str, str]:
+    """把表名拆成 (schema, name)；未写 schema 时补 `public`。
+
+    **必须带 schema**：Supabase 的 pooler 会话 `search_path` 是**空的**
+    （2026-11-03 实测 `current_setting('search_path')` 为空串），
+    未限定的 `to_regclass('knowledge_vectors')` 直接返回 NULL，
+    表现为「表不存在」——而表其实好端端在 public 里。
+    """
+    if "." in table:
+        schema, _, name = table.partition(".")
+        return schema, name
+    return "public", table
+
+
 def serialise_vector(vector: Iterable[float]) -> str:
     """把向量序列化成 pgvector 文本格式 `[1.0,0.0]`。
 
@@ -185,7 +199,11 @@ class PgVectorBackend:
     def _ensure_pool(self) -> None:
         if self._pool is not None:
             return
-        connect_timeout = self._connect_timeout or int(_setting("pgvector_connect_timeout", 5) or 5)
+        # 15s 而不是 5s：2026-11-03 实测从国内服务器到 Supabase eu-west-1
+        # 单次建连（DNS+TLS+pooler 路由）要 **6~8 秒**，5s 会让连接池一直取不到连接。
+        connect_timeout = self._connect_timeout or int(
+            _setting("pgvector_connect_timeout", 15) or 15
+        )
         statement_timeout_ms = self._statement_timeout_ms or int(
             _setting("pgvector_statement_timeout_ms", 15000) or 15000
         )
@@ -197,7 +215,8 @@ class PgVectorBackend:
         )
         min_size = int(self._pool_min_size or _setting("pgvector_pool_min_size", 1) or 1)
         max_size = int(self._pool_max_size or _setting("pgvector_pool_max_size", 5) or 5)
-        timeout = float(self._pool_timeout or _setting("pgvector_pool_timeout", 5.0) or 5.0)
+        # 池等待时间必须大于建连时间，否则首次检索必然超时（见上面的 6~8s 实测）
+        timeout = float(self._pool_timeout or _setting("pgvector_pool_timeout", 15.0) or 15.0)
 
         conninfo = to_sync_dsn(self._resolve_dsn())
         conninfo = with_options(
@@ -279,15 +298,17 @@ class PgVectorBackend:
             self._ext_schema = str(row[0])
 
             table = self._table or str(_setting("pgvector_table", _DEFAULT_TABLE))
-            cur.execute(_TABLE_PROBE_SQL, (table,))
+            schema_hint, table_name = split_table_name(table)
+            qualified = f"{schema_hint}.{table_name}"
+            cur.execute(_TABLE_PROBE_SQL, (qualified,))
             probed = cur.fetchone()
             if probed is None and auto_migrate:
-                self._create_table(cur, table)
-                cur.execute(_TABLE_PROBE_SQL, (table,))
+                self._create_table(cur, qualified)
+                cur.execute(_TABLE_PROBE_SQL, (qualified,))
                 probed = cur.fetchone()
             if probed is None:
                 raise VectorStoreConfigError(
-                    f"向量表 {table!r} 不存在或缺少 embedding 列：请先执行 `alembic upgrade head`"
+                    f"向量表 {qualified!r} 不存在或缺少 embedding 列：请先执行 `alembic upgrade head`"
                 )
 
             schema, relname, typmod = str(probed[0]), str(probed[1]), int(probed[2])
@@ -319,7 +340,7 @@ class PgVectorBackend:
         DDL 里的参数不能用 `%s`（utility 语句不支持占位符），维度与索引参数
         都先从 int 转换再以 `sql.Literal` 内联；表名/类型名走 Identifier。
         """
-        ident = sql.Identifier(table)
+        ident = sql.Identifier(*split_table_name(table))
         vector_type = sql.SQL("{}").format(sql.Identifier(self._ext_schema, "vector")) + sql.SQL(
             "({})"
         ).format(sql.Literal(self._embedding_dimension))
