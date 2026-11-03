@@ -22,11 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.db.base import Base  # noqa: E402
-from app.db.engine_options import (  # noqa: E402
-    database_connect_args,
-    database_engine_kwargs,
-    database_url_for_alembic,
-)
+from app.db.engine_options import database_connect_args, database_url_for_alembic  # noqa: E402
 # 触发所有 ORM 模型注册到 Base.metadata，让 autogenerate 能发现
 import app.db.models  # noqa: E402, F401
 
@@ -39,10 +35,6 @@ if config.config_file_name is not None:
 # 用与应用完全相同的构造逻辑：Supabase 的 TLS / 关闭 prepared statement
 # 若只配在应用侧，迁移会连不上或报 `prepared statement does not exist`。
 config.set_main_option("sqlalchemy.url", database_url_for_alembic())
-# asyncpg 的语句缓存与 SQLAlchemy 方言缓存必须与应用侧一致地关闭；
-# 注意它们不能放进 URL 查询串（会以字符串传给 asyncpg 导致 TypeError）
-_ALEMBIC_ENGINE_KWARGS = database_engine_kwargs()
-_ALEMBIC_ENGINE_KWARGS["connect_args"] = database_connect_args()
 
 # 目标 metadata：所有 ORM 模型自动注册到 Base.metadata
 target_metadata = Base.metadata
@@ -80,7 +72,7 @@ async def run_migrations_online() -> None:
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
-        **_ALEMBIC_ENGINE_KWARGS,
+        connect_args=database_connect_args(),
     )
 
     async with connectable.connect() as connection:

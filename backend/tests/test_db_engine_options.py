@@ -3,11 +3,12 @@
 锁住三条容易在部署时才发现的行为：
 
 1. 默认（本地 postgres）不加任何额外参数，避免影响既有部署；
-2. `disable_prepared_statements=true` 时**两层**缓存都要关——
-   只关一层仍会在 pgbouncer 复用连接后报 `prepared statement does not exist`；
-   且**不能**通过 URL 查询串传：SQLAlchemy 会把查询参数当字符串传给 asyncpg，
-   直接 `TypeError: '<' not supported between instances of 'str' and 'int'`
-   （2026-11-03 切换时真机踩到，后端起不来）；
+2. `disable_prepared_statements=true` 时**两层**缓存都要关，且**传法不同**：
+   - SQLAlchemy 方言的 `prepared_statement_cache_size=0` 只能走 **URL 查询串**
+     （作为 engine kwarg 会报 `Invalid argument(s) ... sent to create_engine()`）；
+   - asyncpg 的 `statement_cache_size=0` 只能走 `connect_args`，**必须是 int**
+     （走 URL 会以字符串传给 asyncpg → `TypeError: '<' not supported ...`）。
+   两处都是 2026-11-03 切换 Supabase 时真机踩到的；
 3. 给 alembic 的 URL 必须带真实密码（`str(URL)` 会打码成 `***`，
    打码后的串连不上库，而报错信息只说「认证失败」，极难排查）。
 """
@@ -17,7 +18,6 @@ from __future__ import annotations
 from app.core.config import settings
 from app.db.engine_options import (
     database_connect_args,
-    database_engine_kwargs,
     database_url_for_alembic,
     prepare_database_url,
 )
@@ -29,13 +29,14 @@ class TestPrepareDatabaseUrl:
         url = prepare_database_url("postgresql+asyncpg://u:p@h:5432/db")
         assert url.query == {}
 
-    def test_disabling_does_not_touch_url_query(self, monkeypatch) -> None:
-        """缓存参数必须走 connect_args / engine kwarg，不能塞进 URL。"""
+    def test_dialect_cache_goes_into_url_query(self, monkeypatch) -> None:
+        """方言层参数**只能**走 URL 查询串（engine kwarg 会被 create_engine 拒收）。"""
         monkeypatch.setattr(settings.database, "disable_prepared_statements", True)
         url = prepare_database_url("postgresql+asyncpg://u:p@h:6543/db")
-        assert url.query == {}
+        assert url.query == {"prepared_statement_cache_size": "0"}
 
-    def test_keeps_driver_prefix(self) -> None:
+    def test_keeps_driver_prefix(self, monkeypatch) -> None:
+        monkeypatch.setattr(settings.database, "disable_prepared_statements", True)
         url = prepare_database_url("postgresql+asyncpg://u:p@h:6543/db")
         assert url.drivername == "postgresql+asyncpg"
 
@@ -64,19 +65,3 @@ class TestConnectArgs:
         args = database_connect_args()
         assert args["statement_cache_size"] == 0
         assert isinstance(args["statement_cache_size"], int)
-
-
-class TestEngineKwargs:
-    def test_dialect_cache_disabled_when_requested(self, monkeypatch) -> None:
-        monkeypatch.setattr(settings.database, "disable_prepared_statements", True)
-        assert database_engine_kwargs() == {"prepared_statement_cache_size": 0}
-
-    def test_default_is_empty(self, monkeypatch) -> None:
-        monkeypatch.setattr(settings.database, "disable_prepared_statements", False)
-        assert database_engine_kwargs() == {}
-
-    def test_both_layers_disabled_together(self, monkeypatch) -> None:
-        """只关一层仍会报 prepared statement 不存在/已存在（两种都踩过）。"""
-        monkeypatch.setattr(settings.database, "disable_prepared_statements", True)
-        assert "statement_cache_size" in database_connect_args()
-        assert "prepared_statement_cache_size" in database_engine_kwargs()

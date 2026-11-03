@@ -16,11 +16,7 @@ from sqlalchemy.ext.asyncio import (
 
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.db.engine_options import (
-    database_connect_args,
-    database_engine_kwargs,
-    prepare_database_url,
-)
+from app.db.engine_options import database_connect_args, prepare_database_url
 
 logger = get_logger(__name__)
 
@@ -59,7 +55,6 @@ def _build_engine():
         pool_recycle=settings.database.pool_recycle,
         pool_pre_ping=True,  # 借出前 ping，避免拿到失效连接
         connect_args=database_connect_args(),
-        **database_engine_kwargs(),
         **common_kwargs,
     )
 
