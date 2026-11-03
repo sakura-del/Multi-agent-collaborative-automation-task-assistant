@@ -100,8 +100,8 @@ rag:
   pgvector_statement_timeout_ms: 15000
   # 留空 = 由 DSN 决定；Supabase 建议 "require"
   pgvector_sslmode: ""
-  # transaction pooler（6543）必须开
-  pgvector_disable_prepared_statements: false
+  # 默认开：transaction pooler 不支持预编译语句；且通用计划用不上 HNSW 有序扫描
+  pgvector_disable_prepared_statements: true
   # 仅集成测试/临时库：允许运行时建表建索引（生产由 alembic 负责）
   pgvector_auto_migrate: false
 

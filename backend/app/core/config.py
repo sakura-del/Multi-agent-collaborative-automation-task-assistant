@@ -190,8 +190,12 @@ class RAGConfig(BaseModel):
     pgvector_statement_timeout_ms: int = 15000
     # 留空 = 由 DSN 决定；Supabase 建议 "require"
     pgvector_sslmode: str = ""
-    # transaction pooler（6543）必须开：psycopg 传 prepare_threshold=None
-    pgvector_disable_prepared_statements: bool = False
+    # 默认关闭 prepared statement（psycopg 传 prepare_threshold=None）。两个原因：
+    # 1) transaction pooler（6543）不支持命名预编译语句；
+    # 2) **通用计划用不上 HNSW 有序扫描**——`ORDER BY embedding <=> $1` 的距离依赖参数值，
+    #    服务端一旦走 generic plan 就退化成 Seq Scan + Sort（2026-11-03 Supabase 实测：
+    #    常量字面量能走 Index Scan，非恒定表达式走 Sort）。每次现解析的代价远小于全表排序。
+    pgvector_disable_prepared_statements: bool = True
     # 仅集成测试/临时库：允许运行时建表建索引（生产由 alembic 负责）
     pgvector_auto_migrate: bool = False
 

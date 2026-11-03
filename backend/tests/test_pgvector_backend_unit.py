@@ -16,6 +16,7 @@ from typing import Any
 
 import pytest
 
+from app.knowledge.services.vector_backends import pgvector_backend
 from app.knowledge.services.vector_backends.base import (
     VectorDimensionMismatchError,
     VectorStoreConfigError,
@@ -46,9 +47,10 @@ class _FakeCursor:
         self._script = script
         self._extension_present = extension_present
         self._table_present = table_present
-        # pgvector 的 atttypmod 编码为「维度 + VARHDRSZ(4)」
+        # pgvector 的 atttypmod **直接就是维度**（不像 varchar 加 4）；
+        # 曾在 Supabase 实测 vector(1024) → 1024，见 pgvector_backend 注释
         dim = table_dimension if table_dimension is not None else dimension
-        self._table_row = ("public", "knowledge_vectors", dim + 4)
+        self._table_row = ("public", "knowledge_vectors", dim)
         self.executed: list[tuple[str, Any]] = []
         self._current: dict[str, Any] = {}
         self.rowcount = 0
@@ -290,6 +292,22 @@ class TestSchemaAndErrors:
         with pytest.raises(VectorDimensionMismatchError):
             backend.count()
 
+    def test_atttypmod_is_the_dimension_itself(self) -> None:
+        """pgvector 的 atttypmod 就是维度，不能再减 VARHDRSZ。
+
+        2026-11-03 在 Supabase 实测：`vector(1024)` → atttypmod = 1024。
+        按 varchar 习惯写 `- 4` 会把 1024 读成 1020，真实写入/检索全被误判为维度不一致。
+        """
+        backend, _ = _make_backend(dimension=1024, table_dimension=1024)
+        # 不该抛 VectorDimensionMismatchError
+        assert backend.column_dimension == 1024
+
+    def test_undimensioned_vector_column_rejected(self) -> None:
+        """`vector`（不写维度）无法建 HNSW 索引，必须要求定长列。"""
+        backend, _ = _make_backend(dimension=4, table_dimension=-1)
+        with pytest.raises(VectorStoreConfigError):
+            backend.count()
+
     def test_missing_extension_raises_config_error(self) -> None:
         """pgvector 扩展没装是「库没准备好」，必须给出可操作的错误。"""
         backend, _ = _make_backend(extension_present=False)
@@ -307,6 +325,51 @@ class TestSchemaAndErrors:
         pool.connection = contextmanager(_raise_operational)  # type: ignore[method-assign]
         with pytest.raises(VectorStoreUnavailableError):
             backend.count()
+
+
+class TestPoolConfiguration:
+    """连接池参数：默认必须关掉服务端预编译语句。
+
+    原因不只是 pgbouncer：`ORDER BY embedding <=> $1` 一旦走 generic plan，
+    距离依赖参数值 → 用不上 HNSW 有序扫描，退化成全表 Sort。
+    """
+
+    def _capture(
+        self, monkeypatch: pytest.MonkeyPatch, **kwargs: Any
+    ) -> tuple[dict[str, Any], PgVectorBackend]:
+        captured: dict[str, Any] = {}
+
+        class _Pool:
+            def __init__(self, **pool_kwargs: Any) -> None:
+                captured.update(pool_kwargs)
+
+        monkeypatch.setattr(pgvector_backend, "ConnectionPool", _Pool)
+        backend = PgVectorBackend(
+            embedding_dimension=4,
+            collection_name="kb",
+            dsn="postgresql://u:p@localhost:5432/db",
+            **kwargs,
+        )
+        backend._ensure_pool()
+        return captured, backend
+
+    def test_prepared_statements_disabled_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        captured, _ = self._capture(monkeypatch)
+
+        assert captured["kwargs"]["prepare_threshold"] is None
+        assert "statement_timeout" in captured["conninfo"]
+
+    def test_flag_off_keeps_server_side_prepared_statements(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        captured, _ = self._capture(monkeypatch, disable_prepared_statements=False)
+
+        assert captured["kwargs"] == {}
+
+    def test_pool_sizes_come_from_arguments(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        captured, _ = self._capture(monkeypatch, pool_min_size=2, pool_max_size=7)
+
+        assert (captured["min_size"], captured["max_size"]) == (2, 7)
 
 
 def _raise_operational() -> Any:

@@ -217,10 +217,35 @@ curl -s http://127.0.0.1:48080/api/v1/health/ready
 | 健康检查 `vector: failed` 但 `database: ok` | `RAG__PGVECTOR_DSN` 指向了别的库/密码错 | 看日志 `pgvector_pool_created` 的 host/port/dbname（密码已脱敏） |
 | Supabase 突然连不上 | 免费档闲置自动 pause | 控制台恢复项目；演示前预热 |
 | 检索变慢 | HNSW 索引缺失（批量导入前被删） | `REINDEX INDEX ix_kv_embedding_hnsw` |
+| 检索慢但索引存在（计划里是 Sort） | 走了 generic plan：`ORDER BY embedding <=> $1` 的距离依赖参数值 | 确认 `RAG__PGVECTOR_DISABLE_PREPARED_STATEMENTS=true`（默认已开） |
 
 ---
 
-## 8. 关键变量速查
+## 8. 实测记录（2026-11-03，Supabase 真机）
+
+| 项 | 实测值 |
+| --- | --- |
+| PostgreSQL | 17.11（aarch64） |
+| pgvector | 0.8.2，装在 `extensions` schema |
+| 迁移后库大小 | 10 MB（空表，业务库尚未导入） |
+| 表与索引 | `knowledge_vectors` + `ix_kv_embedding_hnsw` + `ix_kv_collection_doc/user` 均创建成功 |
+| 维度探测 | `embedding vector(1024)` → `atttypmod = 1024` |
+| 余弦检索 | 同向 distance 0（score 1.0）、正交 distance 1（score 0.0） |
+| 多用户隔离 | `WHERE user_id = 'u1'` 在截断前生效，`u2` 的行不出现 |
+| HNSW | 常量查询向量 → `Index Scan using ix_kv_embedding_hnsw` |
+
+只有真库才会暴露的两个坑（均已修并加回归测试）：
+
+1. **`atttypmod - 4` 是错的**：pgvector 的 typmod **直接就是维度**（不像 varchar 加
+   `VARHDRSZ(4)`）。按 varchar 习惯写 `- 4` 会把 1024 读成 1020，随后每次写入/检索
+   都被自己的维度校验拒绝。
+2. **通用计划用不上 HNSW**：`ORDER BY embedding <=> $1` 的距离依赖参数值，服务端一旦
+   走 generic plan 就退化成 `Seq Scan + Sort`（实测：常量字面量走 Index Scan，
+   非恒定表达式走 Sort）。所以 `prepare_threshold=None` 默认开。
+
+---
+
+## 9. 关键变量速查
 
 | 变量 | 默认 | 作用 |
 | --- | --- | --- |

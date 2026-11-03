@@ -81,8 +81,12 @@ JOIN pg_namespace n ON n.oid = e.extnamespace
 WHERE e.extname = 'vector'
 """
 
-# pgvector 的 atttypmod 编码为 `维度 + VARHDRSZ(4)`；`vector`（无维度）为 -1
-_VARHDRSZ = 4
+# ⚠️ pgvector 的 `atttypmod` **直接就是维度**，不像 varchar 那样加 `VARHDRSZ(4)`。
+# 2026-11-03 在 Supabase 实测：`embedding vector(1024)` → atttypmod = 1024。
+# 曾按 varchar 习惯写 `atttypmod - 4`，会把 1024 维读成 1020 维，
+# 于是真实 1024 维嵌入被判为「维度不一致」，写入与检索全部被自己的校验拦住。
+# 无维度的 `vector` 列 atttypmod = -1。
+_UNDIMENSIONED_TYPMOD = -1
 
 _DEFAULT_TABLE = "knowledge_vectors"
 
@@ -145,6 +149,8 @@ class PgVectorBackend:
         self._prepared = False
         self._ext_schema = "public"
         self._table_ident: sql.Composable | None = None
+        # 从 pg_attribute.atttypmod 读到的列维度（= 维度本身，不是 typmod-4）
+        self._column_dimension: int | None = None
 
     # ------------------------------------------------------------------
     # 连接与 schema 探测
@@ -187,7 +193,7 @@ class PgVectorBackend:
         disable_prepared = (
             self._disable_prepared
             if self._disable_prepared is not None
-            else bool(_setting("pgvector_disable_prepared_statements", False))
+            else bool(_setting("pgvector_disable_prepared_statements", True))
         )
         min_size = int(self._pool_min_size or _setting("pgvector_pool_min_size", 1) or 1)
         max_size = int(self._pool_max_size or _setting("pgvector_pool_max_size", 5) or 5)
@@ -285,20 +291,25 @@ class PgVectorBackend:
                 )
 
             schema, relname, typmod = str(probed[0]), str(probed[1]), int(probed[2])
-            column_dim = typmod - _VARHDRSZ if typmod > 0 else None
-            if column_dim is not None and column_dim != self._embedding_dimension:
+            if typmod == _UNDIMENSIONED_TYPMOD:
+                raise VectorStoreConfigError(
+                    f"向量列 {schema}.{relname}.embedding 未声明维度："
+                    f"请改用 `vector({self._embedding_dimension})`（HNSW 索引要求定长）"
+                )
+            if typmod != self._embedding_dimension:
                 raise VectorDimensionMismatchError(
-                    f"向量维度不一致：表 {schema}.{relname} 是 {column_dim} 维，"
+                    f"向量维度不一致：表 {schema}.{relname} 是 {typmod} 维，"
                     f"当前嵌入模型是 {self._embedding_dimension} 维"
                 )
 
             self._table_ident = sql.Identifier(schema, relname)
+            self._column_dimension = typmod
             self._prepared = True
             logger.info(
                 "pgvector_ready",
                 schema=schema,
                 table=relname,
-                dimension=column_dim,
+                dimension=typmod,
                 collection=self._collection,
             )
 
@@ -479,6 +490,12 @@ class PgVectorBackend:
     # ------------------------------------------------------------------
     # 读
     # ------------------------------------------------------------------
+    @property
+    def column_dimension(self) -> int | None:
+        """表里 `embedding` 列声明的维度（诊断用；无维度列为 None）。"""
+        self._ensure_collection()
+        return self._column_dimension
+
     def count(self) -> int:
         self._ensure_collection()
         assert self._table_ident is not None

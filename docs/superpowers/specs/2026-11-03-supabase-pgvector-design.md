@@ -111,7 +111,9 @@ pgvector 用 `cursor.rowcount` 拿精确值——这是**改善**，不改变语
 
 ## 7. 遗留与后续
 
-- **真机验收未做**：本地无 docker daemon，Supabase DSN 由用户提供；
+- **真机验收部分完成**：2026-11-03 在 Supabase 真库建好 `knowledge_vectors` + HNSW，
+  并实测索引、余弦距离、多用户过滤（记录见迁移手册 §8）；
+  **存量数据搬运与服务端 DSN 配置仍未做**（本地无 docker daemon，集成工具不能跑 alembic/dump）。
   集成测试用 `TEST_PGVECTOR_DSN` 开关，本地默认 skip。
 - 同步驱动阻塞事件循环：后续可把 `VectorStore` 的调用点包进线程池
   （`anyio.to_thread`），或在异步层新增 async 门面。
