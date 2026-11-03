@@ -53,7 +53,12 @@ dependencies = [
     # ⚠️ chromadb 必须与服务端镜像版本一致（docker-compose.yml 的 chromadb/chroma:1.5.9）。
     # 曾用 `>=0.4.22`：CI 装到 1.5.9 而镜像还是 0.4.24 → 跨大版本不兼容
     # （HttpClient 报 `{"detail":"Not Found"}`），smoke 因此全红。升级时两端一起改。
+    # 迁移到 pgvector 后 chromadb 仍保留：`RAG__VECTOR_BACKEND=chroma` 是回滚开关。
     "chromadb==1.5.9",
+    # 向量库新后端（Supabase pgvector）：同步接口 + 同步连接池。
+    # 选 psycopg3 而非 asyncpg：`VectorStore` 是同步接口，异步化要改四层调用方。
+    # 只用原生 SQL，不装 `pgvector` Python 包（避免 ORM 映射与逐连接类型注册）。
+    "psycopg[binary,pool]>=3.2,<4",
     "rank-bm25>=0.2.2",
     "jieba>=0.42.1",
 

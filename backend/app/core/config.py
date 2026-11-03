@@ -100,6 +100,13 @@ class DatabaseConfig(BaseModel):
     max_overflow: int = 20
     pool_recycle: int = 1800
     echo: bool = False
+    # ===== 迁移到 Supabase 后新增（本地 postgres 保持默认即可）=====
+    # Supabase 强制 TLS：开启后给 asyncpg 传 `ssl="require"`（DSN 里已写 sslmode 时不重复加）
+    ssl_require: bool = False
+    # transaction pooler（6543）不支持 prepared statement：
+    # 开启后 asyncpg 传 statement_cache_size=0，
+    # 同时让 SQLAlchemy 方言传 prepared_statement_cache_size=0。
+    disable_prepared_statements: bool = False
 
 
 class RedisConfig(BaseModel):
@@ -161,6 +168,32 @@ class RAGConfig(BaseModel):
     # 历史缺陷：默认值曾是 "chroma"（容器 DNS 名），导致本地/CI 试图解析不存在的主机。
     chroma_host: str = ""
     chroma_port: int = 8000
+    # ===== 向量后端选择（2026-11 迁移 Supabase pgvector）=====
+    # chroma = 旧实现（回滚开关）；pgvector = Supabase PostgreSQL + pgvector。
+    # **默认 chroma**：升级本身不改变既有环境行为，切换是显式动作。
+    vector_backend: str = "chroma"
+    # pgvector 连接串。留空 → 复用 database.url（整库迁 Supabase 后同源，少一套配置）。
+    # ⚠️ 只写 .env，不写进代码/文档；支持 pooler DSN（6543）。
+    pgvector_dsn: str = ""
+    pgvector_table: str = "knowledge_vectors"
+    # 索引类型：hnsw（默认，无需训练）/ ivfflat（省内存，需按数据量调 lists）/ none
+    pgvector_index: str = "hnsw"
+    pgvector_hnsw_m: int = 16
+    pgvector_hnsw_ef_construction: int = 64
+    pgvector_ivfflat_lists: int = 100
+    # 同步连接池：向量检索是同步调用，池大小按并发检索量给（不是按请求量）
+    pgvector_pool_min_size: int = 1
+    pgvector_pool_max_size: int = 5
+    pgvector_pool_timeout: float = 5.0
+    pgvector_connect_timeout: int = 5
+    # Supabase 的 statement_timeout 兜底：慢查询不应把请求线程长期占住
+    pgvector_statement_timeout_ms: int = 15000
+    # 留空 = 由 DSN 决定；Supabase 建议 "require"
+    pgvector_sslmode: str = ""
+    # transaction pooler（6543）必须开：psycopg 传 prepare_threshold=None
+    pgvector_disable_prepared_statements: bool = False
+    # 仅集成测试/临时库：允许运行时建表建索引（生产由 alembic 负责）
+    pgvector_auto_migrate: bool = False
 
 
 class AgentConfig(BaseModel):

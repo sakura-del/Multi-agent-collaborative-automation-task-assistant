@@ -18,16 +18,18 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_active_user
+from app.core.logging import get_logger
 from app.db.models.knowledge import KnowledgeDoc
 from app.db.models.user import User
 from app.db.session import get_db
 from app.knowledge.models.document import ChunkStrategy
 from app.knowledge.services.document_service import KnowledgeDocumentService
 from app.knowledge.services.factory import get_index_manager, get_kb, get_storage
+from app.knowledge.services.vector_backends.base import VectorStoreUnavailableError
 from app.schemas.knowledge import (
     KnowledgeDocumentList,
     KnowledgeDocumentOut,
@@ -38,6 +40,8 @@ from app.schemas.knowledge import (
 )
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
+
+logger = get_logger(__name__)
 
 
 # ===== 依赖注入 =====
@@ -167,7 +171,17 @@ async def search(
     实测（2026-10-23 巡检）：走 `search()` 时接口返回的 chunk_id 是
     `9eac9177523794ed`，不是 UUID —— 「每条证据可点回原文」的核心能力断裂。
     """
-    results = await service.search_for_context(current_user.id, req.query, top_k=req.top_k)
+    try:
+        results = await service.search_for_context(current_user.id, req.query, top_k=req.top_k)
+    except VectorStoreUnavailableError as exc:
+        # 向量库不可达是**依赖故障**，不是服务端缺陷：503 让调用方/网关知道可重试，
+        # 也避免前端把它展示成「查询语法错误」这类不可重试的提示。
+        logger.warning("knowledge_search_vector_unavailable", error=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="向量库暂不可用，请稍后重试",
+        ) from exc
+
     return KnowledgeSearchOut(
         query=req.query,
         total=len(results),

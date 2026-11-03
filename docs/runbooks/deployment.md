@@ -66,7 +66,7 @@ curl -s http://127.0.0.1/api/v1/health/ready
 期望：
 
 ```json
-{"status":"ready","checks":{"database":"ok","redis":"ok","chroma":"ok"}}
+{"status":"ready","checks":{"database":"ok","redis":"ok","vector":"ok","chroma":"ok"}}
 ```
 
 容器状态：

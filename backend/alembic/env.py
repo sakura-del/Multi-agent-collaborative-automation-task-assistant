@@ -21,8 +21,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.core.config import settings  # noqa: E402
 from app.db.base import Base  # noqa: E402
+from app.db.engine_options import database_connect_args, database_url_for_alembic  # noqa: E402
 # 触发所有 ORM 模型注册到 Base.metadata，让 autogenerate 能发现
 import app.db.models  # noqa: E402, F401
 
@@ -31,8 +31,10 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# 注入数据库 URL（覆盖 alembic.ini 中的空值）
-config.set_main_option("sqlalchemy.url", settings.database.url)
+# 注入数据库 URL（覆盖 alembic.ini 中的空值）。
+# 用与应用完全相同的构造逻辑：Supabase 的 TLS / 关闭 prepared statement
+# 若只配在应用侧，迁移会连不上或报 `prepared statement does not exist`。
+config.set_main_option("sqlalchemy.url", database_url_for_alembic())
 
 # 目标 metadata：所有 ORM 模型自动注册到 Base.metadata
 target_metadata = Base.metadata
@@ -70,6 +72,7 @@ async def run_migrations_online() -> None:
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        connect_args=database_connect_args(),
     )
 
     async with connectable.connect() as connection:

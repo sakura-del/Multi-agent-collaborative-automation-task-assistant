@@ -61,7 +61,8 @@ def test_readiness_check_endpoint_all_ok(monkeypatch) -> None:
     assert response.status_code == 200
     body: dict[str, Any] = response.json()
     assert body["status"] == "ready"
-    assert set(body["checks"]) == {"database", "redis", "chroma"}
+    # `vector` 是与后端无关的稳定键；chroma 模式额外保留 `chroma` 别名（切换期兼容）
+    assert set(body["checks"]) == {"database", "redis", "vector", "chroma"}
 
 
 def test_readiness_check_endpoint_db_down(monkeypatch) -> None:

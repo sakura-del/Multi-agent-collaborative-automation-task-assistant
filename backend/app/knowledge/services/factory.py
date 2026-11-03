@@ -10,7 +10,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from app.core.logging import get_logger
@@ -78,18 +77,13 @@ def init_kb(
     _embedding = create_embedding_service(force_mock=force_mock_embedding)
     _reranker = create_reranker(force_mock=force_mock_reranker)
 
-    # 显式传空字符串表示使用内存模式（测试用）；None 时读环境变量
-    if chroma_persist_dir is None:
-        persist_dir = os.getenv("RAG_CHROMA_PATH", ".chroma_db")
-    else:
-        persist_dir = chroma_persist_dir
-
     # 服务端模式（compose 提供独立 chroma 服务）：RAG__CHROMA_HOST 非空时走 HTTP。
     # 此前该配置形同虚设——容器内始终用本地嵌入模式，与 compose 的 chroma 服务脱节，
     # 且 chromadb 1.x 的 Rust 绑定在全新容器里会崩（CI smoke 因此失败）。
     #
     # 显式传入 `chroma_persist_dir` 表示调用方要自行控制存储模式（测试传 "" 走内存），
-    # 此时**不套用配置里的服务端地址**，否则测试会去连不存在的 chroma 主机。
+    # 此时**不套用配置里的服务端地址与后端选择**，否则测试会去连不存在的 chroma 主机、
+    # 或在配置了 pgvector 的环境里把离线单测拖去连外部数据库。
     from app.core.config import get_settings as _get_settings
 
     rag_cfg = _get_settings().rag
@@ -101,7 +95,9 @@ def init_kb(
 
     _vector_store = VectorStore(
         embedding_service=_embedding,
-        persist_directory=persist_dir,
+        # None = 由 `RAG__VECTOR_BACKEND` 决定后端（生产路径）；
+        # 非 None = 强制 Chroma（测试与单机开发路径）。
+        persist_directory=chroma_persist_dir,
         chroma_host=chroma_host,
         chroma_port=chroma_port,
     )
@@ -139,7 +135,8 @@ def init_kb(
         "knowledge_base_initialized",
         embedding_type=type(_embedding).__name__,
         reranker_type=type(_reranker).__name__,
-        chroma_persist=bool(persist_dir),
+        vector_backend=_vector_store.backend_name,
+        chroma_persist=bool(chroma_persist_dir),
     )
     return _kb
 
@@ -167,6 +164,17 @@ def get_index_manager() -> IndexManager:
     if _index_manager is None:
         raise KnowledgeBaseNotInitializedError()
     return _index_manager
+
+
+def get_vector_store() -> VectorStore:
+    """获取向量存储单例（健康探针用）。
+
+    探针要按当前后端真实探测，必须拿到同一个实例——否则会新建一个连接池，
+    既不真实也会在每次探活时泄漏连接。
+    """
+    if _vector_store is None:
+        raise KnowledgeBaseNotInitializedError()
+    return _vector_store
 
 
 def reset_kb() -> None:

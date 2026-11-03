@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import (
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.db.engine_options import database_connect_args, prepare_database_url
 
 logger = get_logger(__name__)
 
@@ -25,8 +26,11 @@ def _build_engine():
 
     SQLite/SQLitestaticPool 不支持 pool_size / max_overflow / pool_pre_ping，
     需按 url scheme 判断后再传参，确保测试环境（sqlite 内存库）也能正常启动。
+    Supabase 需要的 TLS 与「关闭 prepared statement」由
+    `app.db.engine_options` 统一提供（与 alembic 共用同一份逻辑）。
     """
-    url = settings.database.url
+    # 注意：`str(URL)` 会把密码打码成 `***`，必须显式 `hide_password=False`
+    url = prepare_database_url().render_as_string(hide_password=False)
     common_kwargs = dict(
         echo=settings.database.echo,
         future=True,
@@ -50,6 +54,7 @@ def _build_engine():
         max_overflow=settings.database.max_overflow,
         pool_recycle=settings.database.pool_recycle,
         pool_pre_ping=True,  # 借出前 ping，避免拿到失效连接
+        connect_args=database_connect_args(),
         **common_kwargs,
     )
 

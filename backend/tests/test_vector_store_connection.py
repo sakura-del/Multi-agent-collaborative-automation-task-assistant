@@ -127,6 +127,9 @@ class TestConfigWiring:
         captured: dict[str, Any] = {}
 
         class _SpyStore:
+            # 工厂会在初始化日志里读 `backend_name`：替身必须满足被替代对象的接口
+            backend_name = "chroma"
+
             def __init__(self, *args: Any, **inner_kwargs: Any) -> None:
                 captured.update(inner_kwargs)
 

@@ -32,6 +32,12 @@ from app.knowledge.services.reranker import (
     MockReranker,
     create_reranker,
 )
+from app.knowledge.services.vector_backends.base import (
+    VectorDimensionMismatchError,
+    VectorStoreConfigError,
+    VectorStoreError,
+    VectorStoreUnavailableError,
+)
 from app.knowledge.services.vector_store import VectorStore
 
 __all__ = [
@@ -48,7 +54,11 @@ __all__ = [
     "MockReranker",
     "RetrievalCache",
     "SentenceTransformerEmbeddingService",
+    "VectorDimensionMismatchError",
     "VectorStore",
+    "VectorStoreConfigError",
+    "VectorStoreError",
+    "VectorStoreUnavailableError",
     "create_embedding_service",
     "create_reranker",
     "tokenize",

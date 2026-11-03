@@ -61,7 +61,9 @@ curl -s http://127.0.0.1:48080/api/v1/health/ready
 - 五个容器（postgres / redis / chroma / backend / nginx）全部 `healthy`；
 - `GET http://127.0.0.1:48080/` 返回 200，内容为镜像内构建的 Vue 页面；
 - `GET /api/v1/health/ready` 返回
-  `{"status":"ready","checks":{"database":"ok","redis":"ok","chroma":"ok"}}`。
+  `{"status":"ready","checks":{"database":"ok","redis":"ok","vector":"ok","chroma":"ok"}}`
+（`vector` 是与后端无关的稳定键；`chroma` 是 chroma 模式下的兼容别名，
+切到 pgvector 后只剩 `vector`）。
 - 首次构建约 10–15 分钟（torch CPU + 前端构建），之后重建走缓存会快很多。
 
 ## 4. 模型接口（正式实验）

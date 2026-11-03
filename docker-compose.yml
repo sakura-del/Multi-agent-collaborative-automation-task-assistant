@@ -100,8 +100,19 @@ services:
     restart: unless-stopped
     environment:
       # 嵌套配置：pydantic-settings 以 __ 为分隔符映射到 settings.database.url 等
-      DATABASE__URL: postgresql+asyncpg://${POSTGRES_USER:-maa}:${POSTGRES_PASSWORD:-maa_secret_pwd}@postgres:5432/${POSTGRES_DB:-multi_agent_assistant}
+      # 默认连本机 postgres；整库迁 Supabase 时在 .env 里设 DATABASE__URL 覆盖
+      # （Pooler 串与注意事项见 .env.example，不要把真实 DSN 写进本文件）
+      DATABASE__URL: ${DATABASE__URL:-postgresql+asyncpg://${POSTGRES_USER:-maa}:${POSTGRES_PASSWORD:-maa_secret_pwd}@postgres:5432/${POSTGRES_DB:-multi_agent_assistant}}
+      # Supabase transaction pooler：TLS 与「关闭 prepared statement」（见 .env.example）
+      DATABASE__SSL_REQUIRE: ${DATABASE__SSL_REQUIRE:-false}
+      DATABASE__DISABLE_PREPARED_STATEMENTS: ${DATABASE__DISABLE_PREPARED_STATEMENTS:-false}
       REDIS__URL: redis://redis:6379/0
+      # 向量后端：chroma（默认，回滚开关）| pgvector（Supabase）
+      RAG__VECTOR_BACKEND: ${RAG__VECTOR_BACKEND:-chroma}
+      RAG__PGVECTOR_DSN: ${RAG__PGVECTOR_DSN:-}
+      RAG__PGVECTOR_TABLE: ${RAG__PGVECTOR_TABLE:-knowledge_vectors}
+      RAG__PGVECTOR_INDEX: ${RAG__PGVECTOR_INDEX:-hnsw}
+      RAG__PGVECTOR_DISABLE_PREPARED_STATEMENTS: ${RAG__PGVECTOR_DISABLE_PREPARED_STATEMENTS:-false}
       RAG__CHROMA_HOST: chroma
       RAG__CHROMA_PORT: "8000"
       # 受控存储目录（容器内 /app/data，命名卷持久化）
