@@ -147,6 +147,6 @@ nginx 静态 JS 包含“智能排序”字符串
 
 ## 6. 下一步
 
-1. 在 Preview 任务中检查实际观感，必要时删除 Preview demo 任务；
+1. Preview 实际观感**已由用户确认通过**（2026-11-03），Preview demo 任务按用户要求保留；
 2. 如需要论文方法学结果，再独立设计 ASReview 模拟评估切片；
 3. 后续正常开发时补跑完整 Playwright E2E 套件。
