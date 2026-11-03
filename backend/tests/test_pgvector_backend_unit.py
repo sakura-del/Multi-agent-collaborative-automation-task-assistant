@@ -181,6 +181,25 @@ class TestUpsert:
         assert "一段正文" in rows[0]
         assert json.loads(rows[0][-1])["user_id"] == "u1"
 
+    def test_placeholder_count_matches_parameters(self) -> None:
+        """占位符数量必须等于参数数量。
+
+        `{cast}` 只做类型转换，不占参数位。曾写成 `VALUES (%s, %s, {cast}, ...)`，
+        真机直接报 `the query has 10 placeholders but 11 parameters were passed`
+        （2026-11-03 Supabase 实测）——单测只断言「包含 INSERT」时抓不住。
+        """
+        backend, pool = _make_backend()
+        backend.upsert(
+            ids=["c1"],
+            vectors=[[1.0, 0.0, 0.0, 0.5]],
+            documents=["正文"],
+            metadatas=[{"doc_id": "d1"}],
+        )
+
+        sql, rows = pool.cursor.executed[-1]
+        assert sql.count("%s") == len(rows[0])
+        assert '%s::"public"."vector"' in sql
+
     def test_rejects_dimension_mismatch_before_db(self) -> None:
         """维度不一致必须在写库前报错，不能等 SQL 层报错。"""
         backend, pool = _make_backend(dimension=4)
@@ -244,6 +263,16 @@ class TestQuery:
         sql, params = pool.cursor.executed[-1]
         assert "= ANY" in sql
         assert ["d1", "d2"] in params
+
+    def test_placeholder_count_matches_parameters(self) -> None:
+        """检索 SQL 的占位符数必须等于参数数（`{cast}` 不占位）。"""
+        backend, pool = _make_backend(script=self._hits())
+        backend.query([1.0, 0.0, 0.0, 0.0], top_k=5, where={"user_id": "u1"})
+
+        sql, params = pool.cursor.executed[-1]
+        assert sql.count("%s") == len(params)
+        # 两处距离比较都要有值占位
+        assert sql.count('<=> %s::"public"."vector"') == 2
 
     def test_unknown_key_raises(self) -> None:
         """未识别的过滤键必须报错：静默忽略会导致过滤失效（跨用户串数据）。"""

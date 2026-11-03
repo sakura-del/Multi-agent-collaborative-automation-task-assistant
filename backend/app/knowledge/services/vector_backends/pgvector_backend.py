@@ -443,7 +443,9 @@ class PgVectorBackend:
             "INSERT INTO {table}"
             " (collection, id, embedding, document, doc_id, user_id, doc_source,"
             "  chunk_index, start_offset, end_offset, metadata)"
-            " VALUES (%s, %s, {cast}, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)"
+            # 向量列必须是 `%s{cast}`：`{cast}` 只是类型转换，不能顶替占位符，
+            # 否则占位符比参数少 1（真机报 `10 placeholders but 11 parameters`）
+            " VALUES (%s, %s, %s{cast}, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)"
             " ON CONFLICT (collection, id) DO UPDATE SET"
             "  embedding = EXCLUDED.embedding,"
             "  document = EXCLUDED.document,"
@@ -557,11 +559,12 @@ class PgVectorBackend:
 
         where_sql, where_params = _compile_where(where)
         cast = sql.SQL("::{}").format(sql.Identifier(self._ext_schema, "vector"))
+        # 两处距离比较都要带 `%s{cast}`：`{cast}` 只转换类型，不占参数位
         statement = sql.SQL(
-            "SELECT id, document, metadata, (embedding <=> {cast}) AS distance"
+            "SELECT id, document, metadata, (embedding <=> %s{cast}) AS distance"
             " FROM {table}"
             " WHERE collection = %s{where}"
-            " ORDER BY embedding <=> {cast}"
+            " ORDER BY embedding <=> %s{cast}"
             " LIMIT %s"
         ).format(cast=cast, table=self._table_ident, where=where_sql)
 
