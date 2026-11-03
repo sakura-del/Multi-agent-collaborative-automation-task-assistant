@@ -1,5 +1,13 @@
 # Supabase 迁移手册（业务库 + 向量库 pgvector）
 
+> **状态：已切换（2026-11-03）。** 线上运行在 Supabase（`aws-0-eu-west-1.pooler.supabase.com:6543`）
+> + `RAG__VECTOR_BACKEND=pgvector`。
+> 验收：`/health/ready` = ready（database/vector ok，无 chroma 键）；demo 检索 200 且有结果；
+> id 级一致性巡检 `consistent=true, chunks=28341, vectors=28341, 缺失/孤儿=0`。
+> **回滚**：服务器 `~/projects/multi-agent-assistant/.env.bak-supabase-20261103-182904`
+> （切回 chroma + 本地库，覆盖回 `.env` 并 `docker compose up -d backend`）；
+> Chroma 容器/卷与本地 postgres 均未删，dump 备份在 `~/maa-final-20261103.dump`。
+
 > 对应代码：`backend/app/knowledge/services/vector_backends/`（新后端）、
 > 迁移 `d5a8c1e3f7b2`（`knowledge_vectors` 表）、
 > 脚本 `backend/scripts/migrate_vectors_to_pgvector.py`。
@@ -227,14 +235,16 @@ curl -s http://127.0.0.1:48080/api/v1/health/ready
 | --- | --- |
 | PostgreSQL | 17.11（aarch64） |
 | pgvector | 0.8.2，装在 `extensions` schema |
-| 迁移后库大小 | 10 MB（空表，业务库尚未导入） |
+| **切换后库大小** | **253 MB**（业务库 54 MB + 向量表 200 MB），500 MB 档还剩约 247 MB |
+| **业务库** | user 27 / task 114 / doc_chunk 28341，与本地一致；`alembic` = `d5a8c1e3f7b2` |
+| **一致性巡检** | `consistent=true`，28341/28341，缺失 0 / 孤儿 0，ids_verified=true |
 | 表与索引 | `knowledge_vectors` + `ix_kv_embedding_hnsw` + `ix_kv_collection_doc/user` 均创建成功 |
 | 维度探测 | `embedding vector(1024)` → `atttypmod = 1024` |
 | 余弦检索 | 同向 distance 0（score 1.0）、正交 distance 1（score 0.0） |
 | 多用户隔离 | `WHERE user_id = 'u1'` 在截断前生效，`u2` 的行不出现 |
 | HNSW | 常量查询向量 → `Index Scan using ix_kv_embedding_hnsw` |
 
-只有真库才会暴露的两个坑（均已修并加回归测试）：
+只有真库才会暴露的坑（均已修并加回归测试）：
 
 1. **`atttypmod - 4` 是错的**：pgvector 的 typmod **直接就是维度**（不像 varchar 加
    `VARHDRSZ(4)`）。按 varchar 习惯写 `- 4` 会把 1024 读成 1020，随后每次写入/检索
@@ -242,6 +252,29 @@ curl -s http://127.0.0.1:48080/api/v1/health/ready
 2. **通用计划用不上 HNSW**：`ORDER BY embedding <=> $1` 的距离依赖参数值，服务端一旦
    走 generic plan 就退化成 `Seq Scan + Sort`（实测：常量字面量走 Index Scan，
    非恒定表达式走 Sort）。所以 `prepare_threshold=None` 默认开。
+3. **Supabase pooler 会话 `search_path` 是空的**：`to_regclass('knowledge_vectors')`
+   返回 NULL → 明明表在 public 里却报「表不存在」。表名必须**限定 schema**
+   （`RAG__PGVECTOR_TABLE=other.tbl` 可覆盖）。
+4. **`{cast}` 不能顶替占位符**：`VALUES (%s, %s, ::vector, ...)` 占位符比参数少 1，
+   真机报 `the query has 10 placeholders but 11 parameters were passed`；
+   必须写 `%s::vector`。
+5. **chromadb 的 get() 返回 numpy 数组**：`payload.get("embeddings") or []` 会抛
+   `truth value of an array ... is ambiguous`（校验阶段崩）。
+6. **`.env`/脚本的 CRLF**：Windows 侧写入后 `postgres\r` 让连接串的 dbname 变成
+   `postgres\r`（报 `database postgres does not exist`），密码同理。上传后先
+   `sed -i 's/\r$//'`。
+7. **asyncpg 两个缓存参数的传法（SQLAlchemy 2.0.51 实测）**：
+   - 方言层 `prepared_statement_cache_size=0` **只能放 URL 查询串**（engine kwarg 被
+     `create_engine` 拒收）；
+   - asyncpg 层 `statement_cache_size=0` **只能放 `connect_args` 且必须是 int**
+     （URL 查询串会以字符串传入 → `TypeError: '<' not supported ...`）；
+   - 只关任何一层都不够（`does not exist` / `already exists` 两种都出现过）。
+8. **网络质量**：国内服务器 → Supabase eu-west-1 单次建连 **6~8s**，长连接会被
+   `SSL SYSCALL error: EOF detected` 断开：
+   - 连接/池超时给到 15s+；
+   - `pg_restore` **不要用 `--single-transaction`**（长事务必断），逐语句提交 +
+     `PGKEEPALIVES=1 PGKEEPALIVESIDLE=30`，失败就重跑（`--clean` 幂等）；
+   - 2.8 万条向量导入约 5 分钟，最后一批附近断连属正常，重跑补齐即可。
 
 ---
 
