@@ -258,8 +258,13 @@ def _verify(
         sample = chroma_ids[:sample_size]
         payload = collection.get(ids=sample, include=["embeddings"])
         ratios: list[float] = []
-        for index, chunk_id in enumerate(payload.get("ids") or []):
-            embeddings = payload.get("embeddings") or []
+        # ⚠️ chromadb 返回的是 **numpy 数组**：`x or []` 会触发
+        # `truth value of an array ... is ambiguous`（2026-11-03 真机踩到）。
+        # 没拿到就整体跳过，不做布尔转换。
+        embeddings = payload.get("embeddings")
+        if embeddings is None:
+            return report
+        for index, _chunk_id in enumerate(payload.get("ids") or []):
             if index >= len(embeddings) or embeddings[index] is None:
                 continue
             vector = _to_float_list(embeddings[index])

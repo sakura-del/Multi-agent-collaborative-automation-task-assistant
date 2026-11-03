@@ -6,10 +6,12 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 from scripts.migrate_vectors_to_pgvector import (
     Batch,
+    _verify,
     build_batch,
     compare_ids,
     iter_batches,
@@ -132,6 +134,78 @@ class TestOverlap:
 
     def test_both_empty_is_one(self) -> None:
         assert overlap_ratio([], []) == 1.0
+
+
+class _ArrayLike:
+    """模拟 chromadb 的 numpy 返回值：**布尔判断会抛异常**。"""
+
+    def __init__(self, rows: list[Any]) -> None:
+        self._rows = rows
+
+    def __len__(self) -> int:
+        return len(self._rows)
+
+    def __getitem__(self, index: int) -> Any:
+        return self._rows[index]
+
+    def __bool__(self) -> bool:  # pragma: no cover - 触发即为缺陷
+        raise ValueError("The truth value of an array with more than one element is ambiguous")
+
+
+class _FakeChroma:
+    def __init__(self, ids: list[str], vectors: list[list[float]]) -> None:
+        self._ids = ids
+        self._vectors = vectors
+
+    def get(self, ids: list[str] | None = None, include: list[str] | None = None) -> dict[str, Any]:
+        return {"ids": self._ids, "embeddings": _ArrayLike(self._vectors)}
+
+    def query(self, query_embeddings: list[list[float]], n_results: int) -> dict[str, Any]:
+        return {"ids": [["a", "b"]]}
+
+
+class _FakeVectorBackend:
+    def __init__(self) -> None:
+        self.hits = [SimpleNamespace(chunk_id="a"), SimpleNamespace(chunk_id="c")]
+
+    def count(self) -> int:
+        return len(self.hits)
+
+    def list_ids(self) -> list[str]:
+        return [hit.chunk_id for hit in self.hits]
+
+    def query(self, vector: list[float], top_k: int, where: Any = None) -> list[Any]:
+        return self.hits[:top_k]
+
+
+class TestVerify:
+    def test_array_like_embeddings_do_not_break_verify(self) -> None:
+        """chromadb 返回 numpy 数组，校验函数不能对它做布尔判断。
+
+        2026-11-03 真机：`payload.get("embeddings") or []` 直接抛
+        `truth value of an array ... is ambiguous`，校验跑不完。
+        """
+        collection = _FakeChroma(["a", "b"], [[1.0, 0.0], [0.0, 1.0]])
+        backend = _FakeVectorBackend()
+
+        report = _verify(collection, backend, chroma_ids=["a", "b"])
+
+        # 缺失 b、孤儿 c；重叠率 1/2
+        assert report.missing_ids == ["b"]
+        assert report.orphan_ids == ["c"]
+        assert report.overlap == 0.5
+        assert report.ok is False
+
+    def test_identical_sets_pass(self) -> None:
+        collection = _FakeChroma(["a", "b"], [[1.0, 0.0], [0.0, 1.0]])
+        backend = _FakeVectorBackend()
+        backend.hits = [SimpleNamespace(chunk_id="a"), SimpleNamespace(chunk_id="b")]
+
+        report = _verify(collection, backend, chroma_ids=["a", "b"])
+
+        assert report.missing_ids == []
+        assert report.overlap == 1.0
+        assert report.ok is True
 
 
 class TestBatchDataclass:
