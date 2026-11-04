@@ -146,5 +146,6 @@ backend/evaluation/runs/
 backend/evaluation/reports/
 
 # ===== Cloudflare Pages / wrangler（2026-11-04）=====
-# wrangler 的本地状态目录，含账号/项目缓存，不入库.wrangler/
+# wrangler 的本地状态目录（含账号/项目缓存），不入库
+.wrangler/
 
