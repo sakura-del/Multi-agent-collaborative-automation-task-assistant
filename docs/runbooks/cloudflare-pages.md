@@ -37,7 +37,36 @@
    - Subdomain `api`，Domain `你的域名`
    - Service `HTTP` → `localhost:48080`（nginx 已处理 `/api` 与 WS Upgrade）
 
-### 2.2 Cloudflare API Token（Page 部���用）
+### 2.1b 没有域名时：Quick Tunnel（临时演示）
+
+没有托管在 Cloudflare 的域名时，用 Quick Tunnel 也能把接口临时暴露成 HTTPS：
+
+```bash
+# 服务器上（容器内 127.0.0.1:48080 = 宿主机 nginx）
+docker run -d --name maa-tunnel --restart unless-stopped --network host \
+  cloudflare/cloudflared:latest tunnel --url http://127.0.0.1:48080 --no-autoupdate
+
+# 域名在日志里，形如 https://xxx-yyy-zzz.trycloudflare.com
+docker logs maa-tunnel 2>&1 | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | head -n1
+```
+
+**代价（务必写进演示说明）**：
+
+- 域名**随机且每次重启都变** → 前端必须**重新构建**（`VITE_API_BASE_URL` 是构建期内联的）；
+- 无 SLA、有速率限制，适合临时演示，不适合长期；
+- 拿到新域名后要同步更新 `.env` 的 `CORS__ALLOW_ORIGIN_REGEX` 吗？**不用**——
+  它约束的是「前端来源」，与隧道域名无关；隧道域名变了只需重建前端。
+
+2026-11-04 实测（`https://connecticut-sets-mentioned-bracelets.trycloudflare.com`）：
+
+| 检查 | 结果 |
+| --- | --- |
+| `/api/v1/health/ready`（公网） | 200，`{"status":"ready",...}`，total ≈ 4.7s |
+| CORS 预检（Origin=`https://multi-agent-assistant.pages.dev`） | HTTP/2 200，`access-control-allow-origin` 命中 |
+| 跨域登录 POST | 200，返回 access_token |
+| WebSocket（`wss://…/api/v1/tasks/{id}/ws`） | **握手成功**（4.3s，国际链路导致偏慢） |
+
+### 2.2 Cloudflare API Token（Page 部署用）
 
 Dashboard → My Profile → API Tokens → Create Token → 自定义权限：
 
@@ -46,11 +75,14 @@ Dashboard → My Profile → API Tokens → Create Token → 自定义权限：
 
 同时记下 **Account ID**（Dashboard 右侧栏；也可由 `GET /accounts` 用 Token 列出）。
 
-> ⚠️ **别拿 R2 的令牌当 API Token**：R2 页面「创建 API 令牌」给出的是
-> `cfat_…` + Access Key / Secret（S3 兼容凭证），拿它调
-> `GET /user/tokens/verify` 返回 **401 Invalid API Token**（2026-11-04 实测）。
-> Pages 部署必须用 **My Profile → API Tokens → Create Custom Token**
-> 并勾选 `Account → Cloudflare Pages → Edit`。
+> ⚠️ **`cfat_` 是「账户级令牌」，校验走 `/accounts/{id}/tokens/verify`**，
+> 不是 `/user/tokens/verify`（后者会对它返回 401，容易误判成令牌无效）。
+> 2026-11-04 实测：该令牌 `verify: 200 active`，但 `GET /accounts/{id}/pages/projects`
+> 返回 **403 code 10000 Authentication error** —— 说明**没有 Pages 权限**。
+>
+> Pages 部署必须给令牌加上 **Account → Cloudflare Pages → Edit**（编辑现有令牌即可）。
+> 没有权限时的替代方案：Dashboard → Workers & Pages → Create → Pages →
+> **Upload assets**，把 `frontend/dist` 整个拖进去（项目名必须与 CORS 正则一致）。
 
 > ⚠️ 三个凭据（Tunnel Token、API Token、Account ID）只写进 600 权限的文件或进程环境变量，
 > **不要**贴进对话、不要提交到仓库。
