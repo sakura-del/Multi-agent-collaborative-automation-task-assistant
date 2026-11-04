@@ -46,14 +46,24 @@ COPY backend/demo_data ./demo_data
 ARG PIP_INDEX_URL=https://pypi.org/simple
 ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
 ARG TORCH_FIND_LINKS=
+# `INSTALL_RAG_MODELS=false` 只装运行时不装 torch/sentence-transformers：
+# 本机演示用 Mock 嵌入（RAG_EMBEDDING_MOCK=1），真实模型依赖 1GB+ 且
+# `FlagEmbedding` 会拉着 pip 反复回溯下载多个 184MB 的 torch 轮子
+# （2026-11-04 实测：镜像已换成国内源，仍在 500 秒后失败）。
+# ⚠️ 设成 false 后不能启用真实嵌入模型，会 ImportError（embedded 是延迟导入）。
+ARG INSTALL_RAG_MODELS=true
 
 RUN pip install --upgrade pip --index-url "${PIP_INDEX_URL}" && \
-    if [ -n "${TORCH_FIND_LINKS}" ]; then \
-        pip install torch --no-index --find-links "${TORCH_FIND_LINKS}" ; \
+    if [ "${INSTALL_RAG_MODELS}" = "true" ]; then \
+        if [ -n "${TORCH_FIND_LINKS}" ]; then \
+            pip install torch --no-index --find-links "${TORCH_FIND_LINKS}" ; \
+        else \
+            pip install torch --index-url "${TORCH_INDEX_URL}" ; \
+        fi && \
+        pip install ".[rag-models]" --index-url "${PIP_INDEX_URL}" ; \
     else \
-        pip install torch --index-url "${TORCH_INDEX_URL}" ; \
-    fi && \
-    pip install ".[rag-models]" --index-url "${PIP_INDEX_URL}"
+        pip install "." --index-url "${PIP_INDEX_URL}" ; \
+    fi
 
 # 复制其余运行时文件
 COPY backend/alembic ./alembic

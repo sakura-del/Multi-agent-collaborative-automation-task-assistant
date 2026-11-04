@@ -104,6 +104,8 @@ services:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
         TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
         TORCH_FIND_LINKS: ${TORCH_FIND_LINKS:-}
+        # false = 只装运行时不装 torch（Mock 嵌入的部署可省 1GB+ 与回溯下载）
+        INSTALL_RAG_MODELS: ${INSTALL_RAG_MODELS:-true}
     container_name: maa-backend
     restart: unless-stopped
     environment:
