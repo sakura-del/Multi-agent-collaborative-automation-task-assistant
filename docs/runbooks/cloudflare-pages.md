@@ -75,6 +75,14 @@ Dashboard → My Profile → API Tokens → Create Token → 自定义权限：
 
 同时记下 **Account ID**（Dashboard 右侧栏；也可由 `GET /accounts` 用 Token 列出）。
 
+> ⚠️ **IP 白名单会让所有业务端点返回 403 `Authentication error`（10000）**，
+> 看起来像「没权限」，其实是被 IP 过滤拦了。判断方法：请求
+> `GET /accounts/{id}`，它会明确返回
+> `Cannot use the access token from location: <你的出口 IP>`
+> （2026-11-04 实测：令牌限定 `2406:da1a:…` IPv6，本机出口 `65.2.131.169`、
+> 服务器出口 `154.64.227.29` 都被拒；而 `tokens/verify` 仍返回 200，极具误导性）。
+> 解决：把部署机出口 IP 加进白名单，或部署期间临时移除该过滤。
+
 > ⚠️ **`cfat_` 是「账户级令牌」，校验走 `/accounts/{id}/tokens/verify`**，
 > 不是 `/user/tokens/verify`（后者会对它返回 401，容易误判成令牌无效）。
 > 2026-11-04 实测：该令牌 `verify: 200 active`，但 `GET /accounts/{id}/pages/projects`
