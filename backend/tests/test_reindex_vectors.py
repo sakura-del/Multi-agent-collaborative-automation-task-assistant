@@ -108,6 +108,50 @@ def _chunks(count: int) -> list[_Chunk]:
     return [_Chunk(uuid.uuid4(), doc_id, f"分块内容 {i}") for i in range(count)]
 
 
+class TestLimit:
+    """`--limit`：远程环境下先用小样本演练，不必全量跑一遍才知道链路通不通。"""
+
+    @pytest.mark.asyncio
+    async def test_limit_truncates_planned_and_written(self) -> None:
+        chunks = _chunks(10)
+        store = _RecordingVectorStore()
+
+        result = await reindex_from_chunks(
+            session=_FakeSession(chunks),
+            vector_store=store,
+            batch_size=4,
+            limit=3,
+        )
+
+        assert result.planned == 3
+        assert result.indexed == 3
+        assert len(store.ids) == 3
+        # batches 记录的是每批条数
+        assert all(b <= 3 for b in store.batches)
+
+    @pytest.mark.asyncio
+    async def test_limit_larger_than_total_is_noop(self) -> None:
+        result = await reindex_from_chunks(
+            session=_FakeSession(_chunks(2)),
+            vector_store=_RecordingVectorStore(),
+            limit=100,
+        )
+
+        assert result.planned == 2
+        assert result.indexed == 2
+
+    @pytest.mark.asyncio
+    async def test_limit_zero_means_no_limit(self) -> None:
+        """0/None 都表示「不限制」，避免 CLI 传 0 时意外什么都不做。"""
+        result = await reindex_from_chunks(
+            session=_FakeSession(_chunks(4)),
+            vector_store=_RecordingVectorStore(),
+            limit=0,
+        )
+
+        assert result.indexed == 4
+
+
 class TestIdPreservation:
     @pytest.mark.asyncio
     async def test_uses_chunk_id_as_vector_id(self) -> None:

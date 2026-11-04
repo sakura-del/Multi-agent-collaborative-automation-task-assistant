@@ -18,8 +18,10 @@ python -m scripts.reindex_vectors --user-id <uuid>   # 只重建某用户
 
 ## 耗时预期
 
-28344 条 / 500 条每批 ≈ 57 批。Mock embedding 下每批约 1-3 秒，
-总计 **1-3 分钟**；真实模型会慢 5-10 倍。
+28344 条 / 500 条每批 ≈ 57 批。**每批只有 1 次 upsert + 1 次批量 UPDATE**
+（2026-11-04 之前是每 chunk 一条 UPDATE，在远程库上要 3.8 小时）。
+Mock embedding 下总计 **1-3 分钟**；真实模型会慢 5-10 倍。
+远程库（Supabase）上先用 `--limit 200` 演练，再全量。
 """
 
 from __future__ import annotations
@@ -43,6 +45,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true", help="只统计，不写入")
     parser.add_argument("--batch-size", type=int, default=500, help="每批条数（默认 500）")
     parser.add_argument("--user-id", default=None, help="只重建指定用户（UUID）")
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="只重建前 N 条（0=全部）；远程库上先用小样本演练链路",
+    )
     parser.add_argument("--json", action="store_true", help="以 JSON 输出")
     return parser.parse_args(argv)
 
@@ -73,6 +81,7 @@ async def _main() -> int:
             batch_size=args.batch_size,
             user_id=user_id,
             dry_run=args.dry_run,
+            limit=args.limit,
         )
 
     if args.json:
@@ -82,7 +91,7 @@ async def _main() -> int:
         if args.dry_run:
             print("--dry-run：未写入任何向量。")
         else:
-            print(f"实际写入：{result.indexed} 条")
+            print(f"实际写入：{result.indexed} 条（耗时 {result.elapsed_ms} ms）")
             if result.failed_batches:
                 print(f"失败批次：{result.failed_batches}")
                 for message in result.errors:

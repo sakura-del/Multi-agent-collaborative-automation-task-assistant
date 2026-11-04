@@ -30,13 +30,15 @@ for source in sources:
 
 from __future__ import annotations
 
+import time
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import String, cast, select, update
 
 from app.core.logging import get_logger
-from app.db.models.knowledge import DocChunk, KnowledgeDoc
+from app.db.models.knowledge import DocChunk, KnowledgeDoc, VectorIndex
 
 logger = get_logger(__name__)
 
@@ -52,6 +54,8 @@ class ReindexResult:
     indexed: int
     failed_batches: int = 0
     errors: list[str] = field(default_factory=list)
+    #: 端到端耗时（毫秒）：远程库上「网络往返」是主要成本，必须可观测
+    elapsed_ms: int = 0
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -59,6 +63,7 @@ class ReindexResult:
             "indexed": self.indexed,
             "failed_batches": self.failed_batches,
             "errors": list(self.errors),
+            "elapsed_ms": self.elapsed_ms,
         }
 
 
@@ -69,6 +74,7 @@ async def reindex_from_chunks(
     batch_size: int = DEFAULT_BATCH_SIZE,
     user_id: Any | None = None,
     dry_run: bool = False,
+    limit: int | None = None,
 ) -> ReindexResult:
     """从 `DocChunk` 重建向量（保持 chunk_id 不变）。
 
@@ -90,6 +96,9 @@ async def reindex_from_chunks(
         stmt = stmt.where(KnowledgeDoc.user_id == user_id)
 
     rows = (await session.execute(stmt)).all()
+    # `limit` 只用于远程环境的小样本演练；0/None 都表示不限制
+    if limit:
+        rows = rows[: max(0, int(limit))]
     planned = len(rows)
 
     if dry_run:
@@ -99,6 +108,7 @@ async def reindex_from_chunks(
     indexed = 0
     failed_batches = 0
     errors: list[str] = []
+    started_at = time.perf_counter()
 
     for start in range(0, planned, batch_size):
         batch = rows[start : start + batch_size]
@@ -127,8 +137,17 @@ async def reindex_from_chunks(
             #
             # 为什么之前漏了：`_attach_storage_ids` 里「结果 id 已是 UUID →
             # 原样保留」，所以检索恰好还能工作，掩盖了这个不一致。
-            for chunk_row, _owner in batch:
-                await _sync_vector_index(session, str(chunk_row.id))
+            #
+            # **必须批量**：曾写成逐条 `_sync_vector_index`，28341 条在
+            # Supabase 上就是 28341 × 0.48s ≈ 3.8 小时（本地库 2ms 时看不出来）。
+            await _sync_vector_index_batch(session, [row.id for row, _owner in batch])
+            logger.info(
+                "reindex_batch",
+                batch=start // batch_size + 1,
+                total_batches=(planned + batch_size - 1) // batch_size,
+                indexed=indexed,
+                planned=planned,
+            )
         except Exception as exc:
             # 单批失败不中断：记录并继续，运维可重复运行（upsert 幂等）
             failed_batches += 1
@@ -142,33 +161,45 @@ async def reindex_from_chunks(
         if commit is not None:
             await commit()
 
+    elapsed_ms = int((time.perf_counter() - started_at) * 1000)
     logger.info(
         "reindex_done",
         planned=planned,
         indexed=indexed,
         failed_batches=failed_batches,
+        elapsed_ms=elapsed_ms,
     )
     return ReindexResult(
         planned=planned,
         indexed=indexed,
         failed_batches=failed_batches,
         errors=errors,
+        elapsed_ms=elapsed_ms,
     )
 
 
-async def _sync_vector_index(session: Any, chunk_id: str) -> None:
-    """把 `vector_index.chroma_id` 更新为新的向量 id（即 chunk_id）。
+async def _sync_vector_index_batch(session: Any, chunk_ids: Sequence[Any]) -> None:
+    """把**一批** chunk 的 `vector_index.chroma_id` 同步为 `chunk_id`（一条 SQL）。
 
-    抽成模块级函数而不是方法：`reindex_from_chunks` 是**函数**（不是类），
-    上一版注释里写的 `self._sync_vector_index` 是笔误。
+    为什么批量：逐条更新在远程库上是「每行一次往返」——28341 条 × 0.48s ≈ 3.8 小时。
+    批量后每批一条，57 批 ≈ 57 次往返。
 
-    使用 ORM `update()` 构造语句，`session.execute()` 执行。
-    测试替身只要提供 `execute()` 即可。
+    两个类型细节（PostgreSQL 上不写就报错）：
+
+    - `chunk_id` 是 `uuid` 列，**必须传 UUID 对象**（传 str 会得到
+      `operator does not exist: uuid = text`；SQLite 下看不出来）；
+    - `chroma_id` 是 `varchar(64)`，值是列引用时必须显式
+      `cast(chunk_id AS varchar)`，否则报
+      `column "chroma_id" is of type character varying but expression is of type uuid`。
+
+    语义等价于原来的逐条 `values(chroma_id=str(chunk_id))`：两者都满足
+    「向量库 id 就是 chunk_id」。
     """
-    from sqlalchemy import update
-
-    from app.db.models.knowledge import VectorIndex
-
+    ids = list(chunk_ids)
+    if not ids:
+        return
     await session.execute(
-        update(VectorIndex).where(VectorIndex.chunk_id == chunk_id).values(chroma_id=chunk_id)
+        update(VectorIndex)
+        .where(VectorIndex.chunk_id.in_(ids))
+        .values(chroma_id=cast(VectorIndex.chunk_id, String))
     )
