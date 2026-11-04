@@ -1,7 +1,16 @@
 # Supabase 迁移手册（业务库 + 向量库 pgvector）
 
-> **状态：已切换（2026-11-03）。** 线上运行在 Supabase（`aws-0-eu-west-1.pooler.supabase.com:6543`）
-> + `RAG__VECTOR_BACKEND=pgvector`。
+> **状态：已切换到新加坡项目（2026-11-04）。** 线上运行在
+> `aws-0-ap-southeast-1.pooler.supabase.com:6543`（项目 ref `eowgihkicleusmvvoxle`）
+> + `RAG__VECTOR_BACKEND=pgvector`；旧爱尔兰项目（`fiooponfjzzaqfvicmwy`）保留待手动删除。
+> 切换前的回滚点在服务器 `.env.bak-sg-20261104-103611`（回爱尔兰）与
+> `.env.bak-supabase-20261103-182904`（回本地库 + chroma）。
+>
+> ⚠️ **换区域只带来 ~15% 改善**：实测服务器到新加坡仍是 **~480ms/次数据库往返**、
+> TLS 握手 ~1.9s（到 github 也要 2s），说明瓶颈是**这台服务器本身的国际链路**，
+> 不是 Supabase 地域。应用层 `/tasks` 4.2s、检索 6.2s 属于「链路+往返次数」的必然结果。
+> 想继续优化只有三条路：① 后端也部署到云上近邻区域；② 业务库用本地 Postgres
+> （Supabase 作备份）；③ 继续压应用层往返次数（收益有限）。
 > 验收：`/health/ready` = ready（database/vector ok，无 chroma 键）；demo 检索 200 且有结果；
 > id 级一致性巡检 `consistent=true, chunks=28341, vectors=28341, 缺失/孤儿=0`。
 > **回滚**：服务器 `~/projects/multi-agent-assistant/.env.bak-supabase-20261103-182904`
@@ -241,6 +250,8 @@ curl -s http://127.0.0.1:48080/api/v1/health/ready
 | **业务库** | user 27 / task 114 / doc_chunk 28341，与本地一致；`alembic` = `d5a8c1e3f7b2` |
 | **一致性巡检** | `consistent=true`，28341/28341，缺失 0 / 孤儿 0，ids_verified=true |
 | 表与索引 | `knowledge_vectors` + `ix_kv_embedding_hnsw` + `ix_kv_collection_doc/user` 均创建成功 |
+| **新加坡项目实测** | 迁移后 `consistent=true`（28341/28341，缺失/孤儿 0），库 253 MB；`/tasks` **4.2s**、检索 **6.2s**、登录 2.2s（旧爱尔兰：5.0s / 6s+ / 2.4s） |
+| **链路实测** | 服务器→新加坡 pooler：建连 1.7s、**每查询 0.48s**；HTTPS TLS 握手 1.9s（到 github 也 2.0s）→ 瓶颈是服务器国际出口，不是地域 |
 | 维度探测 | `embedding vector(1024)` → `atttypmod = 1024` |
 | 余弦检索 | 同向 distance 0（score 1.0）、正交 distance 1（score 0.0） |
 | 多用户隔离 | `WHERE user_id = 'u1'` 在截断前生效，`u2` 的行不出现 |
