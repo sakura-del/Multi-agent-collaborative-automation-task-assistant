@@ -349,9 +349,16 @@ class CORSConfig(BaseModel):
     allow_origins: list[str] = Field(
         default_factory=lambda: ["http://localhost:5173", "http://localhost:3000"]
     )
+    #: 按正则放行（用于 Cloudflare Pages 的 `<hash>.<project>.pages.dev` 预览域名）。
+    #: 为什么不能只靠 allow_origins：预览域名每次部署都变，逐个枚举不可维护；
+    #: 而 `allow_credentials=True` 时浏览器禁止 `*`。**必须限定到本项目前缀**。
+    allow_origin_regex: str = ""
     allow_credentials: bool = True
     allow_methods: list[str] = Field(default_factory=lambda: ["*"])
     allow_headers: list[str] = Field(default_factory=lambda: ["*"])
+    #: 跨域时需要暴露给前端的响应头。`Content-Disposition` 不带上的话，
+    #: 前端拿不到下载文件名（浏览器默认只暴露 6 个安全头）。
+    expose_headers: list[str] = Field(default_factory=lambda: ["Content-Disposition"])
 
 
 # ===== 顶层 Settings =====

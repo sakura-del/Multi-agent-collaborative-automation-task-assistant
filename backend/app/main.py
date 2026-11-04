@@ -181,13 +181,17 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # CORS：阶段0允许前端开发服务器访问
+    # CORS：阶段0允许前端开发服务器访问；Phase 3 起支持 Cloudflare Pages（正则放行预览域名）
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors.allow_origins,
+        # 空字符串会让 Starlette 编译出「匹配一切」的正则，必须转成 None
+        allow_origin_regex=settings.cors.allow_origin_regex or None,
         allow_credentials=settings.cors.allow_credentials,
         allow_methods=settings.cors.allow_methods,
         allow_headers=settings.cors.allow_headers,
+        # 跨域下载要读 Content-Disposition 取文件名
+        expose_headers=settings.cors.expose_headers,
     )
     # 限流中间件（Phase 1 P1-D）。
     # ⚠️ Starlette 的 add_middleware 是**后注册者先执行**（洋葱模型外层先跑），

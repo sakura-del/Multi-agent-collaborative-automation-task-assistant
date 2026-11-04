@@ -81,6 +81,7 @@ describe("task event session", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllEnvs();
   });
 
   it("loads the snapshot and acquires a ticket before connecting", async () => {
@@ -95,6 +96,29 @@ describe("task event session", () => {
     expect(socket.url).toContain("/api/v1/tasks/task-1/ws");
     expect(socket.url).toContain("ticket=ticket-2");
     expect(socket.url).toContain("after_event_id=0");
+    session.stop();
+  });
+
+  it("未配置 VITE_WS_BASE_URL 时仍连当前页面 origin（同源部署零回归）", async () => {
+    const { deps } = buildDeps();
+    const session = createTaskEventSession(deps);
+
+    await session.start("task-1", 0, vi.fn());
+
+    const socket = FakeWebSocket.instances[0];
+    expect(socket.url.startsWith(`ws://${window.location.host}/api/v1/tasks/task-1/ws`)).toBe(true);
+    session.stop();
+  });
+
+  it("配置 VITE_WS_BASE_URL 时连到该 origin（Cloudflare Pages 跨域部署）", async () => {
+    vi.stubEnv("VITE_WS_BASE_URL", "wss://api.example.com");
+    const { deps } = buildDeps();
+    const session = createTaskEventSession(deps);
+
+    await session.start("task-1", 0, vi.fn());
+
+    const socket = FakeWebSocket.instances[0];
+    expect(socket.url.startsWith("wss://api.example.com/api/v1/tasks/task-1/ws")).toBe(true);
     session.stop();
   });
 

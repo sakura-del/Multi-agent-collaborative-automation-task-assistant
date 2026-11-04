@@ -1,5 +1,7 @@
 import axios, { AxiosError, type InternalAxiosRequestConfig } from "axios";
 
+import { resolveApiBase } from "@/config/endpoint";
+
 import type { TokenOut } from "./types";
 
 // 单一 Axios 实例：统一 baseURL、token 注入与 401 单飞刷新
@@ -9,8 +11,13 @@ export const REFRESH_TOKEN_KEY = "refresh_token";
 /** 标记已重试过的请求，避免 401 → 刷新 → 401 的死循环 */
 type RetriableConfig = InternalAxiosRequestConfig & { _retry?: boolean };
 
+// 基地址集中解析（见 @/config/endpoint）：
+// 未配置环境变量时是相对路径 `/api/v1`，保持 nginx 同源部署不变；
+// 部署到 Cloudflare Pages 时由 VITE_API_BASE_URL 注入绝对地址。
+const API_BASE = resolveApiBase();
+
 /** 刷新专用实例：不带拦截器，避免 401 触发递归刷新 */
-const refreshClient = axios.create({ baseURL: "/api/v1", timeout: 15000 });
+const refreshClient = axios.create({ baseURL: API_BASE, timeout: 15000 });
 
 let refreshPromise: Promise<string> | null = null;
 let unauthorizedHandler: (() => void) | null = null;
@@ -59,8 +66,9 @@ async function rotateTokens(): Promise<string> {
 }
 
 export const api = axios.create({
-  // 开发期 vite proxy 转发 /api 到后端；生产期 nginx 反代
-  baseURL: "/api/v1",
+  // 开发期 vite proxy 转发 /api 到后端；生产期 nginx 反代；
+  // 跨域部署（Cloudflare Pages）时由 VITE_API_BASE_URL 提供绝对地址
+  baseURL: API_BASE,
   timeout: 15000,
 });
 

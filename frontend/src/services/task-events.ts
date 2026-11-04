@@ -1,4 +1,5 @@
 import type { TaskEvent, TaskEventPage, WsTicket } from "@/api/types";
+import { API_PREFIX, resolveWsBase } from "@/config/endpoint";
 
 // 任务事件会话：一次性票据 → 快照 → 补拉 → WebSocket 实时转发；
 // 连续失败按 1s/3s/9s 退避重连，仍失败则降级为 3s HTTP 轮询补拉。
@@ -72,9 +73,11 @@ export function createTaskEventSession(deps: TaskEventSessionDeps): TaskEventSes
   }
 
   function socketUrl(ticket: string): string {
-    const scheme = isSecure() ? "wss" : "ws";
     const query = new URLSearchParams({ ticket, after_event_id: String(lastEventId) });
-    return `${scheme}://${window.location.host}/api/v1/tasks/${taskId}/ws?${query.toString()}`;
+    // 跨域部署时走 API 所在 origin；未配置时沿用「当前页面 origin」（改造前行为）
+    const wsBase = resolveWsBase();
+    const origin = wsBase || `${isSecure() ? "wss" : "ws"}://${window.location.host}`;
+    return `${origin}${API_PREFIX}/tasks/${taskId}/ws?${query.toString()}`;
   }
 
   function stopPolling(): void {

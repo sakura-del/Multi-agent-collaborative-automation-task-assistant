@@ -1,0 +1,8 @@
+# Cloudflare Pages：SPA 深链回退
+#
+# vue-router 用的是 history 模式（createWebHistory），`/tasks/<id>` 这类路径
+# 在 Pages 上是「不存在的文件」→ 直接刷新会 404。
+# nginx 侧靠 `try_files $uri $uri/ /index.html` 兜底，Pages 靠这个文件。
+#
+# 200 = rewrite（地址栏不变），不能用 301/302，否则刷新后 URL 会被改写。
+/*    /index.html   200
