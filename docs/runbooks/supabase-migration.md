@@ -291,7 +291,62 @@ curl -s http://127.0.0.1:48080/api/v1/health/ready
 
 ---
 
-## 9. 关键变量速查
+## 9. 单实例统一管理验收（2026-11-04）
+
+**结论：PASS（有条件）**。同一 Supabase 实例内，13 张核心表 + 向量表可统一管理、一致且可运行。
+
+### 9.1 两个脚本的运行结果
+
+| 脚本 | 关键输出 | 结论 |
+| --- | --- | --- |
+| `reindex_vectors.py --dry-run` | `planned=28341` | 计划数量与 `doc_chunk`（ready）一致 |
+| `reindex_vectors.py --limit 200` | `indexed=200 failed_batches=0 elapsed_ms=6906` | 小样本演练通过，一致性仍 true |
+| `reindex_vectors.py`（全量） | `planned=28341 indexed=28341 failed_batches=0 elapsed_ms=285204`（57 批，4 分 45 秒） | **重建成功** |
+| `check_kb_consistency.py --json` | `consistent=true, expected=28341, actual=28341, missing=0, orphan=0, ids_verified=true` | **一致** |
+
+**重建前后检索等价性**：同一组 5 条查询的 top-10 命中 id **完全一致（重叠率 1.000）**，
+证明「重写向量」没有改变检索语义（Mock 嵌入下应为确定性结果）。
+
+### 9.2 13 张核心表的核验（口径：`dev-plan-v2.md:165`）
+
+| 表 | 行数 | 表 | 行数 |
+| --- | --- | --- | --- |
+| user | 27 | knowledge_doc | 101 |
+| task | 101 | doc_chunk | 28341 |
+| subtask | 673 | vector_index | 28341 |
+| task_dag | 95 | agent | 0 |
+| execution_log | 3984 | agent_interaction | 0 |
+| validation_result | 629 | human_feedback | 0 |
+| failure_case | 0 | | |
+
+- **外键孤儿检查 8 项全为 0**：subtask→task、task_dag→task、execution_log→task、
+  validation_result→subtask、doc_chunk→knowledge_doc、vector_index→doc_chunk、
+  agent_interaction→task、task→user。
+- **同实例取证**：`current_database()=postgres`，pgvector 扩展在 `extensions` schema；
+  业务连接与向量连接指向同一 host/库（`.env` 两个 DSN 同源）。
+- **关系型 ↔ 向量 id 集合双向差为 0**：`vector_index.chunk_id`（uuid）与
+  `knowledge_vectors.id`（text，`::text` 后比对）完全对齐。
+- **正文抽样 20 条**：`doc_chunk.content` 与 `knowledge_vectors.document` 零不一致。
+
+### 9.3 期间发现的问题与处置
+
+| 问题 | 事实 | 处置 |
+| --- | --- | --- |
+| reindex 逐条 UPDATE | 28341 × 0.48s ≈ **3.8 小时**，事实上不可执行 | 改每批一条批量 UPDATE（57 次），实测 4 分 45 秒（`996fb4a`） |
+| **免费档容量超限** | 反复全量 upsert 后库涨到 **528 MB / 500 MB（114%）**：`knowledge_vectors` TOAST 297 MB、索引 120 MB（物理膨胀，死元组已清但不缩文件） | `TRUNCATE` 后从 Chroma 重导入（200s），库回到 **262 MB（52%）**；索引/TOAST 均回到正常体积 |
+| 重复启动多个 reindex | 两次 `exec -d` 叠加，同一批行互相抢锁、放大膨胀 | 改为「先数 `/proc` 再启动」，并记录「进程检测不要用会被自身命令匹配的关键字」 |
+| 长事务会丢进度 | `vector_index` 的批量 UPDATE 只在**全部批次结束后**才 commit | 本次无实际损失（值本就等于 chunk_id）；如需断点续跑应改为每批提交 |
+
+### 9.4 免费实例限制结论
+
+- **存储 500 MB 是硬约束**：一次全量 upsert 会让向量表临时膨胀 2~2.6 倍
+  （本次 200 MB → 466 MB）。**不要反复跑全量 reindex**；要跑就先 `TRUNCATE` 或接受临时超限。
+- 超出配额时 Supabase 只告警不立即封库（本次超限期间读写仍正常），但会限制新建项目。
+- 闲置会自动 pause（演示前预热）；连接走 transaction pooler 且必须关闭两层语句缓存。
+
+---
+
+## 10. 关键变量速查
 
 | 变量 | 默认 | 作用 |
 | --- | --- | --- |
