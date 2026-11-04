@@ -35,9 +35,25 @@ COPY backend/demo_data ./demo_data
 # torch 先装 CPU 版（--index-url whl/cpu），避免 sentence-transformers 连带拉取
 # CUDA wheel（cudnn/nccl/triton 等 1GB+），容器内仅 CPU 推理
 # CI 安装 ./backend[dev] 并用 Mock 嵌入/重排，不依赖本镜像
-RUN pip install --upgrade pip && \
-    pip install torch --index-url https://download.pytorch.org/whl/cpu && \
-    pip install ".[rag-models]"
+#
+# ⚠️ 国内服务器到 pypi.org / download.pytorch.org 可能**完全不通**
+# （2026-11-04 实测：两者 curl http=000，而清华/阿里镜像 TLS 0.1~0.5s）。
+# 因此索引源做成构建参数，默认官方、国内可覆盖：
+#   PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+#   TORCH_FIND_LINKS=https://mirrors.aliyun.com/pytorch-wheels/cpu/
+# 注意阿里云 pytorch-wheels 是**扁平目录**（没有 /simple/torch/），
+# 只能用 `--find-links`，用 `--index-url` 会报 "No matching distribution"。
+ARG PIP_INDEX_URL=https://pypi.org/simple
+ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
+ARG TORCH_FIND_LINKS=
+
+RUN pip install --upgrade pip --index-url "${PIP_INDEX_URL}" && \
+    if [ -n "${TORCH_FIND_LINKS}" ]; then \
+        pip install torch --no-index --find-links "${TORCH_FIND_LINKS}" ; \
+    else \
+        pip install torch --index-url "${TORCH_INDEX_URL}" ; \
+    fi && \
+    pip install ".[rag-models]" --index-url "${PIP_INDEX_URL}"
 
 # 复制其余运行时文件
 COPY backend/alembic ./alembic

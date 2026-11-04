@@ -96,6 +96,14 @@ services:
       # pyproject readme 指向 ../README.md，build context 必须是仓库根
       context: .
       dockerfile: backend/Dockerfile
+      # 包索引可替换：国内服务器到 pypi.org / download.pytorch.org 可能完全不通
+      # （2026-11-04 实测 http=000）。在 .env 里设成国内镜像即可重建：
+      #   PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+      #   TORCH_FIND_LINKS=https://mirrors.aliyun.com/pytorch-wheels/cpu/
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
+        TORCH_FIND_LINKS: ${TORCH_FIND_LINKS:-}
     container_name: maa-backend
     restart: unless-stopped
     environment:
