@@ -155,6 +155,43 @@ curl -s -o /dev/null -D - http://127.0.0.1:48080/api/v1/health \
 
 ---
 
+## 3.5 首次上线记录（2026-11-04，已 PASS）
+
+| 项 | 值 |
+| --- | --- |
+| 前端地址 | `https://multi-agent-assistant.pages.dev`（项目名 `multi-agent-assistant`，Direct Upload 项目） |
+| API 地址 | `https://connecticut-sets-mentioned-bracelets.trycloudflare.com`（Quick Tunnel，容器 `maa-tunnel`） |
+| 部署方式 | `node scripts/deploy-pages.mjs`（构建 + 调 wrangler） |
+| Account ID | `39069f8084e72ee42ca05110889fb102` |
+| E2E | 预检 / 登录 / 任务列表 / 检索 / 产物下载（含 `Content-Disposition`）/ **wss 握手** 全部通过（7/7） |
+
+### 关键教训：手写 REST 直传会产出「空部署」
+
+按 wrangler 的两阶段协议（`upload-token` → `assets/check-missing` → `assets/upload`
+→ `upsert-hashes` → `POST /deployments`）手写实现后，API 每次都返回
+`success:true`、`environment=production`、部署日志 `Success: Your site was deployed!`，
+但**访问任何路径都是 500**（`/index.html` 反而 308），换项目名、去掉 `_redirects`、
+补 `deployment_configs` 都无效。
+
+换成官方 wrangler 上传同一份 `dist` → **立即 200**。
+
+### 本机没有 npm/npx 时怎么拿到 wrangler
+
+```powershell
+# 1) 自举 npm（registry.npmjs.org 可达即可）
+curl.exe -sSL -o npm.tgz https://registry.npmjs.org/npm/-/npm-10.9.2.tgz
+tar.exe -xzf npm.tgz; Rename-Item package npm
+# 2) 装 wrangler —— 必须把 node 目录加进 PATH，
+#    否则 esbuild 的 postinstall 会报 `'node' is not recognized`
+$env:PATH = "C:\...\node\bin;$env:PATH"
+node npm\bin\npm-cli.js install --no-audit --no-fund wrangler@latest
+# 3) 部署（凭据从 600 文件读，不落命令行）
+node node_modules\wrangler\bin\wrangler.js pages deploy <dist> --project-name multi-agent-assistant --branch main
+```
+
+`scripts/deploy-pages.mjs` 已改为**优先调用 wrangler**（`WRANGLER_BIN` 可覆盖默认路径），
+找不到时才回退到 REST 直传并打印警告。
+
 ## 4. 构建与部署
 
 本机**没有 npm/npx**（只有 node.exe），所以用零依赖脚本
