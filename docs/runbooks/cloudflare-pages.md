@@ -44,7 +44,13 @@ Dashboard → My Profile → API Tokens → Create Token → 自定义权限：
 - **Account → Cloudflare Pages → Edit**
 - **Account → Account Settings → Read**
 
-同时记下 **Account ID**（Dashboard 右侧栏）。
+同时记下 **Account ID**（Dashboard 右侧栏；也可由 `GET /accounts` 用 Token 列出）。
+
+> ⚠️ **别拿 R2 的令牌当 API Token**：R2 页面「创建 API 令牌」给出的是
+> `cfat_…` + Access Key / Secret（S3 兼容凭证），拿它调
+> `GET /user/tokens/verify` 返回 **401 Invalid API Token**（2026-11-04 实测）。
+> Pages 部署必须用 **My Profile → API Tokens → Create Custom Token**
+> 并勾选 `Account → Cloudflare Pages → Edit`。
 
 > ⚠️ 三个凭据（Tunnel Token、API Token、Account ID）只写进 600 权限的文件或进程环境变量，
 > **不要**贴进对话、不要提交到仓库。
@@ -60,11 +66,52 @@ Dashboard → My Profile → API Tokens → Create Token → 自定义权限：
 CORS__ALLOW_ORIGIN_REGEX=^https://([a-z0-9-]+\.)?multi-agent-assistant\.pages\.dev$
 ```
 
-**坑（本次踩过）**：`docker-compose.yml` 的 `environment` 是**白名单**——
+**坑 1（本次踩过）**：`docker-compose.yml` 的 `environment` 是**白名单**——
 `.env` 里配了但 compose 没透传，容器里读不到，预检直接 `400`。
 已在 compose 里加上 `CORS__ALLOW_ORIGIN_REGEX: ${CORS__ALLOW_ORIGIN_REGEX:-}`。
 
+**坑 2**：只改配置不够，**必须重建镜像**（代码在镜像里）。
+`docker compose up -d` 只会用旧镜像重建容器，`CORSConfig` 仍缺字段。
+
 `expose_headers=["Content-Disposition"]` 由代码默认提供，无需额外配置。
+
+### 3.1 服务器在国内时的镜像构建（重要）
+
+2026-11-04 实测：这台服务器访问 `pypi.org`、`download.pytorch.org`、`github.com`
+全部 `http=000`（TLS 握手即失败），`docker compose build` 卡在 `pip install torch`。
+国内镜像可达（清华/阿里 TLS 0.1~0.5s）。已在 Dockerfile/compose 里做成构建参数：
+
+```dotenv
+# 服务器 .env（只影响 docker build）
+PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+TORCH_FIND_LINKS=https://mirrors.aliyun.com/pytorch-wheels/cpu/
+INSTALL_RAG_MODELS=false
+```
+
+两个关键细节：
+
+- 阿里云 `pytorch-wheels` 是**扁平目录**（没有 `/simple/torch/`），
+  只能 `--find-links`；用 `--index-url` 会报 `No matching distribution found`；
+- `FlagEmbedding` 会让 pip **回溯**下载多个 184MB 的 torch 轮子（实测 500s 后仍失败）。
+  演示部署用 Mock 嵌入，`INSTALL_RAG_MODELS=false` 只装运行时依赖，
+  构建时间从「不可完成」降到约 19 分钟（200KB/s 的镜像速率）；
+  ⚠️ 置 false 后**不能**启用真实嵌入模型（`sentence-transformers` 是延迟导入，
+  只会在首次 embed 时报 ImportError）。
+
+### 3.2 验证 CORS（服务器本机即可复现）
+
+```bash
+curl -s -o /dev/null -D - -X OPTIONS http://127.0.0.1:48080/api/v1/tasks \
+  -H "Origin: https://multi-agent-assistant.pages.dev" \
+  -H "Access-Control-Request-Method: GET" | grep -i access-control-allow-origin
+# 期望：access-control-allow-origin: https://multi-agent-assistant.pages.dev
+# 换 https://evil.example.com 则应**没有**该头
+curl -s -o /dev/null -D - http://127.0.0.1:48080/api/v1/health \
+  -H "Origin: https://multi-agent-assistant.pages.dev" | grep -i expose-headers
+# 期望：access-control-expose-headers: Content-Disposition
+```
+
+**2026-11-04 实测结果**：生产域名 ✓、预览域名 ✓、异域无头 ✓、expose-headers ✓。
 
 ---
 
