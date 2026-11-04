@@ -115,6 +115,9 @@ services:
       RAG__PGVECTOR_DISABLE_PREPARED_STATEMENTS: ${RAG__PGVECTOR_DISABLE_PREPARED_STATEMENTS:-true}
       RAG__CHROMA_HOST: chroma
       RAG__CHROMA_PORT: "8000"
+      # CORS：Cloudflare Pages 域名正则（前端跨域访问后端时必需）。
+      # ⚠️ compose 的 environment 是**白名单**：.env 里有值但这里不写，容器里就收不到。
+      CORS__ALLOW_ORIGIN_REGEX: ${CORS__ALLOW_ORIGIN_REGEX:-}
       # 受控存储目录（容器内 /app/data，命名卷持久化）
       APP__UPLOAD_ROOT: /app/data/uploads
       APP__ARTIFACT_ROOT: /app/data/artifacts
