@@ -226,6 +226,8 @@ curl -s http://127.0.0.1:48080/api/v1/health/ready
 | Supabase 突然连不上 | 免费档闲置自动 pause | 控制台恢复项目；演示前预热 |
 | 检索变慢 | HNSW 索引缺失（批量导入前被删） | `REINDEX INDEX ix_kv_embedding_hnsw` |
 | 检索慢但索引存在（计划里是 Sort） | 走了 generic plan：`ORDER BY embedding <=> $1` 的距离依赖参数值 | 确认 `RAG__PGVECTOR_DISABLE_PREPARED_STATEMENTS=true`（默认已开） |
+| **页面加载慢甚至前端超时（15s）** | **N+1 在远程库上爆炸**：SQL 服务端只花几十 ms，但每条 SQL 有 ~300ms 往返；旧任务列表对每任务补 2 条查询，20 任务 ≈ 90 条 ≈ 34s（2026-11-04 实测） | 已修：`list_tasks` 单条汇总查询（`79d1b60`，整页 1 条 SELECT，实测 5.1s）；**根治是换到低延迟区域**（Singapore），换区域后同样的代码 < 1s |
+| 列表页仍慢但 SQL 只有 ~16 条 | 其中 12 条是 BEGIN/ROLLBACK（一次请求多个短会话）+ 每条 ~300ms 往返 | 应用层已到合理下限；换区域或升级套餐（同 region）才能继续压 |
 
 ---
 
