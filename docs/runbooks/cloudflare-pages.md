@@ -3,9 +3,8 @@
 > 目标：前端跑在 `https://<project>.pages.dev`（免费、可商用、全球 CDN），
 > 后端仍在现有服务器，通过 Cloudflare Tunnel 暴露为 `https://api.<你的域名>`。
 >
-> 状态（2026-11-04）：**代码与部署脚本已就绪，尚未上线**——
-> 卡在两件事：① 缺少域名 / API Token / Tunnel Token；② 服务器当前**出网异常**
-> （pypi、github 全部 `http=000`），后端镜像无法重建，而 CORS 改动需要新镜像。
+> 状态（2026-11-04）：**公网 API 已下线**（删除 Quick Tunnel 容器），前端静态站保留在线。
+> 恢复步骤见 §3.6。前端由 Cloudflare Pages 托管，后端仍在现有服务器。
 
 ---
 
@@ -191,6 +190,63 @@ node node_modules\wrangler\bin\wrangler.js pages deploy <dist> --project-name mu
 
 `scripts/deploy-pages.mjs` 已改为**优先调用 wrangler**（`WRANGLER_BIN` 可覆盖默认路径），
 找不到时才回退到 REST 直传并打印警告。
+
+## 3.6 临时下线（2026-11-04 已执行）
+
+出于安全考虑先把**公网 API** 收回，前端静态站保留。
+
+### 下线（2 分钟）
+
+```bash
+# 服务器上：先 stop 再 rm —— 必须 rm
+# 容器启动时带了 --restart unless-stopped，docker 守护进程重启会把 stop 的容器再拉起来
+docker stop maa-tunnel
+docker rm -f maa-tunnel
+docker ps -a --filter name=maa-tunnel   # 期望无输出
+```
+
+验证（本机 PowerShell 用 `curl.exe`，`curl` 是 `Invoke-WebRequest` 别名）：
+
+| 目标 | 期望 |
+| --- | --- |
+| 旧隧道域名 `/api/v1/health/ready` | **530**（Argo Tunnel error）或 000 |
+| `https://multi-agent-assistant.pages.dev/` | 200（静态站保留） |
+| 服务器本机 `http://127.0.0.1:48080/api/v1/health/ready` | ready（局域网不受影响） |
+
+2026-11-04 实测：旧隧道 `530`、Pages `200`、本机 `ready`，`docker ps -a` 残留 0。
+
+### 下线后的现象（属预期，不是故障）
+
+页面仍能打开，但登录、任务列表、检索、产物下载、实时进度**全部失败**——
+因为产物里内联的 `VITE_API_BASE_URL` 指向已删除的隧道域名（死链）。
+
+### 恢复上线
+
+1. **先改 demo 密码**（弱口令曾在公网可用，重开等于再暴露一次）；
+2. 重建隧道并取新域名：
+
+   ```bash
+   docker run -d --name maa-tunnel --network host \
+     cloudflare/cloudflared:latest tunnel --url http://127.0.0.1:48080 --no-autoupdate
+   docker logs maa-tunnel 2>&1 | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | head -n1
+   ```
+
+   > 用 `--no-autoupdate`、**不加** `--restart`：长期常驻再单独加 restart 策略，
+   > 否则下次下线又得 `rm`。
+3. **重新构建并部署前端**（域名变了，必须重建；旧的 `dist` 指向死链）：
+
+   ```powershell
+   # 把 API_BASE_URL 换成新域名后执行
+   node C:\Users\Lenovo\AppData\Local\Temp\run-deploy.mjs
+   ```
+4. 按 §5 逐条复验（预检 / 登录 / 列表 / 检索 / 下载 / wss）。
+
+### 下线期间仍然暴露的东西
+
+- Pages 静态站（只有前端代码，无数据；产物里是死链）；
+- 服务器 `10.0.10.2:48080`（仅局域网可达）。
+
+---
 
 ## 4. 构建与部署
 
