@@ -98,6 +98,39 @@ class TaskRepository(BaseRepository[Task]):
         )
         return result.scalar_one_or_none()
 
+    async def list_summaries(
+        self,
+        user_id: UUID,
+        workspace_ids: Sequence[UUID] = (),
+        *,
+        skip: int = 0,
+        limit: int = 20,
+    ) -> Any:
+        """**单条 SQL** 只取列表页需要的列（id/status/title/plan_version/时间戳）。
+
+        为什么不走 `list_visible` + 快照：列表页用不到 subtasks / plan /
+        final_output，旧路径对每个任务还要补 2 条查询。远程库上每条 SQL
+        有 ~380ms 往返，20 个任务就是 34 秒（2026-11-04 实测）。
+        可见性与排序语义与 `list_visible` 完全一致（复用 `_visible_clause`，
+        排序键带 `id`，AGENTS #14）。
+        """
+        safe_limit = max(1, min(limit, 100))
+        stmt = (
+            select(
+                Task.id,
+                Task.status,
+                Task.title,
+                Task.plan_version,
+                Task.created_at,
+                Task.updated_at,
+            )
+            .where(self._visible_clause(user_id, workspace_ids))
+            .order_by(Task.created_at.desc(), Task.id.desc())
+            .offset(max(0, skip))
+            .limit(safe_limit)
+        )
+        return (await self.db.execute(stmt)).all()
+
     async def list_visible(
         self,
         user_id: UUID,

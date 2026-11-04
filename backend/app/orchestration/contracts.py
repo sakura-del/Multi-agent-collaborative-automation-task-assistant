@@ -300,6 +300,25 @@ class SubtaskSnapshot(BaseModel):
     error: str | None = None
 
 
+class TaskListSummary(BaseModel):
+    """任务列表条目：**只有**列表页需要的列。
+
+    为什么不复用 TaskSnapshot：构造快照会连带取 subtasks / plan /
+    final_output，列表页全部用不上，却把一次列表变成 ~90 条 SQL ——
+    迁移到 Supabase 后每条 SQL 有 ~380ms 网络往返，实测 34s（前端 15s 超时）。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    task_id: UUID
+    status: str
+    title: str
+    plan_version: int = 0
+    revision: int = 0
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
 class TaskSnapshot(BaseModel):
     """任务状态快照：供查询、断线重连与前端轮询使用。"""
 

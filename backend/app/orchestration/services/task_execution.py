@@ -42,6 +42,7 @@ from app.orchestration.contracts import (
     TaskCommand,
     TaskControlRequest,
     TaskEvent,
+    TaskListSummary,
     TaskPlan,
     TaskSnapshot,
     TaskStatus,
@@ -535,20 +536,33 @@ class TaskExecution:
         skip: int = 0,
         limit: int = 20,
         workspace_ids: Sequence[UUID] = (),
-    ) -> list[TaskSnapshot]:
-        """分页列出可见任务快照（HTTP 列表接口使用）。
+    ) -> list[TaskListSummary]:
+        """分页列出任务摘要（**单条 SQL**，HTTP 列表接口使用）。
 
-        `workspace_ids` 非空时按双轨可见性（个人 + 工作区）；为空时保持
-        旧行为（仅 owner）。
+        `workspace_ids` 非空时按双轨可见性（个人 + 工作区）；为空时仅 owner。
+
+        ## 为什么不再构造 TaskSnapshot（2026-11-04）
+
+        旧实现对每个任务跑 2 条额外 SQL（subtasks + 时间戳回查），
+        20 个任务 ≈ 90 条；迁移到 Supabase 后每条 SQL 有 ~380ms 往返，
+        一次列表实测 34s（前端 15s 超时）。列表页只要 6 个字段，
+        一条汇总查询足够；**详情接口 `get_snapshot` 保持原样**。
         """
         async with self._session_factory() as session:
             repo = TaskRepository(session)
-            tasks = (
-                await repo.list_visible(user_id, workspace_ids, skip=skip, limit=limit)
-                if workspace_ids
-                else await repo.list_for_user(user_id, skip=skip, limit=limit)
-            )
-            return [await self._build_snapshot(session, task) for task in tasks]
+            rows = await repo.list_summaries(user_id, workspace_ids, skip=skip, limit=limit)
+            return [
+                TaskListSummary(
+                    task_id=row.id,
+                    status=row.status,
+                    title=row.title,
+                    plan_version=row.plan_version or 0,
+                    revision=row.plan_version or 0,
+                    created_at=row.created_at,
+                    updated_at=row.updated_at,
+                )
+                for row in rows
+            ]
 
     async def events_after(
         self,
