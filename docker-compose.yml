@@ -131,6 +131,17 @@ services:
       # 受控存储目录（容器内 /app/data，命名卷持久化）
       APP__UPLOAD_ROOT: /app/data/uploads
       APP__ARTIFACT_ROOT: /app/data/artifacts
+      # 文档存储后端：local（默认）| s3（七牛云 Kodo / R2）
+      # ⚠️ 同样是白名单：.env 里配了 STORAGE__* 但这里不列，容器里读不到（CORS 踩过）
+      STORAGE__BACKEND: ${STORAGE__BACKEND:-local}
+      STORAGE__S3_ENDPOINT: ${STORAGE__S3_ENDPOINT:-}
+      STORAGE__S3_REGION: ${STORAGE__S3_REGION:-cn-east-1}
+      STORAGE__S3_BUCKET: ${STORAGE__S3_BUCKET:-}
+      STORAGE__S3_ACCESS_KEY_ID: ${STORAGE__S3_ACCESS_KEY_ID:-}
+      STORAGE__S3_SECRET_ACCESS_KEY: ${STORAGE__S3_SECRET_ACCESS_KEY:-}
+      STORAGE__S3_PREFIX: ${STORAGE__S3_PREFIX:-uploads}
+      STORAGE__S3_ADDRESSING_STYLE: ${STORAGE__S3_ADDRESSING_STYLE:-virtual}
+      STORAGE__PRESIGN_EXPIRES_SECONDS: ${STORAGE__PRESIGN_EXPIRES_SECONDS:-900}
       # 嵌入/重排模型缓存（HuggingFace 缓存目录指向命名卷，避免重复下载）
       HF_HOME: /app/.cache
       # 嵌入/重排：默认 Mock（自包含、离线、快）；设为 0 启用真实 BGE 模型（首次下载约 2.5GB 权重）
@@ -191,6 +202,41 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    networks:
+      - maa-network
+
+  # 生产环境专属：Supabase（生产库）每日备份 → 七牛云 Kodo
+  #
+  # 为什么用 profiles：开源用户 `docker compose up -d` 不会启动它，
+  # 也就不会因为没填七牛 AK/SK 而反复重启报错；生产用
+  # `docker compose --profile prod up -d` 一键开启。
+  #
+  # 为什么自建镜像：社区的 postgres-backup-s3 只有 ≤16 的 tag，
+  # 而 Supabase 是 PG 17.11，pg_dump 16 会 server version mismatch。
+  db-backup:
+    build:
+      context: .
+      dockerfile: deploy/db-backup/Dockerfile
+    image: veripaper-db-backup:local
+    container_name: veripaper-db-backup
+    profiles: ["prod"]
+    restart: unless-stopped
+    environment:
+      # 备份对象是 Supabase 生产库；session pooler(5432) 才适合 pg_dump
+      PGHOST: ${SUPABASE_PG_HOST:-}
+      PGPORT: ${SUPABASE_PG_PORT:-5432}
+      PGDATABASE: ${SUPABASE_PG_DB:-postgres}
+      PGUSER: ${SUPABASE_PG_USER:-}
+      PGPASSWORD: ${SUPABASE_PG_PASSWORD:-}
+      PGSSLMODE: require
+      # 七牛云 Kodo（与文档存储共用同一空间，前缀不同）
+      S3_ENDPOINT: ${STORAGE__S3_ENDPOINT:-}
+      S3_REGION: ${STORAGE__S3_REGION:-cn-east-1}
+      S3_BUCKET: ${STORAGE__S3_BUCKET:-}
+      S3_ACCESS_KEY_ID: ${STORAGE__S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${STORAGE__S3_SECRET_ACCESS_KEY:-}
+      S3_PREFIX: db-backups
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-7}
     networks:
       - maa-network
 

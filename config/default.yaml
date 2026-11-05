@@ -14,6 +14,20 @@ app:
   artifact_root: "/app/data/artifacts"
   max_upload_bytes: 31457280  # 30 MB
 
+# 文档存储：local（本地磁盘，默认）| s3（七牛云 Kodo / R2 等 S3 兼容服务）
+# 凭据只放 .env（600），不要写进本文件；这里只给安全默认值。
+storage:
+  backend: "local"
+  s3_endpoint: ""
+  s3_region: "cn-east-1"
+  s3_bucket: ""
+  s3_access_key_id: ""
+  s3_secret_access_key: ""
+  s3_prefix: "uploads"
+  # 七牛云只接受 virtual-hosted（bucket.endpoint/key），path 样式会 SignatureDoesNotMatch
+  s3_addressing_style: "virtual"
+  presign_expires_seconds: 900
+
 database:
   pool_size: 10
   max_overflow: 20

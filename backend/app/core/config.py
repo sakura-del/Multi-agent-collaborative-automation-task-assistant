@@ -361,6 +361,31 @@ class CORSConfig(BaseModel):
     expose_headers: list[str] = Field(default_factory=lambda: ["Content-Disposition"])
 
 
+class StorageConfig(BaseModel):
+    """文档存储配置：本地磁盘 / S3 兼容对象存储（七牛云 Kodo、Cloudflare R2）。
+
+    **默认 local**：不配置任何变量时行为与引入对象存储之前完全一致，
+    单元测试与开源本地部署都不需要云凭据。
+
+    七牛云的两处硬性要求（否则报 SignatureDoesNotMatch）：
+
+    - 签名版本必须是 `s3v4`；
+    - 寻址必须是 **virtual-hosted**（`bucket.endpoint/key`），path 样式不被接受。
+    """
+
+    backend: str = "local"  # local | s3
+    s3_endpoint: str = ""
+    s3_region: str = "cn-east-1"
+    s3_bucket: str = ""
+    s3_access_key_id: str = ""
+    s3_secret_access_key: str = ""
+    #: 对象键前缀（最终 key = `{prefix}/{user_id}/{uuid}{ext}`）
+    s3_prefix: str = "uploads"
+    s3_addressing_style: str = "virtual"
+    #: 预签名直链有效期（秒）。S3 协议上限 604800（7 天）。
+    presign_expires_seconds: int = 900
+
+
 # ===== 顶层 Settings =====
 
 
@@ -399,6 +424,7 @@ class Settings(BaseSettings):
     rate_limit: RateLimitConfig = RateLimitConfig()
     quota: QuotaConfig = QuotaConfig()
     cors: CORSConfig = CORSConfig()
+    storage: StorageConfig = StorageConfig()
 
     # ===== JWT 鉴权（阶段0任务3） =====
     jwt_secret_key: str = "change-me-in-production"
@@ -441,6 +467,7 @@ class Settings(BaseSettings):
         "rate_limit",
         "quota",
         "cors",
+        "storage",
         mode="before",
     )
     @classmethod

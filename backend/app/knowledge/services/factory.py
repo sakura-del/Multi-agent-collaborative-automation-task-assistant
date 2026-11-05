@@ -129,7 +129,11 @@ def init_kb(
     from app.core.config import get_settings
 
     app_cfg = get_settings().app
-    _storage = DocumentStorage(app_cfg.upload_root, max_file_bytes=app_cfg.max_upload_bytes)
+    _storage = DocumentStorage(
+        app_cfg.upload_root,
+        max_file_bytes=app_cfg.max_upload_bytes,
+        config=get_settings().storage,
+    )
 
     logger.info(
         "knowledge_base_initialized",

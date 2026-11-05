@@ -15,19 +15,25 @@
 
 from __future__ import annotations
 
+import asyncio
+import mimetypes
+from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_active_user
+from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.db.models.knowledge import KnowledgeDoc
 from app.db.models.user import User
 from app.db.session import get_db
 from app.knowledge.models.document import ChunkStrategy
 from app.knowledge.services.document_service import KnowledgeDocumentService
+from app.knowledge.services.document_storage import DocumentStorage
 from app.knowledge.services.factory import get_index_manager, get_kb, get_storage
 from app.knowledge.services.vector_backends.base import VectorStoreUnavailableError
 from app.schemas.knowledge import (
@@ -122,6 +128,44 @@ async def delete_document(
     """删除文档；跨用户或不存在的 doc_id 返回 404。"""
     doc = await service.delete(current_user.id, doc_id)
     return _to_out(doc)
+
+
+@router.get(
+    "/documents/{doc_id}/download",
+    response_model=None,
+    summary="下载文档原文（S3 预签名直链 / 本地流式）",
+)
+async def download_document(
+    doc_id: UUID,
+    current_user: User = Depends(get_current_active_user),
+    service: KnowledgeDocumentService = Depends(get_document_service),
+    storage: DocumentStorage = Depends(get_storage),
+) -> Response:
+    """下载当前用户某篇文档的原文。
+
+    - S3 后端：**307 跳转**到预签名直链，不占用应用服务器带宽；
+    - 本地后端：`FileResponse` 流式返回，文件名取上传时的原名；
+    - 跨用户 / 记录没有文件 / 本地路径越出上传根目录：一律 404
+      （与「不存在」同语义，避免泄漏资源存在性）。
+    """
+    doc = await service.get_document(current_user.id, doc_id)
+    if not doc.file_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="文档不存在")
+
+    # 预签名是同步 SDK 调用，放线程避免阻塞事件循环
+    presigned = await asyncio.to_thread(storage.presigned_url, doc.file_path)
+    if presigned:
+        return RedirectResponse(presigned, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+
+    path = Path(doc.file_path).resolve()
+    upload_root = Path(get_settings().app.upload_root).resolve()
+    # 防越权读盘：历史脏数据里如果写了 /etc/passwd 之类的路径，这里必须挡住
+    if upload_root not in path.parents or not path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="文档不存在")
+
+    original_name = (doc.meta_info or {}).get("original_name") or path.name
+    media_type = mimetypes.guess_type(original_name)[0] or "application/octet-stream"
+    return FileResponse(path, media_type=media_type, filename=original_name)
 
 
 @router.get(

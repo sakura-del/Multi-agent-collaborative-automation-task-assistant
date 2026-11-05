@@ -21,6 +21,9 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "PyYAML>=6.0.1",
 
+    # 对象存储（S3 兼容：七牛云 Kodo / Cloudflare R2）；local 模式下不会导入 boto3
+    "boto3>=1.34.0",
+
     # 数据库
     "sqlalchemy[asyncio]>=2.0.25",
     "asyncpg>=0.29.0",

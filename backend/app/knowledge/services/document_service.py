@@ -113,7 +113,8 @@ class KnowledgeDocumentService:
             title=title,
             source="upload",
             doc_type=doc_type,
-            file_path=str(stored.path),
+            # as_posix()：S3 模式下 path 是对象键，Windows 的 `\` 会让 key 变形
+            file_path=stored.path.as_posix(),
             index_status="indexing",
             chunk_count=0,
             meta_info={"original_name": stored.original_name, "file_size": stored.size},
@@ -123,13 +124,16 @@ class KnowledgeDocumentService:
 
         # 3. 解析 + 分块 + 写双索引（CPU/模型密集，放线程池避免阻塞事件循环）
         try:
-            _, chunks = await asyncio.to_thread(
-                self._mgr.prepare_document,
-                str(stored.path),
-                doc_id=doc_id_str,
-                strategy=strategy,
-                metadata={"user_id": str(user_id)},
-            )
+            # 解析器只认本地文件：S3 后端在 localize 里下载到临时文件，退出即删除。
+            # local 后端直接返回原路径，行为与改造前一致。
+            async with self._storage.localize(stored.path.as_posix()) as local_path:
+                _, chunks = await asyncio.to_thread(
+                    self._mgr.prepare_document,
+                    str(local_path),
+                    doc_id=doc_id_str,
+                    strategy=strategy,
+                    metadata={"user_id": str(user_id)},
+                )
             if not chunks:
                 raise ValidationException("未能从文档中提取出文本内容")
             await asyncio.to_thread(self._mgr.index_chunks, chunks)
@@ -224,6 +228,13 @@ class KnowledgeDocumentService:
         """
         """列出用户文档。"""
         return await self._repo.list_for_user(user_id)
+
+    async def get_document(self, user_id: UUID, doc_id: UUID) -> KnowledgeDoc:
+        """取单个文档（含归属校验）；不存在或不属于该用户一律 404 语义。"""
+        doc = await self._repo.get_for_user(user_id, doc_id)
+        if doc is None:
+            raise NotFoundException("文档不存在")
+        return doc
 
     async def stats(self, user_id: UUID) -> tuple[int, int]:
         """统计用户文档数与分块数。"""
