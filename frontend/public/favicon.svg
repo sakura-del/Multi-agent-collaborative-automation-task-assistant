@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <rect width="64" height="64" rx="14" fill="#0F2942" />
+  <!-- V字与论文主干 -->
+  <path d="M12 14H24L34 42L44 14H52L38 50H26L12 14Z" fill="#3B82F6" />
+  <!-- 顶部绿色论文折角 -->
+  <path d="M44 14L35 23H44V14Z" fill="#10B981" />
+  <!-- 右下角核验绿勾 -->
+  <path d="M32 38L39 45L54 28L58 32L39 53L28 42L32 38Z" fill="#10B981" />
+</svg>

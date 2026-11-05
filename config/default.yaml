@@ -2,7 +2,7 @@
 # 阶段0：仅初始化基础结构，后续阶段按需扩展
 
 app:
-  name: "多智能体协作自动化任务助手"
+  name: "VeriPaper"
   env: "development"          # development / staging / production
   debug: true
   host: "0.0.0.0"

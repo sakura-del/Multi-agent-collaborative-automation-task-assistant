@@ -174,7 +174,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app.name,
         version=__version__,
-        description="基于多智能体协作的自动化任务执行系统",
+        description="VeriPaper API",
         docs_url="/docs",
         redoc_url="/redoc",
         openapi_url="/openapi.json",

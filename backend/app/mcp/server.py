@@ -68,7 +68,7 @@ from app.mcp.tools import (
 logger = get_logger(__name__)
 
 #: server 名称（客户端里显示的名字）。
-SERVER_NAME = "multi-agent-assistant"
+SERVER_NAME = "veripaper"
 
 #: server 版本（MCP 客户端握手时展示）。
 SERVER_VERSION = "1.0.0"

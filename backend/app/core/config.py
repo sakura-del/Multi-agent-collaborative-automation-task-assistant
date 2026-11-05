@@ -76,7 +76,7 @@ ENV_FILE = PROJECT_ROOT / ".env"
 class AppConfig(BaseModel):
     """应用基础配置"""
 
-    name: str = "多智能体协作自动化任务助手"
+    name: str = "VeriPaper"
     env: str = "development"  # development / staging / production
     debug: bool = True
     host: str = "0.0.0.0"

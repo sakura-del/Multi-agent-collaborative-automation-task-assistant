@@ -1,7 +1,7 @@
 [project]
-name = "multi-agent-assistant"
+name = "veripaper"
 version = "0.1.0"
-description = "多智能体协作自动化任务助手 - 后端应用"
+description = "VeriPaper - backend application"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Academic" }

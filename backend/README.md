@@ -1,6 +1,6 @@
 # 后端应用（backend）
 
-多智能体协作自动化任务助手 — FastAPI 后端。
+VeriPaper — FastAPI 后端。
 
 完整项目说明见仓库根目录 [`README.md`](../README.md)。
 

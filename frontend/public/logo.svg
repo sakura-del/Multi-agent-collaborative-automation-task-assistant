@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%" fill="none">
+  <defs>
+    <!-- 学术深蓝渐变：左翼 -->
+    <linearGradient id="vp-left-wing" x1="80" y1="96" x2="256" y2="432" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1E4E8C" />
+      <stop offset="100%" stop-color="#0F2942" />
+    </linearGradient>
+    <!-- 皇家蓝渐变：论文护盾主体 -->
+    <linearGradient id="vp-paper-body" x1="240" y1="96" x2="416" y2="432" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#2563EB" />
+      <stop offset="100%" stop-color="#1E3A8A" />
+    </linearGradient>
+    <!-- 翡翠绿渐变：核验对勾与折角 -->
+    <linearGradient id="vp-verified" x1="256" y1="96" x2="440" y2="380" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#34D399" />
+      <stop offset="100%" stop-color="#059669" />
+    </linearGradient>
+  </defs>
+
+  <!-- 1. 右侧主体：融合“论文页”与“半盾牌”的几何基底 -->
+  <path d="M272 96H416V268C416 352 356 408 292 432L244 320L272 96Z" fill="url(#vp-paper-body)" />
+
+  <!-- 2. 论文左上角：翠绿翻页折角 (Paper Fold) -->
+  <path d="M272 96L216 164C236 168 256 160 272 140V96Z" fill="url(#vp-verified)" />
+  <path d="M272 96L216 164L254 236L272 140V96Z" fill="#0F2942" fill-opacity="0.28" />
+
+  <!-- 3. 左侧主翼：刚劲的 V 字左笔触 -->
+  <path d="M72 96H164L284 408L236 432H196L72 96Z" fill="url(#vp-left-wing)" />
+  <!-- 左翼立体折面高光 -->
+  <path d="M132 96H164L284 408L256 422L132 96Z" fill="#3B82F6" fill-opacity="0.25" />
+
+  <!-- 4. 右侧负空间切线（象征多智能体分层/文献检索条目） -->
+  <path d="M368 96H396L316 268H288L368 96Z" fill="#FFFFFF" fill-opacity="0.9" />
+  <path d="M396 144L432 144L416 176H380L396 144Z" fill="url(#vp-verified)" />
+
+  <!-- 5. 右下角核心视觉锤：突破边界的翠绿核验对勾 (Verified Checkmark) -->
+  <path d="M300 316L340 356L436 244L464 272L340 412L272 344L300 316Z" fill="url(#vp-verified)" />
+</svg>

@@ -1,3 +1,3 @@
-"""多智能体协作自动化任务助手 - 后端应用包"""
+"""VeriPaper - backend application package."""
 
 __version__ = "0.1.0"

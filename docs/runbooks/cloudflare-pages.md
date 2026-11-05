@@ -164,6 +164,11 @@ curl -s -o /dev/null -D - http://127.0.0.1:48080/api/v1/health \
 | Account ID | `39069f8084e72ee42ca05110889fb102` |
 | E2E | 预检 / 登录 / 任务列表 / 检索 / 产物下载（含 `Content-Disposition`）/ **wss 握手** 全部通过（7/7） |
 
+**品牌（2026-11-05）**：站点标题与图标已改为 **VeriPaper**（`<title>` + `/favicon.svg`），
+`logo.svg`（512 viewBox）与 `favicon.svg`（64 viewBox）均已随产物发布。
+注意前端产物**内联了构建时的 API 地址**，本次沿用已下线的隧道域名（页面接口不可用属预期）；
+后端镜像里的 `app.name` / `pyproject.name` 需下次重建镜像才会体现在 `/docs` 标题。
+
 ### 关键教训：手写 REST 直传会产出「空部署」
 
 按 wrangler 的两阶段协议（`upload-token` → `assets/check-missing` → `assets/upload`
