@@ -1,7 +1,9 @@
 # 对象存储（七牛云 Kodo）与 Supabase 每日备份
 
-> 状态（2026-11-05）：**代码已就绪，默认仍是 `local`**——没有填入真实 AK/SK，
-> 线上行为与改造前完全一致。填 `.env` 并重启即切换，无需重建镜像。
+> 状态（2026-11-05）：**已启用**。线上 `STORAGE__BACKEND=s3`，桶 `veripaper-storage`，
+> 区域 **华南-广东 `cn-south-1`**（`https://s3-cn-south-1.qiniucs.com`）。
+> 端到端冒烟通过：上传 → 桶内有对象 → 解析 `ready` → 下载 307 → 直链 GET 200 → 删除后对象消失。
+> 回滚：`STORAGE__BACKEND=local` + `docker compose up -d backend`（不重建镜像）。
 
 ## 1. 双模式设计
 
@@ -103,6 +105,28 @@ CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA extensions;
 # 切回本地磁盘（历史 S3 对象保留，不删）
 STORAGE__BACKEND=local  # 改 .env → docker compose up -d backend
 ```
+
+## 5.5 启用实测记录（2026-11-05，华南）
+
+| 步骤 | 结果 |
+| --- | --- |
+| 只读探测（`list_objects_v2`） | OK，桶为空 |
+| 镜像重建 | 成功（`boto3 1.43.123` 已进镜像），`/health/ready` = ready |
+| 容器内配置 | `backend=s3`、`bucket=veripaper-storage`、`endpoint=https://s3-cn-south-1.qiniucs.com`、`region=cn-south-1` |
+| 上传 PDF | **201**，`index_status=ready`、`chunk_count=1` |
+| 落库路径 | `uploads/<user_id>/<uuid>.pdf`（对象键，不是 `/app/data/...`） |
+| 桶内对象 | 存在同名 key |
+| 下载端点 | **307**，`Location` 直链 **GET 200**（925 bytes，`%PDF-1.7`） |
+| 删除文档 | 200，桶内对象**消失** |
+
+两个实测踩到的细节：
+
+1. **预签名 URL 只能用 GET 验证**：SigV4 把 HTTP 方法算进签名，拿 `HEAD` 去访问
+   一个按 `get_object` 签出的 URL 会被判签名不匹配（403）——不是权限问题。
+2. **上传返回 201 Created**，不是 200；按 200 判断会误报失败。
+
+> ⚠️ 这对 AK/SK 曾出现在会话里，建议演示结束后在七牛控制台**轮换一次**；
+> 仓库与文档只保留占位符，真实值只在服务器 `.env`（600）。
 
 ## 6. 已知边界
 
