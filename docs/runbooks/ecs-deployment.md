@@ -165,6 +165,29 @@ Supabase 项目保持原样（未删），迁移脚本不改源库；`backup/` �
 **C. 完全回退旧服务器**：旧机 `maa-backend` 已 `docker compose stop backend`
 （容器与数据都在），`docker compose start backend` 即可恢复；前端需重新构建指向旧入口。
 
+## 7.5 域名绑定（2026-11-10）
+
+| 域名 | 指向 | 状态 |
+| --- | --- | --- |
+| `veripaper.me`（根域） | Pages 项目 `multi-agent-assistant`（CNAME → `*.pages.dev`，橙云，CF 压平根域） | 200，直接打开应用 |
+| `www.veripaper.me` | 同上 + Redirect Rule `www → apex`（301） | 301 |
+| `multi-agent-assistant.pages.dev` | Pages 默认域名 | 保留可用（回滚/预览） |
+| `api.veripaper.me` | A → 47.253.81.6（橙云） | 200，后端 API |
+
+后端 CORS 正则已同时放行三处：
+
+```dotenv
+CORS__ALLOW_ORIGIN_REGEX=^https://(([a-z0-9-]+\.)?multi-agent-assistant\.pages\.dev|(www\.)?veripaper\.me)$
+```
+
+实测（从 ECS 发起）：`veripaper.me` 200、`www` 301、`pages.dev` 200；
+CORS 预检 `veripaper.me` / `www` / `pages.dev` 均返回对应 `allow-origin`，
+`evil.example.com` 无该头。
+
+> ⚠️ **国内访问注意**：2026-11-10 从国内网络访问 `veripaper.me` 出现 TLS 握手被重置
+> （同一 IP 上 `api.veripaper.me` 正常，属 SNI 层干扰），而 `pages.dev` 正常。
+> 演示时若根域打不开，用 `multi-agent-assistant.pages.dev` 作为备用入口（CORS 已放行）。
+
 ## 8. 尚未完成 / 后续
 
 - **ECS 自身的每日备份**：`deploy/db-backup`（Supabase 版）现在指向的是**旧生产库**，
