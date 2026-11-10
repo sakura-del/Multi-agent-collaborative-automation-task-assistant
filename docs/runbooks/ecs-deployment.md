@@ -184,9 +184,12 @@ CORS__ALLOW_ORIGIN_REGEX=^https://(([a-z0-9-]+\.)?multi-agent-assistant\.pages\.
 CORS 预检 `veripaper.me` / `www` / `pages.dev` 均返回对应 `allow-origin`，
 `evil.example.com` 无该头。
 
-> ⚠️ **国内访问注意**：2026-11-10 从国内网络访问 `veripaper.me` 出现 TLS 握手被重置
-> （同一 IP 上 `api.veripaper.me` 正常，属 SNI 层干扰），而 `pages.dev` 正常。
-> 演示时若根域打不开，用 `multi-agent-assistant.pages.dev` 作为备用入口（CORS 已放行）。
+> **关于可达性**：2026-11-10 在**某台特定机器**（带本地代理的沙箱环境）访问
+> `veripaper.me` 出现 TLS 握手被重置，而同一环境访问 `api.veripaper.me` 与
+> `pages.dev` 正常 —— 属该机出口/代理的 SNI 行为，**不是域名配置问题**：
+> 用户侧国内网络实测可正常打开，ECS 侧亦返回 200/301。
+> 若将来有人在特定网络下打不开根域，可先用 `multi-agent-assistant.pages.dev`
+> 作为备用入口（CORS 已放行，功能一致）。
 
 ## 8. 尚未完成 / 后续
 
