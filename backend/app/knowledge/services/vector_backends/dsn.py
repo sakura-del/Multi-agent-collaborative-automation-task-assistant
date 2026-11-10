@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 import re
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 # `postgresql+asyncpg://` / `postgresql+psycopg://` 等 SQLAlchemy 方言前缀
 _DRIVER_RE = re.compile(r"^(postgresql|postgres)\+[A-Za-z0-9_]+://", re.IGNORECASE)
@@ -72,7 +72,13 @@ def with_options(dsn: str, **options: object) -> str:
         query = dict(parse_qsl(parts.query, keep_blank_values=True))
         for key, value in clean.items():
             query.setdefault(key, value)
-        return urlunsplit(parts._replace(query=urlencode(query)))
+        # ⚠️ 必须 quote_via=quote（空格编码成 %20）：
+        # `urlencode` 默认用 application/x-www-form-urlencoded 的 `+` 表示空格，
+        # 而 psycopg 按 RFC 3986 解析 URI，不会把 `+` 还原成空格。
+        # 后果：`options=-c statement_timeout=15000` 变成 `-c+statement_timeout=...`，
+        # libpq 会把它当成名为 `+statement_timeout` 的参数 →
+        # `FATAL: unrecognized configuration parameter "+statement_timeout"`（2026-11-10 实测）。
+        return urlunsplit(parts._replace(query=urlencode(query, quote_via=quote)))
 
     existing = {token.partition("=")[0].strip().lower() for token in dsn.split() if "=" in token}
     appended = " ".join(f"{k}={v}" for k, v in clean.items() if k.lower() not in existing)
