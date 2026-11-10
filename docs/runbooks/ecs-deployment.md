@@ -191,10 +191,37 @@ CORS 预检 `veripaper.me` / `www` / `pages.dev` 均返回对应 `allow-origin`�
 > 若将来有人在特定网络下打不开根域，可先用 `multi-agent-assistant.pages.dev`
 > 作为备用入口（CORS 已放行，功能一致）。
 
-## 8. 尚未完成 / 后续
+## 8. 每日备份（已启用，2026-11-10）
 
-- **ECS 自身的每日备份**：`deploy/db-backup`（Supabase 版）现在指向的是**旧生产库**，
-  应改为备份 ECS 本地 PG（`pg_dump -h vp-postgres`）并传到七牛 `db-backups/`；
-- 七牛 AK/SK 曾多次出现在对话中，建议轮换（改 `.env` → 重启 backend）；
+`deploy/ecs/docker-compose.yml` 里的 `db-backup` 服务：`pg_dump --schema=public | gzip`
+→ 七牛 `db-backups/<UTC 时间戳>.sql.gz`，保留 7 天，每 24h 一次。
+
+```bash
+docker compose -f deploy/ecs/docker-compose.yml ps db-backup
+docker logs --tail 20 vp-db-backup
+docker exec -e RUN_ONCE=1 vp-db-backup /usr/local/bin/backup.sh   # 手动跑一次
+```
+
+2026-11-10 实测：dump 21 MB / 30 秒；**上传耗时约 9 分钟**（美东 → 七牛华南约 40 KB/s），
+`db-backups/` 下已生成两个对象。日常备份对时延不敏感，可接受；若要更快，
+可改为在**国内机器**上执行 `pg_dump`（跨公网连 ECS 需加白名单）或换就近的 R2。
+
+## 9. 安全基线（根据 Cloudflare Security Insights 2026-11-10 处置）
+
+| 项 | 状态 |
+| --- | --- |
+| Cloudflare 账号 MFA | 用户已开启 |
+| Always Use HTTPS | **on**（`http://api.veripaper.me` → 301） |
+| 最低 TLS 版本 | **1.2**（TLS 1.0/1.1 握手被拒） |
+| HSTS | **on**，`max-age=15768000; includeSubDomains`（未开 preload，保留回退余地） |
+| 未知 Host 探测 | nginx `default_server` → `444`，消除「悬空 A 记录」的判定特征 |
+| SSH | **仅密钥**（`PasswordAuthentication no`、`PermitRootLogin prohibit-password`），
+drop-in 在 `/etc/ssh/sshd_config.d/99-veripaper-keyonly.conf` |
+| Bot Fight Mode | **未开**：会对 API 客户端发 JS 挑战，纯 API 域名开启风险大于收益 |
+| Security.txt / AI Labyrinth / Turnstile | 未做，低优先级 |
+
+## 10. 尚未完成 / 后续
+
+- 七牛 AK/SK 曾多次出现在对话与终端输出中，**建议轮换**（改 `.env` → 重启 backend 与 db-backup）；
 - 真实嵌入模型（`INSTALL_RAG_MODELS=true`）未在该镜像启用，检索质量仍是 Mock 嵌入；
 - `/metrics` 已在网关屏蔽；如需采集请走内网或加鉴权。

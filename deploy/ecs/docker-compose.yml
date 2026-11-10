@@ -95,6 +95,36 @@ services:
     depends_on:
       - backend
 
+  # 每日把本地 PG 备份到七牛云（复用 deploy/db-backup 的镜像与脚本）
+  #
+  # 为什么不是指向 Supabase 的那份：Supabase 现在只是回滚用的旧库，
+  # 生产数据在 vp-postgres 里，备份必须打它。
+  db-backup:
+    build:
+      context: ../..
+      dockerfile: deploy/db-backup/Dockerfile
+    image: veripaper-db-backup:local
+    container_name: vp-db-backup
+    restart: unless-stopped
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: ${POSTGRES_DB:?}
+      PGUSER: ${POSTGRES_USER:?}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?}
+      # 容器网络内直连，无 TLS
+      PGSSLMODE: disable
+      S3_ENDPOINT: ${STORAGE__S3_ENDPOINT:-}
+      S3_REGION: ${STORAGE__S3_REGION:-cn-east-1}
+      S3_BUCKET: ${STORAGE__S3_BUCKET:-}
+      S3_ACCESS_KEY_ID: ${STORAGE__S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${STORAGE__S3_SECRET_ACCESS_KEY:-}
+      S3_PREFIX: db-backups
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-7}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   pgdata:
   redisdata:
