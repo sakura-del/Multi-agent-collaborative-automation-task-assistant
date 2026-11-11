@@ -226,6 +226,25 @@ class TestUpsert:
             )
 
 
+class TestDeleteByIds:
+    def test_deletes_by_parameterized_ids(self) -> None:
+        backend, pool = _make_backend(script=[{"rowcount": 2}])
+
+        removed = backend.delete_by_ids(["c1", "c2"])
+
+        assert removed == 2
+        statement, params = pool.cursor.executed[-1]
+        assert "DELETE FROM" in statement
+        assert "id = ANY(%s)" in statement
+        assert params == ("kb", ["c1", "c2"])
+
+    def test_empty_ids_do_not_touch_database(self) -> None:
+        backend, pool = _make_backend()
+
+        assert backend.delete_by_ids([]) == 0
+        assert pool.cursor.executed == []
+
+
 class TestQuery:
     def _hits(self) -> list[dict[str, Any]]:
         return [

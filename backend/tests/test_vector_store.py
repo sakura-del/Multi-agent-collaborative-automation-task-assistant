@@ -125,6 +125,13 @@ class TestVectorStoreRemove:
         vector_store.add_chunks(_make_chunks(2))
         assert vector_store.remove_doc("nonexistent") == 0
 
+    def test_remove_chunks_deletes_exact_ids(self, vector_store: VectorStore) -> None:
+        vector_store.add_chunks(_make_chunks(3))
+
+        assert vector_store.remove_chunks(["chunk-0", "chunk-2"]) == 2
+        assert vector_store.list_ids() == ["chunk-1"]
+        assert vector_store.remove_chunks([]) == 0
+
 
 class TestVectorStoreClear:
     """向量库清空。"""

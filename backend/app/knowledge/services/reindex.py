@@ -54,6 +54,9 @@ class ReindexResult:
     indexed: int
     failed_batches: int = 0
     errors: list[str] = field(default_factory=list)
+    #: 对账时发现的孤儿数与实际删除数；普通全量模式始终为 0
+    orphans_present: int = 0
+    deleted_orphans: int = 0
     #: 端到端耗时（毫秒）：远程库上「网络往返」是主要成本，必须可观测
     elapsed_ms: int = 0
 
@@ -63,6 +66,8 @@ class ReindexResult:
             "indexed": self.indexed,
             "failed_batches": self.failed_batches,
             "errors": list(self.errors),
+            "orphans_present": self.orphans_present,
+            "deleted_orphans": self.deleted_orphans,
             "elapsed_ms": self.elapsed_ms,
         }
 
@@ -75,6 +80,7 @@ async def reindex_from_chunks(
     user_id: Any | None = None,
     dry_run: bool = False,
     limit: int | None = None,
+    reconcile: bool = False,
 ) -> ReindexResult:
     """从 `DocChunk` 重建向量（保持 chunk_id 不变）。
 
@@ -82,7 +88,9 @@ async def reindex_from_chunks(
     - `session`：`AsyncSession`；
     - `vector_store`：需提供 `add_chunks(list[TextChunk])`；
     - `user_id`：只重建某用户的（多租户场景下按需）；
-    - `dry_run`：只统计计划数量，不写入。
+    - `dry_run`：只统计计划数量，不写入；
+    - `reconcile`：只补目标库缺失 ID，并在缺项全部成功后删除孤儿；
+      普通模式仍全量 upsert，不删除任何向量。
     """
     from app.knowledge.services.chunker import TextChunk
 
@@ -96,14 +104,33 @@ async def reindex_from_chunks(
         stmt = stmt.where(KnowledgeDoc.user_id == user_id)
 
     rows = (await session.execute(stmt)).all()
+    orphan_ids: list[str] = []
+    if reconcile:
+        # 影子表后台重建期间，原表仍可能新增/删除文档。只补缺失 ID，
+        # 已同步的 ID 不再生成嵌入；孤儿在缺项全部成功后才删除。
+        current_ids = {str(row.id) for row, _owner in rows}
+        store_ids = set(vector_store.list_ids())
+        missing_ids = current_ids - store_ids
+        orphan_ids = sorted(store_ids - current_ids)
+        rows = [row for row in rows if str(row[0].id) in missing_ids]
+
     # `limit` 只用于远程环境的小样本演练；0/None 都表示不限制
     if limit:
         rows = rows[: max(0, int(limit))]
     planned = len(rows)
 
     if dry_run:
-        logger.info("reindex_dry_run", planned=planned)
-        return ReindexResult(planned=planned, indexed=0)
+        logger.info(
+            "reindex_dry_run",
+            planned=planned,
+            orphans=len(orphan_ids),
+            reconcile=reconcile,
+        )
+        return ReindexResult(
+            planned=planned,
+            indexed=0,
+            orphans_present=len(orphan_ids),
+        )
 
     indexed = 0
     failed_batches = 0
@@ -161,12 +188,24 @@ async def reindex_from_chunks(
         if commit is not None:
             await commit()
 
+    deleted_orphans = 0
+    if reconcile and failed_batches == 0 and orphan_ids:
+        deleted_orphans = int(vector_store.remove_chunks(orphan_ids))
+        logger.info(
+            "reindex_orphans_deleted",
+            planned=len(orphan_ids),
+            deleted=deleted_orphans,
+        )
+
     elapsed_ms = int((time.perf_counter() - started_at) * 1000)
     logger.info(
         "reindex_done",
         planned=planned,
         indexed=indexed,
         failed_batches=failed_batches,
+        orphans=len(orphan_ids),
+        deleted_orphans=deleted_orphans,
+        reconcile=reconcile,
         elapsed_ms=elapsed_ms,
     )
     return ReindexResult(
@@ -174,6 +213,8 @@ async def reindex_from_chunks(
         indexed=indexed,
         failed_batches=failed_batches,
         errors=errors,
+        orphans_present=len(orphan_ids),
+        deleted_orphans=deleted_orphans,
         elapsed_ms=elapsed_ms,
     )
 

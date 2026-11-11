@@ -174,6 +174,14 @@ class VectorStore:
         )
         return removed
 
+    def remove_chunks(self, chunk_ids: list[str]) -> int:
+        """按 chunk ID 精确删除，供影子索引对账清理孤儿。"""
+        if not chunk_ids:
+            return 0
+        removed = self._backend.delete_by_ids(chunk_ids)
+        logger.info("vector_chunks_removed", backend=self._backend_name, count=removed)
+        return removed
+
     def clear(self) -> None:
         """清空当前 collection（重建）。"""
         self._backend.reset()

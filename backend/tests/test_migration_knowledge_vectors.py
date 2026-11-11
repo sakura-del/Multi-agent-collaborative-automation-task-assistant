@@ -23,6 +23,7 @@ from alembic.script import ScriptDirectory
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 NEW_REVISION = "d5a8c1e3f7b2"
+EXPECTED_HEAD = "c4f2a8d7e9b1"
 MIGRATION_FILE = BACKEND_DIR / "alembic" / "versions" / f"{NEW_REVISION}_add_knowledge_vectors.py"
 
 
@@ -40,7 +41,7 @@ def _migration_module() -> ModuleType:
 
 class TestMigrationChain:
     def test_single_head(self) -> None:
-        assert _script().get_heads() == [NEW_REVISION]
+        assert _script().get_heads() == [EXPECTED_HEAD]
 
     def test_new_revision_follows_reference_library(self) -> None:
         revision = _script().get_revision(NEW_REVISION)

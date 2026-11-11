@@ -60,7 +60,7 @@ class VectorMatch:
 
 @runtime_checkable
 class VectorBackend(Protocol):
-    """向量后端协议：门面只依赖这六个方法。"""
+    """向量后端协议：门面只依赖这里定义的存储方法。"""
 
     name: str
 
@@ -84,6 +84,10 @@ class VectorBackend(Protocol):
 
     def delete_by_doc(self, doc_id: str) -> int:
         """删除某文档的全部向量，返回实际删除条数。"""
+        ...
+
+    def delete_by_ids(self, ids: list[str]) -> int:
+        """按 chunk ID 精确删除，返回实际删除条数。"""
         ...
 
     def reset(self) -> None:

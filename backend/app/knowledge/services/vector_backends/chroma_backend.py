@@ -128,6 +128,15 @@ class ChromaVectorBackend:
         after = self._collection.count()
         return int(before - after)
 
+    def delete_by_ids(self, ids: list[str]) -> int:
+        """按 chunk ID 精确删除；空列表不访问 Chroma。"""
+        if not ids:
+            return 0
+        self._ensure_collection()
+        before = self._collection.count()
+        self._collection.delete(ids=ids)
+        return int(before - self._collection.count())
+
     def reset(self) -> None:
         """重建 collection（删除后重新创建）。"""
         self._ensure_collection()

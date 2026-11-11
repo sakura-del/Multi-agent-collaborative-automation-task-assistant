@@ -40,12 +40,30 @@ from app.knowledge.services.reindex import ReindexResult, reindex_from_chunks
 class _RecordingVectorStore:
     """记录写入的 id 与文本。"""
 
-    def __init__(self, *, fail_on_batch: int | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        fail_on_batch: int | None = None,
+        initial_ids: list[str] | None = None,
+    ) -> None:
         self.ids: list[str] = []
         self.texts: list[str] = []
         self.batches: list[int] = []
+        self.deleted_ids: list[str] = []
+        self._store_ids = list(initial_ids or [])
         self._fail_on_batch = fail_on_batch
         self._batch_index = 0
+
+    def list_ids(self) -> list[str]:
+        return sorted(self._store_ids)
+
+    def remove_chunks(self, chunk_ids: list[str]) -> int:
+        if not chunk_ids:
+            return 0
+        before = len(self._store_ids)
+        self.deleted_ids.extend(chunk_ids)
+        self._store_ids = [item for item in self._store_ids if item not in set(chunk_ids)]
+        return before - len(self._store_ids)
 
     def add_chunks(self, chunks: list[Any]) -> int:
         """与真实 `VectorStore.add_chunks(chunks)` 签名一致。"""
@@ -56,6 +74,7 @@ class _RecordingVectorStore:
         for chunk in chunks:
             self.ids.append(chunk.chunk_id)
             self.texts.append(chunk.text)
+            self._store_ids.append(chunk.chunk_id)
         return len(chunks)
 
 
@@ -242,6 +261,79 @@ class TestDryRun:
         assert store.ids == [], "dry-run 不应写入任何向量"
         assert result.indexed == 0
         assert result.planned == 20, "dry-run 应报出计划写入的数量"
+
+
+class TestReconcile:
+    @pytest.mark.asyncio
+    async def test_writes_only_missing_and_deletes_orphans(self) -> None:
+        chunks = _chunks(3)
+        store = _RecordingVectorStore(initial_ids=[str(chunks[1].id), "orphan"])
+
+        result = await reindex_from_chunks(
+            session=_FakeSession(chunks),
+            vector_store=store,
+            batch_size=10,
+            reconcile=True,
+        )
+
+        assert result.planned == 2
+        assert result.indexed == 2
+        assert store.batches == [2], "已存在的 chunk 不得重新计算嵌入"
+        assert set(store.ids) == {str(chunks[0].id), str(chunks[2].id)}
+        assert store.deleted_ids == ["orphan"]
+        assert result.orphans_present == 1
+        assert result.deleted_orphans == 1
+
+    @pytest.mark.asyncio
+    async def test_dry_run_has_no_write_or_delete(self) -> None:
+        chunks = _chunks(3)
+        store = _RecordingVectorStore(initial_ids=[str(chunks[1].id), "orphan"])
+
+        result = await reindex_from_chunks(
+            session=_FakeSession(chunks),
+            vector_store=store,
+            reconcile=True,
+            dry_run=True,
+        )
+
+        assert result.planned == 2
+        assert result.orphans_present == 1
+        assert result.deleted_orphans == 0
+        assert store.batches == []
+        assert store.deleted_ids == []
+
+    @pytest.mark.asyncio
+    async def test_normal_mode_still_rewrites_all_without_deleting(self) -> None:
+        chunks = _chunks(3)
+        store = _RecordingVectorStore(initial_ids=[str(chunks[1].id), "orphan"])
+
+        result = await reindex_from_chunks(
+            session=_FakeSession(chunks),
+            vector_store=store,
+            batch_size=10,
+        )
+
+        assert result.planned == 3
+        assert store.batches == [3]
+        assert len(store.ids) == 3
+        assert store.deleted_ids == []
+        assert result.orphans_present == 0
+
+    @pytest.mark.asyncio
+    async def test_failed_missing_write_preserves_orphans_for_retry(self) -> None:
+        chunks = _chunks(2)
+        store = _RecordingVectorStore(initial_ids=["orphan"], fail_on_batch=1)
+
+        result = await reindex_from_chunks(
+            session=_FakeSession(chunks),
+            vector_store=store,
+            reconcile=True,
+        )
+
+        assert result.failed_batches == 1
+        assert result.orphans_present == 1
+        assert result.deleted_orphans == 0
+        assert store.deleted_ids == []
 
 
 class TestResultShape:

@@ -496,6 +496,19 @@ class PgVectorBackend:
             cur.execute(statement, (self._collection, doc_id))
             return int(cur.rowcount or 0)
 
+    def delete_by_ids(self, ids: list[str]) -> int:
+        """按 chunk ID 精确删除；空列表不访问数据库。"""
+        if not ids:
+            return 0
+        self._ensure_collection()
+        assert self._table_ident is not None
+        statement = sql.SQL("DELETE FROM {table} WHERE collection = %s AND id = ANY(%s)").format(
+            table=self._table_ident
+        )
+        with self._cursor() as cur:
+            cur.execute(statement, (self._collection, ids))
+            return int(cur.rowcount or 0)
+
     def reset(self) -> None:
         """清空当前 collection 的行。
 
