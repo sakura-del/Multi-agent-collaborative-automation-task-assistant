@@ -22,7 +22,10 @@
 
 ## 一、Critical
 
-### C-1 用户上传的 Word 模板可触发 Jinja2 SSTI，进而远程执行命令
+### C-1 用户上传的 Word 模板可触发 Jinja2 SSTI，进而远程执行命令 —— ✅ 已修复（2026-11-11）
+
+> 修复提交 `5421a98`，生产镜像 `bd6cb7ad39f5`，Issue #9 已关闭。
+> 详见文末「修复状态」。
 
 - **位置**：`backend/app/tools/templates/`（`inspector.py` 校验、`renderer.py` 渲染）
 - **根因**：`docxtpl` 使用默认 Jinja2 `Environment`（非 SandboxedEnvironment）。
@@ -172,3 +175,37 @@
   已 `DEL` 清理（核查后 `ratelimit:*` 数量为 0，`quota:*` 未受影响）。
 - 未创建任何账号、未上传模板、未修改业务数据。
 - 所有 payload 均在本地沙箱验证，未在生产执行命令。
+
+---
+
+## 修复状态（2026-11-11）
+
+### C-1 模板 SSTI —— 已修复并生产验证
+
+**提交**：`5421a98 fix: block template ssti leading to rce`
+
+| 层 | 改动 |
+| --- | --- |
+| 上传校验 | `inspector.py` 新增 `_validate_jinja_expressions`，白名单只放行 `{{ identifier }}`；`{% ... %}` 控制标签一律拒绝 |
+| 渲染 | `renderer.py` 改用 `jinja_env=SandboxedEnvironment(autoescape=True)` 阻断 `__class__` / `__globals__` 逃逸 |
+| 测试 | 新增 `tests/test_template_ssti_security.py`（14 条） |
+
+**门禁**：black / ruff / mypy 通过；`pytest --cov-fail-under=80` → **3043 passed, 21 skipped, 89.62%**（903.9s）。
+**诚实性验证**：回退两处修复后 10 条测试变红，恢复后 14 条全绿。
+
+**生产验证**（镜像 `bd6cb7ad39f5`，容器 healthy，公网 ready）：
+
+| 攻击载荷 | 结果 |
+| --- | --- |
+| `{{ 7 * 7 }}` | **400** `含不允许的模板表达式：{{ 7 * 7 }}` |
+| 完整逃逸链（`__mro__` → `_wrap_close` → `os.popen`） | **400** 拒绝 |
+| `{% if flag %}x{% endif %}` | **400** 拒绝 |
+
+正常模板（`{{ title }}` / `{{ author }}`）**201 创建成功**，占位符识别为 `author`、`title`；测试模板已删除。
+
+**回滚锚点**：`veripaper-backend:shadow-mock`（`79ac91a4374c`）保留。
+
+### 其余项
+
+H-1 / H-2（凭据，Issue #10）、Medium、Low 均**未修复**，按 Issue #9 之外的清单继续。
+
