@@ -1,10 +1,11 @@
 # AGENTS.md — 项目上下文与开发约定
 
 > 本文件是**给 AI 编码助手看的交接文档**。新会话开始时请先读完本文件再动手。
-> 最后更新：2026-11-03（主动筛选已部署；新交接与蒸馏记录）
+> 最后更新：2026-11-11（上线后：M3 嵌入 + Pages Git 集成 + 安全排查与 #9 修复）
 >
-> **新会话请先读** → [docs/runbooks/2026-11-03-handoff.md](docs/runbooks/2026-11-03-handoff.md)
+> **新会话请先读** → [docs/runbooks/2026-11-11-handoff.md](docs/runbooks/2026-11-11-handoff.md)
 > （紧凑版：现状 / 未完成项 / 硬约束 / 命令与坑）。本文件查约定与历史坑，handoff 查「现在该干什么」。
+> 安全排查结论见 [docs/security/2026-11-11-security-audit.md](docs/security/2026-11-11-security-audit.md)。
 > 历史基线见 [2026-10-28-handoff.md](docs/runbooks/2026-10-28-handoff.md)。
 
 ---
@@ -20,23 +21,25 @@
 
 ---
 
-## 2. 状态快照（2026-10-28 基线；最新见 2026-11-03 handoff）
+## 2. 状态快照（2026-11-11 上线后；详见 2026-11-11 handoff）
 
 | 项 | 值 |
 | --- | --- |
-| 分支 | `main`（工作分支 `codex/plan3-literature-workflow` 与 main 同点） |
-| HEAD | … → 历史迁移 + CI 超时 `2f44ee8` → 模型切换 + 404 降级 `a1742f3` → 实验画像模型对齐 `f57553b` → 报告隐藏失败修复 `a23b8b6` → **指标采集修复 `5eeabae`** |
+| 分支 | `main` |
+| HEAD | **`5421a98`**（`fix: block template ssti leading to rce`）→ 前有 M3 上线 `090e29a`、Pages Git 集成、安全排查与 `security.txt` |
 | 冻结 tag | `defense-v1` |
 | Plan 状态 | Plan 2 / 3 / 4 / 5 **全部 Exit Gate PASSED**；**Phase 1 五项全部端到端可用且遗留清零**；**Phase 2 五项全部交付完成**（PRISMA ✅ + 可观测性 ✅ + 团队工作区 ✅ + 开放 API ✅ + 计费套餐 ✅） |
 | 产品化进度 | **Issue #2~#7 全部关闭且遗留清零**；**P1-D 配额遗留已修复**；**`max_results` 已夹紧**；**PRISMA 完成**；**可观测性完成**（8 指标 + `/metrics` + 看板，**看板数字已全部为真**）；**团队工作区完成**；**开放 API 完成**；**计费套餐完成**（四档 + 四条功能门禁 + 手工开通 + **套餐页已重设计**）；**引用样式页已重设计**（**真实渲染预览** + 删除二次确认）；**Word 模板页已修**（**不再把示例填充谎称成稿** + 删除二次确认）；**前端已迁移到 Tailwind v4 + shadcn-vue**；**引用库 + 证据闭环完成**；**review 长度上限缺陷已修**（`max_length` 不再施加到机器汇总） |
-| 数据库迁移 head | **`b7d4e9f1c6a2`**（`reference_library_item` 引用库表） |
-| 后端测试 | **2837 passed**, 8 skipped；覆盖率 **~89%**；`mypy` 0 错误（207 文件） |
-| 前端测试 | Vitest **458 passed**（+6 skipped）；**Playwright E2E 44 场景**（新增引用库编辑 1 条，chromium + mobile-chrome 双视口实测通过） |
-| CI | **最近一次全绿**：run `40653550585`（`73c5748` 前一个提交）。⚠️ **2026-10-28 起 CI 因 GitHub Actions 账单额度停摆**：报 `The job was not started because recent account payments have failed or your spending limit needs to be increased`，作业 0~2s 就 X，**不是代码问题**。等账单恢复或跨月后再看 CI。⚠️ **GitHub 直连时通时不通**：直连能用就直接 push；不通时走系统代理（`git -c http.proxy=http://127.0.0.1:7894 ...`，端口从注册表读，`gh` 需 `$env:HTTPS_PROXY`） |
-| 服务器 | 已部署至 `5eeabae`，五容器 healthy，`/api/v1/health/ready` → `{"status":"ready"}`，`alembic current` = **`b7d4e9f1c6a2 (head)`**，四套餐种子已就位，**向量库 id 级一致（28344 条）**，**`task.used_tokens` 已回填（169372，28 个任务）**，**6 个引用样式预览全部真实渲染（warnings=0）**，**引用库端到端跑通**，**元数据证据已生效（metadata 4/4 可追溯）**，**review 长度上限已修**，**校验结论已落库**，**历史校验已迁移（188 条）**，**模型 = `workbuddy-ai/deepseek-v4.1-flash`（容器内 FROZEN_MODEL 与 runtime 一致）**，**404 降级已实测生效**，**60 个实验任务在库（tasks 113 = 53 + 60）** |
+| 数据库迁移 head | **`c4f2a8d7e9b1`**（`knowledge_vectors_bge` 影子表；生产表名 `knowledge_vectors_bge`） |
+| 后端测试 | **3043 passed**, 21 skipped；覆盖率 **89.62%**；`mypy` 0 错误（216 文件） |
+| 前端测试 | Vitest **458 passed**（+6 skipped）；**Playwright E2E 44 场景**（chromium + mobile-chrome 双视口） |
+| 发布方式 | **前端：`git push backup main` 后 Cloudflare Pages 自动构建部署**（Git 集成，无需本机 Node）；**后端：bundle + `deploy/ecs` 目录 `docker compose build backend`** |
+| CI | ⚠️ **2026-10-28 起 CI 因 GitHub Actions 账单额度停摆**（报 spending limit），作业 0~2s 就 X，**不是代码问题**。⚠️ **GitHub 直连时通时不通**：不通时走代理（`git -c http.proxy=http://127.0.0.1:7894 ...`，`gh` 需 `$env:HTTPS_PROXY`） |
+| 服务器 | `root@47.253.81.6`，HEAD **`5421a98`**，backend 镜像 `bd6cb7ad39f5`（回滚锚点 `shadow-mock`=`79ac91a4374c`），五容器 healthy，公网 `ready`，嵌入 = **SiliconFlow BGE-M3**（1600 RPM / 400k TPM），两表各 **28,341** 条，磁盘 38% |
 
-**演示账号**：`demo` / `demo12345` —— **全权限管理员**（`role=admin` + `institution` 套餐：篇数不限 / 含团队 / 含开放 API）；知识库 11 篇 / 28341 分块
-**E2E 固定账号**：`e2efull` / `e2ereconn`，密码 `e2e-password-2026`（复用，不再每次注册——`auth_register` 限流 5 次/3600s）
+**演示账号**：`demo` / `demo12345` —— **全权限管理员**（`role=admin` + `institution` 套餐）；知识库 11 篇 / 28341 分块。
+⚠️ **这是已知安全问题 [#10](https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant/issues/10)：密码公开在本文件里且生产有效（admin）。公开演示前必须轮换。**
+**E2E 固定账号**：`e2efull` / `e2ereconn`，密码 `e2e-password-2026`（**同样属 #10，生产有效，上线后应删除或轮换**）
 
 ---
 
@@ -77,39 +80,41 @@ cd 'E:\Multi-agent collaborative automation task assistant\backend'
 - 前端（**只用 npm**，见 §6.5.6）：`cd frontend && npm run test` / `npm run build`
 - 本机**无法访问** `model.rhzy.ai`（直连 reset / 代理 TLS 失败）→ **真实模型实验只能在服务器跑**
 
-### 4.2 服务器（ylin@10.0.10.2，Ubuntu 24.04）
+### 4.2 生产服务器（root@47.253.81.6，Ubuntu 24.04）
+
+> ⚠️ 旧服务器 `ylin@10.0.10.2` 已停用（后端 stop，Supabase 2026-11-17 后删除）。
+> 现在**所有生产操作都在 `47.253.81.6` / `/opt/veripaper`**。
 
 ```bash
-cd ~/projects/multi-agent-assistant
-docker compose ps
-curl -s http://127.0.0.1:48080/api/v1/health/ready
+ssh root@47.253.81.6            # 私钥 C:\Users\Lenovo\.ssh\id_ed25519_hermes
+cd /opt/veripaper
+cd deploy/ecs && docker compose ps          # ← 生产编排文件在这个目录
+curl -s https://api.veripaper.me/api/v1/health/ready
 ```
 
-- venv 由 **uv** 创建，**没有 pip** → 装包用 `uv pip install --python .venv/bin/python <pkg>`
-- 测试环境变量：
-  ```bash
-  export APP_ENV=test
-  export DATABASE__URL="postgresql+asyncpg://maa:maa_secret_pwd@localhost:35433/multi_agent_assistant"
-  export JWT_SECRET_KEY="ci-test-secret-not-for-production"
-  ```
-- 宿主机端口（由未入库的 `docker-compose.override.yml` 指定）：postgres `35433` / redis `36379` / chroma `38002` / nginx `48080`
-- ⚠️ **服务器 CPU 单核吞吐约为本机 1/28**（2026-10-19 实测：同一非文献子集本地 14.89s vs 服务器 418.53s；主机 192 核、load ~44，多项目共存）。**不要在服务器跑全量 `pytest tests` 等结果**（约需 3 小时），服务器验证用「定向用例 + 容器内脚本」；全量门禁以本地为准
+- 服务器写 `.sh` 再 `bash` 执行（PowerShell 引号/glob 会被远端拆坏）
+- 长任务用 `setsid nohup ... > /tmp/x.log 2>&1 &` 脱离 SSH，再短命令轮询
+- ⚠️ 不要再在服务器跑全量 `pytest tests`；全量门禁以本地为准
 
-### 4.3 本地 → 服务器同步（标准流程）
+### 4.3 本地 → 生产服务器同步（2026-11-11 起）
 
 ```powershell
-# 本地
-$b = Join-Path $env:TEMP 'maa.bundle'
+# 本地：打包并上传（服务器 origin 指向 /root/vp.bundle）
+$b = Join-Path $env:TEMP 'vp.bundle'
 git bundle create $b --all
-scp $b ylin@10.0.10.2:~/maa.bundle
+scp -i 'C:\Users\Lenovo\.ssh\id_ed25519_hermes' $b root@47.253.81.6:/root/vp.bundle
 ```
 ```bash
-# 服务器
-cd ~/projects/multi-agent-assistant
-git fetch ~/maa.bundle "+refs/heads/*:refs/remotes/win/*"
-git merge --ff-only win/main
-docker compose build backend && docker compose up -d backend
+# 服务器（写成 deploy.sh 再 bash 执行）
+cd /opt/veripaper
+git fetch origin '+refs/heads/*:refs/remotes/origin/*'
+git merge --ff-only origin/main
+cd deploy/ecs                    # ← 必须在这个目录，否则镜像名会变成 multi-agent-assistant-backend
+docker compose build backend
+docker compose up -d backend
 ```
+
+前端**不需要**这一步：`git push backup main` 后 Cloudflare Pages 自动构建部署。
 
 ### 4.4 冒烟测试（隔离栈，不碰生产数据）
 
@@ -165,6 +170,10 @@ docker compose build backend && docker compose up -d backend
 | 38 | **禁止 `git add -A`：本仓库常有用户并行任务**（2026-10-28） | 用户同时在做 UI 重设计任务，工作区里有未跟踪的 `docs/design/`、`docs/superpowers/specs/*.md`。我用 `git add -A` 把它们一起提交进我的 fix commit，只能 `git reset --soft HEAD~1` 重做。**只 add 本任务的确切路径**，提交前 `git status --short` 逐条过一遍 |
 | 39 | **改画像/配置里的「约定值」要 grep 全部同类断言**（2026-10-28） | 切默认模型时把 `fallback_chain` 首项从 `deepseek` 改成 `workbuddy-ai/-sg`，有 4 处断言硬编码 `fallback_chain[0].provider == "deepseek"`，我只改了 3 处，**全量测试跑 14 分钟才暴露第 4 处**（`test_config_priority.py`）。改约定值前先 `grep -r 'fallback_chain\[0\]\|chain\[0\]' tests/` |
 | 40 | **实验类修复做完就停，不要顺手重跑矩阵**（2026-10-28） | 指标采集修好后我提议「重跑 60 run 验证」，被用户否决两次：交付在**次年 3 月**，现在重跑白烧 73 分钟和模型额度。采集逻辑有 11 条单测覆盖即可，**真实重跑等临近交付再做**。见 §6.2 |
+| 41 | **后端 build 必须在 `/opt/veripaper/deploy/ecs` 目录**（2026-11-11） | 在 `/opt/veripaper` 根目录跑 `docker compose build backend`，项目名不同 → 产出 `multi-agent-assistant-backend` 镜像，生产仍在跑旧镜像，**白构建一次**。判断部署是否生效看**镜像 ID 变化**，不是看 compose 输出「Built」 |
+| 42 | **SSH 长命令若输出被缓冲会断连**（2026-11-11） | `docker compose build \| tail -n 8` 在构建期间无输出，SSH 约 60 秒被对端断开，代码已同步但镜像没建。做法：`setsid nohup cmd > /tmp/x.log 2>&1 &`，再短命令轮询日志与镜像 ID |
+| 43 | **对生产做接口测试会消耗全局限流配额**（2026-11-11） | 限流按 nginx 容器 IP 计数（`trust_proxy=false`），`auth_register` 5 次/小时是**全局**的，测试后真实用户无法注册。测试完必须清理：`docker exec vp-redis redis-cli --scan --pattern 'ratelimit:*' \| xargs -r redis-cli DEL` |
+| 44 | **用户上传的 .docx 必须经 `validate_template_bytes` + 沙箱渲染**（2026-11-11） | docxtpl 默认用非沙箱 Jinja2，模板里的 `{{ ... }}` 可执行任意代码（SSTI→RCE，Issue #9）。新增模板相关入口时不要绕开校验；渲染必须传 `jinja_env=SandboxedEnvironment(autoescape=True)`。回归测试在 `tests/test_template_ssti_security.py` |
 
 ---
 
@@ -442,7 +451,8 @@ docs/superpowers/plans/             # 计划 + 执行记录（execution-notes）
 
 | 想知道什么 | 读哪个 |
 | --- | --- |
-| **接手新会话**（当前状态 / 剩余任务 / 命令 / 阻塞项） | [docs/runbooks/2026-11-03-handoff.md](docs/runbooks/2026-11-03-handoff.md) ⭐ **先读这个**；历史基线查 [2026-10-28-handoff.md](docs/runbooks/2026-10-28-handoff.md) |
+| **接手新会话**（当前状态 / 剩余任务 / 命令 / 阻塞项） | [docs/runbooks/2026-11-11-handoff.md](docs/runbooks/2026-11-11-handoff.md) ⭐ **先读这个**；历史基线查 [2026-10-28-handoff.md](docs/runbooks/2026-10-28-handoff.md) |
+| **安全排查结论与待修项**（1 Critical 已修 + 1 High 未修 + Medium/Low） | [docs/security/2026-11-11-security-audit.md](docs/security/2026-11-11-security-audit.md) |
 | **前端重设计怎么做的**（10 个阶段的设计取舍与实测证据） | [docs/superpowers/specs/2026-10-23-frontend-redesign-design.md](docs/superpowers/specs/2026-10-23-frontend-redesign-design.md) §4.5~§4.18 |
 | **用量看板为什么重做**（token 用量从未落库 + 5 个缺陷 + 数据修复） | 同上 §4.14 + [execution-notes](docs/superpowers/plans/2026-08-09-00-execution-notes.md) |
 | **套餐页为什么重做**（当前卡零权益 + 到期日缺失 + 无升级入口 + 6 缺陷） | 同上 §4.15 + [execution-notes](docs/superpowers/plans/2026-08-09-00-execution-notes.md) |
