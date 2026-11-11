@@ -10,6 +10,14 @@
 **当前不能认为"安全有保证"**：存在 **1 个 Critical（远程命令执行）**，
 以及 2 个高危凭据问题。其余为中低危配置加固项。
 
+### Issue 跟踪
+
+| Issue | 级别 | 标题 |
+| --- | --- | --- |
+| [#9](https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant/issues/9) | Critical | 用户上传 Word 模板可触发 SSTI，导致远程命令执行 |
+| [#10](https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant/issues/10) | High | demo 与 e2e 账号已知密码在生产有效，另有 25 个历史测试账号 |
+| [#11](https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant/issues/11) | 汇总 | 生产安全排查结果与修复计划（含全部 Medium/Low 清单） |
+
 ---
 
 ## 一、Critical
