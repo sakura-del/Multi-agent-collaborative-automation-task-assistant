@@ -506,6 +506,21 @@ git push backup main     # backup 指向 GitHub；推送后 Cloudflare 自动构
 在 Cloudflare → Workers & Pages → multi-agent-assistant → 部署 里查看进度。
 失败时先看构建日志的 `npm ci` / `vue-tsc` 输出，再核对上述环境变量是否仍在。
 
+### 13.5 自动部署闭环验证（2026-11-11）
+
+三次部署构成完整证据链：
+
+| 部署 | 时间 (JST) | 触发 | 提交 | 结果 |
+| --- | --- | --- | --- | --- |
+| `70669cfb` | 16:24 | ad_hoc（连接后首次） | `b063500` | 成功但**变量未注入**，前端不可用 |
+| `a7e83ca8` | 16:29 | ad_hoc（API 重试） | `b063500` | 成功，产物含正确 API 地址 |
+| `cb1bbf2f` | 16:33 | **github:push** | **`26dc12a`** | **成功**，自动部署闭环验证通过 |
+
+`cb1bbf2f` 由 push 到 `main` 自动触发，说明「push 即部署」生效。
+其产物与 `a7e83ca8` 同为 `index-DLpds5o8.js`（该次仅改文档，前端源码未变，
+hash 一致符合预期）。线上复核：首页 200、`security.txt` 为 `text/plain`、
+`api.veripaper.me` health ready、CORS 允许 `https://veripaper.me`。
+
 > 本节取代继续运行本地 BGE-large 的做法。生产服务器只调用 Embeddings API，
 > 不进行本地模型推理。设计/完整计划见
 > `docs/superpowers/specs/2026-11-11-siliconflow-bge-m3-design.md` 与
