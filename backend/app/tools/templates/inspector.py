@@ -55,6 +55,12 @@ _PKG_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
 
 #: docxtpl 段落级标签：必须独占段落（坑 #5）
 _PARAGRAPH_LEVEL_TAG = re.compile(r"\s*\{%-?\s*(?:p|tr)\b.*?%\}\s*", re.DOTALL)
+#: 模板包内所有 Jinja 表达式 / 语句片段
+_JINJA_CODE = re.compile(r"\{\{.*?\}\}|\{%.*?%\}", re.DOTALL)
+#: 唯一允许的表达式形态：`{{ identifier }}`（产品契约就是「占位符填内容」）。
+#: 不允许过滤器、属性访问、算术、`{% ... %}` 语句——docxtpl 使用非沙箱
+#: Jinja2 环境执行模板，任意表达式可升级为远程命令执行（安全 Issue #9）。
+_ALLOWED_EXPRESSION = re.compile(r"^\{\{\s*[A-Za-z_][A-Za-z0-9_]*\s*\}\}$")
 #: 关系属性（r:id / r:embed / r:link 等），用于定位引用被剥离关系的元素
 _RELATIONSHIP_ATTR_PREFIX = f"{{{_R_NS}}}"
 
@@ -124,7 +130,38 @@ def validate_template_bytes(data: bytes, *, source: str = "模板") -> None:
     """校验模板包结构、安全约束与 docxtpl 语法；不通过则抛领域异常。"""
     _validate_package(data, source=source)
     _validate_paragraph_level_tags(data, source=source)
+    _validate_jinja_expressions(data, source=source)
     extract_placeholder_keys(data)
+
+
+def _validate_jinja_expressions(data: bytes, *, source: str) -> None:
+    """拒绝模板中任何非简单占位符的 Jinja 代码（防 SSTI → 远程命令执行）。
+
+    安全边界（Issue #9）：`docxtpl` 用**非沙箱** Jinja2 环境渲染模板，
+    `{{ ... }}` 里可以是任意表达式，例如
+    `{{ ''.__class__.__mro__[1].__subclasses__()... }}` 可直接调用 `os.popen`。
+    这类 payload 不引入任何「未声明变量」，因此契约校验拦不住。
+
+    产品契约只要求「把占位符替换成内容」，所以此处按白名单只放行
+    `{{ identifier }}`；`{% ... %}`（含 docxtpl 的 `{%p%}` / `{%tr%}`）
+    的合法用法必然包含 Jinja 语句，属同一攻击面，一律拒绝。
+    渲染层另有 `SandboxedEnvironment` 兜底。
+
+    跨 XML 标签的碎片（Word 可能把占位符拆进多个 run）不在此处判定：
+    这类模板 docxtpl 自身会解析失败，由 ``extract_placeholder_keys`` 收敛。
+    """
+    for name, blob in _read_entries(data).items():
+        if not name.endswith(".xml"):
+            continue
+        text = blob.decode("utf-8", errors="ignore")
+        for match in _JINJA_CODE.finditer(text):
+            expression = match.group(0).strip()
+            if "<" in expression or ">" in expression:
+                continue
+            if not _ALLOWED_EXPRESSION.fullmatch(expression):
+                raise TemplateValidationError(
+                    f"{source} 的 {name} 含不允许的模板表达式：{expression[:80]}"
+                )
 
 
 def extract_placeholder_keys(data: bytes) -> list[str]:

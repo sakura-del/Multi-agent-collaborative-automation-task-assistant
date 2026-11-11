@@ -30,6 +30,7 @@ from docx import Document
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docxtpl import DocxTemplate
+from jinja2.sandbox import SandboxedEnvironment
 
 from app.core.logging import get_logger
 from app.tools.templates.inspector import (
@@ -205,8 +206,12 @@ def _validate_contract(
 def _render_with_docxtpl(data: bytes, context: dict[str, Any]) -> bytes:
     try:
         template = DocxTemplate(io.BytesIO(data))
-        # 坑 #5：autoescape 防止内容里的 < > & 破坏 XML
-        template.render(context, autoescape=True)
+        # 坑 #5：autoescape 防止内容里的 < > & 破坏 XML。
+        # 安全 Issue #9：docxtpl 默认用非沙箱 Jinja2 环境，模板里的
+        # `{{ ''.__class__... }}` 会真的执行；这里换成 SandboxedEnvironment，
+        # 阻断 `__class__` / `__globals__` / `__subclasses__` 一类属性逃逸。
+        environment = SandboxedEnvironment(autoescape=True)
+        template.render(context, jinja_env=environment)
         buffer = io.BytesIO()
         template.save(buffer)
     except TemplateRenderError:
