@@ -158,6 +158,14 @@ class RAGConfig(BaseModel):
     """RAG 知识库配置（阶段5填充）"""
 
     embedding_model: str = "BAAI/bge-large-zh"
+    # local = 本机 SentenceTransformers；siliconflow = 托管 Embeddings API
+    embedding_provider: str = "local"
+    siliconflow_api_key: str | None = None
+    siliconflow_base_url: str = "https://api.siliconflow.cn/v1"
+    # 免费 BGE-M3 的 2000 RPM / 500000 TPM 只使用 80%，给在线查询留余量
+    embedding_rpm: int = Field(default=1600, gt=0)
+    embedding_tpm: int = Field(default=400000, gt=0)
+    embedding_batch_size: int = Field(default=64, gt=0)
     reranker_model: str = "BAAI/bge-reranker-large"
     chunk_size: int = 512
     chunk_overlap: int = 64

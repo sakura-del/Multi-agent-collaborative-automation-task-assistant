@@ -23,6 +23,7 @@ from typing import Any
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.knowledge.services.vector_backends.base import VectorStoreConfigError
 
 logger = get_logger(__name__)
 
@@ -122,6 +123,15 @@ def create_embedding_service(
     if force_mock:
         logger.info("using_mock_embedding")
         return MockEmbeddingService()
+
+    provider = get_settings().rag.embedding_provider.strip().lower()
+    if provider == "siliconflow":
+        # 托管 API 的鉴权/配置错误不得落入本地 Mock 兜底，否则生产会静默换语义空间
+        from app.knowledge.services.siliconflow_embedding import SiliconFlowEmbeddingService
+
+        return SiliconFlowEmbeddingService()
+    if provider != "local":
+        raise VectorStoreConfigError(f"未知嵌入 provider：{provider}")
 
     try:
         return SentenceTransformerEmbeddingService()

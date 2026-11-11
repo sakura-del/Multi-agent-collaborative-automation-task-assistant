@@ -1,9 +1,14 @@
 """向量嵌入服务单元测试：Mock 模式与工厂函数。"""
 
+import pytest
+
+from app.core.config import get_settings
 from app.knowledge.services.embedding import (
     MockEmbeddingService,
     create_embedding_service,
 )
+from app.knowledge.services.siliconflow_embedding import SiliconFlowEmbeddingService
+from app.knowledge.services.vector_backends.base import VectorStoreConfigError
 
 
 class TestMockEmbeddingService:
@@ -82,3 +87,34 @@ class TestCreateEmbeddingService:
         svc = create_embedding_service()
         # 可能是 SentenceTransformerEmbeddingService 或 MockEmbeddingService
         assert svc.dimension > 0
+
+    def test_siliconflow_provider_returns_api_service(self, monkeypatch) -> None:
+        monkeypatch.setenv("RAG__EMBEDDING_PROVIDER", "siliconflow")
+        monkeypatch.setenv("RAG__EMBEDDING_MODEL", "BAAI/bge-m3")
+        monkeypatch.setenv("RAG__SILICONFLOW_API_KEY", "test-key")
+        get_settings.cache_clear()
+        try:
+            svc = create_embedding_service(force_mock=False)
+            assert isinstance(svc, SiliconFlowEmbeddingService)
+            assert svc.dimension == 1024
+        finally:
+            get_settings.cache_clear()
+
+    def test_siliconflow_missing_key_does_not_fallback_to_mock(self, monkeypatch) -> None:
+        monkeypatch.setenv("RAG__EMBEDDING_PROVIDER", "siliconflow")
+        monkeypatch.delenv("RAG__SILICONFLOW_API_KEY", raising=False)
+        get_settings.cache_clear()
+        try:
+            with pytest.raises(VectorStoreConfigError):
+                create_embedding_service(force_mock=False)
+        finally:
+            get_settings.cache_clear()
+
+    def test_unknown_embedding_provider_fails(self, monkeypatch) -> None:
+        monkeypatch.setenv("RAG__EMBEDDING_PROVIDER", "unknown")
+        get_settings.cache_clear()
+        try:
+            with pytest.raises(VectorStoreConfigError):
+                create_embedding_service(force_mock=False)
+        finally:
+            get_settings.cache_clear()

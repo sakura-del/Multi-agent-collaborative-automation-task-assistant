@@ -32,6 +32,7 @@ from app.knowledge.services.reranker import (
     MockReranker,
     create_reranker,
 )
+from app.knowledge.services.siliconflow_embedding import SiliconFlowEmbeddingService
 from app.knowledge.services.vector_backends.base import (
     VectorDimensionMismatchError,
     VectorStoreConfigError,
@@ -54,6 +55,7 @@ __all__ = [
     "MockReranker",
     "RetrievalCache",
     "SentenceTransformerEmbeddingService",
+    "SiliconFlowEmbeddingService",
     "VectorDimensionMismatchError",
     "VectorStore",
     "VectorStoreConfigError",
