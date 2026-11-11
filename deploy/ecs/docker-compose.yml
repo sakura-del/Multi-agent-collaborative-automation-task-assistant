@@ -52,19 +52,24 @@ services:
       context: ../..
       dockerfile: backend/Dockerfile
       args:
-        # 美东机器直连官方 PyPI；Mock 嵌入部署不需要 torch
+        # 美东机器直连官方 PyPI；真实 BGE 嵌入需要 CPU 版 torch 与 RAG 依赖
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
         TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
-        INSTALL_RAG_MODELS: ${INSTALL_RAG_MODELS:-false}
+        INSTALL_RAG_MODELS: ${INSTALL_RAG_MODELS:-true}
     container_name: vp-backend
     restart: unless-stopped
     # 全部配置走 env_file（.env 里已是 pydantic-settings 的嵌套名），
     # 避免根 compose 那种「白名单漏项」问题
     env_file:
       - ../../.env
+    environment:
+      HF_HOME: /app/.cache
+      # 双核 ECS 上真实嵌入只用单线程，给 PostgreSQL/Redis/网关保留余量
+      OMP_NUM_THREADS: "1"
     volumes:
       - uploads:/app/data/uploads
       - artifacts:/app/data/artifacts
+      - model_cache:/app/.cache
     expose:
       - "8000"
     depends_on:
@@ -130,3 +135,4 @@ volumes:
   redisdata:
   uploads:
   artifacts:
+  model_cache:
