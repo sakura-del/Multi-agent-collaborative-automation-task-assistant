@@ -26,7 +26,7 @@
 | 项 | 值 |
 | --- | --- |
 | 分支 | `main` |
-| HEAD | **`5421a98`**（`fix: block template ssti leading to rce`）→ 前有 M3 上线 `090e29a`、Pages Git 集成、安全排查与 `security.txt` |
+| HEAD | **`105b383`**（`fix(security): 轮换 demo 口令并清理 26 个测试账号`）→ `5421a98`（SSTI 修复）→ `090e29a`（M3 上线）、Pages Git 集成、安全排查与 `security.txt` |
 | 冻结 tag | `defense-v1` |
 | Plan 状态 | Plan 2 / 3 / 4 / 5 **全部 Exit Gate PASSED**；**Phase 1 五项全部端到端可用且遗留清零**；**Phase 2 五项全部交付完成**（PRISMA ✅ + 可观测性 ✅ + 团队工作区 ✅ + 开放 API ✅ + 计费套餐 ✅） |
 | 产品化进度 | **Issue #2~#7 全部关闭且遗留清零**；**P1-D 配额遗留已修复**；**`max_results` 已夹紧**；**PRISMA 完成**；**可观测性完成**（8 指标 + `/metrics` + 看板，**看板数字已全部为真**）；**团队工作区完成**；**开放 API 完成**；**计费套餐完成**（四档 + 四条功能门禁 + 手工开通 + **套餐页已重设计**）；**引用样式页已重设计**（**真实渲染预览** + 删除二次确认）；**Word 模板页已修**（**不再把示例填充谎称成稿** + 删除二次确认）；**前端已迁移到 Tailwind v4 + shadcn-vue**；**引用库 + 证据闭环完成**；**review 长度上限缺陷已修**（`max_length` 不再施加到机器汇总） |
@@ -35,7 +35,7 @@
 | 前端测试 | Vitest **458 passed**（+6 skipped）；**Playwright E2E 44 场景**（chromium + mobile-chrome 双视口） |
 | 发布方式 | **前端：`git push backup main` 后 Cloudflare Pages 自动构建部署**（Git 集成，无需本机 Node）；**后端：bundle + `deploy/ecs` 目录 `docker compose build backend`** |
 | CI | ⚠️ **2026-10-28 起 CI 因 GitHub Actions 账单额度停摆**（报 spending limit），作业 0~2s 就 X，**不是代码问题**。⚠️ **GitHub 直连时通时不通**：不通时走代理（`git -c http.proxy=http://127.0.0.1:7894 ...`，`gh` 需 `$env:HTTPS_PROXY`） |
-| 服务器 | `root@47.253.81.6`，HEAD **`5421a98`**，backend 镜像 `bd6cb7ad39f5`（回滚锚点 `shadow-mock`=`79ac91a4374c`），五容器 healthy，公网 `ready`，嵌入 = **SiliconFlow BGE-M3**（1600 RPM / 400k TPM），两表各 **28,341** 条，磁盘 38% |
+| 服务器 | `root@47.253.81.6`，HEAD **`105b383`**，backend 镜像 `81cdeb767d98`（回滚锚点 `shadow-mock`=`79ac91a4374c`），五容器 healthy，公网 `ready`，嵌入 = **SiliconFlow BGE-M3**（1600 RPM / 400k TPM），**user=1（仅 demo）/ task 86 / doc_chunk 2835 / 两表各 2835**（2026-11-11 清掉 26 个测试账号后），磁盘 38% |
 
 **演示账号**：`demo` —— **全权限管理员**（`role=admin` + `institution` 套餐：篇数不限 / 含团队 / 含开放 API）；知识库 11 篇 / 2835 分块（2026-11-11 清理测试账号后，全库仅剩 demo）。
 **口令不入仓库**：2026-11-11 已轮换为强随机口令，只存在于服务器 `/opt/veripaper/.demo-password`（600）与口令管理器；要登录就 `ssh root@47.253.81.6 cat /opt/veripaper/.demo-password`。
