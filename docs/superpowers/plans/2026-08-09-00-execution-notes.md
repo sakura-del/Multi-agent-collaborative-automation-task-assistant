@@ -4295,3 +4295,14 @@ air tokens 只服务两页，不替换 success/warning/destructive。证据卡�
 - 最终负载：load `0.20/0.29/0.31`、`MemAvailable=2294 MB`、根盘 7.3 GB 可用；五容器 healthy，无遗留 reindex 容器。切换后数据库备份已确认上传：`db-backups/20261111T061422Z.sql.gz`，**135 MB**，dump 2 分 37 秒、上传约 15 分钟。
 - **磁盘清理（用户要求）**：上线后根盘到 81%（30G/40G）。清理构建缓存 12.44 GB、`bge-real` 3.92 GB、dangling `183500694951` 3.92 GB、`mock-pre-bge` 2.14 GB、`model_cache` 卷内容 1.2 GB、旧 bundle 约 90 MB、辅助 alpine 12.9 MB，共释放约 **18.7 GB**，根盘降至 **33%（12G/40G，26G 可用）**。保留 `latest`/`shadow-mock`（`79ac91a4374c`）、备份镜像、四个基础镜像、`pgdata` 与 `/opt/veripaper/backup` 两份 Supabase dump。
 - 清理后回归：公网 health ready、frontend 200、M3 实时调用 **870 ms / 1024 维 / 8 tokens**、两表各 **28,341** 条、backend `healthy`、五容器运行中。
+
+### Issue #10 账号口令（2026-11-11 修复）
+
+- 安全排查（`docs/security/2026-11-11-security-audit.md` H-1/H-2）结论：`demo` 用公开在仓库文档里的弱口令即可登录且是 `admin`；`e2efull`/`e2ereconn` 同样已知口令有效；库内另有 24 个历史测试账号。
+- **先写失败测试**：`backend/tests/test_no_plaintext_credentials.py`（全仓库扫描 + `verify.sh` 不得有默认口令 + E2E 凭据必须来自环境变量）与 `backend/tests/test_account_hygiene.py`（口令生成 / 测试账号识别 / 清理硬规则 / 向量表选择）。首次运行 **3 failed + 1 passed** / **ModuleNotFoundError**，确认变红后才写实现。
+- 实现 `backend/scripts/account_hygiene.py`：`audit`（可读泄漏口令文件做弱口令比对）、`rotate`（32 位强随机 + `token_invalid_before` 强制下线）、`purge`（默认 dry-run，`demo` 受保护、任何 admin 拒删、名字不像测试账号拒删、拼错也拒；按 `user_id` 显式清两张裸向量表；执行后自动回查）。测试 **35 passed**。
+- **踩坑并修正**：首版 rotate 先 `commit` 再写口令文件，容器写 `/opt/veripaper`（未挂载）失败 → 口令已改、新值丢失，账号被锁死。改为**先落盘再改库**，并重新轮换一次；该坑写进 §5 铁律 #28。
+- 生产执行（2026-11-11 17:15–17:20 JST，ECS）：先做 `pg_dump -Fc` 备份 **140 MB**（`/opt/veripaper/backup/pre-issue10-20261111-171506.dump`，600）+ 账号清单存档；旧口令登录 **200** → 轮换 → 旧口令 **401**、新口令 **200** 且 `/auth/me` = `demo/admin/active`；`purge --apply` 删除 **26 个账号**，级联 15 任务 / 90 文档 / 25506 分块，**显式删向量 51012 条**（2 表 × 25506）。
+- 回查（AGENTS §5 #11）：残留账号 **0**、全库孤儿向量 **0**；`user=1 / task=86 / knowledge_doc=11 / doc_chunk=2835 / vector_index=2835 / knowledge_vectors=2835 / knowledge_vectors_bge=2835 / workspace=4 / api_key=1 / subscription=1`。业务回归：`/health/ready` ready（db/redis/vector ok）、`/knowledge/search` 返回 demo 真实分块。临时口令/令牌文件已 `shred -u` 并回查。
+- 仓库脱敏：`AGENTS.md`、两份 handoff、安全报告、phase2 plan、`frontend/e2e/*`（18 个 spec 改读 `E2E_DEMO_PASSWORD`/`E2E_SECONDARY_PASSWORD`，新增 `frontend/e2e/credentials.ts`）、`deploy/ecs/verify.sh`（`${PASSWORD:?}`）、后端 E2E 夹具（每次 `secrets.token_urlsafe(24)`）。全仓库 `grep` 命中 **0**，守卫测试 **4 passed**。
+- 门禁：black 423 文件 / ruff 0 / mypy **216 文件 0 错误**；pytest **3064 passed / 21 skipped / 覆盖率 90%**。仍有 **4 failed**：`test_csl_style_files::TestAttribution::test_records_actual_sha256`，原因是本 worktree 的系统级 `core.autocrlf=true` 把 `.csl` 换成 CRLF（`tr -d '\r'` 后哈希与 `ATTRIBUTION.md` 完全一致），与本次改动无关，已写入 §5 铁律 #29，未改哈希也未提交被转换的文件。前端 Vitest **494 passed / 6 skipped**，`playwright test --list` **92 tests / 18 files** 解析通过。

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { demoPassword } from "./credentials";
 
 // 样式页「修复后量数值」验收（AGENTS §6.5.7）：与修复前取证逐项对照。
 const API = "http://10.0.10.2:48080/api/v1";
@@ -12,7 +13,7 @@ async function loginAs(page: Page, account: string, password: string) {
 }
 
 test("样式页修复后：预览/差异/告警/对比度", async ({ page }) => {
-  await loginAs(page, "demo", "demo12345");
+  await loginAs(page, "demo", demoPassword());
   await page.goto("/styles");
   await expect(page.locator('[data-test^="style-row-"]').first()).toBeVisible({
     timeout: 30_000,

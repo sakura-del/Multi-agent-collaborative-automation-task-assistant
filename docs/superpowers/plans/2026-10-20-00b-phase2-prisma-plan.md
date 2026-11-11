@@ -2630,7 +2630,7 @@ def emit(text: str = "") -> None:
     lines.append(text)
 
 with httpx.Client(base_url=BASE, timeout=90.0) as client:
-    token = client.post("/auth/login", json={"account": "demo", "password": "demo12345"}).json()["access_token"]
+    token = client.post("/auth/login", json={"account": "demo", "password": os.environ["DEMO_PASSWORD"]}).json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
 
     task = client.post(
@@ -2729,7 +2729,8 @@ pnpm exec playwright test e2e/phase2-prisma.spec.ts --reporter=line
 import { expect, test, type Page } from "@playwright/test";
 
 // PRISMA 筛选工作台页面验收（Phase 2）
-const CREDENTIALS = { account: "demo", password: "demo12345" };
+// 口令不入仓库（Issue #10）：运行时从环境变量取
+const CREDENTIALS = { account: "demo", password: process.env.E2E_DEMO_PASSWORD ?? "" };
 
 async function login(page: Page) {
   await page.goto("/login");

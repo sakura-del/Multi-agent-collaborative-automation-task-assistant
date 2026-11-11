@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
+import { demoPassword } from "./credentials";
 
 /**
  * 引用库条目编辑的真实浏览器验证（2026-10-27）。
@@ -33,7 +34,7 @@ import type { Page } from "@playwright/test";
  * 说明它抓的是「页面真的更新了」，不是「接口被调用了」。
  */
 
-const CREDENTIALS = { account: "demo", password: "demo12345" };
+const CREDENTIALS = { account: "demo", password: demoPassword() };
 
 /** 造一条引用库条目；返回 item_id。 */
 async function seedItem(page: Page, title: string): Promise<string> {

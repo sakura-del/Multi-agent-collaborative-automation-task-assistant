@@ -2,15 +2,16 @@
 # ECS 部署验收：健康、文档标题、CORS 预检、关键接口计时。
 #
 # 用法：
-#   bash deploy/ecs/verify.sh                    # 走本机网关 127.0.0.1:80
-#   BASE=https://api.veripaper.me bash deploy/ecs/verify.sh
+#   ACCOUNT=demo PASSWORD=$(cat /opt/veripaper/.demo-password) bash deploy/ecs/verify.sh
+#   BASE=https://api.veripaper.me ACCOUNT=demo PASSWORD=*** bash deploy/ecs/verify.sh
 # 注意：不要用 127.0.0.1:8000 —— backend 只在容器网络内 expose，宿主上没监听
+# 口令必须显式传入：仓库里不留默认口令（Issue #10）
 set -uo pipefail
 
 BASE="${BASE:-http://127.0.0.1}"
 ORIGIN="${ORIGIN:-https://multi-agent-assistant.pages.dev}"
 ACCOUNT="${ACCOUNT:-demo}"
-PASSWORD="${PASSWORD:-demo12345}"
+PASSWORD="${PASSWORD:?需要设置 PASSWORD（演示账号口令在服务器 /opt/veripaper/.demo-password）}"
 
 fail=0
 ok()   { printf '  \033[32m✔\033[0m %s\n' "$1"; }

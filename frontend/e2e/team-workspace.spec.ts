@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { demoPassword } from "./credentials";
 
 // 团队工作区 + 席位 + 导师批注走查（Phase 2）
 //
@@ -36,7 +37,7 @@ test("团队页：创建团队 + 席位用量展示", async ({ page }) => {
   const teamName = `E2E 团队 ${stamp}`;
   const slug = `e2e-team-${stamp}`.toLowerCase().replace(/[^a-z0-9-]/g, "-");
 
-  await login(page, "demo", "demo12345");
+  await login(page, "demo", demoPassword());
   await page.goto("/workspaces");
 
   await expect(page.getByRole("heading", { name: "团队" })).toBeVisible({ timeout: 30_000 });
@@ -85,7 +86,7 @@ test("任务详情页展示导师批注面板", async ({ page, request }) => {
   const content = `E2E 批注 ${stamp}`;
 
   const loginResp = await request.post(`${API}/auth/login`, {
-    data: { account: "demo", password: "demo12345" },
+    data: { account: "demo", password: demoPassword() },
   });
   const token = (await loginResp.json()).access_token as string;
   const headers = { Authorization: `Bearer ${token}` };
@@ -96,7 +97,7 @@ test("任务详情页展示导师批注面板", async ({ page, request }) => {
   expect(completed, "demo 账号应有已完成任务").toBeTruthy();
   const taskId = completed!.task_id;
 
-  await login(page, "demo", "demo12345");
+  await login(page, "demo", demoPassword());
   await page.goto(`/tasks/${taskId}`);
 
   // 2026-10-23 重设计：批注从「每个 tab 底部常驻」改为**侧边抽屉，默认收起**

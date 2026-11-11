@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { demoPassword, secondaryPassword } from "./credentials";
 
 // 套餐页 E2E（2026-10-26 重设计）：
 // 数字必须与真实接口一致；权益/到期日/警示色/升级入口/加载态/局部失败都要验。
@@ -20,13 +21,13 @@ async function token(request: Page["request"], account: string, password: string
 }
 
 test("套餐页：当前套餐数字与真实接口一致", async ({ page, request }) => {
-  const accessToken = await token(request, "demo", "demo12345");
+  const accessToken = await token(request, "demo", demoPassword());
   const usage = await (
     await request.get(`${API}/billing/usage`, { headers: { Authorization: `Bearer ${accessToken}` } })
   ).json();
   const plans = await (await request.get(`${API}/billing/plans`)).json();
 
-  await loginAs(page, "demo", "demo12345");
+  await loginAs(page, "demo", demoPassword());
   await page.goto("/settings/plan");
   await expect(page.locator('[data-test="plan-current"]')).toBeVisible({ timeout: 30_000 });
 
@@ -61,7 +62,7 @@ test("套餐页：当前套餐数字与真实接口一致", async ({ page, reque
 
 test("套餐页：免费版额度用尽的警示与升级入口", async ({ page, request }) => {
   const account = "e2efull";
-  const password = "e2e-password-2026";
+  const password = secondaryPassword();
   const accessToken = await token(request, account, password);
   const usage = await (
     await request.get(`${API}/billing/usage`, { headers: { Authorization: `Bearer ${accessToken}` } })
@@ -107,7 +108,7 @@ test("套餐页：免费版额度用尽的警示与升级入口", async ({ page,
 });
 
 test("套餐页：加载中有明确加载态（不是空白）", async ({ page }) => {
-  await loginAs(page, "e2efull", "e2e-password-2026");
+  await loginAs(page, "e2efull", secondaryPassword());
 
   await page.route(`${API}/billing/usage`, async (route) => {
     await new Promise((r) => setTimeout(r, 3000));
@@ -128,7 +129,7 @@ test("套餐页：加载中有明确加载态（不是空白）", async ({ page 
 });
 
 test("套餐页：usage 失败不连累套餐列表", async ({ page }) => {
-  await loginAs(page, "e2efull", "e2e-password-2026");
+  await loginAs(page, "e2efull", secondaryPassword());
 
   await page.route(`${API}/billing/usage`, (route) =>
     route.fulfill({ status: 500, contentType: "application/json", body: '{"detail":"boom"}' })
@@ -149,7 +150,7 @@ test("套餐页：usage 失败不连累套餐列表", async ({ page }) => {
 });
 
 test("套餐页：移动端无横向溢出", async ({ page }) => {
-  await loginAs(page, "demo", "demo12345");
+  await loginAs(page, "demo", demoPassword());
   await page.goto("/settings/plan");
   await expect(page.locator('[data-test="plan-current"]')).toBeVisible({ timeout: 30_000 });
 

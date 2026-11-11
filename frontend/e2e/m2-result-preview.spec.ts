@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { demoPassword } from "./credentials";
 
 // 结果页需要「已完成」任务才有 review_report，单独取一条已完成的
 const SHOTS = resolve(dirname(fileURLToPath(import.meta.url)), "screenshots");
@@ -8,7 +9,7 @@ const SHOTS = resolve(dirname(fileURLToPath(import.meta.url)), "screenshots");
 test("任务结果页（引用核验 + 质量评分）", async ({ page }) => {
   await page.goto("/login");
   await page.locator("#account").fill("demo");
-  await page.locator("#password").fill("demo12345");
+  await page.locator("#password").fill(demoPassword());
   await page.locator('form button[type="submit"]').click();
   await page.getByRole("link", { name: /任务/ }).waitFor({ timeout: 30_000 });
 

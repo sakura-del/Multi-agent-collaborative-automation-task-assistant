@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { demoPassword } from "./credentials";
 
 // Phase 1 前端页面验收：Word 模板管理 + 参考文献导入
 // 覆盖：登录 → 导航到新页面 → 上传模板（真实后端）→ 看到占位符 → 渲染下载
@@ -10,7 +11,7 @@ import { fileURLToPath } from "node:url";
 //   E2E_BASE_URL=http://10.0.10.2:48080 pnpm exec playwright test e2e/phase1-pages.spec.ts
 
 const SHOTS = resolve(dirname(fileURLToPath(import.meta.url)), "screenshots");
-const CREDENTIALS = { account: "demo", password: "demo12345" };
+const CREDENTIALS = { account: "demo", password: demoPassword() };
 
 async function login(page: Page) {
   await page.goto("/login");

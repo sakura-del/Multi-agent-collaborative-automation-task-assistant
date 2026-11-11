@@ -525,3 +525,73 @@ hash 一致符合预期）。线上复核：首页 200、`security.txt` 为 `tex
 > 不进行本地模型推理。设计/完整计划见
 > `docs/superpowers/specs/2026-11-11-siliconflow-bge-m3-design.md` 与
 > `docs/superpowers/plans/2026-11-11-siliconflow-bge-m3.md`。
+
+## 14. 账号与凭据运维（Issue #10，2026-11-11）
+
+安全排查（`docs/security/2026-11-11-security-audit.md` H-1/H-2）发现：`demo` 用
+仓库文档里公开的弱口令就能登录，且是 `admin`；`e2efull`/`e2ereconn` 同样已知口令有效；
+库里另有 24 个历史测试账号。本节是处置与后续 SOP。
+
+工具：`backend/scripts/account_hygiene.py`（`audit` / `rotate` / `purge`，
+默认 dry-run，含硬规则与事后回查）。
+
+### 14.1 轮换口令
+
+```bash
+scp backend/scripts/account_hygiene.py root@47.253.81.6:/root/
+ssh root@47.253.81.6 'docker cp /root/account_hygiene.py vp-backend:/app/scripts/'
+# 容器里写 /opt/veripaper 会 FileNotFoundError（没挂载）→ 先写 /tmp 再拷出来
+ssh root@47.253.81.6 'docker exec -w /app vp-backend \
+  python -m scripts.account_hygiene rotate --username demo --out-file /tmp/.demo-password'
+ssh root@47.253.81.6 'docker cp vp-backend:/tmp/.demo-password /opt/veripaper/.demo-password \
+  && docker exec vp-backend rm -f /tmp/.demo-password && chmod 600 /opt/veripaper/.demo-password'
+```
+
+`rotate` 同时写 `token_invalid_before = now()`，让此前签发的 access/refresh 全部失效
+（否则改了口令、攻击者手上的 7 天 refresh 仍可用）。
+
+> **坑（本会话踩过）**：首版脚本"先 `commit` 再写文件"，容器写挂载外路径失败后
+> **库里的口令已经改了、新口令却没人知道**，账号直接被锁死。现版本**先落盘再改库**：
+> 写不出文件就根本不动数据库。
+
+### 14.2 清理测试账号
+
+```bash
+# 先看清单（默认 dry-run，不写库）
+docker exec -w /app vp-backend python -m scripts.account_hygiene purge \
+  --usernames e2efull,e2ereconn,literature-demo --apply   # 确认无误后再加 --apply
+```
+
+硬规则（任一命中即整批拒绝执行）：`demo` 受保护；任何 `admin` 拒删；
+名字不匹配测试账号规律（`exitgate\d{6,}` / `literature-demo\d*` / `rh\d{6,}` / …）拒删；
+请求里出现不存在的账号名也拒（拼错就应该报错，而不是静默跳过）。
+
+**向量要单独清**：`knowledge_vectors` / `knowledge_vectors_bge` 是裸表，
+没有外键指向 `knowledge_doc`，删账号只会级联删文档/分块/`vector_index`，
+向量会留下来变成孤儿。脚本按 `user_id` 显式删两张表。
+
+### 14.3 本次实测证据（2026-11-11 17:15–17:20 JST）
+
+| 项 | 结果 |
+| --- | --- |
+| 备份 | `pg_dump -Fc` 140 MB → `/opt/veripaper/backup/pre-issue10-20261111-171506.dump`；账号清单 JSON 另存 `backup/issue10/users-*.txt` |
+| 旧口令登录（轮换前） | **200** + `access_token` |
+| 轮换 | 32 位强随机（四类字符、无易混字符），落 `/opt/veripaper/.demo-password` 600 |
+| 旧口令登录（轮换后） | **401** |
+| 新口令登录 | **200**；`/auth/me` → `{'username': 'demo', 'role': 'admin', 'is_active': True}` |
+| 清理 | 26 个账号；级联删 15 个任务、90 篇文档、25506 个分块；**显式删向量 51012 条**（2 表 × 25506） |
+| 回查 | 残留账号 **0**、全库孤儿向量 **0**；`user=1 / task=86 / knowledge_doc=11 / doc_chunk=2835 / knowledge_vectors=2835 / knowledge_vectors_bge=2835 / workspace=4 / api_key=1 / subscription=1` |
+| 业务回归 | `/health/ready` → `ready`（db/redis/vector 全 ok）；`/knowledge/search` 返回 demo 真实文档分块 |
+| 仓库脱敏 | 全仓库 `grep` 0 命中；`backend/tests/test_no_plaintext_credentials.py` 4 条全绿 |
+
+### 14.4 命令行访问注意
+
+宿主机 `curl http://127.0.0.1/...` 会**被网关的 `default_server` 直接 444 断连**
+（防悬空 A 记录误报）。本机验收要带 Host 头：
+
+```bash
+curl -s http://127.0.0.1/api/v1/health/ready -H 'Host: api.veripaper.me'
+```
+
+登录这类含口令的请求不要把口令放命令行（`ps`/history 会留痕）：写进 600 的
+JSON 文件用 `--data-binary @file`，用完 `shred -u`。

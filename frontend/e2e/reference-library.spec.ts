@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
+import { demoPassword } from "./credentials";
 
 /**
  * 引用库页 + 导入页保存入口的真实浏览器验证（2026-10-26 引用库计划 §3.6）。
@@ -14,7 +15,7 @@ import type { Page } from "@playwright/test";
  * - 文案断言它「说了什么」，而不是「有个元素」。
  */
 
-const CREDENTIALS = { account: "demo", password: "demo12345" };
+const CREDENTIALS = { account: "demo", password: demoPassword() };
 
 async function login(page: Page) {
   await page.goto("/login");

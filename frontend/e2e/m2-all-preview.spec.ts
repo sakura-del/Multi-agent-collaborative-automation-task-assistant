@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { demoPassword } from "./credentials";
 
 // M2 全部页面迁移后的视觉验收截图
 const SHOTS = resolve(dirname(fileURLToPath(import.meta.url)), "screenshots");
@@ -15,7 +16,7 @@ async function shot(page: Page, name: string, fullPage = true) {
 async function login(page: Page) {
   await page.goto("/login");
   await page.locator("#account").fill("demo");
-  await page.locator("#password").fill("demo12345");
+  await page.locator("#password").fill(demoPassword());
   await page.locator('form button[type="submit"]').click();
   const loggedIn = page.getByRole("link", { name: /任务/ });
   for (let i = 0; i < 6; i += 1) {

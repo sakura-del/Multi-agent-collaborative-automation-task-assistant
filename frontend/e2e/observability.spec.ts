@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { demoPassword } from "./credentials";
 
 // 用量看板走查（Phase 2 可观测性 + 2026-10-26 重设计）：
 // 真实后端 → 概览卡片 + 全状态分布 + 最近任务，并核对「看板的数字自洽」。
@@ -20,7 +21,7 @@ async function shot(page: Page, name: string) {
 async function login(page: Page) {
   await page.goto("/login");
   await page.locator("#account").fill("demo");
-  await page.locator("#password").fill("demo12345");
+  await page.locator("#password").fill(demoPassword());
   await page.locator('form button[type="submit"]').click();
   await page.getByRole("link", { name: /任务/ }).waitFor({ timeout: 30_000 });
 }
@@ -28,7 +29,7 @@ async function login(page: Page) {
 test("用量看板：概览卡片 + 状态分布 + 最近任务", async ({ page, request }) => {
   // 确认后端有数据（demo 账号有历史任务）
   const loginResp = await request.post(`${API}/auth/login`, {
-    data: { account: "demo", password: "demo12345" },
+    data: { account: "demo", password: demoPassword() },
   });
   expect(loginResp.ok()).toBeTruthy();
   const token = (await loginResp.json()).access_token as string;
@@ -69,7 +70,7 @@ test("用量看板：数字必须与真实接口一致且自洽", async ({ page,
   // 这一条是「看板不说谎」的核心验收：页面上的每个数字都要能在后端找到出处，
   // 并且**分布合计 == 任务总数**（旧版会漏 waiting_approval，差值不可见）。
   const loginResp = await request.post(`${API}/auth/login`, {
-    data: { account: "demo", password: "demo12345" },
+    data: { account: "demo", password: demoPassword() },
   });
   expect(loginResp.ok()).toBeTruthy();
   const token = (await loginResp.json()).access_token as string;

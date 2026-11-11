@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import secrets
 import uuid
 import zipfile
 from collections.abc import Iterator
@@ -123,7 +124,9 @@ def e2e_env(tmp_path: Path) -> Iterator[Any]:
 
 
 def _register_and_login(client: TestClient, username: str) -> str:
-    password = "e2e-password-2026"
+    # 口令每次随机生成：Issue #10 —— 测试夹具里也不留固定口令，
+    # 否则一旦有人把测试指向真实库，这个口令就变成了"公开可用的账号"。
+    password = secrets.token_urlsafe(24)
     client.post(
         "/api/v1/auth/register",
         json={"username": username, "email": f"{username}@example.com", "password": password},

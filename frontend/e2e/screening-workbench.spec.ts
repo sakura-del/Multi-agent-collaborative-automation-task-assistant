@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { demoPassword } from "./credentials";
 
 // PRISMA 筛选工作台视觉验收：真实后端造数据 → 走完决策流 → 截图
 const SHOTS = resolve(dirname(fileURLToPath(import.meta.url)), "screenshots");
@@ -16,7 +17,7 @@ async function shot(page: Page, name: string) {
 async function login(page: Page) {
   await page.goto("/login");
   await page.locator("#account").fill("demo");
-  await page.locator("#password").fill("demo12345");
+  await page.locator("#password").fill(demoPassword());
   await page.locator('form button[type="submit"]').click();
   await page.getByRole("link", { name: /任务/ }).waitFor({ timeout: 30_000 });
 }
@@ -24,7 +25,7 @@ async function login(page: Page) {
 test("PRISMA 筛选工作台：造数据 → 纳入/排除 → 计数变化", async ({ page, request }) => {
   // ---- 后端直接造数据（前端没有「提交检索」的入口，检索由任务执行产生）----
   const loginResp = await request.post(`${API}/auth/login`, {
-    data: { account: "demo", password: "demo12345" },
+    data: { account: "demo", password: demoPassword() },
   });
   expect(loginResp.ok()).toBeTruthy();
   const token = (await loginResp.json()).access_token as string;

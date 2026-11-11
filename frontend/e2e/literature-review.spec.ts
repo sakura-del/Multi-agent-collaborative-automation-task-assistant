@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { existsSync, statSync } from "node:fs";
+import { secondaryPassword } from "./credentials";
 
 // 文献综述全流程验收（Plan 4 Task 8 / M4）：
 // 注册 → 上传知识库文档 → 建离线任务 → 确认规划 → 观察 DAG 状态变化 → 完成 → 校验引用 → 下载两种产物
@@ -59,7 +60,7 @@ async function expectNoHorizontalOverflow(page: Page) {
  * 策略：**能登录就登录，登不进才注册**。首次运行时建账号，之后复用。
  * 两个用例用不同账号，避免互相干扰任务列表与知识库内容。
  */
-const E2E_PASSWORD = "e2e-password-2026";
+const E2E_PASSWORD = secondaryPassword();
 const E2E_USERS = {
   full: { username: "e2efull", email: "e2efull@example.com", password: E2E_PASSWORD },
   reconnect: { username: "e2ereconn", email: "e2ereconn@example.com", password: E2E_PASSWORD },

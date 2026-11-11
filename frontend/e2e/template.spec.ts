@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { inflateRawSync } from "node:zlib";
+import { demoPassword } from "./credentials";
 
 // Word 模板页 E2E（2026-10-26 重设计）。
 //
@@ -67,7 +68,7 @@ test("模板页：校验语义如实、占位符可读、删除需确认、移�
 }) => {
   // ===== 准备：一次 API 登录，确保有模板 =====
   const loginResp = await request.post(`${API}/auth/login`, {
-    data: { account: "demo", password: "demo12345" },
+    data: { account: "demo", password: demoPassword() },
   });
   expect(loginResp.ok(), "auth_login 限流 5 次/3600s，超了要等窗口").toBeTruthy();
   const accessToken = (await loginResp.json()).access_token as string;
@@ -96,7 +97,7 @@ test("模板页：校验语义如实、占位符可读、删除需确认、移�
   console.log("TEMPLATE_ID=" + templateId);
 
   // ===== 一次页面登录，跑完所有页面断言 =====
-  await loginAs(page, "demo", "demo12345");
+  await loginAs(page, "demo", demoPassword());
   await page.goto("/templates");
   await expect(page.locator(`[data-test="template-row-${templateId}"]`)).toBeVisible({
     timeout: 30_000,

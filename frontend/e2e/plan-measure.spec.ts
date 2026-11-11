@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { demoPassword, secondaryPassword } from "./credentials";
 
 // 套餐页「修复后量数值」验收（AGENTS §6.5.7 第 2/3 条）。
 // 与修复前的取证逐项对比，用数据证明缺陷真的没了。
@@ -75,7 +76,7 @@ async function measure(page: Page, tag: string) {
 }
 
 test("套餐页修复后：demo（机构版）", async ({ page }) => {
-  await loginAs(page, "demo", "demo12345");
+  await loginAs(page, "demo", demoPassword());
   await page.goto("/settings/plan");
   await expect(page.locator('[data-test="plan-current"]')).toBeVisible({ timeout: 30_000 });
 
@@ -127,7 +128,7 @@ test("套餐页修复后：demo（机构版）", async ({ page }) => {
 });
 
 test("套餐页修复后：免费版（额度用尽）", async ({ page }) => {
-  await loginAs(page, "e2efull", "e2e-password-2026");
+  await loginAs(page, "e2efull", secondaryPassword());
   await page.goto("/settings/plan");
   await expect(page.locator('[data-test="plan-current"]')).toBeVisible({ timeout: 30_000 });
 

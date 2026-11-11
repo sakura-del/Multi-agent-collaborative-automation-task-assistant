@@ -37,9 +37,10 @@
 | CI | ⚠️ **2026-10-28 起 CI 因 GitHub Actions 账单额度停摆**（报 spending limit），作业 0~2s 就 X，**不是代码问题**。⚠️ **GitHub 直连时通时不通**：不通时走代理（`git -c http.proxy=http://127.0.0.1:7894 ...`，`gh` 需 `$env:HTTPS_PROXY`） |
 | 服务器 | `root@47.253.81.6`，HEAD **`5421a98`**，backend 镜像 `bd6cb7ad39f5`（回滚锚点 `shadow-mock`=`79ac91a4374c`），五容器 healthy，公网 `ready`，嵌入 = **SiliconFlow BGE-M3**（1600 RPM / 400k TPM），两表各 **28,341** 条，磁盘 38% |
 
-**演示账号**：`demo` / `demo12345` —— **全权限管理员**（`role=admin` + `institution` 套餐）；知识库 11 篇 / 28341 分块。
-⚠️ **这是已知安全问题 [#10](https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant/issues/10)：密码公开在本文件里且生产有效（admin）。公开演示前必须轮换。**
-**E2E 固定账号**：`e2efull` / `e2ereconn`，密码 `e2e-password-2026`（**同样属 #10，生产有效，上线后应删除或轮换**）
+**演示账号**：`demo` —— **全权限管理员**（`role=admin` + `institution` 套餐：篇数不限 / 含团队 / 含开放 API）；知识库 11 篇 / 2835 分块（2026-11-11 清理测试账号后，全库仅剩 demo）。
+**口令不入仓库**：2026-11-11 已轮换为强随机口令，只存在于服务器 `/opt/veripaper/.demo-password`（600）与口令管理器；要登录就 `ssh root@47.253.81.6 cat /opt/veripaper/.demo-password`。
+**E2E 账号**：`e2efull` / `e2ereconn` 已从生产删除（Issue #10）；本地/测试库需要时自行注册，E2E 用例只从环境变量读凭据（`E2E_DEMO_PASSWORD` / `E2E_SECONDARY_PASSWORD`，见 `frontend/e2e/credentials.ts`）。
+**防回归**：`backend/tests/test_no_plaintext_credentials.py` 会扫描整个仓库，出现已泄露口令即红。
 
 ---
 
@@ -157,6 +158,8 @@ docker compose up -d backend
 | 25 | **探针脚本不要 `sys.path.insert` 项目根**（2026-10-26） | 镜像里 `site-packages/app` 是 `pip install` 的**另一份副本**（缺 `styles/` 等资产）。探针 `sys.path.insert(0, BACKEND_DIR)` 让 `app` 抢先解析到副本 → 6 个样式**全部静默回退兜底格式化器**，输出只有 2 种却报「6/6 渲染成功」。容器内 WORKDIR=`/app` 已在 sys.path，**直接跑即可** |
 | 26 | **`CitationRenderer` 兜底是静默的，必须检查 `warnings`**（2026-10-26） | citeproc 失败时 `render()` 回退极简格式化器并**返回非空条目** —— 看起来完全成功。凡涉及 CSL 渲染的验证，断言里必须加「`warnings` 为空」，否则测不出「所有样式长得一样」 |
 | 27 | **读取工具的输出层会做脱敏，不要据此改代码**（2026-10-26） | `read` 显示 `placeholder="选择 .csl 文件"`，一度当成真实缺陷。用字符码核实（`[112,108,97,99,101,...]` = `placeholder`）确认文件本身正确。**怀疑是脱敏时，先打印字符码/hex 再判断** |
+| 28 | **改库的脚本必须「先落盘、再提交」**（2026-11-11） | 口令轮换脚本首版先 `commit` 再写口令文件；容器里写 `/opt/veripaper`（未挂载）直接 `FileNotFoundError` → **库里的口令已改、新口令却没人知道**，账号当场锁死。凡「生成一个只出现一次的秘密 → 写库」，顺序必须是先持久化秘密再提交 |
+| 29 | **WorkBuddy worktree 里 `.csl` 哈希测试会红 4 条，是换行不是代码**（2026-11-11） | 系统级 `core.autocrlf=true`（PortableGit `etc/gitconfig`）让 checkout 把 LF 换成 CRLF，`sha256` 与 `ATTRIBUTION.md` 记录不符 → `test_csl_style_files::TestAttribution` 4 红。**判据**：`tr -d '\r' < 文件 \| sha256sum` 与记录值一致即属此类。**不要为了变绿去改 ATTRIBUTION 里的哈希**，也别提交被转换过的 `.csl` |
 | 28 | **契约校验的是形状，不是真实性**（2026-10-26） | 模板页「渲染」按钮发的是假内容（`sections[key] = "示例内容（key）"`），后端 `_validate_contract` 只检查「占位符是否都有值」——**填假的照样通过**。契约能防「少填」，防不住「填假的」。**凡前端为通过校验而自己编内容，都是在制造假成功**；应改成「校验/预览」语义并显式标注示例 |
 | 29 | **一个 E2E 文件只做一次登录**（2026-10-26） | `auth_login` 限流 **5 次/3600s**。模板页原本 4 条 test 各做「API 登录 + 页面登录」= 8 次 → **必然 429**，表现为「登录页超时」，看起来像页面缺陷（实测踩到，同一坑此前也打过 `plan.spec.ts`）。**拆 test 前先算登录次数**；需要多段断言就合并成一条 test 在一次页面访问里跑完 |
 | 30 | **验证「引用可核验」时测试数据必须真实可核验**（2026-10-26） | 引用库端到端验证用 `10.1234/jcs.2024.001` 当 DOI，任务跑成 `waiting_human`。查校验报告：LLM 判定「10.1234 是示例性或占位符 DOI」——**它判对了**（10.1234 正是 DOI 手册的示例前缀）。换成真实 DOI 后同一流程 `completed`。**不要把校验器的正确判断当成系统缺陷**；造测试数据时先确认它在真实世界里站得住 |
