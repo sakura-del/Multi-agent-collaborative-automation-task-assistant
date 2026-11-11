@@ -217,8 +217,15 @@ docker exec -e RUN_ONCE=1 vp-db-backup /usr/local/bin/backup.sh   # 手动跑一
 | 未知 Host 探测 | nginx `default_server` → `444`，消除「悬空 A 记录」的判定特征 |
 | SSH | **仅密钥**（`PasswordAuthentication no`、`PermitRootLogin prohibit-password`），
 drop-in 在 `/etc/ssh/sshd_config.d/99-veripaper-keyonly.conf` |
-| Bot Fight Mode | **未开**：会对 API 客户端发 JS 挑战，纯 API 域名开启风险大于收益 |
-| Security.txt / AI Labyrinth / Turnstile | 未做，低优先级 |
+| Bot Fight Mode | **不建议开**：zone 级开关对 `api.veripaper.me` 同样生效，会挑战非浏览器客户端；本项目有开放 API（api_key 程序调用），免费版无法配置例外 |
+| AI Labyrinth | **不建议开**：只给 bot 注入隐藏 nofollow 链接，对 SPA + JSON API 无实质安全收益，还会增大 index.html |
+| Security.txt | **已就绪待部署**：`frontend/public/.well-known/security.txt`（commit `6090d84`）；当前线上仍返回 SPA fallback |
+| Turnstile | **可选未做**：可防注册/登录刷量，但需 Cloudflare widget + 前后端改造；现有保护是注册限流 5 次/3600s |
+
+> 2026-11-11 Cloudflare Security Insights 复核：这四项均为「未启用功能」建议，不是漏洞。
+> 传输与访问基线已处置（HSTS、最低 TLS 1.2、Full strict、SSH 仅密钥、未知 Host 444）。
+> 本机 deploy 前置条件缺失：无 node/npm，且 CF API Token 有 IP 白名单
+> （当前出口被 9109 拒绝）。部署 security.txt 需先补 node 或把出口 IP 加入白名单。
 
 ## 10. 尚未完成 / 后续
 
