@@ -1,0 +1,5 @@
+Contact: mailto:yanglin125210@gmail.com
+Expires: 2027-05-09T00:00:00.000Z
+Preferred-Languages: zh, en
+Canonical: https://veripaper.me/.well-known/security.txt
+Policy: https://veripaper.me/.well-known/security.txt
