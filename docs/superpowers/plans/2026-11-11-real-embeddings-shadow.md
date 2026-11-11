@@ -10,6 +10,8 @@
 
 **Execution:** 用户已选择本会话串行执行。生产构建、迁移、重建和对账不得并行。
 
+**当前进度：** Task 1–4 已完成；同版 Mock 公网 4/4 PASS，migration head 为 `c4f2a8d7e9b1`。Task 5 影子表全量重建已后台启动，生产继续使用原表 Mock。
+
 ---
 
 ## Task 1: 影子表迁移（先红后绿）
@@ -324,8 +326,9 @@ BM25 重建完成后公网 ready。
 - [ ] **Step 4: 验证配置回滚路径但不反复切生产**
 
 核对 `veripaper-backend:shadow-mock` 指向同版代码、原 Mock 表行数/ID 未变。
-回滚手册明确：同版代码 + Mock + `knowledge_vectors`，不跑 reindex、不恢复整库。
-只有用户要求实际回滚时才执行切换，不做额外生产来回重启。
+回滚手册明确：停写后用同版代码 + Mock + `knowledge_vectors` 跑 `--reconcile`，
+只补切换后的新写入；不全量重算、不恢复整库。只有用户要求实际回滚时才执行切换，
+不做额外生产来回重启。
 
 ## Task 7: 文档、提交与备份
 

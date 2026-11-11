@@ -225,3 +225,127 @@ drop-in 在 `/etc/ssh/sshd_config.d/99-veripaper-keyonly.conf` |
 - 七牛 AK/SK 曾多次出现在对话与终端输出中，**建议轮换**（改 `.env` → 重启 backend 与 db-backup）；
 - 真实嵌入模型（`INSTALL_RAG_MODELS=true`）未在该镜像启用，检索质量仍是 Mock 嵌入；
 - `/metrics` 已在网关屏蔽；如需采集请走内网或加鉴权。
+
+## 11. 真实 BGE 嵌入：影子表后台切换 SOP
+
+> 当前状态：**正在实施，生产仍为已验证一致的 Mock**。目标模型是
+> `BAAI/bge-large-zh`（1024 维），重排保持 Mock。详细设计与完整命令见
+> `docs/superpowers/specs/2026-11-11-real-embeddings-shadow-design.md` 和
+> `docs/superpowers/plans/2026-11-11-real-embeddings-shadow.md`。
+
+### 11.1 为什么不再原地停机重建
+
+2026-11-11 真实样本已成功写入 32/32、0 失败，但 `elapsed_ms=54693`
+（含一次性模型加载）；按去加载后的约 39 秒外推，全量约需 9 小时。
+未启动原地全量 BGE。Mock 回滚实测 28,341/28,341、0 失败、86.312 秒，
+ID 一致性为真，公网 4/4 PASS。
+
+因此保留 `knowledge_vectors` 承载在线 Mock，新建 `knowledge_vectors_bge`
+接收真实向量。只有影子表完整且增量对账成功才短暂重启切换。
+
+### 11.2 不变量与负载门槛
+
+- 查询与文档始终来自同一表；原 Mock 表在真实验收后仍保留；
+- 保持原 `chunk_id`，不重新解析文件；DDL 只走 Alembic；
+- 构建、备份、预热、样本、全量重建与对账串行，禁止叠加实验矩阵/批量导入；
+- 开始构建前根盘至少 10 GB、`MemAvailable` 至少 800 MB；
+- 一次性重建固定 `--cpus=1 --memory=2500m` 与 `OMP_NUM_THREADS=1`；
+- 每 2–5 分钟检查一次。若 1 分钟 load 连续三次高于 `2 × vCPU`、
+  重建期 `MemAvailable < 300 MB` 或根盘余量 `< 3 GB`，停止重建容器；
+  在线 Mock 不受影响，资源恢复后续跑，不并行启动第二个进程。
+
+compose 必须有 `HF_HOME=/app/.cache`、`OMP_NUM_THREADS=1` 和
+`model_cache:/app/.cache`。模型权重已实测可在新容器加载。
+
+### 11.3 迁移与同版 Mock 上线
+
+影子表 migration 是 `c4f2a8d7e9b1`，索引使用独立的
+`ix_kvbge_embedding_hnsw`、`ix_kvbge_collection_doc`、`ix_kvbge_collection_user`。
+无 pgvector 的 CI 库 no-op；downgrade 只删影子表。
+
+旧镜像不认识新 head，因此先构建含新迁移的镜像，再以
+`RAG_EMBEDDING_MOCK=1` + `RAG__PGVECTOR_TABLE=knowledge_vectors` 启动：
+
+```bash
+cd /opt/veripaper
+nohup docker compose -f deploy/ecs/docker-compose.yml build \
+  --build-arg INSTALL_RAG_MODELS=true backend >/tmp/vp-shadow-build.log 2>&1 &
+echo $! >/tmp/vp-shadow-build.pid
+
+# 构建成功且资源正常后：
+docker compose -f deploy/ecs/docker-compose.yml up -d --no-build backend
+```
+
+新代码 healthy 后自动迁移并创建空影子表。此时给镜像打
+`veripaper-backend:shadow-mock`，并验证公网 Mock 4/4 PASS。
+普通回滚必须使用这个同版镜像，不能直接让旧镜像连接新 head。
+
+### 11.4 后台全量重建
+
+一次性容器显式覆盖影子表和真实嵌入，其他配置仍从服务器 `.env` 读取：
+
+```bash
+nohup docker run --rm --name vp-shadow-bge-reindex --cpus=1 --memory=2500m \
+  --network veripaper_default --env-file /opt/veripaper/.env \
+  -e RAG__PGVECTOR_TABLE=knowledge_vectors_bge -e RAG_EMBEDDING_MOCK=0 \
+  -e HF_HOME=/app/.cache -e OMP_NUM_THREADS=1 \
+  -v veripaper_model_cache:/app/.cache \
+  --entrypoint python veripaper-backend:latest \
+  -m scripts.reindex_vectors --batch-size 100 --json \
+  >/tmp/vp-shadow-bge-reindex.log 2>&1 &
+echo $! >/tmp/vp-shadow-bge-reindex.pid
+```
+
+开始前先 dry-run 和 32 条样本。全量结束必须 `indexed == planned`、
+`failed_batches=0`、`errors=[]`。后台期间新增/删除文档只影响 Mock 原表，
+下一阶段用 reconcile 补齐影子表，不能靠数量相等判断一致。
+
+### 11.5 增量对账与短停切换
+
+`--reconcile` 只对 `DB IDs - store IDs` 生成嵌入，成功后删除
+`store IDs - DB IDs`；dry-run 不写不删。它与 `--limit`、`--user-id` 互斥。
+
+```bash
+# 在线预对账：容器公共参数同 11.4
+python -m scripts.reindex_vectors --reconcile --batch-size 100 --json
+python -m scripts.check_kb_consistency --json
+
+# 预对账成功后停止写入，再做最终对账和一致性检查
+docker compose -f deploy/ecs/docker-compose.yml stop backend
+```
+
+最终对账仍须零失败、缺失/孤儿 ID 为 0。然后只删除 Redis 的
+`rag:retrieval:*`（禁止 FLUSHDB），把 `.env` 改为：
+
+```dotenv
+RAG__PGVECTOR_TABLE=knowledge_vectors_bge
+RAG_EMBEDDING_MOCK=0
+INSTALL_RAG_MODELS=true
+```
+
+权限保持 600，再执行：
+
+```bash
+docker compose -f deploy/ecs/docker-compose.yml up -d --no-build --force-recreate backend
+BASE=https://api.veripaper.me bash deploy/ecs/verify.sh
+```
+
+启动日志必须是 SentenceTransformerEmbeddingService 且 pgvector 表为影子表。
+真实检索使用不复制标题的自然语言查询，目标文档进入 top 5，返回 ID 均为 UUID；
+用新容器 `HF_HUB_OFFLINE=1` 实际 encode 验证缓存，而不是只看卷存在。
+
+### 11.6 回滚
+
+- **后台阶段**：停止 `vp-shadow-bge-reindex` 即可；在线 Mock 与原表不受影响；
+- **切换后**：停止 backend，用同版代码 + Mock + 原 `knowledge_vectors`
+  先跑 `--reconcile`，只补切换后新增的缺项并删除孤儿；随后将 `.env` 改回
+  `RAG__PGVECTOR_TABLE=knowledge_vectors` 与 `RAG_EMBEDDING_MOCK=1`，
+  用 `veripaper-backend:shadow-mock` 同版镜像启动，清理检索缓存并验收；
+- 原 Mock 表未被 BGE 覆盖，回滚**不需要全量重算或恢复整库**；但切换后的新写入
+  必须先经 Mock reconcile 回补，不能只看表还在就直接切换；
+- 只有明确回退代码时才先用新镜像 `alembic downgrade d5a8c1e3f7b2`
+  删除影子表，再恢复旧镜像。
+
+> 预检偏差：`verify.sh` 默认 `http://127.0.0.1` 的 Host 会被
+> `default_server 444` 拒绝。线上验收使用 `BASE=https://api.veripaper.me`；
+> 这不是 backend 健康退化。

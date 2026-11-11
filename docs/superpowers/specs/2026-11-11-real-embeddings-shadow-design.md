@@ -113,13 +113,16 @@ CLI 增加 `--reconcile`。它与 `--limit`、`--user-id` 互斥，防止把部�
 
 ### 6.2 切换后普通回滚
 
-1. 停止 backend；
-2. `.env` 恢复 `RAG__PGVECTOR_TABLE=knowledge_vectors`、
+1. 停止 backend，封闭切换后新增/删除文档的竞态；
+2. 用同版代码、Mock 嵌入和原 `knowledge_vectors` 执行一次 `--reconcile`，
+   只补切换后新增的缺项并删除孤儿；若确认切换后零写入，也仍需 dry-run/一致性证明；
+3. `.env` 恢复 `RAG__PGVECTOR_TABLE=knowledge_vectors`、
    `RAG_EMBEDDING_MOCK=1`；
-3. 用同版新代码镜像启动 backend，清理旧检索缓存；
-4. 验证 Mock 一致性与公网检索。
+4. 用同版新代码镜像启动 backend，清理旧检索缓存；
+5. 验证 Mock 一致性与公网检索。
 
-原 Mock 表从未被 BGE 覆盖，因此不需要重新生成向量或恢复数据库。
+原 Mock 表从未被 BGE 覆盖，因此不需要全量重算或恢复数据库；但切换后的新写入
+必须通过 Mock reconcile 回补，不能假设旧表永远无需对账。
 
 ## 7. 验收证据
 

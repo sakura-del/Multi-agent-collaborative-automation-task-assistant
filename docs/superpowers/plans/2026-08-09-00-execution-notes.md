@@ -4229,6 +4229,40 @@ air tokens 只服务两页，不替换 success/warning/destructive。证据卡�
 
 恢复后两页测试 **26/26 passed**，服务器重新部署 `dd0d720`。`restored-login-desktop.png` / `restored-tasks-desktop.png` 已人工查看，恢复为此前暖纸学术编辑风；`restored-validation.json` 记录 air 选择器均为 0、正常搜索和新建入口均为 1、无横向溢出。设计文档与生产验证图仅保留作决策历史，**不再作为后续实施依据**。
 
+## 2026-11-11 · ECS 真实 BGE 嵌入切换
+
+设计：[2026-11-11-real-embeddings-design.md](../specs/2026-11-11-real-embeddings-design.md)；计划：[2026-11-11-real-embeddings.md](2026-11-11-real-embeddings.md)。
+
+### 已确认的基线与进行中状态
+
+- 复用现有 `BAAI/bge-large-zh`、1024 维嵌入与按原 chunk ID 重建脚本；不修改应用代码，不启用真实重排。
+- `b4cdd1d` 仅修改 ECS compose 与 env 模板：真实模型构建默认、`HF_HOME`、持久化 `model_cache`、`OMP_NUM_THREADS=1`。
+- 聚焦回归：**69 passed / 16.83s**（embedding、reindex、pgvector、一致性六文件）。
+- 构建前 ECS 实测：2 vCPU，load `0.14/0.09/0.07`，`MemAvailable=2253 MB`，根盘余量 **23 GB**；五容器健康。公网 `verify.sh` **4/4 PASS**，API ready、CORS 命中。
+- 本地 `verify.sh` 默认 `http://127.0.0.1` 因 gateway `default_server 444` 返回空响应；改用 `BASE=https://api.veripaper.me` 后通过，不是后端故障。
+- 旧镜像已保留为 `veripaper-backend:mock-pre-bge`，SHA `bd472785fa9926da562db3e672dacaec39ae0a4bf06bd4950b348d279f877d8a`。
+- 真实模型镜像 `veripaper-backend:latest` 已构建成功（约 6 分钟；导出层 163.5s、解包 31.1s）；构建后根盘余量 **17 GB**、`MemAvailable=2419 MB`，旧服务未中断。
+- 切换前备份成功：`db-backups/20261111T030356Z.sql.gz`，dump **21 MB**，`03:04:05Z` 完成 dump、`03:07:41Z` 确认上传。
+- 备份后已进入维护窗口：`vp-backend` 停止，`.env.pre-bge` 保留原配置，`.env` 权限 **600**，`RAG_EMBEDDING_MOCK=0`、`RAG_RERANKER_MOCK=1`、`INSTALL_RAG_MODELS=true`；可用内存升至 **2787 MB**。
+- 真实预热实测通过：`SentenceTransformerEmbeddingService` / `BAAI/bge-large-zh`，向量 **1024 维、非零、全部有限**。dry-run 现场 `planned=28341`、`indexed=0`、`failed_batches=0`。样本容器限制生效（1 CPU / 2500 MB），峰值观察约 **1.74 GB**，主机另一核保持余量。
+- 32 条真实样本成功：`planned=32`、`indexed=32`、`failed_batches=0`，但 `elapsed_ms=54693`（含一次性模型加载）。从 `03:11:40` 加载到 `03:12:19` 写库前约 39 秒，按 28,341 条粗略外推全量约 **9 小时**；即使估计有偏差也明显超过数十分钟。为避免已上线 API 长时间停机，**未启动全量 BGE**。
+- Mock 回滚已完成：`planned=indexed=28341`、`failed_batches=0`、`errors=[]`、`elapsed_ms=86312`；一致性 `consistent=true`、缺失/孤儿 ID 均为 0。真实镜像另存为 `veripaper-backend:bge-real`，`latest` 已恢复指向 `mock-pre-bge`，原 `.env` 已恢复。
+- 旧 backend 启动期 BM25 重建 28,341 分块后转为 healthy；公网 `verify.sh` 复验 **4/4 PASS**：API ready（database/redis/vector 全 ok）、VeriPaper OpenAPI、CORS、登录均正常，`/tasks=0.097742s`、`/knowledge/search=0.972683s`。本次维护已结束，生产继续使用已验证一致的 Mock。
+
+### 影子表方案与 TDD
+
+- 用户改选影子表后台重建；`e495301` 固化设计与计划。`c4f2a8d7e9b1` 新增 `knowledge_vectors_bge`，独立 `ix_kvbge_*` 索引，原表不动；无 pgvector 时 no-op，downgrade 只删影子表。
+- 迁移 RED：5 项因 revision/文件缺失失败；实现并更新旧 head 契约后 **9 passed**。
+- 按 ID 删除 RED：3 项因方法缺失失败；实现 pgvector 参数化 `id=ANY(%s)`、Chroma `collection.delete(ids=...)` 与 VectorStore 门面后 **45 passed**。
+- reconcile RED：7 项因参数/结果字段/指定 CLI 错误缺失失败；实现后 **19 passed**。测试实际证明：已存在 ID 不重算、只补缺项、孤儿精确删除、dry-run 零副作用、缺项失败时不删孤儿、普通模式仍全量 upsert。
+- 完整聚焦回归 **102 passed / 11.54s**；black 全量 417 文件无变化，ruff 全量通过，mypy **214 文件 0 错误**。后端全量 pytest **3003 passed / 21 skipped / 89.44% 覆盖率 / 820.50s**，无失败。
+- `0f059b2` 单独提交 13 个迁移/服务/脚本/测试文件；用户并行的 qrels、论文与工具目录未进入提交。
+- ECS 已 ff-only 同步到 `0f059b2`。影子镜像构建前实测 load `0.17/0.12/0.14`、`MemAvailable=2279 MB`、根盘余量 **16 GB**；构建期间旧 Mock backend 继续在线。
+- 新镜像构建成功（导出层 158.9s、解包 31.8s），完成后磁盘余量 **9.8 GB**。同版 Mock 验收通过：`alembic current=c4f2a8d7e9b1 (head)`，原表 **28,341**、影子表 **0**，公网 **4/4 PASS**（tasks 0.108940s、search 0.888014s）；同版回滚镜像 `shadow-mock` 已固定到 SHA `183500694951...`。
+- 影子表 reconcile dry-run：`planned=28341`、`indexed=0`、`orphans_present=0`、零写入。32 条真实影子样本成功：`indexed=32`、`failed_batches=0`、`elapsed_ms=64996`，目标表日志明确为 `knowledge_vectors_bge`。
+- 全量影子重建已于 2026-11-11 12:04（ECS UTC+8）以后台容器 `vp-shadow-bge-reindex` 启动，1 CPU / 2500 MB / 单线程；原 Mock 服务保持在线。样本期主机 load 约 1.8–1.9、可用内存约 2 GB，未达中止线；Swap 使用上升，后续持续监控。
+- Mock 对照（两条真实 API 查询）：中文多智能体/RAG 查询中目标 `03_MultiAgent_Collaborative_RAG`（`29159da1-e751-4d30-9ade-b38ac46ee540`）已在 top 5（rank 2），五条 score 均为 0；英文迭代检索/代码生成查询中目标 EVOR（`7134058d-4955-4d2d-9524-878ef485b832`）也在 rank 2。基线只用于对照，不能据此宣称真实模型带来「漏检 → 命中」变化。
+
 
 
 
