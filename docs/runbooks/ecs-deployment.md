@@ -418,3 +418,30 @@ Retry-After 或 1/2/4/8/16 秒退避，单次等待上限 60 秒。API 失败不
 切换后回滚仍需停写，用 Mock 对原表 reconcile 补切换后的新写入，再切回；
 不全量重算、不恢复整库。回滚镜像为 `veripaper-backend:shadow-mock`
 （`79ac91a4374c`），原表 `knowledge_vectors` 保持 28,341 条 Mock 向量。
+
+### 12.4 磁盘清理（2026-11-11）
+
+上线后根盘一度到 **81%（30G/40G）**。清理后为 **33%（12G/40G，26G 可用）**，
+释放约 **18.7 GB**，清理项与保留项如下：
+
+| 动作 | 对象 | 回收 |
+| --- | --- | --- |
+| `docker builder prune -af` | 87 项构建缓存 | 12.44 GB |
+| `docker rmi` | `veripaper-backend:bge-real`（本地 BGE-large 实验镜像） | 3.92 GB |
+| `docker rmi` | dangling `183500694951`（旧 latest 残留） | 3.92 GB |
+| `docker rmi` | `veripaper-backend:mock-pre-bge`（旧回滚锚点，已被 shadow-mock 取代） | 2.14 GB |
+| 清空卷内容 | `veripaper_model_cache`（API 模式不再需要模型权重） | 1.2 GB |
+| `rm /root/*.bundle` | 10 个历史部署包 | 约 90 MB |
+| `docker rmi` | `alpine:3.22` 辅助清卷镜像 | 12.9 MB |
+
+清理后回归：公网 health ready、frontend 200、M3 实时调用 870 ms/1024 维、
+两表各 **28,341** 条、五容器 healthy、backend `healthy`。
+
+**保留且不要删**：`veripaper-backend:latest` 与 `shadow-mock`（同一镜像
+`79ac91a4374c`，生产运行 + 回滚锚点）、`veripaper-db-backup:local`、
+postgres/redis/nginx 基础镜像、`veripaper_pgdata` 卷、
+`/opt/veripaper/backup/` 下两份 Supabase 迁移期 dump（各 21 MB，回滚用）。
+
+> 卷 `veripaper_model_cache` 仍在 compose 中挂载（现在是空卷）。若彻底不再
+> 需要本地模型，可从 compose 移除该挂载以消除 `external` 警告；本次只清内容，
+> 未改 compose，避免影响运行中的容器。

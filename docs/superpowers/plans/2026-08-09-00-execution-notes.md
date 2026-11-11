@@ -4293,3 +4293,5 @@ air tokens 只服务两页，不替换 success/warning/destructive。证据卡�
 - 真实语义验收：中文「交替迭代」查询命中 FAIR-RAG + MultiAgent RAG；英文「iterative refinement / decides when enough evidence」全部命中 FAIR-RAG；两次查询后端日志均有实时 `siliconflow_embeddings`（count=1、actual_tokens、trace_id），返回 ID 均为可回溯 UUID。中文直查标题词版本在 M3 下 5 条全部命中目标文档。
 - 回滚可用性：以 Mock 对原表做只读一致性检查，`consistent=true`、ID 全对；回滚镜像 `shadow-mock`=`79ac91a4374c`，原表从未被 M3 覆盖。
 - 最终负载：load `0.20/0.29/0.31`、`MemAvailable=2294 MB`、根盘 7.3 GB 可用；五容器 healthy，无遗留 reindex 容器。切换后数据库备份已确认上传：`db-backups/20261111T061422Z.sql.gz`，**135 MB**，dump 2 分 37 秒、上传约 15 分钟。
+- **磁盘清理（用户要求）**：上线后根盘到 81%（30G/40G）。清理构建缓存 12.44 GB、`bge-real` 3.92 GB、dangling `183500694951` 3.92 GB、`mock-pre-bge` 2.14 GB、`model_cache` 卷内容 1.2 GB、旧 bundle 约 90 MB、辅助 alpine 12.9 MB，共释放约 **18.7 GB**，根盘降至 **33%（12G/40G，26G 可用）**。保留 `latest`/`shadow-mock`（`79ac91a4374c`）、备份镜像、四个基础镜像、`pgdata` 与 `/opt/veripaper/backup` 两份 Supabase dump。
+- 清理后回归：公网 health ready、frontend 200、M3 实时调用 **870 ms / 1024 维 / 8 tokens**、两表各 **28,341** 条、backend `healthy`、五容器运行中。
