@@ -223,7 +223,7 @@ drop-in 在 `/etc/ssh/sshd_config.d/99-veripaper-keyonly.conf` |
 ## 10. 尚未完成 / 后续
 
 - 七牛 AK/SK 曾多次出现在对话与终端输出中，**建议轮换**（改 `.env` → 重启 backend 与 db-backup）；
-- 真实嵌入模型（`INSTALL_RAG_MODELS=true`）未在该镜像启用，检索质量仍是 Mock 嵌入；
+- 真实嵌入模型：**已由 SiliconFlow BGE-M3 API 替代**（见 §12），生产不装 torch；
 - `/metrics` 已在网关屏蔽；如需采集请走内网或加鉴权。
 
 ## 11. 真实 BGE 嵌入：影子表后台切换 SOP
@@ -297,8 +297,11 @@ echo $! >/tmp/vp-shadow-bge-reindex.pid
 ```
 
 开始前先 dry-run 和 32 条样本。全量结束必须 `indexed == planned`、
-`failed_batches=0`、`errors=[]`。后台期间新增/删除文档只影响 Mock 原表，
-下一阶段用 reconcile 补齐影子表，不能靠数量相等判断一致。
+`failed_batches=0`、`errors=[]`。一次性容器继承 backend 镜像的 HTTP healthcheck，
+但以 Python reindex 为入口时没有 HTTP 服务，因此 Docker 可能显示 `unhealthy`；
+这只是探针语义不匹配，是否成功必须看批次日志与最终 JSON，不要据此重启进程。
+后台期间新增/删除文档只影响 Mock 原表，下一阶段用 reconcile 补齐影子表，
+不能靠数量相等判断一致。
 
 ### 11.5 增量对账与短停切换
 
@@ -349,3 +352,68 @@ BASE=https://api.veripaper.me bash deploy/ecs/verify.sh
 > 预检偏差：`verify.sh` 默认 `http://127.0.0.1` 的 Host 会被
 > `default_server 444` 拒绝。线上验收使用 `BASE=https://api.veripaper.me`；
 > 这不是 backend 健康退化。
+
+## 12. SiliconFlow BGE-M3 API（**已上线，2026-11-11**）
+
+> 本节取代继续运行本地 BGE-large 的做法。生产服务器只调用 Embeddings API，
+> 不进行本地模型推理。设计/完整计划见
+> `docs/superpowers/specs/2026-11-11-siliconflow-bge-m3-design.md` 与
+> `docs/superpowers/plans/2026-11-11-siliconflow-bge-m3.md`。
+
+### 12.1 实测结果
+
+| 项 | 值 |
+| --- | --- |
+| API 冒烟 | HTTP 200、`BAAI/bge-m3`、1024 维、14 tokens、约 1196 ms |
+| 32 条样本 | 32/32、0 失败、2424 ms、实际 3,931 tokens |
+| 全量重建 | **28,341/28,341、0 失败、596,775 ms（约 10 分钟）** |
+| API 调用 | 443 批共 646 次调用（batch 64 拆分后）、约 224 万 tokens |
+| 重试/限流 | **0 次重试、0 次 429** |
+| 一致性 | 预对账 0 缺项/0 孤儿；停写最终对账同样为 0；ID 级 `consistent=true` |
+| 切换后 | backend healthy、`SiliconFlowEmbeddingService`、公网 **4/4 PASS** |
+| 回滚可用性 | 原 Mock 表 28,341 条 ID 级一致；回滚镜像 `shadow-mock` |
+
+纯语义验收：中文「把检索和生成两个阶段交替迭代……」命中 FAIR-RAG 与
+MultiAgent Collaborative RAG；英文「iterative refinement where the system
+decides when enough evidence has been gathered」全部命中 FAIR-RAG。
+两者均返回可回溯 UUID。
+
+### 12.2 配置与限额
+
+```dotenv
+RAG__EMBEDDING_PROVIDER=siliconflow
+RAG__EMBEDDING_MODEL=BAAI/bge-m3
+RAG__SILICONFLOW_API_KEY=
+RAG__SILICONFLOW_BASE_URL=https://api.siliconflow.cn/v1
+RAG__EMBEDDING_RPM=1600
+RAG__EMBEDDING_TPM=400000
+RAG__EMBEDDING_BATCH_SIZE=64
+RAG__PGVECTOR_TABLE=knowledge_vectors_bge
+RAG_EMBEDDING_MOCK=0
+INSTALL_RAG_MODELS=false
+```
+
+1600/400000 是免费上限 2000/500000 的 80%。每次 HTTP 尝试（含 429/重试）
+都进入 60 秒滑动窗口；请求前用 UTF-8 字节数+4 保守估算，成功后用
+`usage.total_tokens` 修正。400/401/403/404 不重试，429/网络/5xx 最多 5 次，
+Retry-After 或 1/2/4/8/16 秒退避，单次等待上限 60 秒。API 失败不得回退 Mock。
+
+实测估算约为实际的 4 倍（32 条：估算 15,573 / 实际 3,931），限流因此偏保守；
+真实 token 在响应后即时修正窗口，所以全量仍能在 10 分钟内完成且零 429。
+
+当前限流是进程内实现，只允许一个 backend 进程，且重建与最终在线 M3 查询
+不得同时运行。未来增加 worker/多个调用方时，先改 Redis 分布式限流再扩容。
+
+### 12.3 重建与切换检查点（已全部执行）
+
+1. 同版 Mock + 原表部署新代码并公网验收；
+2. M3 两条短文本真实调用通过；
+3. 清空旧影子并回查：影子 0、原 Mock 28,341；
+4. dry-run、32 条 M3 样本、后台全量，全程 Mock 在线；
+5. 在线预对账 → 停止 backend → 最终 reconcile + ID 一致性；
+6. 只清理 `rag:retrieval:*`，切到 M3 provider + 影子表并启动；
+7. 验证真实语义 top 5、UUID 回溯、公网 health/frontend、API 429/用量与主机资源。
+
+切换后回滚仍需停写，用 Mock 对原表 reconcile 补切换后的新写入，再切回；
+不全量重算、不恢复整库。回滚镜像为 `veripaper-backend:shadow-mock`
+（`79ac91a4374c`），原表 `knowledge_vectors` 保持 28,341 条 Mock 向量。

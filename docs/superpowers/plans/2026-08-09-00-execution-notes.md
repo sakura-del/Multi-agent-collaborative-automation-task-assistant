@@ -4261,17 +4261,35 @@ air tokens 只服务两页，不替换 success/warning/destructive。证据卡�
 - 新镜像构建成功（导出层 158.9s、解包 31.8s），完成后磁盘余量 **9.8 GB**。同版 Mock 验收通过：`alembic current=c4f2a8d7e9b1 (head)`，原表 **28,341**、影子表 **0**，公网 **4/4 PASS**（tasks 0.108940s、search 0.888014s）；同版回滚镜像 `shadow-mock` 已固定到 SHA `183500694951...`。
 - 影子表 reconcile dry-run：`planned=28341`、`indexed=0`、`orphans_present=0`、零写入。32 条真实影子样本成功：`indexed=32`、`failed_batches=0`、`elapsed_ms=64996`，目标表日志明确为 `knowledge_vectors_bge`。
 - 全量影子重建已于 2026-11-11 12:04（ECS UTC+8）以后台容器 `vp-shadow-bge-reindex` 启动，1 CPU / 2500 MB / 单线程；原 Mock 服务保持在线。样本期主机 load 约 1.8–1.9、可用内存约 2 GB，未达中止线；Swap 使用上升，后续持续监控。
+- 一次性 reindex 容器会继承 backend 的 HTTP healthcheck 而显示 `unhealthy`，因为它不启动 HTTP 服务；这不是批次失败。判断依据是 reindex 日志、最终 JSON 和主机资源，不对该误报做重启。
+- 全量首批于 `04:06:49Z` 写入：`indexed=100/28341`、`total_batches=284`，首批含加载约 2 分 16 秒；与样本推算一致。同期公网 health ready，主机 load 约 1.5、可用内存约 2 GB。
+- **用户暂停（2026-11-11 12:58 ECS）**：真实嵌入对自有测试语料的价值不匹配约 9 小时 CPU 成本。最后成功批次为 **2700/28,341（27/284）**，失败日志 0；已停止 `vp-shadow-bge-reindex`，后台等待器正常结束。生产仍为同版新代码 + Mock + 原表，公网 health ready，可用内存回升至约 **2880 MB**。部分影子表保留现场，目标已 paused；未经用户明确要求不得恢复重建。
 - Mock 对照（两条真实 API 查询）：中文多智能体/RAG 查询中目标 `03_MultiAgent_Collaborative_RAG`（`29159da1-e751-4d30-9ade-b38ac46ee540`）已在 top 5（rank 2），五条 score 均为 0；英文迭代检索/代码生成查询中目标 EVOR（`7134058d-4955-4d2d-9524-878ef485b832`）也在 rank 2。基线只用于对照，不能据此宣称真实模型带来「漏检 → 命中」变化。
 
+## 2026-11-11 · SiliconFlow BGE-M3 API（进行中）
 
+设计：[2026-11-11-siliconflow-bge-m3-design.md](../specs/2026-11-11-siliconflow-bge-m3-design.md)；计划：[2026-11-11-siliconflow-bge-m3.md](2026-11-11-siliconflow-bge-m3.md)。
 
+- 用户选择生产不跑本地模型，改用 SiliconFlow 免费 `BAAI/bge-m3`，要求限制 RPM/TPM。原 BGE-large 全量任务保持暂停，不因新方案自动恢复。
+- ECS 真实冒烟：HTTP **200**，模型 `BAAI/bge-m3`，1 条 **1024 维**有效向量，`usage.total_tokens=14`，耗时约 **1196 ms**。临时 key 文件已从本机/服务器删除并回查，未进入仓库或日志。
+- 双限流 TDD：模块缺失 RED 后 **5 passed**；覆盖 RPM、TPM 独立等待、实际 usage 修正和非法 token。
+- API 适配器 TDD：模块缺失 RED；配置依赖补齐后 **18 passed**。覆盖空输入零请求、64+1 批量、token 拆分、index 顺序、400/401/403/404 不重试、429 每次尝试重新计数、503/网络有界重试、响应维度/NaN/model 契约。
+- provider TDD：3 项因误走本地服务 RED；实现后 **14 passed**，缺 key/未知 provider 明确失败且不回退 Mock。合并聚焦 **37 passed**。
+- ECS 模板改为 M3 API、`1600 RPM / 400000 TPM / 64 条每批`、`INSTALL_RAG_MODELS=false`。
+- 全量门禁通过：**3029 passed / 21 skipped / 89.58% 覆盖率 / 862.11s**；black 419+2 文件、ruff 通过、mypy **216 文件 0 错误**。提交 `090e29a`，仅含应用/测试/ECS 模板。
+- ECS 已 ff-only 同步到 `090e29a`。`.env` 写入 M3 provider/model/限额与 key，权限 **600**，`RAG_EMBEDDING_MOCK` 仍为 **1**、表仍为原表，key 注入用的临时文件已删除并回查。不装 torch 的轻量镜像正在后台构建。
+- 轻量镜像构建成功（约 2 分钟，2.14 GB，对比装 torch 的 3.92 GB/6 分钟）。同版 Mock 部署验收：healthy、`MockEmbeddingService`、`alembic current=c4f2a8d7e9b1`、原表 **28,341**、影子表 **2,700**（旧 BGE-large 待清），公网 **4/4 PASS**（tasks 0.137304s、search 0.960794s）。回滚镜像 `shadow-mock` 固定到 `79ac91a4374c`。
+- M3 真实冒烟：`SiliconFlowEmbeddingService`、2 条 **1024 维**、`actual_tokens=20`（估算 71，偏保守）、**839 ms**、有 trace_id。
+- 清空旧影子并回查：影子 **0**、原表 **28,341** 不变。M3 dry-run：`planned=28341`、`orphans=0`、零写入。
+- 32 条 M3 真实样本：**32/32、0 失败、2424 ms**，1 次 API 调用、实际 3,931 tokens（估算 15,573）。按此吞吐全量预计约 35 分钟。
+- 全量 M3 后台重建已启动（`vp-shadow-m3-reindex`，`--batch-size 64`，1 CPU/1000 MB），线上 Mock 原表继续服务。
 
+### 完成与切换证据
 
-
-
-
-
-
-
-
-
+- 全量 M3 重建成功：**`planned=indexed=28341`、`failed_batches=0`、`errors=[]`、`elapsed_ms=596775`（约 9.9 分钟）**。443 批按 64 拆分后共 **646 次** API 成功调用、累计实际约 **224 万 tokens**、**0 次重试、0 次 429**。容器内存约 170 MB，主机 load 0.16–0.3 全程无压力。
+- 预对账：`planned=0`、`orphans=0`；在线一致性：`consistent=true`、`28341/28341`、缺失/孤儿 ID 均为 0。
+- 停写最终对账：`planned=0`、`orphans=0`，一致性再次为真。原表 **28,341** 与影子表 **28,341** 并存。
+- 切换：清理 `rag:retrieval:*`（deleted=0、remaining=0），`.env` 切到 `RAG__PGVECTOR_TABLE=knowledge_vectors_bge`、`RAG_EMBEDDING_MOCK=0`、provider=siliconflow、model=BAAI/bge-m3，原配置备份为 `.env.pre-m3-cutover`。backend healthy，日志显示 `SiliconFlowEmbeddingService`，公网 **4/4 PASS**。
+- 真实语义验收：中文「交替迭代」查询命中 FAIR-RAG + MultiAgent RAG；英文「iterative refinement / decides when enough evidence」全部命中 FAIR-RAG；两次查询后端日志均有实时 `siliconflow_embeddings`（count=1、actual_tokens、trace_id），返回 ID 均为可回溯 UUID。中文直查标题词版本在 M3 下 5 条全部命中目标文档。
+- 回滚可用性：以 Mock 对原表做只读一致性检查，`consistent=true`、ID 全对；回滚镜像 `shadow-mock`=`79ac91a4374c`，原表从未被 M3 覆盖。
+- 最终负载：load `0.20/0.29/0.31`、`MemAvailable=2294 MB`、根盘 7.3 GB 可用；五容器 healthy，无遗留 reindex 容器。切换后已再触发一次数据库备份（`2026-11-11T06:14:19Z` 启动）。
