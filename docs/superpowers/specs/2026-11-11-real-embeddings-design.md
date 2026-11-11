@@ -73,6 +73,7 @@
 
 - backend 构建参数 `INSTALL_RAG_MODELS` 的 ECS 默认值改为 `true`；
 - backend 显式设置 `HF_HOME: /app/.cache`；
+- backend 设置 `OMP_NUM_THREADS=1`，正常检索也为其他容器保留一个 CPU；
 - backend 挂载 `model_cache:/app/.cache`；
 - 顶层声明 `model_cache` 命名卷。
 
