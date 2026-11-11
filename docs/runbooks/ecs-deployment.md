@@ -371,7 +371,8 @@ BASE=https://api.veripaper.me bash deploy/ecs/verify.sh
 | 重试/限流 | **0 次重试、0 次 429** |
 | 一致性 | 预对账 0 缺项/0 孤儿；停写最终对账同样为 0；ID 级 `consistent=true` |
 | 切换后 | backend healthy、`SiliconFlowEmbeddingService`、公网 **4/4 PASS** |
-| 回滚可用性 | 原 Mock 表 28,341 条 ID 级一致；回滚镜像 `shadow-mock` |
+| 回滚可用性 | 原 Mock 表 28,341 条 ID 级一致；回滚镜像 `shadow-mock`=`79ac91a4374c` |
+| 切换后备份 | `db-backups/20261111T061422Z.sql.gz`，**135 MB**，dump 2 分 37 秒、上传约 15 分钟 |
 
 纯语义验收：中文「把检索和生成两个阶段交替迭代……」命中 FAIR-RAG 与
 MultiAgent Collaborative RAG；英文「iterative refinement where the system

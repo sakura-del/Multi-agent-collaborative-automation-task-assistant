@@ -4292,4 +4292,4 @@ air tokens 只服务两页，不替换 success/warning/destructive。证据卡�
 - 切换：清理 `rag:retrieval:*`（deleted=0、remaining=0），`.env` 切到 `RAG__PGVECTOR_TABLE=knowledge_vectors_bge`、`RAG_EMBEDDING_MOCK=0`、provider=siliconflow、model=BAAI/bge-m3，原配置备份为 `.env.pre-m3-cutover`。backend healthy，日志显示 `SiliconFlowEmbeddingService`，公网 **4/4 PASS**。
 - 真实语义验收：中文「交替迭代」查询命中 FAIR-RAG + MultiAgent RAG；英文「iterative refinement / decides when enough evidence」全部命中 FAIR-RAG；两次查询后端日志均有实时 `siliconflow_embeddings`（count=1、actual_tokens、trace_id），返回 ID 均为可回溯 UUID。中文直查标题词版本在 M3 下 5 条全部命中目标文档。
 - 回滚可用性：以 Mock 对原表做只读一致性检查，`consistent=true`、ID 全对；回滚镜像 `shadow-mock`=`79ac91a4374c`，原表从未被 M3 覆盖。
-- 最终负载：load `0.20/0.29/0.31`、`MemAvailable=2294 MB`、根盘 7.3 GB 可用；五容器 healthy，无遗留 reindex 容器。切换后已再触发一次数据库备份（`2026-11-11T06:14:19Z` 启动）。
+- 最终负载：load `0.20/0.29/0.31`、`MemAvailable=2294 MB`、根盘 7.3 GB 可用；五容器 healthy，无遗留 reindex 容器。切换后数据库备份已确认上传：`db-backups/20261111T061422Z.sql.gz`，**135 MB**，dump 2 分 37 秒、上传约 15 分钟。
