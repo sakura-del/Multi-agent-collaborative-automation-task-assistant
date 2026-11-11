@@ -219,13 +219,13 @@ docker exec -e RUN_ONCE=1 vp-db-backup /usr/local/bin/backup.sh   # 手动跑一
 drop-in 在 `/etc/ssh/sshd_config.d/99-veripaper-keyonly.conf` |
 | Bot Fight Mode | **不建议开**：zone 级开关对 `api.veripaper.me` 同样生效，会挑战非浏览器客户端；本项目有开放 API（api_key 程序调用），免费版无法配置例外 |
 | AI Labyrinth | **不建议开**：只给 bot 注入隐藏 nofollow 链接，对 SPA + JSON API 无实质安全收益，还会增大 index.html |
-| Security.txt | **已就绪待部署**：`frontend/public/.well-known/security.txt`（commit `6090d84`）；当前线上仍返回 SPA fallback |
+| Security.txt | **已上线**：`frontend/public/.well-known/security.txt` 随 Git 构建发布；线上返回 `text/plain` 真实 RFC 9116 内容（2026-11-11 验证） |
 | Turnstile | **可选未做**：可防注册/登录刷量，但需 Cloudflare widget + 前后端改造；现有保护是注册限流 5 次/3600s |
 
 > 2026-11-11 Cloudflare Security Insights 复核：这四项均为「未启用功能」建议，不是漏洞。
 > 传输与访问基线已处置（HSTS、最低 TLS 1.2、Full strict、SSH 仅密钥、未知 Host 444）。
-> 本机 deploy 前置条件缺失：无 node/npm，且 CF API Token 有 IP 白名单
-> （当前出口被 9109 拒绝）。部署 security.txt 需先补 node 或把出口 IP 加入白名单。
+> Security.txt 已随 Pages Git 构建上线；Bot Fight Mode / AI Labyrinth 保持关闭（理由见上）；
+> Turnstile 需前后端改造，未做。发布流程已改为 Git 自动部署（§13），不再依赖 API Token 与 IP 白名单。
 
 ## 10. 尚未完成 / 后续
 
@@ -362,11 +362,6 @@ BASE=https://api.veripaper.me bash deploy/ecs/verify.sh
 
 ## 12. SiliconFlow BGE-M3 API（**已上线，2026-11-11**）
 
-> 本节取代继续运行本地 BGE-large 的做法。生产服务器只调用 Embeddings API，
-> 不进行本地模型推理。设计/完整计划见
-> `docs/superpowers/specs/2026-11-11-siliconflow-bge-m3-design.md` 与
-> `docs/superpowers/plans/2026-11-11-siliconflow-bge-m3.md`。
-
 ### 12.1 实测结果
 
 | 项 | 值 |
@@ -452,3 +447,66 @@ postgres/redis/nginx 基础镜像、`veripaper_pgdata` 卷、
 > 卷 `veripaper_model_cache` 仍在 compose 中挂载（现在是空卷）。若彻底不再
 > 需要本地模型，可从 compose 移除该挂载以消除 `external` 警告；本次只清内容，
 > 未改 compose，避免影响运行中的容器。
+
+## 13. 前端发布：Cloudflare Pages Git 自动部署（2026-11-11 起）
+
+### 13.1 当前方式
+
+Pages 项目 `multi-agent-assistant` 已从 **Direct Upload 改为 Git 集成**
+（同一项目原地连接，域名与部署历史保留）：
+
+| 项 | 值 |
+| --- | --- |
+| 仓库 | `sakura-del/Multi-agent-collaborative-automation-task-assistant` |
+| 生产分支 | `main` |
+| 根目录 | `frontend` |
+| 构建命令 | `npm ci && npm run build` |
+| 输出目录 | `dist` |
+| 环境变量（生产） | `VITE_API_BASE_URL=https://api.veripaper.me/api/v1`、`VITE_WS_BASE_URL=wss://api.veripaper.me`、`NODE_VERSION=20` |
+| 域名 | `veripaper.me` + `multi-agent-assistant.pages.dev` |
+
+**发布方式：push 到 GitHub `main` 即自动构建部署。** 不再需要本机 Node、
+`scripts/deploy-pages.mjs`、Cloudflare API Token 或令牌 IP 白名单。
+
+`scripts/deploy-pages.mjs` 保留仅为应急（如需临时回到 Direct Upload 手动上传）。
+Cloudflare API Token 与 `C:\Users\Lenovo\cf-secrets.env` 仅用于排查/控制台操作，
+日常发布不依赖它们；动态 IP 不再影响发布。
+
+### 13.2 必须知道的两个坑
+
+1. **环境变量必须在构建之前保存**。若先连接 Git 触发首次构建、之后才添加变量，
+   首次产物会缺少 `VITE_API_BASE_URL`，前端退化为相对路径 `/api/v1` →
+   请求打到 `veripaper.me` 静态站，拿到 `text/html` 而非 JSON，前端整体不可用。
+   症状：`/knowledge/search` 等接口返回 HTML 或 JSON 解析错误。
+2. **Secret 与 Text 类型在 API 里都读不到明文**（`GET projects` 返回空字符串是正常的），
+   所以「变量是否生效」只能通过**构建产物**验证：下载首页引用的
+   `assets/index-*.js`，搜索 `api.veripaper.me`。构建正确时能匹配到
+   `https://api.veripaper.me/api/v1` 与 `wss://api.veripaper.me`。
+
+### 13.3 修复记录（2026-11-11）
+
+首次连接后的构建（`70669cfb`，16:24 JST）产物为 `index-BiH7iure.js`，
+`api.veripaper.me` 命中 **0 次** → 前端 API 走相对路径 → 实际不可用。
+判断为变量在构建之后才保存。用 API 重试该部署（`a7e83ca8`）后产物为
+`index-DLpds5o8.js`，`api.veripaper.me` 命中 **2 次**、`wss://` 命中 1 次，
+提取到 `https://api.veripaper.me/api/v1`；同时验证：
+
+- `https://veripaper.me/.well-known/security.txt` → `text/plain`，内容为真实
+  RFC 9116 条目（此前是 SPA fallback 返回 HTML）；
+- CORS 预检 `OPTIONS /api/v1/tasks`（Origin=`https://veripaper.me`）→
+  `access-control-allow-origin: https://veripaper.me`；
+- `https://api.veripaper.me/api/v1/health/ready` → ready。
+
+### 13.4 换机/换网络后的发布流程
+
+```bash
+git push backup main     # backup 指向 GitHub；推送后 Cloudflare 自动构建
+```
+
+在 Cloudflare → Workers & Pages → multi-agent-assistant → 部署 里查看进度。
+失败时先看构建日志的 `npm ci` / `vue-tsc` 输出，再核对上述环境变量是否仍在。
+
+> 本节取代继续运行本地 BGE-large 的做法。生产服务器只调用 Embeddings API，
+> 不进行本地模型推理。设计/完整计划见
+> `docs/superpowers/specs/2026-11-11-siliconflow-bge-m3-design.md` 与
+> `docs/superpowers/plans/2026-11-11-siliconflow-bge-m3.md`。
