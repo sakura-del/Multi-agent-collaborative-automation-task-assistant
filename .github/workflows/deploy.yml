@@ -72,7 +72,10 @@ jobs:
           # ssh 会报 "invalid format" 而不是"看起来像格式问题"
           printf '%s\n' "$DEPLOY_SSH_KEY" | tr -d '\r' > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+          # ⚠️ 不要用 ssh-keyscan 预扫：它会连 5 个连接、其中几个密钥协商失败，
+          # 会被服务器 fail2ban 计入 maxretry → 部署会话被中途封掉
+          # （表现为 "Timeout, server not responding"，2026-11-12 实测踩过）。
+          # accept-new 只在首次连接记录一次主机密钥，只建立一条连接。
 
       - name: 连接探测（快速失败，避免整步挂死）
         env:
@@ -97,6 +100,7 @@ jobs:
         run: |
           ssh -i ~/.ssh/deploy_key \
             -o BatchMode=yes \
+            -o StrictHostKeyChecking=accept-new \
             -o ConnectTimeout=15 \
             -o ServerAliveInterval=15 \
             -o ServerAliveCountMax=4 \
