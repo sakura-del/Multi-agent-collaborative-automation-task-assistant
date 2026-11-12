@@ -670,3 +670,93 @@ docker exec vp-postgres psql -U veripaper -d veripaper -c \
 # 日志里的两类事件
 docker logs vp-backend --since 1h 2>&1 | grep -E "refresh_token_(rotated|reuse)"
 ```
+
+## 16. 网关与站点安全响应头（Issue #11 M-4，2026-11-12）
+
+安全排查实测：`api.veripaper.me` 只有 HSTS（Cloudflare 加）与 `X-Content-Type-Options`，
+**缺** `X-Frame-Options` / CSP / `Referrer-Policy` / `Permissions-Policy` / COOP。
+影响：API 响应可被任意站点嵌进 iframe（点击劫持）；XSS 之后也没有「能加载什么」的约束。
+
+### 16.1 网关（`deploy/ecs/nginx-api-tls.conf`）
+
+80 与 443 两个反代 server 块各加 6 个头，全部 `always`（4xx/5xx 也要带——
+探测与攻击最常看到的正是错误响应）：
+
+```
+X-Content-Type-Options: nosniff
+X-Frame-Options: DENY
+Referrer-Policy: no-referrer
+Permissions-Policy: geolocation=(), microphone=(), camera=(), payment=(), usb=(), interest-cohort=()
+Cross-Origin-Opener-Policy: same-origin
+Content-Security-Policy: $csp_policy
+```
+
+CSP 用 `map $uri $csp_policy` **分流**，而不是在 location 里覆盖：
+
+- API 默认 `default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`；
+- `/docs` 与 `/redoc` 放宽（jsdelivr + `'unsafe-inline'` + Cloudflare 探针），否则 Swagger UI 白屏。
+
+> 为什么必须用 map：nginx 的 `add_header` **一旦在子级出现，父级全部不再继承**。
+> 想给 `/docs` 换一套策略，若靠 location 覆盖，6 个头要在每个 location 重复一遍，
+> 漏一处就静默少一层防护，而且没有任何报错。
+
+**刻意不加 `Cross-Origin-Resource-Policy: same-origin`**：这个 API 本来就要被
+`veripaper.me` 跨源调用，写成 same-origin 会把产品自己的前端挡掉。
+
+### 16.2 站点（`frontend/public/_headers`）
+
+Cloudflare Pages 读取构建产物根目录的 `_headers`，随代码版本管理（可 review、可回滚）：
+`nosniff` / `X-Frame-Options: DENY` / `Referrer-Policy: strict-origin-when-cross-origin` /
+`Permissions-Policy`。
+
+**暂不下发 CSP**：SPA 的 CSP 会真实影响渲染（Vite 产物的内联样式、库的 style 属性、
+`connect-src` 要同时覆盖根域、`api.veripaper.me` 与 `wss`），打崩的表现是用户白屏且不报错。
+这一条单独做，必须先在真实浏览器里回归（下一步，见 §16.5）。
+
+### 16.3 ⚠️ 部署坑：单文件 bind mount 不会跟着 git 更新
+
+`docker-compose` 把 `./nginx-api-tls.conf` **单文件**挂进容器。`git merge` 是「写新文件 + rename」，
+inode 变了，而容器仍绑在旧 inode 上：
+
+- `nginx -t` 说配置 OK；
+- `nginx -s reload` 也"成功"；
+- **但容器里读到的还是旧配置**——头一个都没出现，且没有任何报错。
+
+判据与解法：
+
+```bash
+docker exec vp-gateway grep -c add_header /etc/nginx/conf.d/default.conf   # 0 => 还是旧文件
+cd /opt/veripaper/deploy/ecs && docker compose up -d --force-recreate gateway
+```
+
+（如果改成挂目录 `./nginx/:/etc/nginx/conf.d/` 就不会有这个坑；当前保持单文件是为了显式。）
+
+### 16.4 本次实测证据（2026-11-12 12:05 JST）
+
+| 检查点 | 结果 |
+| --- | --- |
+| `nginx -t`（重建前） | syntax ok / test successful |
+| 容器内 `grep -c add_header` | 重建前 **0**（踩坑），`--force-recreate` 后 **14** |
+| 源站 443 `GET /api/v1/health/ready` | 200 + **6 个头齐全** |
+| 源站 80 同路径 | 405（HEAD 不允许）**但头仍在** → `always` 生效 |
+| 源站 404 `/api/v1/does-not-exist` | 404 + `x-frame-options: DENY` → `always` 生效 |
+| 源站 `/docs` | 200 + **放宽版 CSP**（含 jsdelivr 与 CF 探针） |
+| 公网 `https://api.veripaper.me` | 200 + 6 个头 + HSTS |
+| CORS 预检 `OPTIONS /tasks`（Origin=veripaper.me） | 200 + `access-control-allow-origin` 命中（未被新头影响） |
+| 真实浏览器 `https://api.veripaper.me/docs` | 标题 `VeriPaper - Swagger UI`、**72 个操作**、CSP 错误 **0**、失败请求 **0** |
+| 真实浏览器 `https://veripaper.me` | 标题 VeriPaper、CSP 错误 **0** |
+| 真实浏览器登录冒烟 | 登录成功 → 跳 `/tasks`、页面异常 **0** |
+| 站点（Pages 自动部署后） | `x-frame-options: DENY` / `referrer-policy: strict-origin-when-cross-origin` / `permissions-policy` / `nosniff` 均已生效 |
+
+### 16.5 仍然待办：站点 CSP
+
+需要先用真实浏览器把以下内容列全再下发，否则白屏风险不可接受：
+
+1. `frontend/dist/index.html` 是否有内联 `<script>`（有则要 hash 或 nonce）；
+2. 第三方资源：Cloudflare Insights 探针、`cdn.jsdelivr.net`（仅 docs）、字体；
+3. `connect-src` 必须覆盖 `https://api.veripaper.me` 与 `wss://api.veripaper.me`；
+4. `style-src` 需要 `'unsafe-inline'`（Vue/Tailwind 运行时与 `motion` 会写 style 属性）；
+5. 预览域 `*.multi-agent-assistant.pages.dev` 是否也要放行（若要求预览可用）。
+
+下发方式：在 `frontend/public/_headers` 的 `/*` 规则里加一行 `Content-Security-Policy:`，
+然后在临时预览域先验证（Pages 每次 push 都有预览 URL），确认无白屏、无 CSP 报错再合并到生产。

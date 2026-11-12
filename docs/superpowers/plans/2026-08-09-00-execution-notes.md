@@ -4317,3 +4317,24 @@ air tokens 只服务两页，不替换 success/warning/destructive。证据卡�
 - 门禁：black 427 文件 / ruff 0 / mypy **218 文件 0**；pytest **3091 passed / 21 skipped / 覆盖率 90%**（4 红仍为 `.csl` 的 CRLF 伪缺陷，§5 #45）。
 - 生产（2026-11-12 11:30–11:37 JST，ECS）：迁移 `c4f2a8d7e9b1 → a7d3e9b6c1f4` 由 entrypoint 自动完成，表 + 3 索引就位；实测 ① 登录 200（`expires_in=3600`）② 首次刷新 200 ③ 旧 refresh 立即重放 **401 `refresh_reuse_grace`** ④ 宽限期内新 access 仍 200 `demo/admin`（不自我踢下线）⑤ 新 refresh 继续轮换 200 ⑥ 等 65 秒再重放 **401 `refresh_reuse`** ⑦⑧ 家族内 access/refresh 均 **401** ⑨ `token_invalid_before` 已写。证据见 `ecs-deployment.md` §15。
 - 副作用：为验证家族作废，`demo` 的既有会话被真实作废一次（重新登录即可）；线上老 refresh（无 `jti`）一律 401，所有用户需重新登录一次。
+
+### Issue #11 M-4 安全响应头（2026-11-12）
+
+- 缺陷：`api.veripaper.me` 只有 HSTS 与 `X-Content-Type-Options`，缺 X-Frame-Options / CSP /
+  Referrer-Policy / Permissions-Policy / COOP；站点侧同样缺（Cloudflare 只补了 HSTS）。
+- **先写失败测试** `backend/tests/test_gateway_security_headers.py`（11 条，9 红）：按 server 块切分配置，
+  断言 80/443 两个反代块都有 6 个头、每个 `add_header` 都带 `always`、CSP 的 `map` 有默认最严与
+  `/docs` 放宽两条分支、站点 `_headers` 存在且含防嵌套与 referrer 策略。实现后 11 passed。
+- 关键设计：CSP 用 `map $uri $csp_policy` 而不是 location 覆盖——`add_header` 一旦在子级出现，
+  父级全部不继承，6 个头就得在每个 location 重复，漏一处静默少一层防护。默认策略
+  `default-src 'none'`，`/docs|/redoc` 放宽到 jsdelivr + inline + Cloudflare 探针。
+- **踩坑 1（单文件 bind mount）**：`git merge` 用「写新文件 + rename」换了 inode，容器仍绑旧 inode →
+  `nginx -t` 通过、`reload` 不报错、头一个都不出现。判据：容器内 `grep -c add_header` 为 0；
+  解法 `docker compose up -d --force-recreate gateway`。记入 §5 #49。
+- **踩坑 2（Cloudflare 注入探针）**：CF 给所有 HTML 响应注入 `static.cloudflareinsights.com` 脚本，
+  docs 的 CSP 只放行 jsdelivr → 控制台报 `Refused to load script`。补放行后 CSP 错误归零。
+- 站点 `_headers` 只下发非 CSP 的四项：SPA 的 CSP 打崩表现为白屏且不报错，需单独回归（§16.5）。
+- 门禁：black 428 文件 / ruff 0 / mypy 218 文件 0；pytest **3102 passed / 21 skipped / 90%**（4 红仍为 `.csl` CRLF，§5 #45）。
+- 生产验证（2026-11-12 12:05 JST）：公网 6 个头齐全 + HSTS；源站 80/443、404 响应均带头（`always`）；
+  `/docs` 放宽 CSP；CORS 预检仍 200 且 allow-origin 命中；真实浏览器 `/docs` 渲染出 **72 个操作**、
+  CSP 错误 0；`veripaper.me` 0 错误；**登录冒烟成功跳 `/tasks`**。站点头在 Pages 自动部署后已生效。

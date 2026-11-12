@@ -117,6 +117,12 @@
   `Permissions-Policy` 与最小 CSP（API 可 `default-src 'none'`）。
   站点侧补 CSP（需与 Vite 产物兼容）。
 
+> 2026-11-12 已修复：网关 80/443 两个反代块补齐 6 个头（全部 `always`），
+> CSP 用 `map $uri` 分流（API `default-src 'none'`，`/docs` 放宽到 jsdelivr + CF 探针）；
+> 站点通过 Pages `_headers` 下发 nosniff / X-Frame-Options / Referrer-Policy / Permissions-Policy。
+> **站点 CSP 仍待办**（打崩风险需真实浏览器回归，方案见 `ecs-deployment.md` §16.5）。
+> 实测证据见 `docs/runbooks/ecs-deployment.md` §16。
+
 ### M-5 依赖存在 21 条 HIGH/CRITICAL 公告，需按可达性处置
 
 按 OSV 实测（168 个包）。逐条判断可达性后：
@@ -174,7 +180,7 @@
 | P0 | ~~H-1/H-2 轮换 demo 与 e2e 密码，清理历史测试账号~~ **已完成 2026-11-11** | 小（需改数据） |
 | P1 | ~~M-1 refresh 旧令牌失效~~ **已完成 2026-11-12** | 中 |
 | P1 | M-2 限流真实 IP + 源站仅允许 Cloudflare | 中（改配置 + 网关） |
-| P1 | M-4 安全响应头 | 小 |
+| P1 | ~~M-4 安全响应头~~ **API/站点已修（2026-11-12），站点 CSP 待办** | 小 |
 | P2 | M-5 依赖升级（先 certifi，再其余） | 中 |
 | P2 | M-3 登录限流收紧 | 小 |
 | P3 | L 系列主机加固 | 小 |
