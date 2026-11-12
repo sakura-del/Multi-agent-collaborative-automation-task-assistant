@@ -31,6 +31,22 @@ os.environ.setdefault("RAG__VECTOR_BACKEND", "chroma")
 # JWT 测试密钥
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-not-for-production")
 
+# 存储根目录指到临时目录。
+# 生产配置里 `upload_root` / `artifact_root` 是**容器内绝对路径** `/app/data/...`，
+# 而 GitHub runner 没有创建 `/app` 的权限 → `init_kb()` 一构造存储就 PermissionError。
+# 这个坑只在 Linux CI 暴露：本地 Windows 上 `/app` 会落到 `C://app`，恰好能建。
+# 用 setdefault：外部显式指定时以外部为准。
+import atexit  # noqa: E402
+import shutil  # noqa: E402
+import tempfile  # noqa: E402
+
+_TEST_DATA_ROOT = Path(tempfile.mkdtemp(prefix="veripaper-test-data-"))
+atexit.register(lambda: shutil.rmtree(_TEST_DATA_ROOT, ignore_errors=True))
+# 这两个字段在 `AppConfig` 下（不是 StorageConfig），环境变量名是 APP__UPLOAD_ROOT。
+# 写成 STORAGE__... 不会有任何报错，只是**静默不生效**——实测过。
+os.environ.setdefault("APP__UPLOAD_ROOT", str(_TEST_DATA_ROOT / "uploads"))
+os.environ.setdefault("APP__ARTIFACT_ROOT", str(_TEST_DATA_ROOT / "artifacts"))
+
 import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402
 from sqlalchemy.ext.asyncio import (  # noqa: E402
