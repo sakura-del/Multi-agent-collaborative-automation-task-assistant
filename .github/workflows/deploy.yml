@@ -68,9 +68,24 @@ jobs:
             exit 1
           fi
           mkdir -p ~/.ssh
-          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          # 去掉可能的 CRLF：Windows 上生成的密钥/复制粘贴的 secret 常带 \r，
+          # ssh 会报 "invalid format" 而不是"看起来像格式问题"
+          printf '%s\n' "$DEPLOY_SSH_KEY" | tr -d '\r' > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: 连接探测（快速失败，避免整步挂死）
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          # 上一次事故：SSH 连不上时整步挂 15 分钟没有任何输出。
+          # 先用 bash 的 /dev/tcp 探一下 22 端口，不通就立刻失败并说清原因。
+          if timeout 15 bash -c "cat < /dev/null > /dev/tcp/${DEPLOY_HOST}/22"; then
+            echo "22 端口可达"
+          else
+            echo "::error::无法连接 ${DEPLOY_HOST}:22 —— 检查云安全组 / ufw / 主机状态"
+            exit 1
+          fi
 
       - name: 部署
         id: deploy
@@ -80,7 +95,12 @@ jobs:
           TARGET_SHA: ${{ steps.target.outputs.sha }}
           REPO_URL: https://github.com/${{ github.repository }}.git
         run: |
-          ssh -i ~/.ssh/deploy_key -o BatchMode=yes "$DEPLOY_USER@$DEPLOY_HOST" \
+          ssh -i ~/.ssh/deploy_key \
+            -o BatchMode=yes \
+            -o ConnectTimeout=15 \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=4 \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
             "TARGET_SHA='$TARGET_SHA' REPO_URL='$REPO_URL' bash -s" <<'REMOTE'
           set -euo pipefail
 
