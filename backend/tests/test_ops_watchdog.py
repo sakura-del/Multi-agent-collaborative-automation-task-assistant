@@ -43,7 +43,7 @@ class TestConfigParsing:
     def test_env_file_ignores_comments_and_strips_quotes(self, tmp_path: Path, wd) -> None:
         path = tmp_path / "notify.env"
         path.write_text(
-            "# 注释\n\nWECOM_WEBHOOK_URL=\"https://qyapi.example/x?a=1\"\nEMPTY=\nBAD_LINE\n",
+            '# 注释\n\nWECOM_WEBHOOK_URL="https://qyapi.example/x?a=1"\nEMPTY=\nBAD_LINE\n',
             encoding="utf-8",
         )
         values = wd.load_env_file(path)
@@ -79,7 +79,9 @@ class TestMetrics:
         assert totals["4xx"] == 5.0
 
     def test_no_previous_snapshot_yields_no_ratio(self, wd) -> None:
-        ratio, _, _ = wd.compute_error_rate(None, {"all": 100, "5xx": 50}, min_requests=10, threshold_pct=20)
+        ratio, _, _ = wd.compute_error_rate(
+            None, {"all": 100, "5xx": 50}, min_requests=10, threshold_pct=20
+        )
         assert ratio is None
 
     def test_below_min_requests_is_ignored(self, wd) -> None:
@@ -182,25 +184,37 @@ class TestNotificationStateMachine:
         return wd.Issue(key, severity, "磁盘 88%", "剩 4 GB")
 
     def test_first_failure_notifies(self, wd) -> None:
-        state, new, recovered = wd.decide_notifications({}, [self._issue(wd)], now=self.NOW, repeat_minutes=180)
+        state, new, recovered = wd.decide_notifications(
+            {}, [self._issue(wd)], now=self.NOW, repeat_minutes=180
+        )
         assert len(new) == 1 and recovered == []
         assert "disk" in state["firing"]
 
     def test_repeat_suppressed_within_interval(self, wd) -> None:
-        state, _, _ = wd.decide_notifications({}, [self._issue(wd)], now=self.NOW, repeat_minutes=180)
+        state, _, _ = wd.decide_notifications(
+            {}, [self._issue(wd)], now=self.NOW, repeat_minutes=180
+        )
         later = self.NOW + timedelta(minutes=10)
-        state, new, recovered = wd.decide_notifications(state, [self._issue(wd)], now=later, repeat_minutes=180)
+        state, new, recovered = wd.decide_notifications(
+            state, [self._issue(wd)], now=later, repeat_minutes=180
+        )
         assert new == [] and recovered == []
 
     def test_repeat_after_interval(self, wd) -> None:
-        state, _, _ = wd.decide_notifications({}, [self._issue(wd)], now=self.NOW, repeat_minutes=180)
+        state, _, _ = wd.decide_notifications(
+            {}, [self._issue(wd)], now=self.NOW, repeat_minutes=180
+        )
         later = self.NOW + timedelta(minutes=181)
         _, new, _ = wd.decide_notifications(state, [self._issue(wd)], now=later, repeat_minutes=180)
         assert len(new) == 1
 
     def test_recovery_reported(self, wd) -> None:
-        state, _, _ = wd.decide_notifications({}, [self._issue(wd)], now=self.NOW, repeat_minutes=180)
-        state, new, recovered = wd.decide_notifications(state, [], now=self.NOW + timedelta(minutes=5), repeat_minutes=180)
+        state, _, _ = wd.decide_notifications(
+            {}, [self._issue(wd)], now=self.NOW, repeat_minutes=180
+        )
+        state, new, recovered = wd.decide_notifications(
+            state, [], now=self.NOW + timedelta(minutes=5), repeat_minutes=180
+        )
         assert new == [] and recovered == ["disk"]
         assert state["firing"] == {}
 
@@ -209,7 +223,10 @@ class TestNotificationStateMachine:
         state, new, _ = wd.decide_notifications({}, issues, now=self.NOW, repeat_minutes=180)
         assert len(new) == 2
         state, new, recovered = wd.decide_notifications(
-            state, [self._issue(wd, "backup")], now=self.NOW + timedelta(minutes=5), repeat_minutes=180
+            state,
+            [self._issue(wd, "backup")],
+            now=self.NOW + timedelta(minutes=5),
+            repeat_minutes=180,
         )
         assert new == [] and recovered == ["disk"]
 
@@ -236,7 +253,9 @@ class TestMessageRendering:
         assert "已恢复" in content and "disk" in content
 
     def test_nothing_to_say_renders_empty(self, wd) -> None:
-        assert wd.format_message(issues=[], recovered=[], cfg=wd.Config(), now=datetime.now(UTC)) == ""
+        assert (
+            wd.format_message(issues=[], recovered=[], cfg=wd.Config(), now=datetime.now(UTC)) == ""
+        )
 
     def test_message_truncated_below_wecom_limit(self, wd) -> None:
         huge = wd.Issue("noise", "red", "x" * 5000, "y" * 5000)
@@ -266,6 +285,7 @@ class TestDelivery:
 
     def test_send_wecom_detects_errcode(self, wd, monkeypatch) -> None:
         """HTTP 200 但 errcode != 0（key 失效）必须判为失败，否则告警静默丢失。"""
+
         class Response:
             status = 200
 
@@ -310,7 +330,7 @@ class TestPublicProbe:
             "fetch",
             lambda url: (200, json.dumps({"status": "ready", "checks": {"database": "ok"}}), {}),
         )
-        ok, detail = probe.check_api()
+        ok, _detail = probe.check_api()
         assert ok is True
 
     def test_api_unhealthy_dependency(self, probe, monkeypatch) -> None:
