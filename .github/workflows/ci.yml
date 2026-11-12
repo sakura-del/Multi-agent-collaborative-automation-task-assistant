@@ -77,8 +77,11 @@ jobs:
     name: Unit Tests & Coverage
     runs-on: ubuntu-latest
     needs: lint
-    # 实测 5m35s。卡死时 30 分钟失败，而不是挂到 GitHub 默认的 6 小时。
-    timeout-minutes: 30
+    # 2026-11-12 实测：本地 3207 条用例 20m24s，CI runner 更慢，30 分钟上限已无余量
+    # （连续两次在 30 分钟被 cancel，看起来像卡死，其实是套件长大了）。
+    # 取 50 = 实测 20 分钟的 2.5 倍：既容忍 runner 抖动，真卡死时也不会挂一小时。
+    # 下次套件再涨 50% 就该拆分 job（按 test_ 前缀分片）而不是继续加时间。
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
 
