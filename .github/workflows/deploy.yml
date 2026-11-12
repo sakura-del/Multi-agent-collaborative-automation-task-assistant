@@ -58,6 +58,11 @@ jobs:
             echo "sha=$(git ls-remote https://github.com/${{ github.repository }}.git refs/heads/main | cut -f1)" >> "$GITHUB_OUTPUT"
           fi
 
+      - uses: actions/checkout@v4
+        with:
+          # 通知脚本（ops/notify.py）需要仓库；workflow_run 场景用被测提交
+          ref: ${{ steps.target.outputs.sha || github.sha }}
+
       - name: 配置 SSH
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
@@ -177,6 +182,7 @@ jobs:
 
       - name: 通知（成功）
         if: success()
+        continue-on-error: true  # 部署成功了，通知挂掉不该把整次运行标红
         env:
           WECOM_WEBHOOK_URL: ${{ secrets.WECOM_WEBHOOK_URL }}
         run: |
@@ -187,6 +193,7 @@ jobs:
 
       - name: 通知（失败并回滚）
         if: failure()
+        continue-on-error: true  # 回滚状态以「部署」步骤为准
         env:
           WECOM_WEBHOOK_URL: ${{ secrets.WECOM_WEBHOOK_URL }}
         run: |
