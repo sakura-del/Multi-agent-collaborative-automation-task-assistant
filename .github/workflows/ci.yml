@@ -1,27 +1,28 @@
-# 多智能体协作自动化任务助手 - CI 流水线（Plan 5 Task 4）
+# CI（2026-11-12 重构：按改动选测试）
 #
-# 门禁原则：任何检查失败即阻断合并（不存在 `|| true` 或 `continue-on-error`）。
-# 依赖唯一来源是 backend/pyproject.toml（`pip install -e ".[dev,chroma]"`），
-# 不再在 workflow 里手工维护第三方包清单。
+# ## 为什么不再每个 push 都跑全量
 #
-# 作业图：
-#   lint ─┬─> test（覆盖率 ≥80%）
-#         ├─> migration（Alembic 升降级往返，PostgreSQL 16）
-#         └─> frontend（Vitest + vue-tsc + vite build）
-#   build-check（Dockerfile 可构建）
-#   smoke（需要 test + frontend 通过，验证 Compose 全链路）
+# 3209 条用例本地 19 分钟、GitHub 2 核 runner 超过 45 分钟。每个 push 都等一次的结果是：
+# 反馈慢到没人愿意看，真红的时候反而被忽略。现在拆成两条：
 #
-# ## 每个作业都必须有 timeout-minutes（2026-10-27 实测踩到）
+# - **本 workflow（push/PR）**：lint + **与改动相关**的测试 + 受影响的构建/迁移检查，
+#   目标是 3~8 分钟出结果；
+# - **`nightly.yml`（每天 03:00 JST）**：全量 + 覆盖率 ≥80% 硬门禁。
 #
-# 不配超时就是 GitHub 默认的 **6 小时**。2026-10-27 一次纯文档提交里，
-# `test` 作业的 pytest 步骤卡了 **42 分钟**（正常 5m35s），我手动取消并重跑，
-# 同一作业 5m35s 正常完成 —— 是 runner 侧卡住，不是代码问题。
+# 选片规则见 `scripts/ci/select_tests.py`：全局前提（core/db/main/alembic/config/pyproject）
+# 改动 → 全量；未映射的新模块 → 全量；只有文档/前端 → 不跑后端测试。
 #
-# 没有超时的话，这种卡死会白占 6 小时，而 CI 的 `concurrency.cancel-in-progress`
-# 又会让**后续 push 把卡住的 run 取消**，等于「看着一直在跑、实际什么都没验」。
+# ## 这个取舍的代价（写在明处）
 #
-# 取值 = 实测最慢值 × 约 3~5 倍余量，既能容忍 runner 抖动，又能在真卡死时
-# 尽快失败而不是挂到 6 小时。
+# 选片器漏判时，push 的 CI 会绿而全量其实红。三层兜底：
+# 1. 夜间全量必跑；
+# 2. 部署后立刻健康检查 + 冒烟，失败自动回滚（`deploy.yml`）；
+# 3. `backend/tests/test_ci_selection.py` 校验映射表里每个路径都真实存在。
+#
+# ## 每个作业都必须有 timeout-minutes（2026-10-27 踩到）
+#
+# 不配就是 6 小时默认值；配合 `cancel-in-progress`，卡死的 run 会白占时间还被下一次 push 取消，
+# 等于「看着一直在跑、实际什么都没验」。
 
 name: CI
 
@@ -30,6 +31,7 @@ on:
     branches: [main, develop, "codex/**"]
   pull_request:
     branches: [main, develop]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -40,10 +42,59 @@ env:
   NODE_VERSION: "20"
 
 jobs:
+  # 先算「这次改了什么」，后面所有作业靠它决定跑不跑
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      base: ${{ steps.base.outputs.value }}
+      mode: ${{ steps.select.outputs.mode }}
+      frontend: ${{ steps.select.outputs.frontend }}
+      needs_build: ${{ steps.select.outputs.needs_build }}
+      summary: ${{ steps.select.outputs.summary }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 确定比较基准
+        id: base
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "value=origin/${{ github.base_ref }}" >> "$GITHUB_OUTPUT"
+          elif [ -n "${{ github.event.before }}" ] && \
+               [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            echo "value=${{ github.event.before }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=HEAD^" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 选片
+        id: select
+        run: |
+          python3 scripts/ci/select_tests.py --base "${{ steps.base.outputs.value }}" --format json > /tmp/selection.json
+          python3 - >> "$GITHUB_OUTPUT" <<'PY'
+          import json
+
+          data = json.load(open("/tmp/selection.json"))
+          files = data.get("files") or []
+          frontend = any(f.startswith("frontend/") for f in files)
+          needs_build = any(
+              f.startswith(("backend/", "deploy/")) or f.endswith("Dockerfile")
+              for f in files
+          )
+          print(f"mode={data['mode']}")
+          print(f"frontend={'true' if frontend else 'false'}")
+          print(f"needs_build={'true' if needs_build else 'false'}")
+          print(f"summary={data['reason']}")
+          PY
+          tail -4 "$GITHUB_OUTPUT"
+
   lint:
     name: Lint, Format & Types
     runs-on: ubuntu-latest
-    timeout-minutes: 15  # 实测 1m22s
+    timeout-minutes: 15  # 实测 1m43s
     steps:
       - uses: actions/checkout@v4
 
@@ -58,7 +109,6 @@ jobs:
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          # 依赖唯一来源：pyproject.toml；重型真实模型包在 rag-models，CI 不安装
           pip install -e ".[dev,chroma]"
 
       - name: Black (format check)
@@ -74,16 +124,16 @@ jobs:
         run: mypy app evaluation
 
   test:
-    name: Unit Tests & Coverage
+    name: Affected Tests
     runs-on: ubuntu-latest
-    needs: lint
-    # 2026-11-12 实测：本地 3207 条用例 20m24s，CI runner 更慢，30 分钟上限已无余量
-    # （连续两次在 30 分钟被 cancel，看起来像卡死，其实是套件长大了）。
-    # 取 50 = 实测 20 分钟的 2.5 倍：既容忍 runner 抖动，真卡死时也不会挂一小时。
-    # 下次套件再涨 50% 就该拆分 job（按 test_ 前缀分片）而不是继续加时间。
-    timeout-minutes: 50
+    needs: [changes, lint]
+    # 纯文档/前端改动不跑后端测试
+    if: needs.changes.outputs.mode != 'none'
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -98,35 +148,24 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev,chroma]"
 
-      - name: Run pytest with coverage gate (>=80%)
-        working-directory: backend
+      # 覆盖率不在这一步：跑部分文件算出的覆盖率没有意义，低于阈值只会误杀。
+      # 全量 + 覆盖率在 nightly.yml。
+      - name: Run affected tests
         env:
           APP_ENV: test
-          # pydantic-settings 嵌套分隔符 __ 映射 settings.database.url
           DATABASE__URL: "sqlite+aiosqlite:///:memory:"
           REDIS__URL: "redis://localhost:6379/0"
           JWT_SECRET_KEY: "ci-test-secret-not-for-production"
           RAG_EMBEDDING_MOCK: "1"
           RAG_RERANKER_MOCK: "1"
         run: |
-          pytest tests \
-            --cov=app \
-            --cov-report=xml:coverage.xml \
-            --cov-report=term-missing \
-            --cov-fail-under=80
-
-      - name: Upload coverage report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: backend-coverage
-          path: backend/coverage.xml
-          if-no-files-found: warn
+          python scripts/ci/run_selected_tests.py --base "${{ needs.changes.outputs.base }}"
 
   migration:
     name: Alembic Round-Trip (PostgreSQL 16)
     runs-on: ubuntu-latest
-    needs: lint
+    needs: [changes, lint]
+    if: needs.changes.outputs.mode != 'none'
     timeout-minutes: 20  # 实测 1m41s
     services:
       postgres:
@@ -175,13 +214,15 @@ jobs:
         working-directory: backend
         run: alembic upgrade head
 
-      - name: PostgreSQL integration tests
+      - name: 集成用例（需要真实 PostgreSQL）
         working-directory: backend
         run: pytest tests/test_task_repository.py -m integration -q
 
   frontend:
     name: Frontend Unit, Types & Build
     runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     timeout-minutes: 20  # 实测 1m24s
     defaults:
       run:
@@ -211,7 +252,8 @@ jobs:
   build-check:
     name: Docker Build Check
     runs-on: ubuntu-latest
-    needs: lint
+    needs: changes
+    if: needs.changes.outputs.needs_build == 'true'
     # 实测 28s（缓存命中）~ 4m47s（冷缓存），差异大所以留足余量
     timeout-minutes: 30
     steps:
@@ -241,7 +283,9 @@ jobs:
   smoke:
     name: Compose Release Smoke
     runs-on: ubuntu-latest
-    needs: [test, frontend]
+    needs: [changes, test]
+    # 后端有改动才做全链路冒烟；文档/前端改动跳过
+    if: needs.changes.outputs.mode != 'none'
     timeout-minutes: 30  # 实测 3m31s
     steps:
       - uses: actions/checkout@v4
@@ -255,3 +299,32 @@ jobs:
         if: failure()
         run: |
           docker compose -p maa-test -f docker-compose.yml -f docker-compose.smoke.yml --profile test logs --tail 120 || true
+
+  # 汇总成单一检查名，便于分支保护只勾一项；上游失败或跳过都在这里体现。
+  ci-summary:
+    name: CI Summary
+    runs-on: ubuntu-latest
+    needs: [changes, lint, test, migration, frontend, build-check, smoke]
+    if: always()
+    timeout-minutes: 5
+    steps:
+      - name: 判定
+        run: |
+          echo "选片结果: ${{ needs.changes.outputs.summary }}"
+          echo "后端模式: ${{ needs.changes.outputs.mode }}"
+          fail=0
+          for item in \
+            "lint=${{ needs.lint.result }}" \
+            "test=${{ needs.test.result }}" \
+            "migration=${{ needs.migration.result }}" \
+            "frontend=${{ needs.frontend.result }}" \
+            "build-check=${{ needs.build-check.result }}" \
+            "smoke=${{ needs.smoke.result }}"; do
+            name="${item%%=*}"; result="${item#*=}"
+            echo "$name: $result"
+            case "$result" in
+              success|skipped) ;;
+              *) echo "::error::$name 未通过（$result）"; fail=1 ;;
+            esac
+          done
+          exit $fail

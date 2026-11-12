@@ -4444,3 +4444,25 @@ air tokens 只服务两页，不替换 success/warning/destructive。证据卡�
 控制台删除留给用户）。我独立复核了生产确实无依赖（DSN 指向本机 postgres、`/health/ready` ready、
 检索命中 `source=hybrid`），但 `.env` 里仍有 5 个 `SUPABASE_PG_*` 死值（只有迁移脚本读，运行时不读）。
 因此把原定 11-17 的「删除提醒」改为「验收 + 清理残留」，避免到点让人重做已完成的事。
+
+### CI/CD 重构：按改动选测试 + 通过即部署（2026-11-12 晚）
+
+触发点：每次全量测试本地 19 分钟、CI 超过 45 分钟（连续两次撞 30 分钟超时被 cancel），
+反馈成本已经高到「没人愿意等结果」。
+
+- **选片器** `scripts/ci/select_tests.py`：改动路径 → 测试集合。规则保守：
+  全局前提（core/db/main/alembic/config/pyproject/conftest）→ 全量；未映射的 `backend/app/**` → 全量；
+  纯文档/前端 → 不跑后端测试；其余按模块映射。冒烟集固定 `test_config` + `test_health`（约 1 秒）。
+- `scripts/ci/run_selected_tests.py`：本地与 CI 共用一条命令，默认不收集覆盖率
+  （跑部分文件的覆盖率无意义，只会误杀）。
+- `ci.yml` 重构：新增 `changes` 作业（git diff → 选片），`test` 只跑选中项，
+  `frontend`/`migration`/`build-check`/`smoke` 全部按改动门控，末尾 `ci-summary` 汇总成单一检查名。
+- `nightly.yml`：每天 03:00 JST 全量 + 覆盖率 ≥80%，失败推送通知。
+- `deploy.yml`：`workflow_run`（CI 在 main 成功）→ SSH 部署：ff-only → 打 rollback 标签 → 构建 →
+  启动 → 健康检查（150s）→ 检索冒烟 → 失败回滚镜像 + git 回退。
+- **部署密钥**：新生成专用 ed25519（`veripaper-cd@github-actions`）加入服务器 authorized_keys，
+  私钥进 `DEPLOY_SSH_KEY` secret——没有把个人密钥塞进 GitHub。`DEPLOY_HOST`/`DEPLOY_USER` 同样已设。
+- **实测**：选片器 19 条自测（含「映射表每条路径必须存在」，抓到并删掉 2 个写错 glob）；
+  CD 手工演练把服务器从 `b372e7c` 推到 `91eda32`：ff-only 合并、镜像重建、容器 healthy、`/health/ready` 200；
+  `veripaper-backend:rollback` 指向部署前镜像。
+- 取舍写在 `docs/runbooks/ci-cd.md` §8：选片可能漏判（三层兜底）、纯文档也会重建镜像（缓存后 1~2 分钟）。

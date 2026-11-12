@@ -1,0 +1,108 @@
+# 夜间全量（2026-11-12 新增）
+#
+# push 的 CI 只跑「与改动相关」的测试，全量与覆盖率门禁挪到这里：
+# - 每天 18:00 UTC = 次日 03:00 JST，业务低谷；
+# - 也可以手动触发（改完映射表、怀疑漏判时）。
+#
+# 为什么覆盖率门禁只在这里：跑 20 个文件的覆盖率没有意义，只会误杀；
+# 全量跑出来的 80% 才是「这套代码的覆盖率」。
+name: Nightly
+
+on:
+  schedule:
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "20"
+
+jobs:
+  full-suite:
+    name: Full Suite + Coverage
+    runs-on: ubuntu-latest
+    # 实测全量在 2 核 runner 上约 50 分钟；留 90 分钟给抖动
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install backend (dev extras)
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,chroma]"
+
+      - name: Run full test suite with coverage gate
+        working-directory: backend
+        env:
+          APP_ENV: test
+          DATABASE__URL: "sqlite+aiosqlite:///:memory:"
+          REDIS__URL: "redis://localhost:6379/0"
+          JWT_SECRET_KEY: "ci-test-secret-not-for-production"
+          RAG_EMBEDDING_MOCK: "1"
+          RAG_RERANKER_MOCK: "1"
+        run: |
+          pytest tests \
+            --cov=app \
+            --cov-report=xml:coverage.xml \
+            --cov-report=term \
+            --cov-fail-under=80
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-coverage
+          path: backend/coverage.xml
+          if-no-files-found: warn
+
+      - name: 失败时通知
+        if: failure()
+        env:
+          WECOM_WEBHOOK_URL: ${{ secrets.WECOM_WEBHOOK_URL }}
+        run: |
+          printf '%s' "## 🌙 VeriPaper 夜间全量失败
+          > $(date -u '+%Y-%m-%d %H:%M UTC') ｜ ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+          push 的 CI 只跑相关测试，所以**这次失败说明有改动影响了未覆盖到的用例**。
+          请先看日志定位，再决定是修代码还是补映射表。" | python3 ops/notify.py
+
+  frontend:
+    name: Frontend Full
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Unit tests (Vitest)
+        run: npm run test:unit -- --run
+
+      - name: Type check
+        run: npm run type-check
+
+      - name: Build
+        run: npm run build

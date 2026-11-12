@@ -1,0 +1,172 @@
+# CD：CI 过了就部署到生产（2026-11-12 新增）
+#
+# 触发：`CI` workflow 在 main 上成功（`workflow_run`），或手动 `workflow_dispatch`。
+#
+# ## 为什么用 workflow_run 而不是 push
+#
+# 直接 `on: push` 会在**测试还没跑完时就开始部署**。`workflow_run` 保证只有 CI 绿了才动手，
+# 且能拿到被验证的那个 sha（`github.event.workflow_run.head_sha`）——不能直接用
+# `github.sha`，在 workflow_run 事件里它是默认分支的头，不是被测提交。
+#
+# ## 部署步骤（在服务器上执行，任何一步失败都会回滚镜像）
+#
+# 1. `git fetch` 公开仓库 + `merge --ff-only <sha>`（非快进说明服务器有分叉 → 停止，不猜）
+# 2. 把当前 `veripaper-backend:latest` 打成 `veripaper-backend:rollback`
+# 3. `docker compose build backend` + `up -d backend`
+# 4. 轮询 `/api/v1/health/ready` 最多 150 秒
+# 5. 失败：把 rollback 重新打成 latest、`up -d`、git 回到部署前 sha，并让 job 失败
+#
+# ## 需要的仓库 secret
+#
+# - `DEPLOY_SSH_KEY`：专用部署私钥（**不是**个人密钥，见 docs/runbooks/ci-cd.md）
+# - `DEPLOY_HOST`：服务器地址
+# - `DEPLOY_USER`：登录用户（root）
+# - `WECOM_WEBHOOK_URL`（可选）：部署结果通知，未配置则只写日志
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  # 部署不能并发，也**不能**因为新提交就取消正在进行的部署（会造成半成品状态）
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
+    steps:
+      - name: 确定要部署的提交
+        id: target
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            echo "sha=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "sha=$(git ls-remote https://github.com/${{ github.repository }}.git refs/heads/main | cut -f1)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 配置 SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          if [ -z "$DEPLOY_SSH_KEY" ]; then
+            echo "::error::缺少 DEPLOY_SSH_KEY secret，见 docs/runbooks/ci-cd.md"
+            exit 1
+          fi
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: 部署
+        id: deploy
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+          REPO_URL: https://github.com/${{ github.repository }}.git
+        run: |
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes "$DEPLOY_USER@$DEPLOY_HOST" \
+            "TARGET_SHA='$TARGET_SHA' REPO_URL='$REPO_URL' bash -s" <<'REMOTE'
+          set -euo pipefail
+
+          cd /opt/veripaper
+          PREV_SHA="$(git rev-parse HEAD)"
+          echo "部署前: $PREV_SHA"
+          echo "目标:   $TARGET_SHA"
+
+          # 非快进说明服务器上有分叉的提交 —— 不猜，直接停
+          git fetch --quiet "$REPO_URL" main
+          if ! git merge --ff-only "$TARGET_SHA"; then
+            echo "::error::非快进更新，服务器仓库与远端分叉，停止部署"
+            exit 1
+          fi
+
+          docker tag veripaper-backend:latest veripaper-backend:rollback 2>/dev/null || true
+
+          cd deploy/ecs
+          echo "== 构建 backend 镜像 =="
+          docker compose build backend
+          echo "== 启动 =="
+          docker compose up -d backend
+
+          echo "== 健康检查（最多 150 秒） =="
+          code=000
+          for _ in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -m 5 -w '%{http_code}' \
+              http://127.0.0.1/api/v1/health/ready -H 'Host: api.veripaper.me' || true)
+            [ "$code" = "200" ] && break
+            sleep 5
+          done
+
+          if [ "$code" != "200" ]; then
+            echo "::error::健康检查失败（$code），回滚"
+            docker tag veripaper-backend:rollback veripaper-backend:latest
+            docker compose up -d backend
+            cd /opt/veripaper && git reset --hard "$PREV_SHA"
+            exit 1
+          fi
+
+          echo "== 冒烟：真实检索 =="
+          python3 - <<'PY'
+          import json, urllib.request
+
+          BASE = "http://127.0.0.1/api/v1"
+          HDR = {"Content-Type": "application/json", "Host": "api.veripaper.me"}
+          pwd = open("/opt/veripaper/.demo-password").read().strip()
+          req = urllib.request.Request(
+              BASE + "/auth/login",
+              data=json.dumps({"account": "demo", "password": pwd}).encode(),
+              method="POST",
+              headers=dict(HDR),
+          )
+          token = json.loads(urllib.request.urlopen(req, timeout=20).read())["access_token"]
+          req = urllib.request.Request(
+              BASE + "/knowledge/search",
+              data=json.dumps({"query": "检索增强生成", "top_k": 1}).encode(),
+              method="POST",
+              headers={**HDR, "Authorization": "Bearer " + token},
+          )
+          data = json.loads(urllib.request.urlopen(req, timeout=45).read())
+          total = data.get("total")
+          print(f"检索命中: {total}")
+          if not total:
+              raise SystemExit("检索返回 0 条")
+          PY
+
+          echo "部署完成: $(git -C /opt/veripaper log --oneline -1)"
+          REMOTE
+
+      - name: 通知（成功）
+        if: success()
+        env:
+          WECOM_WEBHOOK_URL: ${{ secrets.WECOM_WEBHOOK_URL }}
+        run: |
+          printf '%s' "## 🚀 VeriPaper 已部署
+          > $(date -u '+%Y-%m-%d %H:%M UTC') ｜ 提交 \`${{ steps.target.outputs.sha }}\`
+
+          健康检查与检索冒烟均通过。" | python3 ops/notify.py
+
+      - name: 通知（失败并回滚）
+        if: failure()
+        env:
+          WECOM_WEBHOOK_URL: ${{ secrets.WECOM_WEBHOOK_URL }}
+        run: |
+          printf '%s' "## ⚠️ VeriPaper 部署失败
+          > $(date -u '+%Y-%m-%d %H:%M UTC') ｜ 提交 \`${{ steps.target.outputs.sha }}\`
+
+          已尝试回滚到上一版镜像。日志：${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" | python3 ops/notify.py
