@@ -26,16 +26,16 @@
 | 项 | 值 |
 | --- | --- |
 | 分支 | `main` |
-| HEAD | **`d608382`**（`fix(security): refresh 令牌轮换后旧令牌立即失效`）→ `105b383`（口令轮换）→ `5421a98`（SSTI 修复）→ `090e29a`（M3 上线）、Pages Git 集成、安全排查与 `security.txt` |
+| HEAD | **`e36fe70`**（`fix(security): refresh 令牌轮换后旧令牌立即失效`）→ `105b383`（口令轮换）→ `5421a98`（SSTI 修复）→ `090e29a`（M3 上线）、Pages Git 集成、安全排查与 `security.txt` |
 | 冻结 tag | `defense-v1` |
 | Plan 状态 | Plan 2 / 3 / 4 / 5 **全部 Exit Gate PASSED**；**Phase 1 五项全部端到端可用且遗留清零**；**Phase 2 五项全部交付完成**（PRISMA ✅ + 可观测性 ✅ + 团队工作区 ✅ + 开放 API ✅ + 计费套餐 ✅） |
 | 产品化进度 | **Issue #2~#7 全部关闭且遗留清零**；**P1-D 配额遗留已修复**；**`max_results` 已夹紧**；**PRISMA 完成**；**可观测性完成**（8 指标 + `/metrics` + 看板，**看板数字已全部为真**）；**团队工作区完成**；**开放 API 完成**；**计费套餐完成**（四档 + 四条功能门禁 + 手工开通 + **套餐页已重设计**）；**引用样式页已重设计**（**真实渲染预览** + 删除二次确认）；**Word 模板页已修**（**不再把示例填充谎称成稿** + 删除二次确认）；**前端已迁移到 Tailwind v4 + shadcn-vue**；**引用库 + 证据闭环完成**；**review 长度上限缺陷已修**（`max_length` 不再施加到机器汇总） |
 | 数据库迁移 head | **`a7d3e9b6c1f4`**（`revoked_refresh_token`；前一个 `c4f2a8d7e9b1` = `knowledge_vectors_bge` 影子表） |
-| 后端测试 | **3102 passed**, 21 skipped；覆盖率 **90%**；`mypy` 0 错误（218 文件）；另有 4 红为 worktree CRLF 伪缺陷（§5 #45） |
+| 后端测试 | **3138 passed**, 21 skipped；覆盖率 **90%**；`mypy` 0 错误（219 文件）；另有 4 红为 worktree CRLF 伪缺陷（§5 #45） |
 | 前端测试 | Vitest **458 passed**（+6 skipped）；**Playwright E2E 44 场景**（chromium + mobile-chrome 双视口） |
 | 发布方式 | **前端：`git push backup main` 后 Cloudflare Pages 自动构建部署**（Git 集成，无需本机 Node）；**后端：bundle + `deploy/ecs` 目录 `docker compose build backend`** |
 | CI | ⚠️ **2026-10-28 起 CI 因 GitHub Actions 账单额度停摆**（报 spending limit），作业 0~2s 就 X，**不是代码问题**。⚠️ **GitHub 直连时通时不通**：不通时走代理（`git -c http.proxy=http://127.0.0.1:7894 ...`，`gh` 需 `$env:HTTPS_PROXY`） |
-| 服务器 | `root@47.253.81.6`，HEAD **`d608382`**，backend 镜像 `cbf8f96d6446`（回滚锚点 `shadow-mock`=`79ac91a4374c`），五容器 healthy，公网 `ready`，嵌入 = **SiliconFlow BGE-M3**（1600 RPM / 400k TPM），**user=1（仅 demo）/ task 86 / doc_chunk 2835 / 两表各 2835**（2026-11-11 清掉 26 个测试账号后），磁盘 38% |
+| 服务器 | `root@47.253.81.6`，HEAD **`e36fe70`**，backend 镜像 `d46c2cf9ae94`（回滚锚点 `shadow-mock`=`79ac91a4374c`），五容器 healthy，公网 `ready`，嵌入 = **SiliconFlow BGE-M3**（1600 RPM / 400k TPM），**user=1（仅 demo）/ task 86 / doc_chunk 2835 / 两表各 2835**（2026-11-11 清掉 26 个测试账号后），磁盘 38% |
 
 **演示账号**：`demo` —— **全权限管理员**（`role=admin` + `institution` 套餐：篇数不限 / 含团队 / 含开放 API）；知识库 11 篇 / 2835 分块（2026-11-11 清理测试账号后，全库仅剩 demo）。
 **口令不入仓库**：2026-11-11 已轮换为强随机口令，只存在于服务器 `/opt/veripaper/.demo-password`（600）与口令管理器；要登录就 `ssh root@47.253.81.6 cat /opt/veripaper/.demo-password`。
@@ -180,6 +180,8 @@ docker compose up -d backend
 | 47 | **测试里改配置要改 `app.core.config.settings`，不是 `get_settings()`**（2026-11-12） | `test_config_priority` / `test_embedding` 会 `get_settings.cache_clear()`，之后 `get_settings()` 返回**新对象**，而端点读的是导入时的模块级 `settings`。`monkeypatch.setattr(get_settings(), ...)` 改的是没人用的那一个 → 同一个测试单跑绿、全量跑红（最难查的一类）。**判据**：先断言 `get_settings() is config.settings`，或直接改 `config.settings` |
 | 48 | **改库的脚本必须「先落盘、再提交」**（2026-11-11） | 口令轮换脚本首版先 `commit` 再写口令文件；容器里写 `/opt/veripaper`（未挂载）直接 `FileNotFoundError` → **库里的口令已改、新口令却没人知道**，账号当场锁死。凡「生成一个只出现一次的秘密 → 写库」，顺序必须是先持久化秘密再提交 |
 | 49 | **单文件 bind mount 不会跟着 git 更新**（2026-11-12） | `docker-compose` 把 `./nginx-api-tls.conf` 单文件挂进容器；`git merge` 是「写新文件 + rename」，inode 变了，容器仍绑在旧 inode 上 → `nginx -t` 说 OK、`nginx -s reload` 不报错、**但跑的还是旧配置**。判据：`docker exec vp-gateway grep -c add_header /etc/nginx/conf.d/default.conf`，为 0 即旧文件；解法 `docker compose up -d --force-recreate gateway`。**配了不变的东西没生效，先怀疑挂载** |
+| 50 | **限流/审计用的客户端 IP 只能取自「网关覆盖写」的头**（2026-11-12） | `X-Forwarded-For` 由客户端起头，nginx 的 `$proxy_add_x_forwarded_for` 只是**追加**真实地址，第一段永远是客户端写的。原实现取第一段 → 任何人加 `X-Forwarded-For: 1.1.1.1` 就换一个限流桶（已实测复现）。正确做法：网关 `set_real_ip_from` + `real_ip_header CF-Connecting-IP` + `proxy_set_header X-Real-IP $remote_addr`，应用只读 `X-Real-IP` 且校验可解析，非法值退回 socket 地址 |
+| 51 | **两层限流会互相遮挡，验收要看 reason**（2026-11-12） | 登录同时有「IP 5 次/分」与「账号 10 次/15 分」两层。从单个 IP 攒账号锁定次数时，先撞的是 IP 层，返回的 429 里 `reason` 是路由限流而不是 `account_locked` —— 看起来像「账号锁定没生效」。验收要么分轮打（5 次 + 等 61 秒），要么直接看 Redis 计数 |
 
 ---
 

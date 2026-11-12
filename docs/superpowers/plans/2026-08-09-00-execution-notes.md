@@ -4338,3 +4338,23 @@ air tokens 只服务两页，不替换 success/warning/destructive。证据卡�
 - 生产验证（2026-11-12 12:05 JST）：公网 6 个头齐全 + HSTS；源站 80/443、404 响应均带头（`always`）；
   `/docs` 放宽 CSP；CORS 预检仍 200 且 allow-origin 命中；真实浏览器 `/docs` 渲染出 **72 个操作**、
   CSP 错误 0；`veripaper.me` 0 错误；**登录冒烟成功跳 `/tasks`**。站点头在 Pages 自动部署后已生效。
+
+### Issue #11 M-2 / M-3（限流真实 IP + 登录退避，2026-11-12）
+
+- 缺陷：限流主体是 nginx 容器 IP（`ratelimit:3600:auth_register:ip:172.18.0.5`），注册 5 次/小时成了全局限额；
+  登录 10 次/60 秒且无账号级计数，换 IP 就能继续爆破同一账号。
+- **先写失败测试**：`test_client_ip_identity.py`（24 条，6 红）与 `test_login_lockout.py`（12 条，1 红）。
+  红得很具体：伪造 `X-Forwarded-For: 1.1.1.1` 时 Redis 里出现 `ip:1.1.1.1` 桶——绕过路径被完整复现；
+  `auth_login.limit` 断言 5 却读到 10（`config/default.yaml` 覆盖了代码默认值，两处都要改）。
+- 改法（缺一不可）：网关 `set_real_ip_from`（22 个 CF v4/v6 网段）+ `real_ip_header CF-Connecting-IP`
+  + `real_ip_recursive on`；应用只读 `X-Real-IP`（网关用 `$remote_addr` 覆盖写），用 `ipaddress` 校验，
+  非法值退回 socket 地址，**彻底不读 XFF**。
+- M-3：`auth_login` 10→5 次/60 秒；新增 `app/core/login_throttle.py`（Redis Lua INCR+EXPIRE / 内存实现），
+  失败 10 次锁 900 秒，锁定期间**密码正确也 429**，按规范化账号名哈希做 key，成功清零，组件故障 fail-open。
+- **踩坑**：验证账号锁定时，单 IP 的「5 次/分」先返回 429（`reason` 是路由限流），看起来像锁定没生效；
+  要按「5 次 + 等 61 秒」分轮打。记入 §5 #51。
+- 生产实测（2026-11-12 13:05 JST）：公网请求的限流 key = `ratelimit:60:auth_login:ip:13.125.5.87`
+  （与本机 `cdn-cgi/trace` 的公网 IP 一致，改前是 `172.18.0.5`）；伪造 XFF 不产生新桶，第 5 次即 429 +
+  `Retry-After: 60`；账号连续失败 10 次后**正确密码**返回 429 `reason=account_locked`、`retry_after=647`。
+  清理：探针账号删除（回查 0）、`ratelimit:*` 键清空；回归 `demo` 登录 200 / health ready / 前端 200。
+- 门禁：pytest **3138 passed / 21 skipped / 90%**；ruff 0、mypy 219 文件 0（4 红仍是 `.csl` CRLF 伪缺陷）。

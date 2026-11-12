@@ -760,3 +760,81 @@ cd /opt/veripaper/deploy/ecs && docker compose up -d --force-recreate gateway
 
 下发方式：在 `frontend/public/_headers` 的 `/*` 规则里加一行 `Content-Security-Policy:`，
 然后在临时预览域先验证（Pages 每次 push 都有预览 URL），确认无白屏、无 CSP 报错再合并到生产。
+
+## 17. 真实客户端 IP 与登录失败退避（Issue #11 M-2 / M-3，2026-11-12）
+
+### 17.1 问题
+
+| 项 | 实测现象 |
+| --- | --- |
+| M-2 | `request.client.host` 恒为 nginx 容器内网 IP，Redis key 是 `ratelimit:3600:auth_register:ip:172.18.0.5`。注册 5 次/小时成了**全局限额**：任意客户端刷满，所有真实用户 1 小时内无法注册 |
+| M-3 | 登录限流 10 次/60 秒：**10 次失败都不触发 429**，第 11 次才限；且没有任何账号级计数，换 IP 就能继续试同一个账号 |
+
+### 17.2 M-2 的两半，缺一不可
+
+```nginx
+# 网关：只对 Cloudflare 网段采信 CF-Connecting-IP（22 个 v4/v6 段）
+set_real_ip_from 173.245.48.0/20;
+...
+real_ip_header CF-Connecting-IP;
+real_ip_recursive on;
+# 每个反代块都用 $remote_addr 覆盖写 X-Real-IP（客户端自带的同名头会被冲掉）
+proxy_set_header X-Real-IP $remote_addr;
+```
+
+```python
+# 应用：只读 X-Real-IP，且必须能解析成合法 IP，否则退回 socket 地址；永不读 X-Forwarded-For
+gateway_ip = _normalize_ip(request.headers.get("x-real-ip"))
+```
+
+> **为什么不能只开 `TRUST_PROXY`**：原实现取 `X-Forwarded-For` 的**第一段**，而 nginx 的
+> `$proxy_add_x_forwarded_for` 是「客户端自带的 XFF + 真实地址」拼接——第一段正是客户端自己写的。
+> 只开开关不锁源站，任何人加一个 `X-Forwarded-For: 1.1.1.1` 就换了一个限流桶。
+> 实测反证：改前用两个不同 XFF 打同一路径，Redis 里出现 `ip:1.1.1.1` 与 `ip:2.2.2.2` 两个桶。
+
+### 17.3 M-3 的两层
+
+1. **IP 维度**（中间件）：`auth_login` 5 次/60 秒（原 10 次）；
+2. **账号维度**（`app/core/login_throttle.py`）：连续失败 10 次 → 锁 900 秒，
+   期间**密码正确也返回 429**（`reason=account_locked`）——否则爆破者猜中就登录，退避等于没做。
+
+- key 用**规范化账号名**（去空格 + 小写）的 sha256 前 32 位：Redis 里不出现明文用户名，
+  且 `Demo` / `demo` 共用一份计数；
+- 登录成功清零；组件异常 fail-open（Redis 挂了不能把所有人挡在门外）；
+- 配置：`RATE_LIMIT__LOGIN_FAILURE_LIMIT` / `RATE_LIMIT__LOGIN_FAILURE_WINDOW_SECONDS`。
+
+### 17.4 本次实测证据（2026-11-12 13:05 JST）
+
+| 检查点 | 结果 |
+| --- | --- |
+| 容器内 `set_real_ip_from` 条数 | 23（22 个网段 + 注释示例） |
+| `RATE_LIMIT__TRUST_PROXY` | `true`（写入 `/opt/veripaper/.env`） |
+| 源站直连的限流 key | `ratelimit:60:auth_login:ip:172.18.0.1`（宿主机到容器的桥接地址） |
+| **公网客户端的限流 key** | **`ratelimit:60:auth_login:ip:13.125.5.87`** —— 与 `cdn-cgi/trace` 返回的本机公网 IP 一致；改前是 `172.18.0.5` |
+| 伪造 `X-Forwarded-For: 1.2.3.4` + 源站直连伪造 `X-Real-IP` | **没有产生新桶**，仍落回原桶；连打 5 次后第 5 次即 429 |
+| 429 响应 | `Retry-After: 60`，`details.limit=5 / window_seconds=60` |
+| 账号级锁定 | 连续失败达 10 次后，**密码正确也 429** `reason=account_locked`，`retry_after=647` |
+| 清理 | 探针账号已删除（回查 `probe%` = 0，库内仅 `demo`）；`ratelimit:*` 键已清空后重新生成（含真实 IP） |
+| 回归 | 公网 `demo` 登录 200、`/health/ready` ready、前端 200 |
+
+> ⚠️ 两层限流会互相遮挡：从单个 IP 攒满「账号 10 次失败」时，**IP 的 5 次/分先返回 429**，
+> 看到的 `reason` 是路由限流而不是 `account_locked`。验收时要按「5 次 + 等 61 秒」分轮打，
+> 或直接看 Redis 里 `ratelimit:login_fail:*` 的计数。
+
+### 17.5 常用排查
+
+```bash
+# 谁被限流了（key 里就是真实客户端 IP）
+docker exec vp-redis redis-cli --scan --pattern 'ratelimit:*'
+docker exec vp-redis redis-cli get 'ratelimit:60:auth_login:ip:<IP>'
+docker exec vp-redis redis-cli ttl 'ratelimit:60:auth_login:ip:<IP>'
+
+# 某账号连续失败次数 / 剩余锁定
+docker exec vp-redis redis-cli --scan --pattern 'ratelimit:login_fail:*'
+
+# 后端日志（账号名只记哈希前缀）
+docker logs vp-backend --since 30m 2>&1 | grep -E "login_(failed|locked|throttle)"
+```
+
+> Cloudflare 网段变更时同步 `deploy/ecs/nginx-api-tls.conf` 的 `set_real_ip_from`；
+> 漏更新只会让新网段来的请求被当成 CF 节点地址（限流精度下降），不会导致不可用。
