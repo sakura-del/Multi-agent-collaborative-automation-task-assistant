@@ -26,16 +26,16 @@
 | 项 | 值 |
 | --- | --- |
 | 分支 | `main` |
-| HEAD | **`105b383`**（`fix(security): 轮换 demo 口令并清理 26 个测试账号`）→ `5421a98`（SSTI 修复）→ `090e29a`（M3 上线）、Pages Git 集成、安全排查与 `security.txt` |
+| HEAD | **`02496a4`**（`fix(security): refresh 令牌轮换后旧令牌立即失效`）→ `105b383`（口令轮换）→ `5421a98`（SSTI 修复）→ `090e29a`（M3 上线）、Pages Git 集成、安全排查与 `security.txt` |
 | 冻结 tag | `defense-v1` |
 | Plan 状态 | Plan 2 / 3 / 4 / 5 **全部 Exit Gate PASSED**；**Phase 1 五项全部端到端可用且遗留清零**；**Phase 2 五项全部交付完成**（PRISMA ✅ + 可观测性 ✅ + 团队工作区 ✅ + 开放 API ✅ + 计费套餐 ✅） |
 | 产品化进度 | **Issue #2~#7 全部关闭且遗留清零**；**P1-D 配额遗留已修复**；**`max_results` 已夹紧**；**PRISMA 完成**；**可观测性完成**（8 指标 + `/metrics` + 看板，**看板数字已全部为真**）；**团队工作区完成**；**开放 API 完成**；**计费套餐完成**（四档 + 四条功能门禁 + 手工开通 + **套餐页已重设计**）；**引用样式页已重设计**（**真实渲染预览** + 删除二次确认）；**Word 模板页已修**（**不再把示例填充谎称成稿** + 删除二次确认）；**前端已迁移到 Tailwind v4 + shadcn-vue**；**引用库 + 证据闭环完成**；**review 长度上限缺陷已修**（`max_length` 不再施加到机器汇总） |
-| 数据库迁移 head | **`c4f2a8d7e9b1`**（`knowledge_vectors_bge` 影子表；生产表名 `knowledge_vectors_bge`） |
-| 后端测试 | **3043 passed**, 21 skipped；覆盖率 **89.62%**；`mypy` 0 错误（216 文件） |
+| 数据库迁移 head | **`a7d3e9b6c1f4`**（`revoked_refresh_token`；前一个 `c4f2a8d7e9b1` = `knowledge_vectors_bge` 影子表） |
+| 后端测试 | **3091 passed**, 21 skipped；覆盖率 **90%**；`mypy` 0 错误（218 文件）；另有 4 红为 worktree CRLF 伪缺陷（§5 #45） |
 | 前端测试 | Vitest **458 passed**（+6 skipped）；**Playwright E2E 44 场景**（chromium + mobile-chrome 双视口） |
 | 发布方式 | **前端：`git push backup main` 后 Cloudflare Pages 自动构建部署**（Git 集成，无需本机 Node）；**后端：bundle + `deploy/ecs` 目录 `docker compose build backend`** |
 | CI | ⚠️ **2026-10-28 起 CI 因 GitHub Actions 账单额度停摆**（报 spending limit），作业 0~2s 就 X，**不是代码问题**。⚠️ **GitHub 直连时通时不通**：不通时走代理（`git -c http.proxy=http://127.0.0.1:7894 ...`，`gh` 需 `$env:HTTPS_PROXY`） |
-| 服务器 | `root@47.253.81.6`，HEAD **`105b383`**，backend 镜像 `81cdeb767d98`（回滚锚点 `shadow-mock`=`79ac91a4374c`），五容器 healthy，公网 `ready`，嵌入 = **SiliconFlow BGE-M3**（1600 RPM / 400k TPM），**user=1（仅 demo）/ task 86 / doc_chunk 2835 / 两表各 2835**（2026-11-11 清掉 26 个测试账号后），磁盘 38% |
+| 服务器 | `root@47.253.81.6`，HEAD **`02496a4`**，backend 镜像 `cbf8f96d6446`（回滚锚点 `shadow-mock`=`79ac91a4374c`），五容器 healthy，公网 `ready`，嵌入 = **SiliconFlow BGE-M3**（1600 RPM / 400k TPM），**user=1（仅 demo）/ task 86 / doc_chunk 2835 / 两表各 2835**（2026-11-11 清掉 26 个测试账号后），磁盘 38% |
 
 **演示账号**：`demo` —— **全权限管理员**（`role=admin` + `institution` 套餐：篇数不限 / 含团队 / 含开放 API）；知识库 11 篇 / 2835 分块（2026-11-11 清理测试账号后，全库仅剩 demo）。
 **口令不入仓库**：2026-11-11 已轮换为强随机口令，只存在于服务器 `/opt/veripaper/.demo-password`（600）与口令管理器；要登录就 `ssh root@47.253.81.6 cat /opt/veripaper/.demo-password`。
@@ -158,8 +158,6 @@ docker compose up -d backend
 | 25 | **探针脚本不要 `sys.path.insert` 项目根**（2026-10-26） | 镜像里 `site-packages/app` 是 `pip install` 的**另一份副本**（缺 `styles/` 等资产）。探针 `sys.path.insert(0, BACKEND_DIR)` 让 `app` 抢先解析到副本 → 6 个样式**全部静默回退兜底格式化器**，输出只有 2 种却报「6/6 渲染成功」。容器内 WORKDIR=`/app` 已在 sys.path，**直接跑即可** |
 | 26 | **`CitationRenderer` 兜底是静默的，必须检查 `warnings`**（2026-10-26） | citeproc 失败时 `render()` 回退极简格式化器并**返回非空条目** —— 看起来完全成功。凡涉及 CSL 渲染的验证，断言里必须加「`warnings` 为空」，否则测不出「所有样式长得一样」 |
 | 27 | **读取工具的输出层会做脱敏，不要据此改代码**（2026-10-26） | `read` 显示 `placeholder="选择 .csl 文件"`，一度当成真实缺陷。用字符码核实（`[112,108,97,99,101,...]` = `placeholder`）确认文件本身正确。**怀疑是脱敏时，先打印字符码/hex 再判断** |
-| 28 | **改库的脚本必须「先落盘、再提交」**（2026-11-11） | 口令轮换脚本首版先 `commit` 再写口令文件；容器里写 `/opt/veripaper`（未挂载）直接 `FileNotFoundError` → **库里的口令已改、新口令却没人知道**，账号当场锁死。凡「生成一个只出现一次的秘密 → 写库」，顺序必须是先持久化秘密再提交 |
-| 29 | **WorkBuddy worktree 里 `.csl` 哈希测试会红 4 条，是换行不是代码**（2026-11-11） | 系统级 `core.autocrlf=true`（PortableGit `etc/gitconfig`）让 checkout 把 LF 换成 CRLF，`sha256` 与 `ATTRIBUTION.md` 记录不符 → `test_csl_style_files::TestAttribution` 4 红。**判据**：`tr -d '\r' < 文件 \| sha256sum` 与记录值一致即属此类。**不要为了变绿去改 ATTRIBUTION 里的哈希**，也别提交被转换过的 `.csl` |
 | 28 | **契约校验的是形状，不是真实性**（2026-10-26） | 模板页「渲染」按钮发的是假内容（`sections[key] = "示例内容（key）"`），后端 `_validate_contract` 只检查「占位符是否都有值」——**填假的照样通过**。契约能防「少填」，防不住「填假的」。**凡前端为通过校验而自己编内容，都是在制造假成功**；应改成「校验/预览」语义并显式标注示例 |
 | 29 | **一个 E2E 文件只做一次登录**（2026-10-26） | `auth_login` 限流 **5 次/3600s**。模板页原本 4 条 test 各做「API 登录 + 页面登录」= 8 次 → **必然 429**，表现为「登录页超时」，看起来像页面缺陷（实测踩到，同一坑此前也打过 `plan.spec.ts`）。**拆 test 前先算登录次数**；需要多段断言就合并成一条 test 在一次页面访问里跑完 |
 | 30 | **验证「引用可核验」时测试数据必须真实可核验**（2026-10-26） | 引用库端到端验证用 `10.1234/jcs.2024.001` 当 DOI，任务跑成 `waiting_human`。查校验报告：LLM 判定「10.1234 是示例性或占位符 DOI」——**它判对了**（10.1234 正是 DOI 手册的示例前缀）。换成真实 DOI 后同一流程 `completed`。**不要把校验器的正确判断当成系统缺陷**；造测试数据时先确认它在真实世界里站得住 |
@@ -177,6 +175,10 @@ docker compose up -d backend
 | 42 | **SSH 长命令若输出被缓冲会断连**（2026-11-11） | `docker compose build \| tail -n 8` 在构建期间无输出，SSH 约 60 秒被对端断开，代码已同步但镜像没建。做法：`setsid nohup cmd > /tmp/x.log 2>&1 &`，再短命令轮询日志与镜像 ID |
 | 43 | **对生产做接口测试会消耗全局限流配额**（2026-11-11） | 限流按 nginx 容器 IP 计数（`trust_proxy=false`），`auth_register` 5 次/小时是**全局**的，测试后真实用户无法注册。测试完必须清理：`docker exec vp-redis redis-cli --scan --pattern 'ratelimit:*' \| xargs -r redis-cli DEL` |
 | 44 | **用户上传的 .docx 必须经 `validate_template_bytes` + 沙箱渲染**（2026-11-11） | docxtpl 默认用非沙箱 Jinja2，模板里的 `{{ ... }}` 可执行任意代码（SSTI→RCE，Issue #9）。新增模板相关入口时不要绕开校验；渲染必须传 `jinja_env=SandboxedEnvironment(autoescape=True)`。回归测试在 `tests/test_template_ssti_security.py` |
+| 45 | **WorkBuddy worktree 里 `.csl` 哈希测试会红 4 条，是换行不是代码**（2026-11-11） | 系统级 `core.autocrlf=true`（PortableGit `etc/gitconfig`）让 checkout 把 LF 换成 CRLF，`sha256` 与 `ATTRIBUTION.md` 记录不符 → `test_csl_style_files::TestAttribution` 4 红。**判据**：`tr -d '\r' < 文件 \| sha256sum` 与记录值一致即属此类。**不要为了变绿去改 ATTRIBUTION 里的哈希**，也别提交被转换过的 `.csl` |
+| 46 | **凭据吊销策略必须考虑「自己人重放」**（2026-11-12） | refresh 轮换做了「旧令牌重放 → 作废整个家族」，本地测试全绿；但浏览器开两个标签页时，access 过期会让两边**同时**用同一个 refresh 去换，第二个必然 401 → 一旦连坐就把用户每小时踢下线一次。**凡「检测到异常就全量吊销」的规则，先问一遍：正常客户端并发会不会命中同一条路径？** 结论：60 秒宽限期内只拒该次请求，超时才判定泄露（`JWT_REFRESH_REUSE_GRACE_SECONDS`） |
+| 47 | **测试里改配置要改 `app.core.config.settings`，不是 `get_settings()`**（2026-11-12） | `test_config_priority` / `test_embedding` 会 `get_settings.cache_clear()`，之后 `get_settings()` 返回**新对象**，而端点读的是导入时的模块级 `settings`。`monkeypatch.setattr(get_settings(), ...)` 改的是没人用的那一个 → 同一个测试单跑绿、全量跑红（最难查的一类）。**判据**：先断言 `get_settings() is config.settings`，或直接改 `config.settings` |
+| 48 | **改库的脚本必须「先落盘、再提交」**（2026-11-11） | 口令轮换脚本首版先 `commit` 再写口令文件；容器里写 `/opt/veripaper`（未挂载）直接 `FileNotFoundError` → **库里的口令已改、新口令却没人知道**，账号当场锁死。凡「生成一个只出现一次的秘密 → 写库」，顺序必须是先持久化秘密再提交 |
 
 ---
 

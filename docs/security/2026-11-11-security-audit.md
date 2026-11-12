@@ -86,6 +86,12 @@
   获取新访问令牌，且无法通过"重新登录"踢掉。
 - 修复：refresh 时把旧令牌加入黑名单（jti + TTL）或提升 `token_invalid_before`。
 
+> 2026-11-12 已修复：refresh 令牌带唯一 `jti`，每次轮换把旧 `jti` 写入
+> `revoked_refresh_token`（存活期 = 令牌自身 `exp`），旧令牌再用返回 **401**；
+> 超过 60 秒宽限期仍被重放则认定泄露，作废该用户全部令牌。
+> 修复前签发的令牌没有 `jti`，一律拒绝（需重新登录）。
+> 实测证据见 `docs/runbooks/ecs-deployment.md` §15。
+
 ### M-2 限流主体是代理容器 IP，所有用户共享同一配额桶
 
 - `RATE_LIMIT__TRUST_PROXY` 默认 `false`；生产在 nginx 之后，`request.client.host`
@@ -166,7 +172,7 @@
 | --- | --- | --- |
 | P0 | C-1 模板 SSTI：改用 SandboxedEnvironment + 白名单校验 + 回归测试 | 小 |
 | P0 | ~~H-1/H-2 轮换 demo 与 e2e 密码，清理历史测试账号~~ **已完成 2026-11-11** | 小（需改数据） |
-| P1 | M-1 refresh 旧令牌失效 | 中 |
+| P1 | ~~M-1 refresh 旧令牌失效~~ **已完成 2026-11-12** | 中 |
 | P1 | M-2 限流真实 IP + 源站仅允许 Cloudflare | 中（改配置 + 网关） |
 | P1 | M-4 安全响应头 | 小 |
 | P2 | M-5 依赖升级（先 certifi，再其余） | 中 |

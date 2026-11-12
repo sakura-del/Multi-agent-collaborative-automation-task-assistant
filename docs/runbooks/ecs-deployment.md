@@ -599,3 +599,74 @@ curl -s http://127.0.0.1/api/v1/health/ready -H 'Host: api.veripaper.me'
 
 登录这类含口令的请求不要把口令放命令行（`ps`/history 会留痕）：写进 600 的
 JSON 文件用 `--data-binary @file`，用完 `shred -u`。
+
+## 15. refresh 令牌轮换吊销（Issue #11 M-1，2026-11-12）
+
+安全排查 M-1 实测：用 refresh_token 换发新令牌后，**同一个 refresh 还能再用一次**
+（返回 200）。令牌一旦泄露就踢不掉，攻击者可在 7 天内持续换 access。
+
+### 15.1 设计
+
+| 决策 | 理由 |
+| --- | --- |
+| refresh 带 `jti`，access 不带 | 只有 refresh 参与轮换；给 access 也加 jti 会让人误以为 access 可吊销 |
+| 按 `jti` 吊销，不按用户 | 按用户吊销（改 `token_invalid_before`）会把同一个人其他设备一起踢下线 |
+| 落库 `revoked_refresh_token`，不用 Redis | Redis 重启/清空会丢黑名单，而令牌还有 7 天寿命；表跟着库一起备份 |
+| `expires_at` = 令牌自身 `exp`，每次轮换顺手 `purge_expired()` | 表不会无限增长 |
+| 抢占式登记（`ON CONFLICT DO NOTHING` + rowcount） | 并发重放时由数据库裁决谁是真轮换，避免同一令牌换两次 |
+| **60 秒宽限期**（`JWT_REFRESH_REUSE_GRACE_SECONDS`） | 浏览器两个标签页会同时刷新，一律「重放即家族作废」会把用户每小时踢下线一次 |
+
+处置分两档：
+
+- 宽限期内重放 → **401**（`reason=refresh_reuse_grace`），只拒这次，**不作废家族**；
+- 超宽限期重放 → **401**（`reason=refresh_reuse`），`token_invalid_before = now`，
+  该用户全部 access/refresh 立即失效（认定泄露）。
+
+修复前签发的 refresh **没有 `jti`**，无法登记吊销 → 一律 401，用户需重新登录。
+`0` 表示关闭宽限（最严格）。
+
+### 15.2 迁移与部署
+
+迁移 `a7d3e9b6c1f4`（`down_revision = c4f2a8d7e9b1`）建 `revoked_refresh_token`
++ `user_id` / `expires_at` 两个索引。容器 `entrypoint.sh` 启动即 `alembic upgrade head`，
+所以 `docker compose up -d backend` 之后 schema 已就绪，无需人工步骤。
+
+```bash
+cd /opt/veripaper/deploy/ecs && docker compose build backend && docker compose up -d backend
+docker exec vp-backend alembic current          # 期望 a7d3e9b6c1f4 (head)
+```
+
+### 15.3 本次实测证据（2026-11-12 11:35 JST）
+
+| 步骤 | 结果 |
+| --- | --- |
+| 部署前迁移版本 | `c4f2a8d7e9b1 (head)` |
+| 部署后迁移版本 | **`a7d3e9b6c1f4 (head)`**（entrypoint 自动升级成功） |
+| 表与索引 | `revoked_refresh_token` + `revoked_refresh_token_pkey` / `ix_..._user_id` / `ix_..._expires_at` |
+| ① 登录 | **200**，`expires_in=3600`（与配置一致） |
+| ② 首次刷新 | **200**，新 refresh 与原不同 |
+| ③ 旧 refresh 立即重放 | **401** `refresh_reuse_grace`（宽限期内，只拒这次） |
+| ④ 宽限期内新 access | **200** `demo / admin`（**没有**被自己踢下线） |
+| ⑤ 新 refresh 继续轮换 | **200** |
+| ⑥ 等 65 秒后重放旧 refresh | **401** `refresh_reuse`（超宽限期） |
+| ⑦ 家族作废：新 access | **401** `UNAUTHORIZED` |
+| ⑧ 家族作废：新 refresh | **401** |
+| ⑨ `user.token_invalid_before` | 已写入 `2026-11-12 02:35:03`（UTC） |
+
+> 副作用：验证 ⑦⑧ 必须触发一次真实家族作废，`demo` 的旧会话因此失效——
+> 用口令重新登录即可，数据无损。
+
+### 15.4 排查命令
+
+```bash
+# 某用户当前有多少条吊销记录（正常情况下 ≈ 近期轮换次数，7 天后自动清）
+docker exec vp-postgres psql -U veripaper -d veripaper -c \
+  "select user_id, count(*), max(created_at) from revoked_refresh_token group by 1"
+
+# 是否被家族作废过
+docker exec vp-postgres psql -U veripaper -d veripaper -c \
+  "select username, token_invalid_before from \"user\""
+
+# 日志里的两类事件
+docker logs vp-backend --since 1h 2>&1 | grep -E "refresh_token_(rotated|reuse)"
+```

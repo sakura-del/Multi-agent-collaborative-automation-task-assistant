@@ -4306,3 +4306,14 @@ air tokens 只服务两页，不替换 success/warning/destructive。证据卡�
 - 回查（AGENTS §5 #11）：残留账号 **0**、全库孤儿向量 **0**；`user=1 / task=86 / knowledge_doc=11 / doc_chunk=2835 / vector_index=2835 / knowledge_vectors=2835 / knowledge_vectors_bge=2835 / workspace=4 / api_key=1 / subscription=1`。业务回归：`/health/ready` ready（db/redis/vector ok）、`/knowledge/search` 返回 demo 真实分块。临时口令/令牌文件已 `shred -u` 并回查。
 - 仓库脱敏：`AGENTS.md`、两份 handoff、安全报告、phase2 plan、`frontend/e2e/*`（18 个 spec 改读 `E2E_DEMO_PASSWORD`/`E2E_SECONDARY_PASSWORD`，新增 `frontend/e2e/credentials.ts`）、`deploy/ecs/verify.sh`（`${PASSWORD:?}`）、后端 E2E 夹具（每次 `secrets.token_urlsafe(24)`）。全仓库 `grep` 命中 **0**，守卫测试 **4 passed**。
 - 门禁：black 423 文件 / ruff 0 / mypy **216 文件 0 错误**；pytest **3064 passed / 21 skipped / 覆盖率 90%**。仍有 **4 failed**：`test_csl_style_files::TestAttribution::test_records_actual_sha256`，原因是本 worktree 的系统级 `core.autocrlf=true` 把 `.csl` 换成 CRLF（`tr -d '\r'` 后哈希与 `ATTRIBUTION.md` 完全一致），与本次改动无关，已写入 §5 铁律 #29，未改哈希也未提交被转换的文件。前端 Vitest **494 passed / 6 skipped**，`playwright test --list` **92 tests / 18 files** 解析通过。
+
+### Issue #11 M-1 refresh 轮换吊销（2026-11-12）
+
+- 缺陷：换发新令牌后旧 refresh **仍返回 200**；令牌泄露后无法止损，7 天内可持续换 access。
+- **先写失败测试** `backend/tests/test_refresh_rotation.py`（13 条）：轮换后旧令牌 401、新令牌可用、重放连坐、宽限期行为、jti 唯一、legacy 无 jti 拒绝、`expires_in` 与配置一致、repo 幂等/清理。首次运行：`ModuleNotFoundError`（无仓库层）→ 补模型+仓库后 **6 failed**（行为级红）；实现后 **13 passed**。
+- 诚实性验证（§5 #13）：把重放判定改成恒假，`test_old_refresh_token_rejected_after_rotation` 与 `test_replay_after_grace_revokes_whole_family` 双双变红，恢复后转绿。
+- **踩坑 1（宽限期判定时刻）**：请求开头的 `now` 早于本次插入的 `created_at`，用它算间隔得负数 → 宽限期恒成立，`grace=0` 也走宽限分支。改为在判定处重新取 `check_time`，并让 `grace <= 0` 直接关闭宽限。
+- **踩坑 2（配置对象分叉）**：`monkeypatch.setattr(get_settings(), ...)` 改的是**另一个对象**——`test_config_priority` / `test_embedding` 会 `cache_clear()`，之后 `get_settings()` 返回新实例，而端点读的是模块级 `settings`。表现为「同一测试单跑绿、全量跑红」。改法：直接 patch `app.core.config.settings`（记入 §5 #47）；宽限期「自己人重放」的设计取向记入 §5 #46。
+- 门禁：black 427 文件 / ruff 0 / mypy **218 文件 0**；pytest **3091 passed / 21 skipped / 覆盖率 90%**（4 红仍为 `.csl` 的 CRLF 伪缺陷，§5 #45）。
+- 生产（2026-11-12 11:30–11:37 JST，ECS）：迁移 `c4f2a8d7e9b1 → a7d3e9b6c1f4` 由 entrypoint 自动完成，表 + 3 索引就位；实测 ① 登录 200（`expires_in=3600`）② 首次刷新 200 ③ 旧 refresh 立即重放 **401 `refresh_reuse_grace`** ④ 宽限期内新 access 仍 200 `demo/admin`（不自我踢下线）⑤ 新 refresh 继续轮换 200 ⑥ 等 65 秒再重放 **401 `refresh_reuse`** ⑦⑧ 家族内 access/refresh 均 **401** ⑨ `token_invalid_before` 已写。证据见 `ecs-deployment.md` §15。
+- 副作用：为验证家族作废，`demo` 的既有会话被真实作废一次（重新登录即可）；线上老 refresh（无 `jti`）一律 401，所有用户需重新登录一次。
