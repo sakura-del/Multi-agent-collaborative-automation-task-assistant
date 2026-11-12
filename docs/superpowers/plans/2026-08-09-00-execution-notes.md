@@ -4466,3 +4466,21 @@ air tokens 只服务两页，不替换 success/warning/destructive。证据卡�
   CD 手工演练把服务器从 `b372e7c` 推到 `91eda32`：ff-only 合并、镜像重建、容器 healthy、`/health/ready` 200；
   `veripaper-backend:rollback` 指向部署前镜像。
 - 取舍写在 `docs/runbooks/ci-cd.md` §8：选片可能漏判（三层兜底）、纯文档也会重建镜像（缓存后 1~2 分钟）。
+
+### 首次自动部署的两个坑与端到端转绿（2026-11-12 晚）
+
+- **坑（§5 #61）**：部署会话挂 15 分钟、服务器无报错 → fail2ban 把 runner IP 封了。
+  触发源是 workflow 里的 `ssh-keyscan`（5 个连接、几个协商失败 → maxretry），
+  封禁发生在会话已建立之后，客户端只见 `Timeout, server not responding`。
+  修法：工作流改 `accept-new`；服务端把 `api.github.com/meta` 的 actions 网段写进
+  fail2ban `ignoreip`（`ops/fail2ban-github-ignoreip.sh`，装服务器 `/usr/local/sbin/`）。
+- **坑**：部署本体成功（健康+检索冒烟通过）却因通知失败被标红 —— deploy job 没有
+  checkout，`ops/notify.py` 不在 runner。补 checkout（放 target 之后）+ 通知
+  `continue-on-error`（部署成败以「部署」步骤为准）。
+- **顺带修**：新 CI 的 Compose 冒烟第一次真跑就抓到 A 组遗留——根 compose 仍默认
+  `RAG__VECTOR_BACKEND=chroma` 而 chromadb 已移出镜像 → 冒烟 500。改为与生产一致
+  （postgres 镜像 `pgvector/pgvector:pg17`、默认 pgvector、DSN 指向 compose 内 postgres）。
+- **端到端**：push `9fceda6` → CI **success 6.5 分钟**（Frontend 跳过、Affected Tests 秒级、
+  smoke 通过）→ Deploy 自动触发 → ff-only + rollback 标签 + 健康 200 + 检索冒烟 →
+  通知 success；服务器 HEAD `9fceda6`、latest=`f1a9fc045adc`、rollback=`dfb98608a4b7`。
+- 门禁有效性反证：上一次 CI 冒烟红（8a9c3d9）对应的 Deploy 是 **skipped**。

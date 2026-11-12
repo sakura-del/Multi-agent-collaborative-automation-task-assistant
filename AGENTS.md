@@ -26,7 +26,7 @@
 | 项 | 值 |
 | --- | --- |
 | 分支 | `main` |
-| HEAD | **`cd01944`**（`feat(ops): 站内自检 + 外部探测的双层监控告警` + 格式修复）← `dfd6b0f`（`chore(ops): SSH 加固 + 清密钥备份 + 系统包 + 源站只允许 Cloudflare 回源`）← `54ce78a`（`fix(security): refresh 令牌轮换后旧令牌立即失效`）→ `105b383`（口令轮换）→ `5421a98`（SSTI 修复）→ `090e29a`（M3 上线）、Pages Git 集成、安全排查与 `security.txt` |
+| HEAD | **`9fceda6`**（CI/CD 重构 + 冒烟修复，自动部署已验证）（`feat(ops): 站内自检 + 外部探测的双层监控告警` + 格式修复）← `dfd6b0f`（`chore(ops): SSH 加固 + 清密钥备份 + 系统包 + 源站只允许 Cloudflare 回源`）← `54ce78a`（`fix(security): refresh 令牌轮换后旧令牌立即失效`）→ `105b383`（口令轮换）→ `5421a98`（SSTI 修复）→ `090e29a`（M3 上线）、Pages Git 集成、安全排查与 `security.txt` |
 | 冻结 tag | `defense-v1` |
 | Plan 状态 | Plan 2 / 3 / 4 / 5 **全部 Exit Gate PASSED**；**Phase 1 五项全部端到端可用且遗留清零**；**Phase 2 五项全部交付完成**（PRISMA ✅ + 可观测性 ✅ + 团队工作区 ✅ + 开放 API ✅ + 计费套餐 ✅） |
 | 产品化进度 | **Issue #2~#7 全部关闭且遗留清零**；**P1-D 配额遗留已修复**；**`max_results` 已夹紧**；**PRISMA 完成**；**可观测性完成**（8 指标 + `/metrics` + 看板，**看板数字已全部为真**）；**团队工作区完成**；**开放 API 完成**；**计费套餐完成**（四档 + 四条功能门禁 + 手工开通 + **套餐页已重设计**）；**引用样式页已重设计**（**真实渲染预览** + 删除二次确认）；**Word 模板页已修**（**不再把示例填充谎称成稿** + 删除二次确认）；**前端已迁移到 Tailwind v4 + shadcn-vue**；**引用库 + 证据闭环完成**；**review 长度上限缺陷已修**（`max_length` 不再施加到机器汇总） |
@@ -35,7 +35,7 @@
 | 前端测试 | Vitest **458 passed**（+6 skipped）；**Playwright E2E 44 场景**（chromium + mobile-chrome 双视口） |
 | 发布方式 | **前端：`git push backup main` 后 Cloudflare Pages 自动构建部署**（Git 集成，无需本机 Node）；**后端：bundle + `deploy/ecs` 目录 `docker compose build backend`** |
 | CI | ⚠️ **2026-10-28 起 CI 因 GitHub Actions 账单额度停摆**（报 spending limit），作业 0~2s 就 X，**不是代码问题**。⚠️ **GitHub 直连时通时不通**：不通时走代理（`git -c http.proxy=http://127.0.0.1:7894 ...`，`gh` 需 `$env:HTTPS_PROXY`） |
-| 服务器 | `root@47.253.81.6`，HEAD **`cd01944`**，backend 镜像 `c476209d879c`（1.78 GB，已无 chromadb）；80/443 仅接受 Cloudflare 回源（`DOCKER-USER`，第三方探测 443=0/4）；UFW active；SSH 3 把密钥、X11 关、MaxAuthTries 3；监控两层已上线（站内 2 分钟 / 站外 5 分钟），**webhook 待填**（`/etc/veripaper/notify.env`）（回滚锚点 `shadow-mock`=`79ac91a4374c`），五容器 healthy，公网 `ready`，嵌入 = **SiliconFlow BGE-M3**（1600 RPM / 400k TPM），**user=1（仅 demo）/ task 86 / doc_chunk 2835 / 两表各 2835**（2026-11-11 清掉 26 个测试账号后），磁盘 38% |
+| 服务器 | `root@47.253.81.6`，HEAD **`9fceda6`**（CD 自动部署），backend 镜像 `c476209d879c`（1.78 GB，已无 chromadb）；80/443 仅接受 Cloudflare 回源（`DOCKER-USER`，第三方探测 443=0/4）；UFW active；SSH 3 把密钥、X11 关、MaxAuthTries 3；监控两层已上线（站内 2 分钟 / 站外 5 分钟），**webhook 待填**（`/etc/veripaper/notify.env`）（回滚锚点 `shadow-mock`=`79ac91a4374c`），五容器 healthy，公网 `ready`，嵌入 = **SiliconFlow BGE-M3**（1600 RPM / 400k TPM），**user=1（仅 demo）/ task 86 / doc_chunk 2835 / 两表各 2835**（2026-11-11 清掉 26 个测试账号后），磁盘 38% |
 
 **演示账号**：`demo` —— **全权限管理员**（`role=admin` + `institution` 套餐：篇数不限 / 含团队 / 含开放 API）；知识库 11 篇 / 2835 分块（2026-11-11 清理测试账号后，全库仅剩 demo）。
 **口令不入仓库**：2026-11-11 已轮换为强随机口令，只存在于服务器 `/opt/veripaper/.demo-password`（600）与口令管理器；要登录就 `ssh root@47.253.81.6 cat /opt/veripaper/.demo-password`。
@@ -192,6 +192,7 @@ docker compose up -d backend
 | 58 | **CI 超时要跟着套件增长调整，别把「长大」误判成「卡死」**（2026-11-12） | 单元测试连续两次在 30 分钟被 cancel，第一反应是 runner 卡住（历史上真有先例，注释里就记着）。但同一套用例本地也要 **20m24s** —— 是 3128→3207 条用例把余量吃光了。**判据：先跑一遍本地全量拿真实耗时**，再按注释里的「实测 × 2.5」调 `timeout-minutes`；套件再涨 50% 就该按前缀拆分 job，而不是继续加时间 |
 | 59 | **CI 不要每次跑全量；本地迭代同理**（2026-11-12） | 3209 条用例本地 19 分钟、GitHub 2 核 runner 超过 45 分钟——每次 push 都等一遍的结果是没人看结果。现在 push 只跑 `scripts/ci/select_tests.py` 选中的测试（全局前提改动→全量，未映射模块→全量，纯文档→不跑），全量与覆盖率门禁在 `nightly.yml`。**本地迭代也用 `python scripts/ci/run_selected_tests.py --base origin/main`**，别再习惯性跑全量 |
 | 60 | **CD 必须是「测试绿 → 部署 → 冒烟 → 失败回滚」四段**（2026-11-12） | 用 `workflow_run` 触发（`on: push` 会在测试没跑完时部署），目标提交取 `github.event.workflow_run.head_sha`（该事件里 `github.sha` 是默认分支头，不是被测提交）。部署前打 `veripaper-backend:rollback` 标签；启动后轮询 `/health/ready` 并做一次真实检索；任一失败就回滚镜像 + `git reset --hard` 到部署前 sha。**没有回滚点的自动化部署等于把手工操作搬到流水线** |
+| 61 | **会话中途失联，先查 fail2ban 再怀疑网络**（2026-11-12） | CD 部署会话挂 15 分钟无输出，服务器上却找不到报错 —— 是 `ssh-keyscan` 的多次密钥协商失败触发了 fail2ban，**封禁发生在会话已建立之后**，已建立的连接被 DROP，客户端只见 `Timeout, server not responding`。判据：`fail2ban-client status sshd` 看 Banned IP 是否是自己/CI 的出口；修法：脚本别开多条连接，CI 网段进 `ignoreip` |
 
 ---
 

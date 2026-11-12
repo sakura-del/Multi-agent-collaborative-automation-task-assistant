@@ -126,6 +126,34 @@ git -C /opt/veripaper log --oneline -3     # 确认代码版本，必要时 git 
 | CD 手工演练 | 服务器 `b372e7c → 91eda32`：ff-only 合并、镜像重建、`vp-backend` healthy、`/health/ready` 200 |
 | 回滚点 | `veripaper-backend:rollback` = 部署前镜像 `c476209d879c`（3 小时前） |
 
+## 7.1 首次自动部署踩掉的两个坑（同日修复）
+
+**坑 1：部署会话被自己的 fail2ban 封掉。**
+首次自动部署在「部署」步骤挂 15 分钟且无输出，服务器上却找不到会话。
+根因链：workflow 里 `ssh-keyscan` 预扫主机密钥 → 一次开 5 个连接、其中几个密钥协商失败
+→ fail2ban 计到 maxretry 封了 runner IP → **封禁发生在部署会话已建立之后**，会话被 DROP，
+ssh 客户端只报 `Timeout, server not responding`。
+修法：工作流不再 keyscan（改 `accept-new`，只建一条连接）；服务端把 GitHub Actions
+官方网段（`api.github.com/meta` 的 actions）加入 fail2ban `ignoreip`
+（`ops/fail2ban-github-ignoreip.sh`，装在服务器 `/usr/local/sbin/`）。
+
+**坑 2：部署本体成功，却因通知步骤失败被标红。**
+deploy job 没有 checkout，`ops/notify.py` 不在 runner 上。修法：补 checkout
+（放在 target 计算之后，ref 用被测提交），并把两个通知步骤设为 `continue-on-error`——
+**部署成败以「部署」步骤为准**。
+
+## 7.2 端到端验证（2026-11-12 19:25 JST，提交 `9fceda6`）
+
+| 步骤 | 结果 |
+| --- | --- |
+| push → CI | **success，约 6.5 分钟**（此前全量 45+ 分钟）；Frontend 跳过、Affected Tests 秒级 |
+| Deploy 自动触发 | `workflow_run` 收到 CI success → 启动 |
+| 连接探测 | 22 端口可达（15 秒内失败） |
+| 部署 | ff-only → rollback 标签 → 构建 → 启动 → 健康 200 → 检索冒烟通过 |
+| 通知（成功） | success（checkout 修复后） |
+| 服务器 | HEAD `9fceda6`、`latest`=`f1a9fc045adc`、`rollback`=`dfb98608a4b7`、五容器 healthy |
+| 门禁 | 上一次 CI 失败（8a9c3d9 冒烟红）对应的 Deploy 是 **skipped** —— 门禁真的拦住了 |
+
 ## 8. 已知取舍（不要当成 bug）
 
 1. **选片可能漏判**：新模块、跨模块重构时可能少跑。三层兜底：夜间全量 + 部署后冒烟 +
