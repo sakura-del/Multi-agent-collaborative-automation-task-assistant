@@ -838,3 +838,41 @@ docker logs vp-backend --since 30m 2>&1 | grep -E "login_(failed|locked|throttle
 
 > Cloudflare 网段变更时同步 `deploy/ecs/nginx-api-tls.conf` 的 `set_real_ip_from`；
 > 漏更新只会让新网段来的请求被当成 CF 节点地址（限流精度下降），不会导致不可用。
+
+### 16.6 站点 CSP 上线（2026-11-12 补完）
+
+`frontend/public/_headers` 的 `/*` 规则里已加 `Content-Security-Policy`。
+策略逐条对应构建产物，改之前必须先读 `_headers` 里的注释：
+
+```
+default-src 'self';
+script-src 'self' https://static.cloudflareinsights.com;
+style-src 'self' 'unsafe-inline';
+img-src 'self' data: blob:; font-src 'self' data:;
+connect-src 'self' https://api.veripaper.me wss://api.veripaper.me https://cloudflareinsights.com;
+object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+```
+
+关键点：
+
+- **`script-src` 不给 `'unsafe-inline'`**：实测 `dist/index.html` 只有一个外链 module 脚本，
+  没有内联 `<script>`，没必要开口子；
+- **必须放行 `static.cloudflareinsights.com`**：Cloudflare 会往 HTML 注入 Web Analytics 探针，
+  不放行就是控制台一片 `Refused to load`（docs 页踩过同一个坑）；
+- **`style-src` 必须给 `'unsafe-inline'`**：Vue/Tailwind 运行时与 motion 会写 style 属性，
+  CSP3 下 style 属性受 `style-src` 管辖，不给就是满屏裸样式；
+- **`connect-src` 写死 API 域名**：前端用绝对地址 `https://api.veripaper.me`，且预览域
+  (`*.pages.dev`) 调同一套 API，写 `'self'` 不够。
+
+验证方法（**上线前必须做**，白屏不报错是这类改动最大的坑）：
+
+```bash
+cd frontend && npx vite build      # 产物根目录会带上 _headers
+# 用 dist/_headers 里的头起一个本地静态服务，再用真实浏览器断言：
+#   - #app 有内容、登录表单可见、按钮背景色不是 transparent（说明 CSS 生效）
+#   - securitypolicyviolation 事件数为 0
+```
+
+本次实测（2026-11-12 13:00 JST）：`appHtmlLength=7308`、`formVisible=true`、
+`buttonBg=oklch(0.44 0.065 180)`（样式生效）、**violations=[]、CSP 控制台消息 0**。
+Push 后 Pages 自动重建，公网复核见 §16.7。

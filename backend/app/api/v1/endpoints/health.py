@@ -101,7 +101,7 @@ async def probe_pgvector() -> bool:
 
 async def probe_vector() -> bool:
     """向量库探测：按当前后端分派（未知后端按 chroma 处理，保持向后兼容）。"""
-    backend = (getattr(settings.rag, "vector_backend", "") or "chroma").strip().lower()
+    backend = (getattr(settings.rag, "vector_backend", "") or "pgvector").strip().lower()
     if backend == "pgvector":
         return await probe_pgvector()
     return await probe_chroma()
@@ -139,7 +139,7 @@ async def readiness_check() -> JSONResponse:
         "redis": "ok" if redis_ok else "failed",
         "vector": "ok" if vector_ok else "failed",
     }
-    backend = (getattr(settings.rag, "vector_backend", "") or "chroma").strip().lower()
+    backend = (getattr(settings.rag, "vector_backend", "") or "pgvector").strip().lower()
     if backend != "pgvector":
         checks["chroma"] = checks["vector"]
 

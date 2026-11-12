@@ -3,15 +3,34 @@
 # 为什么用 `_headers` 而不是在 Pages 控制台配：这份文件跟代码一起走版本管理，
 # 改了能被 review、能回滚，也不会因为「某人在控制台点了两下」而悄悄丢失。
 #
-# 为什么这里**没有** Content-Security-Policy：
-# CSP 对 SPA 有真实的打崩风险（Vite 产物的内联样式、motion 之类库的 style 属性、
-# 预览域的 connect-src 都要逐个放行），而打崩表现为用户白屏、不报错。
-# 这一条单独做，必须先在真实浏览器里回归一遍（见 ecs-deployment.md §16）。
-#
-# 语法：第一行是匹配规则，缩进行是该规则下的响应头。Pages 构建产物根目录读取。
+# 语法：第一行是匹配规则，缩进行是该规则下的响应头。Pages 读取构建产物根目录的 `_headers`。
 
 /*
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: geolocation=(), microphone=(), camera=(), payment=(), usb=(), interest-cohort=()
+  Content-Security-Policy: default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://api.veripaper.me wss://api.veripaper.me https://cloudflareinsights.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+
+# ===== CSP 逐条为什么这么写（2026-11-12 加，改之前先读）=====
+#
+# 打崩的表现是**用户白屏、控制台不报错**，所以每一项都按构建产物核对过：
+#
+#   default-src 'self'      兜底：只允许同源
+#   script-src  'self'      产物只有一个外链 module 脚本（dist/index.html 实测），
+#                           没有内联 <script>，所以**不给** 'unsafe-inline'
+#                           （Cloudflare 会往 HTML 注入 Web Analytics 探针，必须放行
+#                           static.cloudflareinsights.com，否则控制台刷 Refused to load）
+#   style-src   'unsafe-inline'  Vue/Tailwind 运行时与 motion 会写 style 属性；
+#                           CSP3 下 style 属性受 style-src 管辖，不给就是满屏裸样式
+#   img-src     data: blob: 头像/图标存在 data: URI，下载预览用 blob:
+#   font-src    'self' data: 没有外部字体（不引 Google Fonts）
+#   connect-src API 走绝对地址 https://api.veripaper.me，WebSocket 走 wss:// 同域；
+#               预览域（*.pages.dev）调同一套 API，所以这里写死 API 域名而不是 'self'
+#   object-src 'none'       不用 <object>/<embed>
+#   base-uri   'self'       防 <base> 注入改写相对路径
+#   form-action 'self'      表单只能提交回本站
+#   frame-ancestors 'none'  与 X-Frame-Options: DENY 双保险
+#
+# 验证方式见 docs/runbooks/ecs-deployment.md §16.6：本地用同一份 CSP 起静态服务，
+# 真实浏览器断言「零 securitypolicyviolation + 登录页正常渲染」，再发生产。

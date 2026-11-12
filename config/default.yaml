@@ -96,7 +96,8 @@ rag:
   # chroma = 旧实现（回滚开关，数据在 maa-chroma-data 卷）；
   # pgvector = Supabase PostgreSQL + pgvector。
   # **默认 chroma**：升级本身不改行为，切换是显式动作；回滚也是显式动作。
-  vector_backend: "chroma"
+  # pgvector = 生产唯一后端；chroma 做成可选依赖 `[chroma]`，镜像不装（未修复 CVE）
+  vector_backend: "pgvector"
   # 连接串留空 = 复用 database.url（整库迁 Supabase 后同源）。
   # ⚠️ 真实 DSN 只写 .env（RAG__PGVECTOR_DSN），不要写进本文件。
   pgvector_dsn: ""
@@ -197,3 +198,14 @@ quota:
   window_seconds: 86400              # 按 UTC 日重置
   key_prefix: "quota"
 
+
+# 跨域（Issue #11 Low，2026-11-12 收紧）
+# 生产实际值也放在这里，便于 review 与测试：`.env` 里的同名项会覆盖它。
+# 为什么必须用正则而不是逐个列 origin：Pages 每次部署都会生成新的预览子域。
+# 为什么不能写 `.*`：`allow_credentials=True` 时等于把带凭据的接口开放给任意站点。
+cors:
+  # 允许：
+  #   1) 正式站 https://veripaper.me（`www.` 不再单列——它 301 到根域，浏览器里的 Origin 只有根域）
+  #   2) Pages 项目根域与其**单级**预览别名（<hash|branch>.multi-agent-assistant.pages.dev）
+  # 不允许：别的域、http 协议、多级子域、其它项目的 pages.dev。
+  allow_origin_regex: '^https://([a-z0-9][a-z0-9-]{0,62}\.)?multi-agent-assistant\.pages\.dev$|^https://veripaper\.me$'

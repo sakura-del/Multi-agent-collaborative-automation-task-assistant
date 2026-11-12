@@ -23,6 +23,11 @@ os.environ.setdefault("APP_LOG_FORMAT", "console")
 # pydantic-settings 嵌套分隔符为 __ ，故 DATABASE__URL 映射到 settings.database.url
 os.environ.setdefault("DATABASE__URL", "sqlite+aiosqlite:///:memory:")
 os.environ.setdefault("REDIS__URL", "redis://localhost:6379/0")
+# 单测的向量后端固定走 chroma 内存模式（`chromadb` 是可选依赖 [chroma]，CI 装了它）：
+# 生产默认是 pgvector，需要真实 PostgreSQL + pgvector，而测试库是 SQLite —— 不显式指定
+# 会让每个 `init_kb()` 调用在构造 pgvector 后端时直接报「不能用 sqlite DSN」。
+# 需要验证 pgvector 行为的用例自己 monkeypatch 切过去（见 test_readiness / backend_selection）。
+os.environ.setdefault("RAG__VECTOR_BACKEND", "chroma")
 # JWT 测试密钥
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-not-for-production")
 

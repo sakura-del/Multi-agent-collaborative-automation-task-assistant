@@ -26,9 +26,17 @@ else:
 3. host 模式下 `persist_directory` 不参与（数据由服务端持久化）。
 
 本文件锁定这三条，防止回退到「有服务却用本地嵌入」。
+
+> chromadb 自 2026-11-12 起是可选依赖 `[chroma]`（生产镜像不装，见
+> `docs/security/dependency-risk.md`）。本文件测的是它的连接模式选择，
+> 因此缺包时整体跳过，而不是装一个带未修复 CVE 的包到生产镜像里。
 """
 
 from __future__ import annotations
+
+import pytest
+
+pytest.importorskip("chromadb", reason="chromadb 是可选依赖 [chroma]，CI/生产镜像可不装")
 
 from typing import Any
 from unittest.mock import patch
@@ -106,6 +114,18 @@ class TestConnectionModeSelection:
 
 
 class TestConfigWiring:
+    @pytest.fixture(autouse=True)
+    def _force_chroma_backend(self, monkeypatch) -> None:
+        """本类测的是 chroma 相关接线，必须显式指定后端。
+
+        2026-11-12（Issue #11 M-5）后默认后端是 pgvector（生产真实值，且镜像不再装
+        chromadb）；不显式指回 chroma，工厂会去构造 pgvector 并因缺 DSN 报
+        `VectorStoreConfigError` —— 那是「默认值变了」，不是接线断了。
+        """
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings.rag, "vector_backend", "chroma", raising=False)
+
     def test_settings_expose_chroma_host_and_port(self) -> None:
         """配置层必须暴露这两个字段（compose 已通过 RAG__CHROMA_* 注入）。"""
         from app.core.config import get_settings

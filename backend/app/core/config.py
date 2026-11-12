@@ -177,9 +177,10 @@ class RAGConfig(BaseModel):
     chroma_host: str = ""
     chroma_port: int = 8000
     # ===== 向量后端选择（2026-11 迁移 Supabase pgvector）=====
-    # chroma = 旧实现（回滚开关）；pgvector = Supabase PostgreSQL + pgvector。
-    # **默认 chroma**：升级本身不改变既有环境行为，切换是显式动作。
-    vector_backend: str = "chroma"
+    # pgvector = 生产唯一在用的后端；chroma = 旧实现，现在需要可选依赖 `[chroma]`，
+    # 生产镜像不安装它（4 个上游未修复 CVE，见 docs/security/dependency-risk.md）。
+    # 默认 pgvector：镜像里没有 chromadb，默认值再指向 chroma 只会在首次向量操作时炸。
+    vector_backend: str = "pgvector"
     # pgvector 连接串。留空 → 复用 database.url（整库迁 Supabase 后同源，少一套配置）。
     # ⚠️ 只写 .env，不写进代码/文档；支持 pooler DSN（6543）。
     pgvector_dsn: str = ""

@@ -1,0 +1,5 @@
+# CSL 样式资产按**字节**做 sha256 校验（`ATTRIBUTION.md` 记录了每个文件的值）。
+# 一旦被换行转换（Windows 的 core.autocrlf=true 会把 LF 改成 CRLF），哈希就对不上，
+# `test_csl_style_files::TestAttribution` 会固定红 4 条——这类"伪缺陷"已经误导过两次
+# （见 AGENTS §5 #45）。这里显式声明不做任何文本转换。
+*.csl -text

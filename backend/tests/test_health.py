@@ -53,7 +53,7 @@ def test_readiness_check_endpoint_all_ok(monkeypatch) -> None:
 
     monkeypatch.setattr(health, "probe_database", _ok)
     monkeypatch.setattr(health, "probe_redis", _ok)
-    monkeypatch.setattr(health, "probe_chroma", _ok)
+    monkeypatch.setattr(health, "probe_vector", _ok)
 
     client = TestClient(app)
     response = client.get("/api/v1/health/ready")
@@ -61,8 +61,10 @@ def test_readiness_check_endpoint_all_ok(monkeypatch) -> None:
     assert response.status_code == 200
     body: dict[str, Any] = response.json()
     assert body["status"] == "ready"
-    # `vector` 是与后端无关的稳定键；chroma 模式额外保留 `chroma` 别名（切换期兼容）
-    assert set(body["checks"]) == {"database", "redis", "vector", "chroma"}
+    # `vector` 是与后端无关的稳定键；`chroma` 别名是否存在取决于当前后端，
+    # 两种情形分别在 test_readiness.TestVectorCheckKeyCompatibility 里锁定
+    assert {"database", "redis", "vector"} <= set(body["checks"])
+    assert body["checks"]["vector"] == "ok"
 
 
 def test_readiness_check_endpoint_db_down(monkeypatch) -> None:
@@ -77,7 +79,7 @@ def test_readiness_check_endpoint_db_down(monkeypatch) -> None:
 
     monkeypatch.setattr(health, "probe_database", _bad)
     monkeypatch.setattr(health, "probe_redis", _ok)
-    monkeypatch.setattr(health, "probe_chroma", _ok)
+    monkeypatch.setattr(health, "probe_vector", _ok)
 
     client = TestClient(app)
     response = client.get("/api/v1/health/ready")

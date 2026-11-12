@@ -60,7 +60,15 @@ class ChromaVectorBackend:
         if self._collection is not None:
             return
 
-        import chromadb
+        try:
+            import chromadb
+        except ModuleNotFoundError as exc:  # pragma: no cover - 生产镜像不装 chromadb
+            # Issue #11 M-5：chromadb 已移到可选依赖 `[chroma]`（4 个上游未修复 CVE），
+            # 生产镜像不安装它。这里给一句能直接照做的提示，而不是裸 ModuleNotFoundError。
+            raise RuntimeError(
+                "chroma 向量后端需要可选依赖：pip install -e '.[chroma]'。"
+                "生产环境请使用 pgvector（RAG__VECTOR_BACKEND=pgvector）。"
+            ) from exc
 
         if self._chroma_host:
             # 服务端模式：与 compose 的 chroma 服务通信，不在容器本地落库

@@ -1,7 +1,7 @@
 # 多智能体协作自动化任务助手 - CI 流水线（Plan 5 Task 4）
 #
 # 门禁原则：任何检查失败即阻断合并（不存在 `|| true` 或 `continue-on-error`）。
-# 依赖唯一来源是 backend/pyproject.toml（`pip install -e ".[dev]"`），
+# 依赖唯一来源是 backend/pyproject.toml（`pip install -e ".[dev,chroma]"`），
 # 不再在 workflow 里手工维护第三方包清单。
 #
 # 作业图：
@@ -59,7 +59,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           # 依赖唯一来源：pyproject.toml；重型真实模型包在 rag-models，CI 不安装
-          pip install -e ".[dev]"
+          pip install -e ".[dev,chroma]"
 
       - name: Black (format check)
         working-directory: backend
@@ -93,7 +93,7 @@ jobs:
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[dev,chroma]"
 
       - name: Run pytest with coverage gate (>=80%)
         working-directory: backend
@@ -158,7 +158,7 @@ jobs:
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[dev,chroma]"
 
       - name: Upgrade to head
         working-directory: backend
