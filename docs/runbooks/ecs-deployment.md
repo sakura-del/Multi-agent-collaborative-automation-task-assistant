@@ -217,6 +217,10 @@ docker exec -e RUN_ONCE=1 vp-db-backup /usr/local/bin/backup.sh   # 手动跑一
 | 未知 Host 探测 | nginx `default_server` → `444`，消除「悬空 A 记录」的判定特征 |
 | SSH | **仅密钥**（`PasswordAuthentication no`、`PermitRootLogin prohibit-password`），
 drop-in 在 `/etc/ssh/sshd_config.d/99-veripaper-keyonly.conf` |
+| fail2ban | **已启用（2026-11-12）**：`bantime=1h`、`findtime=10m`、`maxretry=5`，
+`ignoreip` 仅含本机与运维出口 `13.125.5.87`。封禁走 **nftables**
+（`table inet f2b-table`），查 `iptables -L f2b-sshd` 会显示无此链，属正常。
+详见 [2026-11-12 告警排查](../security/2026-11-12-ssh-alert-investigation.md) |
 | Bot Fight Mode | **不建议开**：zone 级开关对 `api.veripaper.me` 同样生效，会挑战非浏览器客户端；本项目有开放 API（api_key 程序调用），免费版无法配置例外 |
 | AI Labyrinth | **不建议开**：只给 bot 注入隐藏 nofollow 链接，对 SPA + JSON API 无实质安全收益，还会增大 index.html |
 | Security.txt | **已上线**：`frontend/public/.well-known/security.txt` 随 Git 构建发布；线上返回 `text/plain` 真实 RFC 9116 内容（2026-11-11 验证） |
