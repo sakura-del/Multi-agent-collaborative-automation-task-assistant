@@ -13,6 +13,13 @@ on:
   schedule:
     - cron: "*/5 * * * *"
   workflow_dispatch:
+    inputs:
+      api_url:
+        description: "临时覆盖 API 探测地址（自测故障路径用，留空用默认）"
+        required: false
+      site_url:
+        description: "临时覆盖站点地址（留空用默认）"
+        required: false
 
 permissions:
   contents: read
@@ -34,6 +41,8 @@ jobs:
         continue-on-error: true
         env:
           WECOM_WEBHOOK_URL: ${{ secrets.WECOM_WEBHOOK_URL }}
+          PROBE_API_URL: ${{ inputs.api_url }}
+          PROBE_SITE_URL: ${{ inputs.site_url }}
         run: python3 ops/probe_public.py --notify
 
       - name: 同步 Issue 状态（故障则开/评论，恢复则关闭）

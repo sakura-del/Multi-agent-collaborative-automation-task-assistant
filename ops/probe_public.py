@@ -35,8 +35,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from watchdog import send_wecom  # noqa: E402  （同目录，脚本方式运行时可用）
 
-API_URL = "https://api.veripaper.me/api/v1/health/ready"
-SITE_URL = "https://veripaper.me/"
+# 允许用环境变量临时覆盖：CI 里自测「故障路径」时把地址指向一个必然失败的 URL，
+# 又不希望往仓库里塞一个假的探测目标。
+API_URL = os.environ.get("PROBE_API_URL") or "https://api.veripaper.me/api/v1/health/ready"
+SITE_URL = os.environ.get("PROBE_SITE_URL") or "https://veripaper.me/"
 ATTEMPTS = 3
 RETRY_DELAY_SECONDS = 20
 TIMEOUT_SECONDS = 15
