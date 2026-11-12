@@ -83,7 +83,8 @@ cd 'E:\Multi-agent collaborative automation task assistant\backend'
 
 ### 4.2 生产服务器（root@47.253.81.6，Ubuntu 24.04）
 
-> ⚠️ 旧服务器 `ylin@10.0.10.2` 已停用（后端 stop，Supabase 2026-11-17 后删除）。
+> ⚠️ 旧服务器 `ylin@10.0.10.2` 已停用（后端 stop）。**Supabase 旧库已于 2026-11-12 下线**，
+> 整库回滚到 Supabase 的路径已关闭，只能靠 `/opt/veripaper/backup/` 下的 dump 重建。
 > 现在**所有生产操作都在 `47.253.81.6` / `/opt/veripaper`**。
 
 ```bash

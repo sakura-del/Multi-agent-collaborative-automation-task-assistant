@@ -34,7 +34,7 @@
 | `/opt/veripaper` | 代码（`git bundle` 部署，非 git 远端） |
 | `/opt/veripaper/.env` | 全部配置（600），字段见 `deploy/ecs/env.example` 与下文 |
 | `/opt/veripaper/certs/{cert,key}.pem` | Cloudflare **Origin** 证书（600，2041 年到期） |
-| `/opt/veripaper/backup/` | Supabase dump 归档（迁移留档） |
+| `/opt/veripaper/backup/` | dump 归档（`pre-issue10-*.dump` 为最新全量；`supabase-*.sql.gz` 为迁移期存档）。**Supabase 已于 2026-11-12 下线，这里是唯一的整库重建来源** |
 | `deploy/ecs/docker-compose.yml` | **standalone 编排**（不用 override，见下文「坑」） |
 | `deploy/ecs/nginx-api-tls.conf` | 网关配置（80+443 双监听，均反代 backend） |
 
@@ -83,7 +83,7 @@ STORAGE__PRESIGN_EXPIRES_SECONDS=900
 
 CORS__ALLOW_ORIGIN_REGEX=^https://([a-z0-9-]+\.)?multi-agent-assistant\.pages\.dev$
 
-# 仅回滚用：源库 DSN（迁移脚本读它）
+# 历史遗留：迁移源库 DSN（`migrate-from-supabase.sh` 读它）。源库已删除，这些值已失效
 SUPABASE_PG_HOST=aws-0-ap-southeast-1.pooler.supabase.com
 SUPABASE_PG_USER=postgres.<ref>
 SUPABASE_PG_PASSWORD=<pwd>
@@ -93,7 +93,10 @@ SUPABASE_PG_PASSWORD=<pwd>
 > 会让 bash 报语法错误。脚本里用 `grep | cut` 取键值（见 `migrate-from-supabase.sh` 的 `get_env`）。
 > docker compose 的 env_file 不受影响。
 
-## 4. 数据迁移（Supabase → ECS）
+## 4. 数据迁移（Supabase → ECS）—— 已于 2026-11-11 完成，源库 2026-11-12 已下线
+
+> **本节为历史记录。** Supabase 项目已删除，`migrate-from-supabase.sh` 现在跑不通（源库不存在），
+> `.env` 里的 `SUPABASE_PG_*` 也已成废值。留档目的：知道当初怎么迁的、迁完对过哪些数。
 
 ```bash
 bash deploy/ecs/migrate-from-supabase.sh          # 完整：dump → 恢复 → 校验
@@ -149,18 +152,39 @@ SKIP_DUMP=1 bash deploy/ecs/migrate-from-supabase.sh   # 复用已有 dump 只�
 
 **A. 只回滚应用（最快，1 分钟）**：数据库保持 ECS，把前端构建指回旧入口即可。
 
-**B. 整库回滚到 Supabase**：
+**B. 整库回滚到 Supabase —— 已于 2026-11-12 关闭，不要再执行**：
+
+Supabase 项目已删除，下面这段只留作历史记录。**回滚路径已关闭**：`aws-0-ap-southeast-1.pooler.supabase.com`
+不再可解析，改了 DSN 只会让 backend 起不来。
+
+```bash
+# 历史命令（已失效，勿执行）
+sed -i 's#^DATABASE__URL=.*#DATABASE__URL=postgresql+asyncpg://postgres.<ref>:<pwd>@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres?ssl=require#' .env
+sed -i 's#^RAG__PGVECTOR_DSN=.*#RAG__PGVECTOR_DSN=postgresql://postgres.<ref>:<pwd>@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres?sslmode=require#' .env
+```
+
+**现在唯一的重建路径**（Supabase 没了，只剩本地 dump）：
 
 ```bash
 cd /opt/veripaper
-sed -i 's#^DATABASE__URL=.*#DATABASE__URL=postgresql+asyncpg://postgres.<ref>:<pwd>@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres?ssl=require#' .env
-sed -i 's#^RAG__PGVECTOR_DSN=.*#RAG__PGVECTOR_DSN=postgresql://postgres.<ref>:<pwd>@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres?sslmode=require#' .env
-# 还需要把 disable_prepared_statements 改回 true（transaction pooler）
-sed -i 's#^RAG__PGVECTOR_DISABLE_PREPARED_STATEMENTS=.*#RAG__PGVECTOR_DISABLE_PREPARED_STATEMENTS=true#' .env
-docker compose -f deploy/ecs/docker-compose.yml up -d backend
+# 1) 先停写（backend 与每日备份都占着连接，不先停 DROP DATABASE 会失败）
+docker compose -f deploy/ecs/docker-compose.yml stop backend db-backup
+# 2) 重建空库
+docker compose -f deploy/ecs/docker-compose.yml exec -T postgres \
+  psql -U veripaper -d postgres -c 'DROP DATABASE IF EXISTS veripaper;' \
+  -c 'CREATE DATABASE veripaper OWNER veripaper;'
+# 3) 恢复（用容器自带的 pg_restore 17.11，宿主机客户端版本可能低于服务端）
+docker compose -f deploy/ecs/docker-compose.yml exec -T postgres \
+  pg_restore -U veripaper -d veripaper --no-owner --clean --if-exists \
+  < backup/pre-issue10-20261111-171506.dump
+# 4) 起 backend 并复验
+docker compose -f deploy/ecs/docker-compose.yml up -d backend db-backup
+curl -s https://api.veripaper.me/api/v1/health/ready
 ```
 
-Supabase 项目保持原样（未删），迁移脚本不改源库；`backup/` 下的 dump 也可用于重建。
+> ⚠️ dump 是 **2026-11-11 17:15** 的快照，之后注册的账号、新增的任务/文档都不在里面。
+> 日常恢复优先用七牛 `db-backups/` 前缀下的**每日备份**（`vp-db-backup` 容器每天 1 次、保留 7 天），
+> 它比这份 dump 新。
 
 **C. 完全回退旧服务器**：旧机 `maa-backend` 已 `docker compose stop backend`
 （容器与数据都在），`docker compose start backend` 即可恢复；前端需重新构建指向旧入口。
@@ -446,7 +470,8 @@ Retry-After 或 1/2/4/8/16 秒退避，单次等待上限 60 秒。API 失败不
 **保留且不要删**：`veripaper-backend:latest` 与 `shadow-mock`（同一镜像
 `79ac91a4374c`，生产运行 + 回滚锚点）、`veripaper-db-backup:local`、
 postgres/redis/nginx 基础镜像、`veripaper_pgdata` 卷、
-`/opt/veripaper/backup/` 下两份 Supabase 迁移期 dump（各 21 MB，回滚用）。
+`/opt/veripaper/backup/` 下的 `pre-issue10-20261111-171506.dump`（140 MB 全量）与
+两份 Supabase 迁移期 dump（各 21 MB）。**Supabase 已下线，这份 140 MB dump 是最后的本地兜底**。
 
 > 卷 `veripaper_model_cache` 仍在 compose 中挂载（现在是空卷）。若彻底不再
 > 需要本地模型，可从 compose 移除该挂载以消除 `external` 警告；本次只清内容，
