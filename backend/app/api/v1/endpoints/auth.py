@@ -11,17 +11,28 @@
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_active_user
 from app.core.config import settings
-from app.core.exceptions import UnauthorizedException, ValidationException
+from app.core.exceptions import (
+    RateLimitedException,
+    UnauthorizedException,
+    ValidationException,
+)
 from app.core.logging import get_logger
+from app.core.login_throttle import (
+    InMemoryLoginThrottle,
+    LoginThrottle,
+    RedisLoginThrottle,
+    normalize_account,
+)
 from app.core.security import (
     TOKEN_TYPE_REFRESH,
     create_access_token,
@@ -96,22 +107,116 @@ async def register(
 @router.post("/login", response_model=TokenOut, summary="登录获取令牌")
 async def login(
     payload: UserLogin,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> TokenOut:
-    """登录：支持用户名或邮箱，校验通过后签发 access_token + refresh_token。"""
+    """登录：支持用户名或邮箱，校验通过后签发 access_token + refresh_token。
+
+    Issue #11 M-3：登录失败按**账号**累计，连续失败达到阈值后临时锁定。
+    锁定期间即使密码正确也拒绝——否则爆破者只要猜中就照常登录，退避等于没做。
+    """
+    throttle = _resolve_login_throttle(request)
+    account_key = normalize_account(payload.account)
+
+    locked_for = await _throttle_check(throttle, account_key)
+    if locked_for is not None:
+        logger.warning(
+            "login_locked", account_hash=_hashed_account(account_key), retry_after=locked_for
+        )
+        raise RateLimitedException(
+            "登录失败次数过多，请稍后再试",
+            retry_after=locked_for,
+            details={"reason": "account_locked"},
+        )
+
     repo = UserRepository(db)
     user = await repo.get_by_account(payload.account)
     if user is None or not verify_password(payload.password, user.password_hash):
+        failures = await _throttle_register_failure(throttle, account_key)
+        logger.warning(
+            "login_failed",
+            account_hash=_hashed_account(account_key),
+            consecutive_failures=failures,
+        )
         # 统一返回"账号或密码错误"，避免通过提示差异枚举有效账号
         raise UnauthorizedException("账号或密码错误")
     if not user.is_active:
         raise UnauthorizedException("账号已被禁用")
+
+    await _throttle_reset(throttle, account_key)
 
     return TokenOut(
         access_token=create_access_token(user.id, role=user.role),
         refresh_token=create_refresh_token(user.id),
         expires_in=_access_token_expires_in(),
     )
+
+
+def _hashed_account(account: str) -> str:
+    """日志里只留账号名的哈希前缀：退避排障需要，明文用户名不该进日志。"""
+    return hashlib.sha256(account.encode("utf-8")).hexdigest()[:8]
+
+
+def _resolve_login_throttle(request: Request) -> LoginThrottle:
+    """取登录退避组件（首次使用时按配置构造，并缓存在 `app.state` 上）。"""
+    existing = getattr(request.app.state, "login_throttle", None)
+    if existing is not None:
+        return existing
+
+    cfg = settings.rate_limit
+    throttle: LoginThrottle
+    if cfg.backend == "memory":
+        throttle = InMemoryLoginThrottle(
+            limit=cfg.login_failure_limit, window_seconds=cfg.login_failure_window_seconds
+        )
+    else:
+        try:
+            import redis.asyncio as aioredis
+
+            client = aioredis.from_url(
+                settings.redis.url,
+                socket_connect_timeout=1.0,
+                socket_timeout=1.0,
+                decode_responses=False,
+            )
+            throttle = RedisLoginThrottle(
+                redis_client=client,
+                limit=cfg.login_failure_limit,
+                window_seconds=cfg.login_failure_window_seconds,
+                key_prefix=cfg.key_prefix,
+            )
+        except Exception as exc:  # pragma: no cover - 依赖缺失时退化为内存
+            logger.warning("login_throttle_redis_unavailable", error=str(exc))
+            throttle = InMemoryLoginThrottle(
+                limit=cfg.login_failure_limit, window_seconds=cfg.login_failure_window_seconds
+            )
+
+    request.app.state.login_throttle = throttle
+    return throttle
+
+
+async def _throttle_check(throttle: LoginThrottle, account: str) -> int | None:
+    """查锁定状态；组件故障一律放行（fail-open，不能让 Redis 挂了就没人能登录）。"""
+    try:
+        return await throttle.check(account)
+    except Exception as exc:
+        logger.warning("login_throttle_check_failed", error=str(exc))
+        return None
+
+
+async def _throttle_register_failure(throttle: LoginThrottle, account: str) -> int:
+    try:
+        return await throttle.register_failure(account)
+    except Exception as exc:
+        logger.warning("login_throttle_register_failed", error=str(exc))
+        return 0
+
+
+async def _throttle_reset(throttle: LoginThrottle, account: str) -> None:
+    try:
+        await throttle.reset(account)
+    except Exception as exc:
+        logger.warning("login_throttle_reset_failed", error=str(exc))
 
 
 def _refresh_token_expiry(token_data: dict, fallback_from: datetime) -> datetime:

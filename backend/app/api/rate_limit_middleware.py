@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -90,19 +91,47 @@ def route_rule_label(method: str, path: str) -> str | None:
     return None
 
 
+def _normalize_ip(raw: str | None) -> str | None:
+    """把 `X-Real-IP` 的值解析成规范 IP；非法值返回 None。
+
+    只用标准库 `ipaddress` 判断，不做"看起来像 IP"的字符串猜测：`X-Real-IP` 由网关写，
+    出现非 IP 说明请求绕过了网关（直连源站伪造），此时必须不采信。
+    """
+    if not raw:
+        return None
+    candidate = raw.strip()
+    if not candidate or "," in candidate:
+        # nginx 的 `$remote_addr` 永远是单个地址；带逗号说明不是网关写的
+        return None
+    try:
+        return str(ipaddress.ip_address(candidate))
+    except ValueError:
+        return None
+
+
 def _client_identity(request: Request, *, trust_proxy: bool) -> str:
     """限流主体的稳定标识：优先登录用户，其次客户端 IP。
 
-    `trust_proxy=False`（默认）时不信任 `X-Forwarded-For`——否则任何客户端
-    伪造该头就能绕过限流；仅当部署在可信反代后才开启。
+    `trust_proxy=False`（默认）时用 socket 对端地址——直连部署/本地开发就是这样。
+
+    `trust_proxy=True` 时**只认 `X-Real-IP`**，且必须是合法 IP：
+
+    - `X-Real-IP` 由 nginx 用 `$remote_addr` **无条件覆盖**写，客户端伪造的值会被冲掉；
+    - `X-Forwarded-For` 一律不看。nginx 的 `$proxy_add_x_forwarded_for` 是
+      「客户端自带的 XFF + 真实地址」拼接，第一段正是客户端自己写的——
+      2026-11-11 的原实现取的就是第一段（`forwarded.split(",")[0]`），
+      等于任何人加一个 `X-Forwarded-For: 1.1.1.1` 就换了一个限流桶。
+
+    生产还要求源站只接受 Cloudflare 回源（`set_real_ip_from`），否则直连源站者
+    无法伪造 `$remote_addr` 但仍可占用连接——那一层由 nginx 负责。
     """
     user_id = getattr(request.state, "user_id", None)
     if user_id:
         return f"user:{user_id}"
     if trust_proxy:
-        forwarded = request.headers.get("x-forwarded-for")
-        if forwarded:
-            return f"ip:{forwarded.split(',')[0].strip()}"
+        gateway_ip = _normalize_ip(request.headers.get("x-real-ip"))
+        if gateway_ip is not None:
+            return f"ip:{gateway_ip}"
     client = request.client
     return f"ip:{client.host if client else 'unknown'}"
 

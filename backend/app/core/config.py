@@ -253,7 +253,12 @@ class RateLimitRules(BaseModel):
     双向校验：所有写端点有规则、所有规则标签存在）。
     """
 
-    auth_login: RateLimitRule = RateLimitRule(limit=10, window_seconds=60)
+    auth_login: RateLimitRule = RateLimitRule(limit=5, window_seconds=60)
+    """登录：60 秒 5 次（Issue #11 M-3，原 10 次）。
+
+    实测 10 次/60 秒时「10 次失败都不触发 429」，第 11 次才限——慢速爆破一天能试 7200 次。
+    收紧到 5 次后配合账号维度的失败退避（见 `login_failure_limit`）才形成两层防护。
+    """
     auth_register: RateLimitRule = RateLimitRule(limit=5, window_seconds=3600)
     task_create: RateLimitRule = RateLimitRule(limit=30, window_seconds=3600)
     task_control: RateLimitRule = RateLimitRule(limit=60, window_seconds=3600)
@@ -282,7 +287,19 @@ class RateLimitConfig(BaseModel):
 
     key_prefix: str = "ratelimit"
     trust_proxy: bool = False
-    """是否信任 `X-Forwarded-For` 作为客户端 IP。默认 False（防伪造）。"""
+    """是否信任网关传来的客户端 IP。默认 False（直连 / 本地开发）。
+
+    开启后只读 **`X-Real-IP`**（由 nginx 无条件覆盖写），**不读 `X-Forwarded-For`**：
+    XFF 的第一段是客户端自己写的，信它等于让任何人换一个限流桶就绕过限额。
+    开启前提：源站只接受可信反代（Cloudflare）回源，见 `deploy/ecs/nginx-api-tls.conf`
+    的 `set_real_ip_from` 与 `ecs-deployment.md` §17。
+    """
+
+    login_failure_limit: int = Field(default=10, ge=1)
+    """同一账号在窗口内允许的连续失败次数，超过即临时锁定（Issue #11 M-3）。"""
+
+    login_failure_window_seconds: int = Field(default=900, ge=60)
+    """失败计数窗口 / 锁定时长（秒）。默认 15 分钟。"""
 
     rules: RateLimitRules = RateLimitRules()
 

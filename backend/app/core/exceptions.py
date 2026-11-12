@@ -96,3 +96,30 @@ class HumanActionRequiredError(AppException):
     status_code = 409
     default_message = "需要人工介入"
     error_code = "HUMAN_ACTION_REQUIRED"
+
+
+class RateLimitedException(AppException):
+    """请求被限流/临时锁定（429）。
+
+    与 `app/api/rate_limit_middleware.py` 直接返回的 429 语义一致：都带 `Retry-After`。
+    这里做成异常，是为了让**端点内部**的判定（如登录失败退避）走统一的异常处理器，
+    而不是每个端点各自拼 JSONResponse。
+    """
+
+    status_code = 429
+    default_message = "请求过于频繁，请稍后重试"
+    error_code = "RATE_LIMITED"
+
+    def __init__(
+        self,
+        message: str | None = None,
+        *,
+        retry_after: int = 60,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        retry = max(1, int(retry_after))
+        self.retry_after = retry
+        merged = {"retry_after": retry}
+        if details:
+            merged.update(details)
+        super().__init__(message or self.default_message, details=merged)
