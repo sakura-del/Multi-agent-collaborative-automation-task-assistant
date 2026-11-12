@@ -4411,3 +4411,23 @@ air tokens 只服务两页，不替换 success/warning/destructive。证据卡�
   经 CF 与回环均 200；容器出网 200；看门狗正常态零改动、清空后可自愈。
 - 门禁：**3173 passed / 21 skipped**（全量，跑的时候新增防火墙配置测试是 12 条）；
   之后补了 3 条看门狗断言，单文件 **15 passed**。black 433 文件、ruff 0、mypy 219 文件 0 错。
+
+### Issue #11 C 组：监控告警（2026-11-12 晚）
+
+- 现状：只有 `/health/ready`，无采集器、无通知渠道。C 组另两项不做（Supabase 定在 11-17 的自动化提醒；
+  旧服务器缺 IP/凭据，用户决定本轮跳过）。
+- **双层设计**，因为单层都有系统性盲区：站内（systemd 每 2 分钟，查健康/5xx/磁盘/容器/备份）+
+  站外（GitHub Actions 每 5 分钟，整机宕机时仍能报）。
+- 站内脚本只用标准库、容器 IP 运行时解析、5xx 做差处理计数归零、状态落盘去重（180 分钟再提醒）+ 恢复通知、
+  未配 webhook 时写 journal 且返回 0。
+- 站外必须解析 JSON 且 `status=ready`（CF 错误页也是响应）；连续 3 次失败才报；失败开 Issue、恢复关 Issue。
+- **踩坑 1（§5 #56）**：把脚本改名成 `veripaper-probe-public.py` → `from watchdog import` ImportError。
+  改为保留原文件名、集中装 `/usr/local/lib/veripaper-ops/`。
+- **踩坑 2（§5 #57）**：企业微信 HTTP 200 但 `errcode=93000` 表示 key 失效，只看状态码会把告警丢黑洞；
+  消息上限是 4096 **字节**，按字符截断中文会变成 ~11 KB 被拒收。两处都改了并写测试。
+- **踩坑 3（§5 #55）**：本地跑会改文件的 `black`，CI 跑 `black --check`，格式化改动没进提交 → 主干 CI 连红两次。
+  已改为提交前跑 `black --check` + `ruff check` + `mypy`（与 CI 同名），并把漏掉的格式化与 RUF059 一次修掉。
+- 实测：站内真实一轮读到 `all=14/5xx=0/4xx=3`；假接收器验证「故障 1 条（220B）→ 重复不发 → 恢复 1 条（90B）」；
+  站外 `workflow_dispatch` 正常 run 11s 通过；用 `-f api_url=...` 制造失败 → **Issue #13 自动创建**，
+  再跑正常 → 自动评论并**关闭**。定时器：站内每 2 分钟、日报次日 09:00。
+- 门禁：**3207 passed / 21 skipped**（新增 31 条），`black --check` 435 文件、ruff 0、mypy 219 文件 0 错。

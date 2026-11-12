@@ -1061,3 +1061,113 @@ systemctl list-timers 'veripaper-firewall*'
 systemctl start veripaper-firewall-watchdog.service   # 手工巡检一次（正常时无输出）
 journalctl -u veripaper-firewall-watchdog.service -n 20 --no-pager
 ```
+
+## 20. 监控告警：站内自检 + 站外探测（Issue #11 C 组，2026-11-12）
+
+此前只有 `/health/ready` 一个端点，**没有任何采集器与通知渠道**：服务挂了没人知道，
+磁盘满了没人知道，备份连续失败也没人知道。
+
+### 20.1 为什么必须是两层
+
+| 层 | 位置 | 覆盖的故障 | 覆盖不了 |
+| --- | --- | --- | --- |
+| 站内自检 | 服务器 systemd timer（每 2 分钟） | 业务 5xx、磁盘、容器、备份、依赖不健康 | 整机宕机、断网、安全组改错——**它自己也发不出通知** |
+| 站外探测 | GitHub Actions（每 5 分钟） | 整机/网络/源站不可达 | 单机内部指标（磁盘、备份、容器） |
+
+单靠任何一层都有系统性盲区。
+
+### 20.2 站内自检（`ops/watchdog.py`）
+
+安装位置 `/usr/local/lib/veripaper-ops/`（**保留原文件名**：`probe_public.py` / `notify.py`
+要 `from watchdog import send_wecom`，改名会直接 ImportError——本次踩过）。
+
+| 检查项 | 判据 | 严重度 |
+| --- | --- | --- |
+| `api_health` | 回环 `/api/v1/health/ready` 非 200，或 `checks` 有非 ok | 红 |
+| `error_rate` | 窗口内 5xx 占比 ≥ 20% 且请求数 ≥ 20 | 红 |
+| `disk` | `/` ≥ 85% / ≥ 92% | 橙 / 红 |
+| `containers` | 有容器非 `Up` 或含 `unhealthy` | 红 |
+| `backup` | 最近一次成功备份 > 30 小时（备份是每日） | 橙 |
+
+四个设计决定（都有具体理由，不是偏好）：
+
+1. **只用标准库**：检查器必须活在被检查对象之外，且不能因依赖升级而静默失效。
+   用系统 `/usr/bin/python3`，不碰项目虚拟环境。
+2. **容器 IP 运行时解析**（`docker inspect`）：写死会在容器重启后让「5xx 比例」这项
+   **永久静默**——静默的检查比没有检查更危险。
+3. **5xx 做差时处理计数归零**：后端重启会让累计计数器变小，直接相减会得到负数占比。
+4. **状态落盘去重**：同一故障只推一次，持续 180 分钟再提醒，恢复时推「已恢复」。
+
+未配置 webhook 时写 journal 并返回 0——不能因为「还没配通知」让 systemd 每分钟报一次 failed。
+
+### 20.3 站外探测（`.github/workflows/uptime.yml`）
+
+每 5 分钟从 GitHub 机房探 `api.veripaper.me/api/v1/health/ready` 与 `veripaper.me`：
+
+- **必须解析 JSON 且 `status=ready`**：Cloudflare 的错误页/挑战页也是 HTTP 响应，
+  只看状态码会把「源站挂了被 CF 挡成 502」误判成正常，也会把挑战页当成故障；
+- **连续 3 次（间隔 20 秒）失败才报**：避开部署瞬间与边缘抖动；
+- 失败 → 企业微信 + 自动开 Issue（label `uptime-alert`）；恢复 → 评论并关闭该 Issue + 恢复通知。
+  Issue 状态本身就是去重手段（不需要额外存储）。
+
+`workflow_dispatch` 带 `api_url` / `site_url` 两个可选输入，用来**真实演练故障路径**——
+这是本次验证「失败→开 Issue→恢复→关 Issue」闭环的办法，平时留空。
+
+### 20.4 启用通知（还差你两步）
+
+代码已上线，但**通知渠道还没填**（当前只在 journal 里记录）。两步，都在你手上：
+
+```bash
+# 1) 服务器：填企业微信群机器人地址（群设置 → 群机器人 → 添加）
+ssh root@47.253.81.6
+sudo vi /etc/veripaper/notify.env        # WECOM_WEBHOOK_URL=https://qyapi.weixin.qq.com/...
+sudo systemctl restart veripaper-watchdog.timer
+
+# 2) 仓库 secret：让站外探测也能推送
+gh secret set WECOM_WEBHOOK_URL --repo sakura-del/Multi-agent-collaborative-automation-task-assistant
+
+# 验证：故意让探测失败一次，应当收到群消息 + 自动 Issue
+gh workflow run uptime.yml -f api_url="https://api.veripaper.me/api/v1/health/nope"
+```
+
+### 20.5 本次实测证据（2026-11-12 15:00 JST）
+
+| 检查点 | 结果 |
+| --- | --- |
+| 站内·真实一轮 | 退出 0，`state.json` 记录 `all=14 / 5xx=0 / 4xx=3`（读到真实计数） |
+| 站内·日报渲染 | 正常输出「累计请求 14，其中 5xx 0。磁盘 50%（剩 17.8 GB）」 |
+| 站内·定时器 | `veripaper-watchdog.timer` 每 2 分钟（下一次 14:57）；`-digest.timer` 次日 09:00 |
+| 站内·单元执行 | `systemctl start` → `Result=success` |
+| 站内·告警链路 | 指向死端口 → 收到 1 条（220 字节）；**同一故障再跑不发**；恢复后收到 1 条（90 字节） |
+| 站外·正常 | `workflow_dispatch` 成功（11s）：`API 正常 / 站点 正常`，未建 Issue |
+| 站外·故障 | 用 `-f api_url=.../health/nope` 触发，50s 后自动创建 **Issue #13** |
+| 站外·恢复 | 再跑一次正常探测 → Issue #13 自动评论「探测已恢复正常」并**关闭** |
+| 配置权限 | `/etc/veripaper/notify.env` = `600 root:root`，模板在仓库 `ops/notify.env.example` |
+
+### 20.6 排查命令
+
+```bash
+# 站内：最近几轮发生了什么
+journalctl -u veripaper-watchdog.service -n 30 --no-pager
+systemctl list-timers 'veripaper-watchdog*'
+cat /var/lib/veripaper-watchdog/state.json          # firing 里就是当前未恢复项
+
+# 手工跑一轮 / 预览日报（不发网络请求）
+/usr/bin/python3 /usr/local/lib/veripaper-ops/watchdog.py --dry-run
+/usr/bin/python3 /usr/local/lib/veripaper-ops/watchdog.py --digest --dry-run
+
+# 站内：临时把某个阈值调低看会不会触发（不落盘，只影响这一轮）
+WATCHDOG_DISK_WARN_PCT=1 /usr/bin/python3 /usr/local/lib/veripaper-ops/watchdog.py --dry-run
+
+# 站外：手工触发 / 看历史
+gh workflow run uptime.yml
+gh run list --workflow=uptime.yml --limit 5
+```
+
+### 20.7 已知局限（写出来，避免误以为有 SLA）
+
+- **GitHub cron 有 5~15 分钟不定延迟**，这是分钟级可用性监控，不是秒级 SLA 监控；
+- **公开仓库的 schedule 在闲置 60 天后会被自动停用**，长期无提交时需手动触发一次；
+- **没有长期指标存储**：`/metrics` 存在但没有 Prometheus 抓取，只能看"当下"，
+  查不了"上周三 14:00 的 5xx 是多少"。真要做趋势，再上 Prometheus；
+- 站内自检的 5xx 判断依赖后端进程存活（进程死了这一项拿不到数据，由 `api_health` 兜）。
