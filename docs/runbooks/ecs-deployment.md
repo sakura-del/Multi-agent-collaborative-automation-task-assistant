@@ -876,3 +876,42 @@ cd frontend && npx vite build      # 产物根目录会带上 _headers
 本次实测（2026-11-12 13:00 JST）：`appHtmlLength=7308`、`formVisible=true`、
 `buttonBg=oklch(0.44 0.065 180)`（样式生效）、**violations=[]、CSP 控制台消息 0**。
 Push 后 Pages 自动重建，公网复核见 §16.7。
+
+### 16.7 站点 CSP 上线验证（2026-11-12 14:05 JST）
+
+| 检查点 | 结果 |
+| --- | --- |
+| 公网响应头 `veripaper.me` | `content-security-policy` 已出现（Pages 自动重建完成） |
+| 登录页渲染 | `#account` 可见 |
+| 登录流程 | 真实浏览器登录成功 → 跳 `/tasks` |
+| **CSP 违规事件** | 登录前后均 **0 条**（`securitypolicyviolation` 监听） |
+| 控制台 CSP 报错 | **0** |
+
+> 若后续新增第三方资源（埋点、字体、CDN），先在这个页面加域名再发版——
+> 被 CSP 拦掉的资源不会报 500，只会静默消失。
+
+## 18. 依赖瘦身：chromadb 移出生产镜像（Issue #11 M-5，2026-11-12）
+
+### 18.1 改了什么
+
+`chromadb==1.5.9` 从主依赖移到可选 `[chroma]`，生产镜像不再安装它。
+完整理由与残留风险见 [dependency-risk.md](../security/dependency-risk.md)。
+
+### 18.2 实测
+
+| 检查点 | 结果 |
+| --- | --- |
+| 镜像大小 | **2.14 GB → 1.78 GB**（省 360 MB），导出层 513 MB → 450 MB |
+| `docker exec vp-backend python -c "import chromadb"` | **ModuleNotFoundError**（符合预期） |
+| `/health/ready` | `ready`，`checks.vector=ok`（走 pgvector 探针） |
+| 真实检索 | `/knowledge/search` 命中 3 条，返回真实 chunk id → **RAG 未被依赖移除影响** |
+| 容器状态 | healthy，五容器正常 |
+
+### 18.3 回滚 / 本地开发需要 chroma 时
+
+```bash
+pip install -e ".[chroma]"          # 本地
+docker build --build-arg ...        # 或在 Dockerfile 里改成 pip install ".[chroma]"
+```
+
+注意版本必须与 `docker-compose.yml` 的 chromadb 镜像一致（`chromadb/chroma:1.5.9`）。

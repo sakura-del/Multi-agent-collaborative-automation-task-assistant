@@ -4358,3 +4358,26 @@ air tokens 只服务两页，不替换 success/warning/destructive。证据卡�
   `Retry-After: 60`；账号连续失败 10 次后**正确密码**返回 429 `reason=account_locked`、`retry_after=647`。
   清理：探针账号删除（回查 0）、`ratelimit:*` 键清空；回归 `demo` 登录 200 / health ready / 前端 200。
 - 门禁：pytest **3138 passed / 21 skipped / 90%**；ruff 0、mypy 219 文件 0（4 红仍是 `.csl` CRLF 伪缺陷）。
+
+### Issue #11 A 组收尾：M-5 依赖 + 站点 CSP + CORS 收紧（2026-11-12）
+
+- **先查后改**：不抄审计报告里「21 条漏洞」那张过期表，直接对生产镜像的 11 个包跑 OSV。
+  结果只剩 3 个包有公告，且 `fixed_in = None`（上游没有修复版本）：`chromadb`（4 CVE）、
+  `python-jose`（1）、`ecdsa`（1）。`certifi`/`urllib3`/`aiohttp`/`cryptography` 等已随版本漂移变干净。
+- M-5 处置：`chromadb` 移出主依赖 → 可选 `[chroma]`，生产镜像不装；
+  默认后端改 pgvector；CI 装 `.[dev,chroma]`；缺包给可照做的报错；
+  新增 `test_dependency_policy.py` 锁住「不得回主依赖」。台账 `docs/security/dependency-risk.md`。
+- **踩坑（记入 §5 #52）**：改默认后端后 **34 个用例 setup 就报错**——它们默认「后端是 chroma」但从没写出来。
+  修法：`conftest` 用 `os.environ.setdefault("RAG__VECTOR_BACKEND", "chroma")` 钉住测试用值，
+  需要验证新默认的用例显式切 pgvector。
+- 站点 CSP：`_headers` 加 `Content-Security-Policy`。逐条按构建产物核对（无内联 `<script>` → 不给
+  `script-src 'unsafe-inline'`；Vue/motion 写 style 属性 → `style-src` 必须 `'unsafe-inline'`；
+  CF 探针域名必须放行）。**上线前**用本地静态服务 + 真实浏览器验证：0 违规、登录页正常、按钮样式生效。
+- CORS：去掉 `www.veripaper.me`（301 到根域）、标签必须以字母数字开头且有长度上限；
+  白名单正则进 `config/default.yaml` 并新增测试。**残留**：同项目任意单级别名仍允许（预览部署需要），
+  已在测试 docstring 与安全报告里写明「按 Low 接受」，没有假装解决。
+- 顺带消除长期 4 红：`.gitattributes` 加 `*.csl -text`，CSL 文件的字节哈希不再被 CRLF 转换破坏。
+- 生产（2026-11-12 14:00 JST）：镜像 **2.14 → 1.78 GB**；容器内 `import chromadb` → `ModuleNotFoundError`；
+  `/health/ready` ready（vector ok）；`/knowledge/search` 命中 3 条真实 chunk；CORS 实测 `veripaper.me` 允许、
+  `www`/`evil.example.com` 拒绝；站点真实浏览器登录成功且 **CSP 违规 0**。
+- 门禁：**3157 passed / 21 skipped / 90%**（4 红已清零），ruff 0、mypy 219 文件 0。
