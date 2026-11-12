@@ -1,0 +1,13 @@
+[Unit]
+Description=VeriPaper: 每周刷新 Cloudflare 网段并重放防火墙规则
+
+[Timer]
+# 每周一次即可：Cloudflare 的官方网段极少变动，漏掉的后果是「新边缘节点的回源被丢」
+# （表现为部分用户间歇 522 / 超时），而非全站不可用。
+OnCalendar=Mon *-*-* 04:30:00
+# 机器关机错过时间点，开机后补跑
+Persistent=true
+RandomizedDelaySec=600
+
+[Install]
+WantedBy=timers.target

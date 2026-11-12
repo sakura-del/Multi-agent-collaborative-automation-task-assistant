@@ -35,7 +35,7 @@
 | 前端测试 | Vitest **458 passed**（+6 skipped）；**Playwright E2E 44 场景**（chromium + mobile-chrome 双视口） |
 | 发布方式 | **前端：`git push backup main` 后 Cloudflare Pages 自动构建部署**（Git 集成，无需本机 Node）；**后端：bundle + `deploy/ecs` 目录 `docker compose build backend`** |
 | CI | ⚠️ **2026-10-28 起 CI 因 GitHub Actions 账单额度停摆**（报 spending limit），作业 0~2s 就 X，**不是代码问题**。⚠️ **GitHub 直连时通时不通**：不通时走代理（`git -c http.proxy=http://127.0.0.1:7894 ...`，`gh` 需 `$env:HTTPS_PROXY`） |
-| 服务器 | `root@47.253.81.6`，HEAD **`54ce78a`**，backend 镜像 `c476209d879c`（1.78 GB，已无 chromadb）（回滚锚点 `shadow-mock`=`79ac91a4374c`），五容器 healthy，公网 `ready`，嵌入 = **SiliconFlow BGE-M3**（1600 RPM / 400k TPM），**user=1（仅 demo）/ task 86 / doc_chunk 2835 / 两表各 2835**（2026-11-11 清掉 26 个测试账号后），磁盘 38% |
+| 服务器 | `root@47.253.81.6`，HEAD **`54ce78a`**，backend 镜像 `c476209d879c`（1.78 GB，已无 chromadb）；80/443 仅接受 Cloudflare 回源（`DOCKER-USER`，第三方探测 443=0/4）；UFW active；SSH 3 把密钥、X11 关、MaxAuthTries 3（回滚锚点 `shadow-mock`=`79ac91a4374c`），五容器 healthy，公网 `ready`，嵌入 = **SiliconFlow BGE-M3**（1600 RPM / 400k TPM），**user=1（仅 demo）/ task 86 / doc_chunk 2835 / 两表各 2835**（2026-11-11 清掉 26 个测试账号后），磁盘 38% |
 
 **演示账号**：`demo` —— **全权限管理员**（`role=admin` + `institution` 套餐：篇数不限 / 含团队 / 含开放 API）；知识库 11 篇 / 2835 分块（2026-11-11 清理测试账号后，全库仅剩 demo）。
 **口令不入仓库**：2026-11-11 已轮换为强随机口令，只存在于服务器 `/opt/veripaper/.demo-password`（600）与口令管理器；要登录就 `ssh root@47.253.81.6 cat /opt/veripaper/.demo-password`。
@@ -183,6 +183,8 @@ docker compose up -d backend
 | 50 | **限流/审计用的客户端 IP 只能取自「网关覆盖写」的头**（2026-11-12） | `X-Forwarded-For` 由客户端起头，nginx 的 `$proxy_add_x_forwarded_for` 只是**追加**真实地址，第一段永远是客户端写的。原实现取第一段 → 任何人加 `X-Forwarded-For: 1.1.1.1` 就换一个限流桶（已实测复现）。正确做法：网关 `set_real_ip_from` + `real_ip_header CF-Connecting-IP` + `proxy_set_header X-Real-IP $remote_addr`，应用只读 `X-Real-IP` 且校验可解析，非法值退回 socket 地址 |
 | 51 | **两层限流会互相遮挡，验收要看 reason**（2026-11-12） | 登录同时有「IP 5 次/分」与「账号 10 次/15 分」两层。从单个 IP 攒账号锁定次数时，先撞的是 IP 层，返回的 429 里 `reason` 是路由限流而不是 `account_locked` —— 看起来像「账号锁定没生效」。验收要么分轮打（5 次 + 等 61 秒），要么直接看 Redis 计数 |
 | 52 | **改配置默认值 = 批量改测试前提**（2026-11-12） | 把 `rag.vector_backend` 默认从 chroma 改成 pgvector 后，34 个用例在 setup 阶段就报 `pgvector 后端不能使用 sqlite DSN` —— 它们默认「后端是 chroma」，只是从没写出来。**改默认值前先 grep 谁依赖它**；测试用值在 `conftest` 里 `os.environ.setdefault` 钉住，需要验证新默认的用例自己显式声明 |
+| 53 | **`DOCKER-USER` 链是双向的，限制规则必须带 `-i <公网网卡>`**（2026-11-12） | 只写 `-p tcp --dports 80,443 -j DROP` 会把**容器出网**一起掐掉（容器发出的包同样走 `FORWARD → DOCKER-USER`，源地址 `172.18.0.x` 不在放行网段）。症状极具欺骗性：网站能开、健康检查 200，只有真正调模型/外部 API 时才 `Network is unreachable`。修法与自检见 `deploy/ecs/firewall-cloudflare-only.sh`（DROP 规则缺 `-i` 直接拒绝生效） |
+| 54 | **「直连源站」测试必须先排除本机代理**（2026-11-12） | 用 `curl --resolve 域名:443:<源站 IP>` 测直连，返回 200 就以为源站裸奔；实际环境有 `http_proxy` 与 SDK 透明代理，`--resolve` 被完全忽略。**判据：响应头出现 `CF-RAY` 或 `Server: cloudflare` 就是没直连**。可靠办法：服务器自身打自己公网 IP（hairpin）、或第三方节点探测（check-host.net），并把「22 端口可连」当对照，证明探测本身有效 |
 
 ---
 

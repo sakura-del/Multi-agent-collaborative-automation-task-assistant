@@ -915,3 +915,149 @@ docker build --build-arg ...        # 或在 Dockerfile 里改成 pip install ".
 ```
 
 注意版本必须与 `docker-compose.yml` 的 chromadb 镜像一致（`chromadb/chroma:1.5.9`）。
+
+## 19. B 组运维：SSH 加固 / 密钥备份清理 / 系统包 / 源站只允许 Cloudflare 回源（2026-11-12）
+
+一次会话内完成四项「零散收尾」。共同原则：**改动前先证明现状、改动中挂自动回滚、改动后用外部视角验证**。
+
+### 19.1 SSH 加固
+
+新增 `/etc/ssh/sshd_config.d/98-veripaper-hardening.conf`（认证方式仍在 `99-veripaper-keyonly.conf`）：
+
+| 项 | 改前 | 改后 | 理由 |
+| --- | --- | --- | --- |
+| `X11Forwarding` | yes | **no** | 服务器没有图形程序，开着只是多一条可被滥用的通道 |
+| `MaxAuthTries` | 6 | **3** | 密钥登录一次就过，6 次只够爆破者多试几轮 |
+| `LoginGraceTime` | 120 | **30** | 压缩未认证连接的占用窗口（slowloris） |
+| `ClientAliveInterval` / `CountMax` | 0 / 3（永不主动断） | **300 / 2** | 空闲 10 分钟断开 |
+
+> **为什么 drop-in 能覆盖主配置**：sshd 对同一关键字取**第一次**出现的值，而 `sshd_config`
+> 顶部就 `Include /etc/ssh/sshd_config.d/*.conf`。所以目录里的值总是赢——这也是
+> `99-veripaper-keyonly.conf` 的 `PasswordAuthentication no` 能压过主配置 `yes` 的原因。
+
+**回滚保险**（改 sshd 必须做，否则一旦连不上就再也进不去）：落盘后先 `sshd -t`，再挂一个
+5 分钟定时任务——期间若没删标记文件，自动删掉 drop-in 并 reload。
+
+实测：新会话登录成功；带 `DISPLAY` 强制请求 X11 转发返回
+`Warning: untrusted X11 forwarding setup failed`，远端 `DISPLAY=none` → 确认 X11 已关。
+
+### 19.2 清理明文密钥备份
+
+`.env.pre-bge`（11-11 11:09）、`.env.pre-m3-cutover`（11-11 14:11）两份 600 权限的明文密钥，
+对应回滚窗口早已过去（pgvector 已稳定运行一天以上）。
+
+删除前做了**键名集合比对**（不打印值）：两份备份里没有任何一个键是现役 `.env` 缺失的，
+反向只有现役多出 `RATE_LIMIT__TRUST_PROXY`（今天新加）→ 确认删除不丢配置。
+之后 `shred -u -z` 覆盖再 unlink。现役只剩 `.env` 与 `.env.example`。
+
+> 局限：ext4 日志与快照仍可能留有旧块，`shred` 不是绝对保证。真正要杜绝，密钥本身要换。
+
+### 19.3 系统包升级
+
+`apt-get update` 后 15 个可升级，升级 11 个（含 `docker-compose-plugin 5.7.0→5.7.1`、
+`libglib`、`libsqlite3`、`tmux`），**无内核更新，不需要重启**（`/var/run/reboot-required` 不存在）。
+
+保留 4 个，且**都不是安全更新**（全部来自 `noble-updates`，非 `noble-security`；
+`apt-check` 报 `0 updates can be applied immediately`）：
+
+| 包 | 原因 | 处置 |
+| --- | --- | --- |
+| `snapd`、`distro-info`、`python3-distro-info` | Ubuntu **分阶段推送（phasing）**，apt 按设计等推送轮次 | 不动，到期自然装 |
+| `cloud-init` 23.2.2 → 26.2 | 大版本跳跃（跨 3 年），只在开机时跑 | 评估后跳过：零安全收益，却影响重启行为 |
+
+升级后复核：`docker compose version` = v5.7.1、五容器 healthy、`/health/ready` 200、无 failed 单元。
+
+### 19.4 源站只允许 Cloudflare 回源（M-2 真正落地）
+
+**问题**：`DOCKER-USER` 链是空的，源站对全世界开放。任何人知道 `47.253.81.6` 就能绕过
+Cloudflare——WAF、DDoS 清洗、Bot 规则、以及 11-12 刚做的「按真实 IP 限流」全部失效。
+
+**为什么开 UFW 解决不了**：docker 发布端口走 nat 表的 DNAT + `DOCKER` 链，**不经过 UFW 的 INPUT**。
+UFW 只保护宿主机自己的 socket。真正的位置是 docker 官方留给用户的 `DOCKER-USER` 钩子
+（在 `FORWARD` 里、docker 自己的规则之前求值）。
+
+**实现**（都进仓库，可 review、可回滚）：
+
+| 文件 | 作用 |
+| --- | --- |
+| `deploy/ecs/firewall-cloudflare-only.sh` | `apply` / `refresh` / `status` / `revert` 四个子命令，幂等 |
+| `deploy/ecs/cloudflare-ranges.txt` | 22 个官方网段（与 nginx 的 `set_real_ip_from` 逐条一致） |
+| `deploy/ecs/veripaper-firewall.service` | `After`/`PartOf=docker.service`：docker 重启会重建空链，必须跟着重放 |
+| `deploy/ecs/veripaper-firewall.timer` | 每周一 04:30 重新下载网段并重放（CF 增网段而漏更新 → 部分用户间歇 522） |
+| `deploy/ecs/veripaper-firewall-watchdog.{service,timer}` | **每 15 分钟**检查规则是否还在；缺失才重建（正常时零改动，不制造 flush 窗口） |
+
+规则形态（关键在于 `-i eth0`）：
+
+```
+-A DOCKER-USER -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
+-A DOCKER-USER -i eth0 -s <CF 网段> -p tcp -m multiport --dports 80,443 -j RETURN   × 22
+-A DOCKER-USER -i eth0 -p tcp -m multiport --dports 80,443 -j DROP
+-A DOCKER-USER -j RETURN
+```
+
+同时启用 UFW 作为**宿主机层面**的纵深防御：`default deny incoming`，只放行 22/80/443
+（数据库/Redis 本就不发布端口，其余端口现在也进不来）。
+
+**为什么要看门狗**：`PartOf=docker.service` 只是「docker 重启时顺手重放」，一旦重放失败，
+表现是**源站重新对全世界开放且没有任何报错**——没有任何告警会响。所以再加一层分钟级巡检：
+规则在就什么都不做（连 flush 都不做，避免瞬时 fail-open），规则没了就重建。
+
+### 19.5 ⚠️ 两个坑（都是我自己踩的，都写进 AGENTS 铁律）
+
+**坑 1：`DOCKER-USER` 是双向的，只按端口写 DROP 会掐掉容器出网。**
+第一版规则是 `-p tcp --dports 80,443 -j DROP`，没限定入接口。结果容器调用外部 HTTPS 直接
+`urllib.error.URLError: <urlopen error [Errno 101] Network is unreachable>` —— 因为容器出网
+的包同样经过 `FORWARD → DOCKER-USER`，源地址是 `172.18.0.x`（不在 CF 网段）→ 命中 DROP。
+这种故障从外面看**完全正常**（网站能开、健康检查 200），只有真正调模型/外部 API 时才报错。
+修法：所有限制规则加 `-i <公网网卡>`（由默认路由推导，本机 `eth0`），并在脚本里自检
+「DROP 规则必须带 `-i`」，缺了直接拒绝生效。
+
+**坑 2：本机有透明代理，`--resolve` 直连测试是假的。**
+改前用 `curl --resolve api.veripaper.me:443:47.253.81.6` 测「源站是否能被直连」，
+拿到 200 —— 但响应头里 `Server: cloudflare` + `CF-RAY` 说明请求根本是经 Cloudflare 回来的：
+环境里有 `http_proxy=http://127.0.0.1:xxxxx`（且 SDK 层还有透明代理），`--resolve` 被忽略。
+**判据：直连测试的响应里出现 `CF-RAY` 或 `Server: cloudflare`，就说明没直连。**
+改用两种不受本机代理影响的办法：① 服务器自身打自己的公网 IP（hairpin）；② 第三方节点探测。
+
+### 19.6 本次实测证据（2026-11-12 14:20 JST）
+
+| 检查点 | 结果 |
+| --- | --- |
+| SSH 新会话 | 登录成功（改配置后多次复连均正常） |
+| X11 转发 | 请求被拒（`xauth key data not generated`），远端 `DISPLAY=none` |
+| `sshd -T` | `x11forwarding no` / `maxauthtries 3` / `logingracetime 30` / `clientaliveinterval 300` |
+| `.env*` | 只剩 `.env`、`.env.example`（键名比对确认无唯一键丢失） |
+| 系统包 | 升 11 个，`docker compose` v5.7.1，无 `reboot-required`，无 failed 单元 |
+| **源站 hairpin 直连** | **失败**（`000`），DROP 计数 0 → 7（SYN 被丢弃） |
+| **第三方节点探测 443** | **0 / 4 节点可连** |
+| 第三方节点探测 22（对照） | 3 / 4 节点可连（证明探测本身有效） |
+| 经 Cloudflare | `api` 200、站点 200 |
+| 回环自检 | `health/ready` 200（不受 `-i eth0` 影响） |
+| 容器出网（修复后） | 200（此前为 `Network is unreachable`） |
+| 容器互通 | backend → postgres:5432 可连 |
+| 影响面 | 出网中断窗口约 3 分钟，后端日志 0 条网络错误、0 条 5xx |
+| 看门狗·正常态 | 手工触发 `watch`：**退出码 0、无输出、规则行数 20 → 20（未改动）** |
+| 看门狗·自愈 | 手工 `iptables -F DOCKER-USER` 模拟 docker 重启 → 再次触发 `watch`：**DROP 规则与 15 条 v4 放行全部重建，DROP 带 `-i eth0`** |
+| 定时器 | `veripaper-firewall-watchdog.timer` 下一次 15:00（15 分钟粒度）；`veripaper-firewall.timer` 下一次 11-16 04:30 |
+| 部署一致性 | 服务器 `/usr/local/sbin/veripaper-firewall.sh` 与仓库文件 sha256 完全相同（`63394a03…`） |
+
+### 19.7 排查命令
+
+```bash
+# 规则是否还在（docker 重启后若 unit 没重放，这里会变空）
+/usr/local/sbin/veripaper-firewall.sh status
+iptables -L DOCKER-USER -v -n | head -8      # 看 DROP 的计数是否在涨
+
+# 强制重放 / 临时放开（应急）
+systemctl restart veripaper-firewall.service
+/usr/local/sbin/veripaper-firewall.sh revert   # 去掉限制，恢复允许直连
+
+# 网段与 nginx 是否一致（不一致会导致限流按错的 IP 计数）
+grep -c set_real_ip_from deploy/ecs/nginx-api-tls.conf
+grep -c . /etc/veripaper/cloudflare-ranges.txt
+
+# 定时器（两个：看门狗 15 分钟 / 网段刷新每周）
+systemctl list-timers 'veripaper-firewall*'
+systemctl start veripaper-firewall-watchdog.service   # 手工巡检一次（正常时无输出）
+journalctl -u veripaper-firewall-watchdog.service -n 20 --no-pager
+```

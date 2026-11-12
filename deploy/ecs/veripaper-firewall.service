@@ -1,0 +1,20 @@
+[Unit]
+Description=VeriPaper: 只允许 Cloudflare 回源访问 80/443（DOCKER-USER 链）
+Documentation=file:///opt/veripaper/deploy/ecs/firewall-cloudflare-only.sh
+# docker 启动时会重建（清空）DOCKER-USER 链，所以必须在 docker 之后跑
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+# 重启 docker 时本单元也要重跑，否则规则会静默消失（表现为「源站又能直连了」）
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=NGINX_CONF=/opt/veripaper/deploy/ecs/nginx-api-tls.conf
+ExecStart=/usr/local/sbin/veripaper-firewall.sh apply
+# 应用后自检：链里必须至少有一条 DROP，否则说明脚本没真正生效
+ExecStartPost=/bin/bash -c 'iptables -S DOCKER-USER | grep -q -- "-j DROP" || (echo "DOCKER-USER 缺少 DROP 规则" >&2; exit 1)'
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,10 @@
+[Unit]
+Description=VeriPaper: 每 15 分钟确认源站仍是「只允许 Cloudflare 回源」
+
+[Timer]
+# 规则丢失 = 源站对全世界开放，且没有任何报错，所以用分钟级巡检兜住
+OnCalendar=*:0/15
+Persistent=true
+
+[Install]
+WantedBy=timers.target

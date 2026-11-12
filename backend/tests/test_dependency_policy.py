@@ -61,9 +61,9 @@ class TestDependencySplit:
         """
         yaml_path = PYPROJECT.parents[1] / "config" / "default.yaml"
         text = yaml_path.read_text(encoding="utf-8")
-        assert 'vector_backend: "pgvector"' in text, (
-            "生产镜像不含 chromadb，配置默认后端必须是 pgvector"
-        )
+        assert (
+            'vector_backend: "pgvector"' in text
+        ), "生产镜像不含 chromadb，配置默认后端必须是 pgvector"
 
 
 class TestChromaBackendFailsHelpfully:

@@ -151,11 +151,12 @@
 
 | 项 | 现状 | 建议 |
 | --- | --- | --- |
-| UFW | `inactive`，iptables 默认 ACCEPT | 依赖阿里云安全组；建议启用 UFW 仅放行 22/80/443 |
+| UFW | **2026-11-12 已启用**：`default deny incoming`，只放行 22/80/443 | **注意 UFW 管不到 docker 发布的端口**（走 nat DNAT，不经 INPUT）；回源限制必须在 `DOCKER-USER` 链做，见下一行 |
 | fail2ban | 未安装 | 建议安装，保护 SSH |
-| SSH `X11Forwarding` / `MaxAuthTries 6` | 开启 / 6 | 关 X11，降到 3 |
-| `.env.pre-bge`、`.env.pre-m3-cutover` | 明文密钥备份，600 | 确认回滚结束后删除 |
-| 系统包 | 10 个可升级 | 评估含安全更新的部分 |
+| SSH `X11Forwarding` / `MaxAuthTries` | **2026-11-12 已加固**：X11 关、`MaxAuthTries 3`、`LoginGraceTime 30`、`ClientAliveInterval 300/2` | 见 `ecs-deployment.md` §19.1（含 sshd 取值优先级说明） |
+| `.env.pre-bge`、`.env.pre-m3-cutover` | **2026-11-12 已删除**（键名比对确认无唯一键丢失后 `shred` 覆盖） | 现仅剩 `.env`、`.env.example`；ext4 日志仍可能留旧块，彻底杜绝需轮换密钥 |
+| 系统包 | **2026-11-12 已升 11 个**；剩 4 个（3 个 Ubuntu phasing + `cloud-init` 大版本跳跃），**均来自 `noble-updates`，非安全更新**（`apt-check`：0 条可立即安装的安全更新） | 无需重启（无内核更新） |
+| **源站可绕过 Cloudflare 直连**（2026-11-12 排查时新增发现） | 实测 `DOCKER-USER` 链为空，任何人知道 `47.253.81.6` 即可直连源站，绕过 WAF / DDoS 清洗 / Bot 规则 / 按真实 IP 的限流 | **2026-11-12 已修**：`DOCKER-USER` 仅放行 22 个 Cloudflare 网段到 80/443，其余丢弃；systemd 单元随 docker 重放、每周刷新网段。第三方节点探测 **443 = 0/4 可连**（22 仍可连作对照） |
 | `/openapi.json`、`/docs`、`/redoc` | 生产公开 | 对开放 API 产品可接受；如需收敛可用环境开关关闭 |
 | CORS 允许 `*.multi-agent-assistant.pages.dev` + `allow-credentials` | 2026-11-12 已收紧：去掉 `www.veripaper.me`、标签必须以字母数字开头且有长度上限；白名单正则进仓库并有测试 | **残留**：同项目下任意单级别名仍被允许（预览部署需要），创建别名需 Cloudflare 项目权限，按 Low 接受 |
 | 登录/密保等端点错误信息 | 统一"账号或密码错误"（无用户枚举） | ✅ 已正确 |
@@ -173,8 +174,8 @@
 - **密钥**：`.env` 权限 600 root:root；JWT 64 位、PG 密码 32 位、七牛 40 位，
   无占位符；backend 日志近 24h 无密钥字样。
 - **容器**：全部非特权、backend 以 `appuser` 运行、无 `docker.sock` 挂载。
-- **暴露面**：宿主机只监听 22/80/443，数据库/Redis 不对外。
-- **SSH**：`PasswordAuthentication no`、`PermitRootLogin without-password`、仅 2 把密钥。
+- **暴露面**：宿主机只监听 22/80/443，数据库/Redis 不对外；80/443 在 11-12 之后**只接受 Cloudflare 网段回源**（见 Low 表新增行）。
+- **SSH**：`PasswordAuthentication no`、`PermitRootLogin without-password`、**3 把密钥**（`lingrove-root` / `hermes-codex` / `hatch`，第三把为后续加入）。
 - **模板加固（除 SSTI 外）**：拒绝 `.docm` 宏、剥离外部关系（attachedTemplate /
   `TargetMode="External"` / altChunk）防 SSRF、`autoescape=True`。
 - **限流**：注册 5/3600s 生效（第 6 次 429）；429 带 Retry-After。

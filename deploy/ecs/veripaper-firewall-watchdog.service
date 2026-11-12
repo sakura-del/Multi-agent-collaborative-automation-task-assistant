@@ -1,0 +1,10 @@
+[Unit]
+Description=VeriPaper: 自愈检查——DOCKER-USER 规则缺失时重建
+Documentation=file:///opt/veripaper/deploy/ecs/firewall-cloudflare-only.sh
+After=docker.service
+
+[Service]
+Type=oneshot
+Environment=NGINX_CONF=/opt/veripaper/deploy/ecs/nginx-api-tls.conf
+# 正常时什么都不做（无输出、无规则变更），只在规则缺失时重建
+ExecStart=/usr/local/sbin/veripaper-firewall.sh watch

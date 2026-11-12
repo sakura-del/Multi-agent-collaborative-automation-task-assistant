@@ -4381,3 +4381,33 @@ air tokens 只服务两页，不替换 success/warning/destructive。证据卡�
   `/health/ready` ready（vector ok）；`/knowledge/search` 命中 3 条真实 chunk；CORS 实测 `veripaper.me` 允许、
   `www`/`evil.example.com` 拒绝；站点真实浏览器登录成功且 **CSP 违规 0**。
 - 门禁：**3157 passed / 21 skipped / 90%**（4 红已清零），ruff 0、mypy 219 文件 0。
+
+### Issue #11 B 组运维（2026-11-12 下午）
+
+四项一次做完：SSH 加固、清理明文密钥备份、系统包升级、源站只允许 Cloudflare 回源 + UFW。
+统一做法：**改动前证明现状 → 改动中挂 5 分钟自动回滚 → 改完用外部视角验证**。
+
+- **SSH**：新增 `98-veripaper-hardening.conf`（X11 关、`MaxAuthTries 3`、`LoginGraceTime 30`、
+  `ClientAliveInterval 300/2`）。先 `sshd -t` 再 reload，同时挂自动回滚；随后用**新会话**登录、
+  并用 `DISPLAY=localhost:10 ssh -X` 强制请求 X11 → `xauth key data not generated` + 远端
+  `DISPLAY=none`，确认关闭。记下「sshd 对同名关键字取第一次出现的值，drop-in 因 Include 在顶部而赢」。
+- **密钥备份**：删前做键名集合比对（不打印值），确认两份 `.env.pre-*` 里没有任何键是现役缺失的，
+  再 `shred -u -z`。局限已写明：ext4 日志仍可能留旧块。
+- **系统包**：15 个可升级 → 升 11 个（含 `docker-compose-plugin 5.7.1`），剩 4 个全是 `noble-updates`
+  非安全更新（3 个 Ubuntu phasing、`cloud-init` 大版本跳跃主动跳过），`apt-check` 报 0 条安全更新，
+  无 `reboot-required`。
+- **源站限制**（原报告没覆盖的新发现）：`DOCKER-USER` 链为空 → 任何人知道 IP 即可绕过 Cloudflare。
+  实现 `firewall-cloudflare-only.sh`（apply/refresh/revert/status/watch）+ systemd 单元 + 周刷新 +
+  15 分钟看门狗，全部进仓库并由 15 条测试锁定。
+- **踩坑 1（§5 #53）**：第一版 DROP 规则没限定 `-i`，把**容器出网**一起掐了，症状是
+  `Network is unreachable`，而网站/健康检查完全正常。修法：规则加 `-i <默认路由网卡>` + 脚本自检。
+- **踩坑 2（§5 #54）**：本机有 `http_proxy` 且 SDK 层有透明代理，`curl --resolve` 的「直连测试」
+  实际仍经 Cloudflare 回来（响应带 `CF-RAY`）。改用 hairpin + 第三方节点探测，并以 22 端口作对照。
+- **踩坑 3**：反向验证测试有效性时用 Python `write_text` 重写脚本，Windows 上默认把 `\n` 转成
+  `\r\n`，导致本地与服务器 sha256 不一致。已加 `.gitattributes`（`deploy/ecs/*.sh text eol=lf`）
+  并在写文件时显式 `newline="\n"`。
+- 生产实测：SSH 参数全部生效；`.env*` 仅剩两项；`docker compose` v5.7.1、五容器 healthy；
+  **hairpin 直连 000（DROP 计数 0→7）、第三方探测 443 = 0/4、22 = 3/4（对照）**；
+  经 CF 与回环均 200；容器出网 200；看门狗正常态零改动、清空后可自愈。
+- 门禁：**3173 passed / 21 skipped**（全量，跑的时候新增防火墙配置测试是 12 条）；
+  之后补了 3 条看门狗断言，单文件 **15 passed**。black 433 文件、ruff 0、mypy 219 文件 0 错。
