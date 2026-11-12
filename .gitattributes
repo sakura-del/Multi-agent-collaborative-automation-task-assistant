@@ -10,3 +10,8 @@ deploy/ecs/*.sh text eol=lf
 deploy/ecs/*.service text eol=lf
 deploy/ecs/*.timer text eol=lf
 deploy/ecs/cloudflare-ranges.txt text eol=lf
+
+# 运维脚本目录同样按 LF 存储：这些文件拷到服务器直接执行/被 systemd 解析。
+ops/*.service text eol=lf
+ops/*.timer text eol=lf
+ops/*.sh text eol=lf

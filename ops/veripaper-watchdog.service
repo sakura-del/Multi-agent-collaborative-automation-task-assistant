@@ -1,0 +1,13 @@
+[Unit]
+Description=VeriPaper: 站内自检（健康/5xx/磁盘/容器/备份）
+Documentation=file:///opt/veripaper/ops/watchdog.py
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# 脚本只用标准库，不依赖项目虚拟环境；用系统 python3 保证「后端坏了也能跑」
+ExecStart=/usr/bin/python3 /usr/local/lib/veripaper-ops/watchdog.py
+# 配置（webhook 地址）放这里，权限 600，不进仓库
+EnvironmentFile=-/etc/veripaper/notify.env
+TimeoutStartSec=90

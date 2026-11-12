@@ -1,0 +1,10 @@
+[Unit]
+Description=VeriPaper: 每日心跳日报
+Documentation=file:///opt/veripaper/ops/watchdog.py
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/lib/veripaper-ops/watchdog.py --digest
+EnvironmentFile=-/etc/veripaper/notify.env
+TimeoutStartSec=90

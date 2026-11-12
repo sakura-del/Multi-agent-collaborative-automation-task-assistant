@@ -1,0 +1,13 @@
+[Unit]
+Description=VeriPaper: 每 2 分钟跑一次站内自检
+
+[Timer]
+# 用 OnUnitActiveSec 而不是 OnCalendar：保证两轮之间至少隔 2 分钟，
+# 单轮跑得慢时不会堆积
+OnBootSec=90s
+OnUnitActiveSec=120s
+AccuracySec=15s
+Unit=veripaper-watchdog.service
+
+[Install]
+WantedBy=timers.target

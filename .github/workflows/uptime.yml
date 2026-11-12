@@ -1,0 +1,84 @@
+# 外部可用性探测（Issue #11 C 组）
+#
+# 为什么在 GitHub 上跑：站内自检活在被监控的机器上，整机/网络挂掉时它发不出告警。
+# 这个 workflow 从 GitHub 机房探测公网，是「站外视角」。
+#
+# 说明：
+# - 仓库公开 → Actions 分钟数免费；但 **schedule 在公开仓库闲置 60 天后会被自动停用**，
+#   长期无 push 时记得手动点一次 workflow_dispatch（或让它随其它提交自然保活）。
+# - GitHub 的 cron 有 5~15 分钟的不定延迟，这是分钟级可用性监控，不是秒级 SLA 监控。
+name: uptime
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: uptime
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 探测公网 API 与站点（含 3 次重试）
+        id: probe
+        continue-on-error: true
+        env:
+          WECOM_WEBHOOK_URL: ${{ secrets.WECOM_WEBHOOK_URL }}
+        run: python3 ops/probe_public.py --notify
+
+      - name: 同步 Issue 状态（故障则开/评论，恢复则关闭）
+        id: sync
+        uses: actions/github-script@v7
+        env:
+          PROBLEMS: ${{ steps.probe.outputs.problems }}
+        with:
+          script: |
+            const label = 'uptime-alert';
+            const { owner, repo } = context.repo;
+            const failed = '${{ steps.probe.outcome }}' === 'failure';
+            const open = await github.rest.issues.listForRepo({
+              owner, repo, state: 'open', labels: label, per_page: 5,
+            });
+            const stamp = new Date().toISOString();
+
+            if (failed) {
+              const problems = process.env.PROBLEMS || '（详见 Actions 运行日志）';
+              const body = `**外部探测失败** \`${stamp}\`\n\n${problems}\n\n> 由 GitHub Actions 自动创建；恢复后会自动关闭。`;
+              if (open.data.length > 0) {
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number: open.data[0].number, body,
+                });
+              } else {
+                await github.rest.issues.create({
+                  owner, repo, title: '[uptime] 外部探测失败', body, labels: [label],
+                });
+              }
+            } else if (open.data.length > 0) {
+              const issue = open.data[0];
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: issue.number,
+                body: `探测已恢复正常 \`${stamp}\`。`,
+              });
+              await github.rest.issues.update({
+                owner, repo, issue_number: issue.number, state: 'closed',
+              });
+              core.setOutput('recovered', 'true');
+            }
+
+      - name: 恢复时推送通知
+        if: steps.sync.outputs.recovered == 'true'
+        env:
+          WECOM_WEBHOOK_URL: ${{ secrets.WECOM_WEBHOOK_URL }}
+        run: |
+          printf '%s' "## ✅ VeriPaper 外部探测恢复正常
+          > $(date -u '+%Y-%m-%d %H:%M UTC') ｜ 来自 GitHub Actions" | python3 ops/notify.py
