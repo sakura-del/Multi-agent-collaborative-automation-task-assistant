@@ -35,6 +35,7 @@ from app.db.models.feedback import HumanFeedback
 from app.db.models.knowledge import DocChunk, KnowledgeDoc, VectorIndex
 from app.db.models.log import ExecutionLog, FailureCase, ValidationResult
 from app.db.models.reference_library import ReferenceLibraryItem
+from app.db.models.revoked_token import RevokedRefreshToken
 from app.db.models.screening import (
     ScreeningDecision,
     ScreeningRecord,
@@ -58,6 +59,7 @@ __all__ = [
     "KnowledgeDoc",
     "Plan",
     "ReferenceLibraryItem",
+    "RevokedRefreshToken",
     "ScreeningDecision",
     "ScreeningRecord",
     "SearchLog",

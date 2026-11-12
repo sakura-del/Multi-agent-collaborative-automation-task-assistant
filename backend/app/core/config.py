@@ -439,6 +439,14 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 60
     jwt_refresh_token_expire_days: int = 7
+    jwt_refresh_reuse_grace_seconds: int = Field(default=60, ge=0)
+    """旧 refresh 被重放时的宽限期（秒），见 Issue #11 M-1。
+
+    为什么需要：浏览器开两个标签页时，access 过期会让两边**同时**发起刷新，
+    第二个必然拿到 401。若一律按「令牌被窃取」处理并作废整个家族，用户每小时
+    都会被自己的浏览器踢下线。宽限期内只拒绝这次重放、不连坐；
+    超过宽限期仍被重放才认定是窃取，作废该用户全部令牌。``0`` = 关闭宽限（最严格）。
+    """
 
     @classmethod
     def settings_customise_sources(

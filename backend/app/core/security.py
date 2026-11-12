@@ -98,11 +98,16 @@ def create_access_token(user_id: uuid.UUID, role: str = "user") -> str:
 
 
 def create_refresh_token(user_id: uuid.UUID) -> str:
-    """生成 refresh_token：仅用于换发新 access_token，有效期较长。"""
+    """生成 refresh_token：仅用于换发新 access_token，有效期较长。
+
+    **必须带 `jti`**（Issue #11 M-1）：refresh 是一次性凭据，换发后旧令牌要能被精确吊销。
+    没有唯一标识就只能按用户整体吊销，多端登录会被互相踢下线。
+    """
     return _create_token(
         subject=str(user_id),
         token_type=TOKEN_TYPE_REFRESH,
         expires_delta=timedelta(days=settings.jwt_refresh_token_expire_days),
+        extra_claims={"jti": uuid.uuid4().hex},
     )
 
 

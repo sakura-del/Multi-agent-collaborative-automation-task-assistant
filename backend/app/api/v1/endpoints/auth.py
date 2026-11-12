@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.exc import IntegrityError
@@ -20,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_active_user
 from app.core.config import settings
 from app.core.exceptions import UnauthorizedException, ValidationException
+from app.core.logging import get_logger
 from app.core.security import (
     TOKEN_TYPE_REFRESH,
     create_access_token,
@@ -30,6 +32,7 @@ from app.core.security import (
     verify_password,
 )
 from app.db.models.user import User
+from app.db.repositories.revoked_token import RevokedTokenRepository
 from app.db.repositories.user import UserRepository
 from app.db.session import get_db
 from app.schemas.auth import (
@@ -41,6 +44,8 @@ from app.schemas.auth import (
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+logger = get_logger(__name__)
 
 
 def _access_token_expires_in() -> int:
@@ -109,12 +114,30 @@ async def login(
     )
 
 
+def _refresh_token_expiry(token_data: dict, fallback_from: datetime) -> datetime:
+    """取 refresh 令牌自身的过期时刻，作为吊销记录的存活期。
+
+    优先读 JWT 的 `exp`；缺失时按配置的 refresh 有效期兜底——吊销记录宁可多留一会儿，
+    也不能比令牌先过期（那等于提前放行一个还能用的旧令牌）。
+    """
+    exp = token_data.get("exp")
+    if isinstance(exp, (int, float)):
+        return datetime.fromtimestamp(float(exp), UTC)
+    return fallback_from + timedelta(days=settings.jwt_refresh_token_expire_days)
+
+
 @router.post("/refresh", response_model=TokenOut, summary="刷新 access_token")
 async def refresh_token(
     payload: TokenRefresh,
     db: AsyncSession = Depends(get_db),
 ) -> TokenOut:
-    """用 refresh_token 换发新的 access_token（同时签发新 refresh_token，实现轮换）。"""
+    """用 refresh_token 换发新令牌（轮换 + 旧令牌立即失效）。
+
+    Issue #11 M-1：原先换发后旧 refresh 仍可再用，等于令牌泄露后无法止损。
+    现在的口径：
+    1. 换发即把旧 `jti` 写入吊销表（存活期 = 令牌自身 exp）；
+    2. 旧令牌再来 → 401，**并把整个家族作废**（`token_invalid_before = now`）。
+    """
     # refresh_token 必须用 expected_type=refresh 校验，防止用 access_token 冒充
     token_data = decode_token(payload.refresh_token, expected_type=TOKEN_TYPE_REFRESH)
     try:
@@ -133,10 +156,68 @@ async def refresh_token(
         if token_data["iat"] < utc_timestamp(user.token_invalid_before):
             raise UnauthorizedException("刷新令牌已被失效，请重新登录")
 
+    jti = token_data.get("jti")
+    if not isinstance(jti, str) or not jti:
+        # 本修复之前签发的令牌没有 jti，无法登记吊销；留着就是一条绕过路径
+        raise UnauthorizedException(
+            "刷新令牌已失效，请重新登录",
+            details={"reason": "missing_jti"},
+        )
+
+    now = datetime.now(UTC)
+    revoked_repo = RevokedTokenRepository(db)
+
+    # 先抢吊销登记：抢不到说明这个 jti 已经被用过（重放）
+    inserted = await revoked_repo.add(
+        jti,
+        user_id=user.id,
+        expires_at=_refresh_token_expiry(token_data, now),
+    )
+    if not inserted:
+        # 复用：要么合法端重试（多标签页同时刷新），要么攻击者先用了。
+        # ⚠️ 判定时刻必须**重新取**：请求开头那个 `now` 早于本次插入的 `created_at`，
+        # 拿它算间隔会得到负数 → 宽限期恒成立（2026-11-12 实测踩到，单测过、全量才暴露）。
+        check_time = datetime.now(UTC)
+        revoked_at = await revoked_repo.get_revoked_at(jti)
+        elapsed = None if revoked_at is None else check_time.timestamp() - utc_timestamp(revoked_at)
+        grace = settings.jwt_refresh_reuse_grace_seconds
+        # grace <= 0 明确表示「关闭宽限」：配置成 0 却因为同一瞬间 elapsed == 0 走进宽限分支，
+        # 会让「最严格配置」变成随机行为。
+        within_grace = grace > 0 and elapsed is not None and elapsed <= grace
+        if within_grace:
+            # 宽限期内：只拒绝这次重放，不作废家族——否则两个标签页就能把用户自己踢下线
+            logger.warning(
+                "refresh_token_reuse_within_grace",
+                user_id=str(user.id),
+                jti=jti,
+                elapsed_seconds=round(elapsed or 0.0, 2),
+            )
+            raise UnauthorizedException(
+                "刷新令牌刚被使用，请稍后重试或重新登录",
+                details={"reason": "refresh_reuse_grace"},
+            )
+
+        # 超过宽限期还在用旧令牌：认定泄露，作废该用户全部令牌
+        user.token_invalid_before = check_time
+        await db.commit()
+        logger.warning("refresh_token_reuse_detected", user_id=str(user.id), jti=jti)
+        raise UnauthorizedException(
+            "刷新令牌已被使用，请重新登录",
+            details={"reason": "refresh_reuse"},
+        )
+
+    # 顺手清理自然过期的记录（令牌过期后这些行已经没有意义）
+    purged = await revoked_repo.purge_expired(now=now)
+    await db.commit()
+
+    if purged:
+        logger.info("refresh_token_revocations_purged", count=purged)
+    logger.info("refresh_token_rotated", user_id=str(user.id))
+
     return TokenOut(
         access_token=create_access_token(user.id, role=user.role),
         refresh_token=create_refresh_token(user.id),
-        expires_in=60 * 60,
+        expires_in=_access_token_expires_in(),
     )
 
 
