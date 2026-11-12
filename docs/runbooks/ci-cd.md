@@ -135,3 +135,17 @@ git -C /opt/veripaper log --oneline -3     # 确认代码版本，必要时 git 
    部署时按需跳过构建。
 3. **夜间失败不会自动回滚线上**：那时线上跑的是白天验证过的版本，夜间失败只说明
    "有改动影响了没被选中的用例"，需要人来看。
+
+## 9. 附：冒烟/本地栈也改用 pgvector（2026-11-12 同批修）
+
+CI 的 `Compose Release Smoke` 暴露了一个 A 组遗留问题：
+根 `docker-compose.yml` 里 `RAG__VECTOR_BACKEND` 仍默认 `chroma`，而 chromadb 已从镜像移除
+→ 冒烟在"上传文档"时 500：`chroma 向量后端需要可选依赖`。
+
+已改为与生产一致：
+- `postgres` 镜像 → `pgvector/pgvector:pg17`（与 `deploy/ecs` 相同）；
+- `RAG__VECTOR_BACKEND` 默认 `pgvector`；
+- `RAG__PGVECTOR_DSN` 默认指向 compose 内的 `postgres:5432`，本地无需外部 DSN。
+
+chroma 服务仍保留在 compose 里（想回滚到旧后端时把 `RAG__VECTOR_BACKEND=chroma` 并
+`pip install -e '.[chroma]'`），但**不再默认启用**。

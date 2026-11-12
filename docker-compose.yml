@@ -15,7 +15,10 @@ name: multi-agent-assistant
 services:
   # ===== PostgreSQL 数据库 =====
   postgres:
-    image: postgres:16-alpine
+    # 与生产（deploy/ecs/docker-compose.yml）保持一致：向量后端已迁到 pgvector，
+    # 而 chromadb 自 Issue #11 M-5 起是可选依赖、**不进镜像**。
+    # 用纯 postgres 镜像会在建向量表时因缺 extension 失败。
+    image: pgvector/pgvector:pg17
     container_name: maa-postgres
     restart: unless-stopped
     environment:
@@ -117,9 +120,10 @@ services:
       DATABASE__SSL_REQUIRE: ${DATABASE__SSL_REQUIRE:-false}
       DATABASE__DISABLE_PREPARED_STATEMENTS: ${DATABASE__DISABLE_PREPARED_STATEMENTS:-false}
       REDIS__URL: redis://redis:6379/0
-      # 向量后端：chroma（默认，回滚开关）| pgvector（Supabase）
-      RAG__VECTOR_BACKEND: ${RAG__VECTOR_BACKEND:-chroma}
-      RAG__PGVECTOR_DSN: ${RAG__PGVECTOR_DSN:-}
+      # 向量后端：pgvector（默认，与代码默认一致）| chroma（可选，需 `pip install -e '.[chroma]'`）
+      # 默认指向本 compose 内的 postgres：容器间直连，无需外部 DSN。
+      RAG__VECTOR_BACKEND: ${RAG__VECTOR_BACKEND:-pgvector}
+      RAG__PGVECTOR_DSN: ${RAG__PGVECTOR_DSN:-postgresql://${POSTGRES_USER:-maa}:${POSTGRES_PASSWORD:-maa_secret_pwd}@postgres:5432/${POSTGRES_DB:-multi_agent_assistant}}
       RAG__PGVECTOR_TABLE: ${RAG__PGVECTOR_TABLE:-knowledge_vectors}
       RAG__PGVECTOR_INDEX: ${RAG__PGVECTOR_INDEX:-hnsw}
       RAG__PGVECTOR_DISABLE_PREPARED_STATEMENTS: ${RAG__PGVECTOR_DISABLE_PREPARED_STATEMENTS:-true}

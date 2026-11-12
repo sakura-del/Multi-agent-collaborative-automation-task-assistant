@@ -81,7 +81,9 @@ jobs:
           files = data.get("files") or []
           frontend = any(f.startswith("frontend/") for f in files)
           needs_build = any(
-              f.startswith(("backend/", "deploy/")) or f.endswith("Dockerfile")
+              f.startswith(("backend/", "deploy/", "docker/"))
+              or f.endswith("Dockerfile")
+              or f.startswith("docker-compose")
               for f in files
           )
           print(f"mode={data['mode']}")
