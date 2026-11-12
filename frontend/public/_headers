@@ -1,0 +1,17 @@
+# 前端站（Cloudflare Pages）安全响应头 —— Issue #11 M-4
+#
+# 为什么用 `_headers` 而不是在 Pages 控制台配：这份文件跟代码一起走版本管理，
+# 改了能被 review、能回滚，也不会因为「某人在控制台点了两下」而悄悄丢失。
+#
+# 为什么这里**没有** Content-Security-Policy：
+# CSP 对 SPA 有真实的打崩风险（Vite 产物的内联样式、motion 之类库的 style 属性、
+# 预览域的 connect-src 都要逐个放行），而打崩表现为用户白屏、不报错。
+# 这一条单独做，必须先在真实浏览器里回归一遍（见 ecs-deployment.md §16）。
+#
+# 语法：第一行是匹配规则，缩进行是该规则下的响应头。Pages 构建产物根目录读取。
+
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: geolocation=(), microphone=(), camera=(), payment=(), usb=(), interest-cohort=()
