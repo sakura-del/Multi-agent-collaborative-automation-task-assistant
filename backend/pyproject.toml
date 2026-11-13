@@ -136,6 +136,9 @@ dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.5",
     "pytest-cov>=4.1.0",
+    # 单测超时：CI 全量曾两次卡在同一段（87%→88%，test_task_api 起始）长达 30 分钟，
+    # 既没有失败也没有栈，只能等 50 分钟作业超时。加了它之后 5 分钟即失败并打印栈。
+    "pytest-timeout>=2.3.1",
     "httpx>=0.26.0",
     "aiosqlite>=0.19.0",  # 测试环境用 SQLite 内存库替代 PostgreSQL
     "fakeredis>=2.21.0",  # 测试环境用 fake redis 替代真实 Redis

@@ -62,7 +62,19 @@ def main(argv: list[str] | None = None) -> int:
             print("[ci] 没有选中任何测试，按冒烟集处理")
             targets = ["tests/test_config.py", "tests/test_health.py"]
 
-    command = [sys.executable, "-m", "pytest", *targets, "-q", "-p", "no:cacheprovider"]
+    command = [
+        sys.executable,
+        "-m",
+        "pytest",
+        *targets,
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        # 单条用例 5 分钟上限：CI 全量两次在 88% 处硬挂 30 分钟且无栈可看。
+        # thread 方法在 C 扩展阻塞时也能打断，并打印全部线程栈。
+        "--timeout=300",
+        "--timeout-method=thread",
+    ]
     if args.cov:
         command += ["--cov=app", "--cov-report=term-missing", "--cov-fail-under=80"]
     if args.exitfirst:
