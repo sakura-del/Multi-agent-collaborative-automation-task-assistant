@@ -131,7 +131,11 @@ jobs:
     needs: [changes, lint]
     # 纯文档/前端改动不跑后端测试
     if: needs.changes.outputs.mode != 'none'
-    timeout-minutes: 25
+    # 25 → 50 分钟（2026-11-13 实测）：全量模式（改 core/db/config/alembic 触发）
+    # 在 2 核 runner 上 25 分钟被 cancel，日志停在半途、看起来像卡死。
+    # 本地同一套用例 20m05s；runner 约 2 倍慢。若再次逼近上限，应按前缀拆 job，
+    # 不要继续加时间（AGENTS §5 #58）。
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
         with:

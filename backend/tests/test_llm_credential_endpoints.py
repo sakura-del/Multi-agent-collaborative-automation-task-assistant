@@ -388,6 +388,23 @@ class TestUpdate:
         assert resp.status_code == 404
         assert _rows(credential_app.state.factory)[0].name == "我的 DeepSeek"
 
+    def test_empty_update_is_noop(self, credential_app: Any) -> None:
+        """空 PATCH 不应改动任何字段（前端「只改名字」时可能只发一个字段）。"""
+        user = _make_user(credential_app.state.factory, "cred_noop")
+        created = _create(credential_app, user).json()
+
+        resp = credential_app.state.client.patch(
+            f"/api/v1/llm-credentials/{created['credential_id']}",
+            headers=_headers(user),
+            json={},
+        )
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["name"] == created["name"]
+        assert body["key_version"] == created["key_version"]
+        assert body["is_default"] is True
+
     def test_preset_cannot_change_base_url(self, credential_app: Any) -> None:
         user = _make_user(credential_app.state.factory, "cred_upd_url")
         created = _create(credential_app, user, provider="openai").json()

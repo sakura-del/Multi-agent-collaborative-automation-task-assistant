@@ -70,6 +70,11 @@ RAG_EMBEDDING_MOCK=1          # 镜像未装 torch（INSTALL_RAG_MODELS=false）
 RAG_RERANKER_MOCK=1
 INSTALL_RAG_MODELS=false
 JWT_SECRET_KEY=<随机 64 位>
+# 用户自带模型凭据的加密主密钥（Issue #15 BYOK）：32 字节 base64/hex。
+# **必须与 JWT_SECRET_KEY 不同**——轮换签名密钥不该让用户已存的 Key 全部不可解。
+# 生成：python3 -c "import base64,os;print(base64.b64encode(os.urandom(32)).decode())"
+# 未配置时凭据接口返回 503（不会退化成明文存储），不影响其他功能。
+SECRETS__ENCRYPTION_KEY=<32 字节 base64>
 
 STORAGE__BACKEND=s3
 STORAGE__S3_ENDPOINT=https://s3-cn-south-1.qiniucs.com
