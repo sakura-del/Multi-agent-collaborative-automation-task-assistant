@@ -25,6 +25,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 import app.db.models  # noqa: F401
 from app.api.v1.endpoints import tasks as tasks_endpoint
+from app.api.v1.endpoints.tasks import ESTIMATED_TOKENS_PER_TASK
+from app.core import config
 from app.core.exceptions import ForbiddenException, LLMException, NotFoundException
 from app.db.base import Base
 from app.db.models.task import Task
@@ -101,6 +103,20 @@ class _RecordingPlanService:
 
     async def check_and_consume_review(self, user_id: Any) -> None:
         self.calls += 1
+
+
+class _RecordingQuota:
+    """记录 token 预扣与退款，验证 BYOK 全程不碰平台配额。"""
+
+    def __init__(self) -> None:
+        self.consumed: list[int] = []
+        self.refunded: list[int] = []
+
+    async def check_and_consume(self, user_id: Any, tokens: int = 0) -> None:
+        self.consumed.append(tokens)
+
+    async def refund(self, user_id: Any, tokens: int = 0) -> None:
+        self.refunded.append(tokens)
 
 
 @pytest.fixture
@@ -207,6 +223,7 @@ class TestEndpointCreate:
         credential = await _make_credential(factory, user)
         execution = _RecordingExecution()
         plan = _RecordingPlanService()
+        quota = _RecordingQuota()
 
         async with factory() as session:
             out = await tasks_endpoint.create_task(
@@ -220,15 +237,46 @@ class TestEndpointCreate:
                 _scope=None,  # type: ignore[arg-type]
                 plan_service=plan,  # type: ignore[arg-type]
                 db=session,
-                quota=None,
+                quota=quota,  # type: ignore[arg-type]
             )
 
         assert out.status == TaskStatus.PLANNING.value
-        assert plan.calls == 1
+        # BYOK 默认免篇数、且始终不预扣 token
+        assert plan.calls == 0
+        assert quota.consumed == []
         call = execution.calls[0]
         assert call["llm_credential_id"] == credential.id
         assert call["model_snapshot"]["model"] == "deepseek-chat"
         assert call["model_snapshot"]["is_byok"] is True
+
+    async def test_byok_can_still_consume_review_when_configured(
+        self, factory: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """开关打开时按篇数计费；但 token 始终不预扣（自费算力不重复收）。"""
+        monkeypatch.setattr(config.settings.billing, "byok_consumes_review_quota", True)
+        user = await _make_user(factory, "byok_task_paid_review")
+        credential = await _make_credential(factory, user)
+        execution = _RecordingExecution()
+        plan = _RecordingPlanService()
+        quota = _RecordingQuota()
+
+        async with factory() as session:
+            await tasks_endpoint.create_task(
+                payload=TaskCreate(
+                    topic="检索增强生成证据核验",
+                    keywords=["RAG"],
+                    llm_credential_id=credential.id,
+                ),
+                execution=execution,  # type: ignore[arg-type]
+                current_user=user,
+                _scope=None,  # type: ignore[arg-type]
+                plan_service=plan,  # type: ignore[arg-type]
+                db=session,
+                quota=quota,  # type: ignore[arg-type]
+            )
+
+        assert plan.calls == 1
+        assert quota.consumed == []
 
     async def test_cross_user_credential_is_404_and_burns_no_review(
         self, factory: async_sessionmaker[AsyncSession]
@@ -298,6 +346,7 @@ class TestEndpointCreate:
         user = await _make_user(factory, "byok_task_plain")
         execution = _RecordingExecution()
         plan = _RecordingPlanService()
+        quota = _RecordingQuota()
 
         async with factory() as session:
             await tasks_endpoint.create_task(
@@ -307,10 +356,13 @@ class TestEndpointCreate:
                 _scope=None,  # type: ignore[arg-type]
                 plan_service=plan,  # type: ignore[arg-type]
                 db=session,
-                quota=None,
+                quota=quota,  # type: ignore[arg-type]
             )
 
         assert set(execution.calls[0]) == {"user_id", "request"}
+        # 平台模型仍按原有口径扣费
+        assert plan.calls == 1
+        assert quota.consumed == [ESTIMATED_TOKENS_PER_TASK]
 
 
 class TestPlanningScope:
@@ -398,6 +450,121 @@ class TestPlanningScope:
         # 失败但保留快照：用户能看出「是这把凭据不可用」，而不是任务凭空消失
         assert snapshot.model is not None
         assert snapshot.model.credential_id == credential.id
+
+
+async def _make_bare_task(
+    factory: async_sessionmaker[AsyncSession],
+    user_id: uuid.UUID,
+    *,
+    byok: bool,
+    settled: bool = False,
+    credential_id: uuid.UUID | None = None,
+) -> uuid.UUID:
+    async with factory() as session:
+        task = Task(
+            user_id=user_id,
+            title="配额测试",
+            description="配额测试",
+            task_type="literature_review",
+            status=TaskStatus.RUNNING.value,
+            config={},
+            llm_credential_id=credential_id,
+            model_snapshot={"is_byok": True} if byok else None,
+            quota_settled=settled,
+        )
+        session.add(task)
+        await session.commit()
+        return task.id
+
+
+class TestQuotaBypass:
+    """BYOK 全程不碰平台 token 配额（Issue #15 P0-5）。"""
+
+    async def test_settle_skips_refund_for_byok(
+        self, factory: async_sessionmaker[AsyncSession]
+    ) -> None:
+        user = await _make_user(factory, "byok_quota_settle")
+        task_id = await _make_bare_task(factory, user.id, byok=True)
+        quota = _RecordingQuota()
+        execution = TaskExecution(RuntimeContainer(session_factory=factory), quota_service=quota)
+
+        await execution.settle_quota(task_id)
+
+        assert quota.refunded == []  # 没预扣过，就不能退
+        async with factory() as session:
+            row = await session.get(Task, task_id)
+            assert row is not None and row.quota_settled is True  # 幂等标记仍要落
+
+    async def test_settle_refunds_platform_task(
+        self, factory: async_sessionmaker[AsyncSession]
+    ) -> None:
+        """对照：平台任务必须照旧退款，BYOK 分支不能误伤。"""
+        user = await _make_user(factory, "platform_quota_settle")
+        task_id = await _make_bare_task(factory, user.id, byok=False)
+        quota = _RecordingQuota()
+        execution = TaskExecution(RuntimeContainer(session_factory=factory), quota_service=quota)
+
+        await execution.settle_quota(task_id)
+
+        assert quota.refunded == [ESTIMATED_TOKENS_PER_TASK]
+
+    async def test_settle_skips_when_credential_present_without_snapshot(
+        self, factory: async_sessionmaker[AsyncSession]
+    ) -> None:
+        """判据一：外键仍在（快照可能被历史数据清掉）也要认 BYOK。"""
+        user = await _make_user(factory, "byok_quota_fk_only")
+        credential = await _make_credential(factory, user)
+        task_id = await _make_bare_task(factory, user.id, byok=False, credential_id=credential.id)
+        quota = _RecordingQuota()
+        execution = TaskExecution(RuntimeContainer(session_factory=factory), quota_service=quota)
+
+        await execution.settle_quota(task_id)
+
+        assert quota.refunded == []
+
+    async def test_settle_skips_when_only_snapshot_remains(
+        self, factory: async_sessionmaker[AsyncSession]
+    ) -> None:
+        """判据二：凭据被删（外键 NULL）但快照还在 → 仍按 BYOK，不能退款。"""
+        user = await _make_user(factory, "byok_quota_snapshot_only")
+        task_id = await _make_bare_task(factory, user.id, byok=True)
+
+        quota = _RecordingQuota()
+        execution = TaskExecution(RuntimeContainer(session_factory=factory), quota_service=quota)
+        await execution.settle_quota(task_id)
+
+        assert quota.refunded == []
+
+    async def test_prereserve_skips_for_byok(
+        self, factory: async_sessionmaker[AsyncSession]
+    ) -> None:
+        user = await _make_user(factory, "byok_quota_prereserve")
+        task_id = await _make_bare_task(factory, user.id, byok=True, settled=True)
+        quota = _RecordingQuota()
+        execution = TaskExecution(RuntimeContainer(session_factory=factory), quota_service=quota)
+
+        await execution._prereserve_quota(user.id, task_id)
+
+        assert quota.consumed == []
+        async with factory() as session:
+            row = await session.get(Task, task_id)
+            assert row is not None and row.quota_settled is True
+
+    async def test_undo_prereserve_skips_for_byok(
+        self, factory: async_sessionmaker[AsyncSession]
+    ) -> None:
+        """BYOK 的「已结算」是标记而非真实退款，撤销不能凭空加额度。"""
+        user = await _make_user(factory, "byok_quota_undo")
+        task_id = await _make_bare_task(factory, user.id, byok=True, settled=True)
+        quota = _RecordingQuota()
+        execution = TaskExecution(RuntimeContainer(session_factory=factory), quota_service=quota)
+
+        await execution._undo_prereserve(user.id, task_id)
+
+        assert quota.refunded == []
+        async with factory() as session:
+            row = await session.get(Task, task_id)
+            assert row is not None and row.quota_settled is True
 
 
 class TestPersistence:

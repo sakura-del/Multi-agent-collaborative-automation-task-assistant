@@ -27,7 +27,7 @@ from app.api.deps import (
     require_scope,
 )
 from app.billing.services.plan_service import PlanService
-from app.core.config import get_settings
+from app.core.config import get_settings, settings
 from app.core.exceptions import ForbiddenException, ValidationException
 from app.core.quota import QuotaService
 from app.db.models.user import User
@@ -214,6 +214,12 @@ async def create_task(
 
     任务失败也消耗了真实算力，所以篇数不退。这与 token 预扣不同
     （token 在任务终态按实际用量退还差额）。
+
+    ## BYOK 的计费口径（Issue #15）
+
+    - **token：始终不预扣** —— 算力由用户自费，平台再收一遍等于双重收费；
+    - **篇数：默认免** —— 开关 `BILLING__BYOK_CONSUMES_REVIEW_QUOTA=true`
+      时与平台模型一致（适合「服务仍由平台提供」的定价）。
     """
     credential = None
     model_snapshot: dict[str, Any] | None = None
@@ -234,12 +240,18 @@ async def create_task(
         }
 
     contract = payload.to_contract()
+    # BYOK（Issue #15）：用户自己的 key，平台不再预扣 token。
+    # 篇数按开关决定：默认免（算力已由用户付费），`billing.byok_consumes_review_quota=true`
+    # 时与平台模型一致。
+    byok = payload.llm_credential_id is not None
 
     # ① 篇数（数据库原子扣减；超限抛 PLAN_QUOTA_EXCEEDED）
-    await plan_service.check_and_consume_review(current_user.id)
+    if not byok or settings.billing.byok_consumes_review_quota:
+        await plan_service.check_and_consume_review(current_user.id)
 
     # ② token 成本护栏（Redis；超限抛 TOKEN_BUDGET_EXCEEDED）
-    if quota is not None:
+    # BYOK 明确跳过：否则平台会为用户自费的 token 再收一次配额。
+    if quota is not None and not byok:
         await quota.check_and_consume(current_user.id, tokens=ESTIMATED_TOKENS_PER_TASK)
 
     # 不带凭据时保持原调用形状：编排层替身（测试/验收）无需感知 BYOK 参数

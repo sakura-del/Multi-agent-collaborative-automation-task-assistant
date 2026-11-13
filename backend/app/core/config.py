@@ -356,6 +356,22 @@ class CaptchaConfig(BaseModel):
     IPv6 前缀变化频繁的网络（移动网）可能造成误拒——真出问题再关。"""
 
 
+class BillingConfig(BaseModel):
+    """计费口径（Issue #15 BYOK）。
+
+    只回答一个问题：用户用自己的模型时，平台还要不要收「篇数」。
+    """
+
+    byok_consumes_review_quota: bool = False
+    """BYOK 任务是否仍消耗套餐的每月篇数。
+
+    默认 **false**：算力由用户自己付费，平台再扣篇数等于双重收费。
+    打开后行为与平台模型一致（适合「BYOK 只是换个模型，服务仍由平台提供」的定价）。
+
+    注意：token 日配额不受本开关影响 —— BYOK 任务**始终**不预扣平台 token。
+    """
+
+
 class RateLimitConfig(BaseModel):
     """速率限制与按用户配额（Phase 1 P1-D）。
 
@@ -530,6 +546,7 @@ class Settings(BaseSettings):
     email: EmailConfig = EmailConfig()
     captcha: CaptchaConfig = CaptchaConfig()
     secrets: SecretsConfig = SecretsConfig()
+    billing: BillingConfig = BillingConfig()
     rate_limit: RateLimitConfig = RateLimitConfig()
     quota: QuotaConfig = QuotaConfig()
     cors: CORSConfig = CORSConfig()
@@ -582,6 +599,7 @@ class Settings(BaseSettings):
         "reference_verification",
         "email",
         "secrets",
+        "billing",
         "rate_limit",
         "quota",
         "cors",

@@ -252,6 +252,12 @@ class TaskExecution:
                 task = await repo.lock_for_update(task_id)
                 if task.quota_settled:
                     return  # 已结算：绝不重复退
+                if self._is_byok_task(task):
+                    # BYOK 从未预扣平台 token：只置标记，绝不退款
+                    task.quota_settled = True
+                    await session.commit()
+                    logger.info("quota_settlement_skipped_byok", task_id=str(task_id))
+                    return
                 task.quota_settled = True
                 used = int(task.used_tokens or 0)
                 refund_tokens = ESTIMATED_TOKENS_PER_TASK - used
@@ -300,6 +306,9 @@ class TaskExecution:
         async with self._session_factory() as session:
             repo = TaskRepository(session)
             task = await repo.lock_for_update(task_id)
+            if self._is_byok_task(task):
+                # BYOK 不占平台 token：继续执行时也不该重新预扣
+                return
             used = int(task.used_tokens or 0)
             already_settled = bool(task.quota_settled)
             if not already_settled:
@@ -328,6 +337,9 @@ class TaskExecution:
             async with self._session_factory() as session:
                 repo = TaskRepository(session)
                 task = await repo.lock_for_update(task_id)
+                if self._is_byok_task(task):
+                    # 未预扣过，撤销就是凭空加额度
+                    return
                 used = int(task.used_tokens or 0)
                 if not task.quota_settled:
                     return  # 预扣并未生效（未结算态），无需撤销
@@ -615,6 +627,20 @@ class TaskExecution:
             self.container.track(task.id, self._execute(task.id))
 
     # ===== 后台流程：规划 =====
+
+    @staticmethod
+    def _is_byok_task(task: Any) -> bool:
+        """任务是否使用用户自带模型（Issue #15）。
+
+        两个判据缺一不可：
+        - `llm_credential_id`：常规情况；
+        - `model_snapshot.is_byok`：凭据被删后外键变 NULL，但快照仍在 ——
+          此时若不认 BYOK，会去退一笔**从未预扣过**的 token，凭空多给额度。
+        """
+        if getattr(task, "llm_credential_id", None) is not None:
+            return True
+        snapshot = getattr(task, "model_snapshot", None)
+        return isinstance(snapshot, dict) and bool(snapshot.get("is_byok"))
 
     async def _bind_task_llm(self, task: Any | None) -> None:
         """把当前后台协程的 LLM 固定到任务指定的凭据（Issue #15 BYOK）。
