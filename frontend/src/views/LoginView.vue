@@ -41,7 +41,8 @@ const captchaEnabled = ref(false);
 const captchaSolved = ref(false);
 const captchaPayload = ref("");
 const captchaError = ref("");
-// widget 自己 fetch 挑战，必须给绝对地址（相对路径会打到 Pages 域名）
+// widget 自己 fetch 挑战（v3 的 `challenge` 属性接受 URL），必须给绝对地址
+// （相对路径会打到 Pages 域名 → 拿到 index.html）
 const captchaChallengeUrl = computed(
   () => `${api.defaults.baseURL ?? ""}/auth/captcha/challenge`,
 );
@@ -335,12 +336,17 @@ async function handleResend() {
           </div>
 
           <div v-if="mode === 'register' && captchaEnabled" class="grid gap-1.5">
+            <!--
+              ⚠️ v3 的属性是 `challenge`（URL 或 JSON）。v2 的 `challengeurl`
+              在 v3 已被移除——传错了 widget 不报错，而是回退去请求**当前页面**
+              （拿到 text/html），表现为「验证失败：invalid content-type」。
+              也没有 `refetchonexpire`：挑战 10 分钟有效期，过期后刷新即可。
+            -->
             <altcha-widget
-              :challengeurl="captchaChallengeUrl"
+              :challenge="captchaChallengeUrl"
               auto="onload"
               language="zh-cn"
-              hidefooter
-              refetchonexpire
+              hideFooter
               @statechange="onCaptchaStateChange"
             />
             <p v-if="captchaError" class="text-xs text-destructive">{{ captchaError }}</p>
