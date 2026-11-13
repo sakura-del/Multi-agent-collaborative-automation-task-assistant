@@ -35,7 +35,7 @@
 | 前端测试 | Vitest **458 passed**（+6 skipped）；**Playwright E2E 44 场景**（chromium + mobile-chrome 双视口） |
 | 发布方式 | **前端：`git push backup main` 后 Cloudflare Pages 自动构建部署**（Git 集成，无需本机 Node）；**后端：bundle + `deploy/ecs` 目录 `docker compose build backend`** |
 | CI | ⚠️ **2026-10-28 起 CI 因 GitHub Actions 账单额度停摆**（报 spending limit），作业 0~2s 就 X，**不是代码问题**。⚠️ **GitHub 直连时通时不通**：不通时走代理（`git -c http.proxy=http://127.0.0.1:7894 ...`，`gh` 需 `$env:HTTPS_PROXY`） |
-| 服务器 | `root@47.253.81.6`，HEAD **`9fceda6`**（CD 自动部署），backend 镜像 `c476209d879c`（1.78 GB，已无 chromadb）；80/443 仅接受 Cloudflare 回源（`DOCKER-USER`，第三方探测 443=0/4）；UFW active；SSH 3 把密钥、X11 关、MaxAuthTries 3；监控两层已上线（站内 2 分钟 / 站外 5 分钟），**webhook 待填**（`/etc/veripaper/notify.env`）（回滚锚点 `shadow-mock`=`79ac91a4374c`），五容器 healthy，公网 `ready`，嵌入 = **SiliconFlow BGE-M3**（1600 RPM / 400k TPM），**user=1（仅 demo）/ task 86 / doc_chunk 2835 / 两表各 2835**（2026-11-11 清掉 26 个测试账号后），磁盘 38% |
+| 服务器 | `root@47.253.81.6`，HEAD **`9fceda6`**（CD 自动部署），backend 镜像 `c476209d879c`（1.78 GB，已无 chromadb）；80/443 仅接受 Cloudflare 回源（`DOCKER-USER`，第三方探测 443=0/4）；UFW active；SSH 3 把密钥、X11 关、MaxAuthTries 3；监控两层已上线（站内 2 分钟 / 站外 5 分钟），**webhook 已配置并验证**（`/etc/veripaper/notify.env` + 仓库 secret `WECOM_WEBHOOK_URL`，2026-11-13）（回滚锚点 `shadow-mock`=`79ac91a4374c`），五容器 healthy，公网 `ready`，嵌入 = **SiliconFlow BGE-M3**（1600 RPM / 400k TPM），**user=1（仅 demo）/ task 86 / doc_chunk 2835 / 两表各 2835**（2026-11-11 清掉 26 个测试账号后），磁盘 38% |
 
 **演示账号**：`demo` —— **全权限管理员**（`role=admin` + `institution` 套餐：篇数不限 / 含团队 / 含开放 API）；知识库 11 篇 / 2835 分块（2026-11-11 清理测试账号后，全库仅剩 demo）。
 **口令不入仓库**：2026-11-11 已轮换为强随机口令，只存在于服务器 `/opt/veripaper/.demo-password`（600）与口令管理器；要登录就 `ssh root@47.253.81.6 cat /opt/veripaper/.demo-password`。
