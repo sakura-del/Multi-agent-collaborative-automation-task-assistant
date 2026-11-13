@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -106,6 +107,33 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     logger.info("应用关闭，释放资源")
     await container.close()
+
+    # 关闭兜底：容器只跟踪自己 `track()` 过的协程；工作流/通信层仍可能留下
+    # 未被跟踪的子任务。`asyncio.run` 在 `_cancel_all_tasks` 上会**无限等待**
+    # 这些任务（CI 实测卡 30 分钟、无栈），所以这里显式取消并给 5 秒上限。
+    # 日志里带上任务名，下次再挂能直接定位是谁。
+    #
+    # ⚠️ 必须排除框架自身任务：`TestClient`/anyio 的 portal 用 `run_portal` 与
+    # `_call_func` 两个任务驱动 lifespan，把它们一起取消会让 teardown 直接抛
+    # `CancelledError`（本地实测 15 条用例连环 ERROR）。
+    _INFRA_PREFIXES = ("anyio.", "starlette.", "uvicorn.", "asyncio.")
+    pending = [
+        task
+        for task in asyncio.all_tasks()
+        if task is not asyncio.current_task()
+        and not task.done()
+        and not task.get_name().startswith(_INFRA_PREFIXES)
+    ]
+    if pending:
+        logger.warning(
+            "lifespan_cancelling_pending_tasks",
+            count=len(pending),
+            names=[task.get_name() for task in pending],
+        )
+        for task in pending:
+            task.cancel()
+        await asyncio.wait(pending, timeout=5)
+
     await engine.dispose()
     await RedisManager.close()
 
