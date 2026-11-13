@@ -1310,3 +1310,99 @@ npx resend-cli@latest api-keys create --name veripaper-smtp-mail --permission se
 端点里 `settings = get_settings()`，测试 patch 模块级 `settings`——CI 全量先跑
 `test_config_priority`（`cache_clear`）后 `get_settings()` 返回**新对象**，patch 落空
 （冷却恒为 60s，重发测试红）；本地单跑没有 cache_clear 所以绿。统一读模块级 settings。
+
+## 23. 注册人机验证：ALTCHA 自托管（2026-11-13）
+
+用户需求：注册加人机验证。调研后**排除**三个主流方案：
+
+| 方案 | 结论 |
+| --- | --- |
+| Cloudflare Turnstile | **官方文档「Turnstile is not supported in Mainland China」**；大陆探针实测 60s 加载不完（7-10 子资源挂起）→ 注册按钮永远不激活 |
+| reCAPTCHA | Google 域名被墙 |
+| hCaptcha | 免费版国内不稳；区域端点只在 Enterprise |
+| **ALTCHA**（采用） | MIT 自托管 PoW，挑战生成/校验全在本后端：零第三方请求、无跨境数据传输、无配额、无 vendor 宕机风险 |
+
+### 23.1 机制
+
+```
+浏览器                          后端
+  GET /auth/captcha/challenge →  create_challenge(cost=5000, data={ip: sha256(ip)[:16]})
+                                 ← {parameters, signature}（HMAC 签名，无状态，不落库）
+  widget 用 Web Worker 解 PoW（PBKDF2/SHA-256，实测 1.2s）
+  POST /auth/register {captcha: payload}
+                                  verify_solution(payload) → 签名/数学/过期
+                                  data.ip 对比（防一处解全站用）
+                                  Redis `SET captcha:used:<nonce> NX EX 600`
+                                  → 建号 + 发验证邮件
+```
+
+四层叠加（不是替代）：**IP 限流 5/时 + 账号锁定 + 邮箱验证门禁 + PoW**。
+PoW 只提高脚本成本（每次注册要多算数万次 KDF），不做人类行为判断——这是
+刻意的隐私取舍；愿意为每次注册付算力的定向攻击仍能过，但那时更该看注册速率异常。
+
+### 23.2 配置（`/opt/veripaper/.env`）
+
+```
+CAPTCHA__ENABLED=true
+CAPTCHA__HMAC_SECRET=<独立随机，与 JWT_SECRET_KEY 不同>
+CAPTCHA__ALGORITHM=PBKDF2/SHA-256
+CAPTCHA__COST=5000          # 移动端实测 3000~8000；再高低端机卡 5s+
+CAPTCHA__TTL_SECONDS=600
+CAPTCHA__BIND_IP=true       # 移动网 IPv6 前缀变化频繁时可关（会失去「一处解全站用」防护）
+```
+
+**默认关闭**（`enabled=false`）：本地开发/CI 不该被验证码挡住，与「未配 SMTP 不阻塞」同一原则。
+
+### 23.3 ⚠️ 踩坑：v3 的 `challengeurl` → `challenge`
+
+altcha 3.x 把 v2 的 `challengeurl` 属性**改名成 `challenge`**。传旧属性名时：
+
+- **widget 不报错**，只是没有挑战源；
+- 它**回退去请求当前页面 URL**（`https://veripaper.me/login`）→ 拿到 SPA 的 `index.html`；
+- 报错是 `RequestError: Server responded with invalid content-type. Expected
+  application/json, received text/html` —— 看起来像 CORS/后端问题，实际是属性名。
+
+判据：Playwright 抓 `xhr/fetch` 响应，会看到一个 `/login` **text/html 200**——
+那是 widget 在请求它自己所在页面。修复后 `challenge` 属性生效，PoW 1.2s 解完。
+
+### 23.4 CSP
+
+`frontend/public/_headers` 必须给 `worker-src 'self' blob:`：
+altcha 用 **Blob URL 创建 Web Worker** 跑 PoW，缺这条会被 CSP 静默拦掉
+（表现为「一直转圈」或 `error`，控制台不一定有清晰提示）。
+
+### 23.5 本次生产实测（2026-11-13 14:35 JST）
+
+| 检查点 | 结果 |
+| --- | --- |
+| 未开启时 `/auth/captcha/challenge` | `{"enabled": false}`，注册页不渲染 widget（不影响既有流程） |
+| 开启后挑战端点 | v2 协议 `{parameters, signature, enabled}`，`data.ip` 为 IP 指纹 |
+| 真实浏览器（Playwright） | widget 渲染 → `verifying` → **`verified`，1.2 秒** → 按钮从 disabled 变可点 → 注册 **201** → 显示「验证邮件已发送」；`console` 零错误 |
+| 无 captcha 注册 | **422 `CAPTCHA_FAILED`** `reason=missing` |
+| 有效 payload | **201** |
+| 重放同一 payload | **422** `reason=nonce_used`（Redis 记录生效，`captcha:used:<nonce>`） |
+| 探针清理 | `cap-probe-*` / `altcha-e2e-*` 已删，用户表只剩真实账号 |
+
+### 23.6 应急回退
+
+```bash
+ssh root@47.253.81.6
+cd /opt/veripaper
+sed -i 's/^CAPTCHA__ENABLED=.*/CAPTCHA__ENABLED=false/' .env
+docker compose -f deploy/ecs/docker-compose.yml up -d backend   # ~20s 生效
+```
+
+（挑战端点在关闭后返回 `{"enabled": false}`，前端自动不渲染 widget。）
+
+### 23.7 排查命令
+
+```bash
+# 挑战是否正常签发
+curl -s http://127.0.0.1/api/v1/auth/captcha/challenge -H 'Host: api.veripaper.me' | head -c 200
+
+# 被拒原因分布（missing/invalid_signature/expired/ip_mismatch/nonce_used）
+docker logs vp-backend --since 1h 2>&1 | grep register_captcha_rejected | tail -5
+
+# 已用 nonce（Redis）
+docker exec vp-redis redis-cli --scan --pattern 'captcha:used:*' | head -5
+```
