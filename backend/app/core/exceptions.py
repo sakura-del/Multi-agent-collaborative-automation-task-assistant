@@ -75,6 +75,18 @@ class ValidationException(AppException):
     error_code = "VALIDATION_ERROR"
 
 
+class ConflictException(AppException):
+    """唯一性冲突（409）。
+
+    典型场景：用户给两把凭据起了同一个名字。用 409 而不是 422：
+    参数本身合法，冲突来自**当前资源集合的状态**（与 DAGCycleError 同一层语义）。
+    """
+
+    status_code = 409
+    default_message = "资源冲突"
+    error_code = "CONFLICT"
+
+
 class LLMException(AppException):
     status_code = 502
     default_message = "LLM 调用失败"

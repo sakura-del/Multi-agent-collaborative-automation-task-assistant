@@ -153,6 +153,39 @@ class LLMConfig(BaseModel):
     deepseek_api_key: str | None = None
     deepseek_base_url: str = "https://api.deepseek.com/v1"
 
+    # ===== BYOK（用户自带模型密钥，Issue #15）=====
+    byok_allow_insecure_base_url: bool = False
+    """自定义端点是否允许 `http://` 与 80 端口。
+
+    **只在本地联调时打开**（对接本机 vLLM / 假 OpenAI 服务）。生产必须为 false：
+    模型的 prompt 与结果都会走这条链路，明文传输等于把用户论文内容广播到链路上。
+    """
+
+
+class SecretsConfig(BaseModel):
+    """应用级密钥（BYOK 凭据加密，Issue #15）。
+
+    `encryption_key` 是**主密钥**，用于派生两把子密钥（HKDF-SHA256）：
+    - 加密子密钥：AES-256-GCM，加密用户模型 API Key；
+    - 指纹子密钥：HMAC-SHA256，用于去重/审计，不可逆。
+
+    ## 为什么独立于 `JWT_SECRET_KEY`
+
+    JWT 密钥会因安全事件轮换（本项目已轮换过一次口令/令牌策略）。若复用同一把，
+    轮换 JWT 会让所有已存凭据**永久不可解**，用户只能全部重填。密钥分离后，
+    两者可以各自轮换、各自记录事故。
+
+    ## 格式
+
+    32 字节，base64 或 hex 均可。生成方式见 `.env.example`：
+    `python -c "import base64,os;print(base64.b64encode(os.urandom(32)).decode())"`
+
+    为空时，任何凭据读写都会抛 `CredentialCipherUnavailable`（503），
+    **不会**退化成「明文存储」或「用 JWT 密钥凑合」。
+    """
+
+    encryption_key: str = ""
+
 
 class RAGConfig(BaseModel):
     """RAG 知识库配置（阶段5填充）"""
@@ -488,6 +521,7 @@ class Settings(BaseSettings):
     reference_verification: ReferenceVerificationConfig = ReferenceVerificationConfig()
     email: EmailConfig = EmailConfig()
     captcha: CaptchaConfig = CaptchaConfig()
+    secrets: SecretsConfig = SecretsConfig()
     rate_limit: RateLimitConfig = RateLimitConfig()
     quota: QuotaConfig = QuotaConfig()
     cors: CORSConfig = CORSConfig()
@@ -539,6 +573,7 @@ class Settings(BaseSettings):
         "orchestration",
         "reference_verification",
         "email",
+        "secrets",
         "rate_limit",
         "quota",
         "cors",

@@ -19,6 +19,7 @@
                   （Phase 2：团队工作区 + 席位 + 邀请码）
   annotation.py:  TASK_ANNOTATION（Phase 2：导师批注，段落指纹锚点）
   api_key.py:     API_KEY（Phase 2：开放 API / MCP 凭证，只存哈希）
+  llm_credential.py: LLM_CREDENTIAL（Issue #15：用户自带的模型密钥，加密存储）
   billing.py:     PLAN / SUBSCRIPTION / USAGE_COUNTER
                   （Phase 2：计费套餐——篇数为主、token 为辅）
   reference_library.py: REFERENCE_LIBRARY_ITEM
@@ -33,6 +34,7 @@ from app.db.models.citation_style import CitationStyle
 from app.db.models.email_token import EmailToken
 from app.db.models.feedback import HumanFeedback
 from app.db.models.knowledge import DocChunk, KnowledgeDoc, VectorIndex
+from app.db.models.llm_credential import LLMCredential
 from app.db.models.log import ExecutionLog, FailureCase, ValidationResult
 from app.db.models.reference_library import ReferenceLibraryItem
 from app.db.models.revoked_token import RevokedRefreshToken
@@ -57,6 +59,7 @@ __all__ = [
     "FailureCase",
     "HumanFeedback",
     "KnowledgeDoc",
+    "LLMCredential",
     "Plan",
     "ReferenceLibraryItem",
     "RevokedRefreshToken",

@@ -30,6 +30,9 @@ os.environ.setdefault("REDIS__URL", "redis://localhost:6379/0")
 os.environ.setdefault("RAG__VECTOR_BACKEND", "chroma")
 # JWT 测试密钥
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-not-for-production")
+# 用户自带模型凭据的加密主密钥（BYOK，Issue #15）：32 字节的 base64。
+# 与 JWT 密钥**必须是两个**——轮换签名密钥不该让所有用户的 key 变成不可解。
+os.environ.setdefault("SECRETS__ENCRYPTION_KEY", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 
 # 存储根目录指到临时目录。
 # 生产配置里 `upload_root` / `artifact_root` 是**容器内绝对路径** `/app/data/...`，

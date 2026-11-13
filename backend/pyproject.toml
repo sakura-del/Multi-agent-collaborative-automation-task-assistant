@@ -40,6 +40,10 @@ dependencies = [
 
     # 鉴权
     "python-jose[cryptography]>=3.3.0",
+    # 用户自带模型凭据的加密（Issue #15 BYOK）：AES-256-GCM + HKDF。
+    # 虽然 python-jose[cryptography] 会间接装上它，但本仓库**直接 import**，
+    # 必须显式声明（AGENTS §5 #64：只 pip install 不写 pyproject → CI 收集阶段 exit 2）。
+    "cryptography>=42.0",
     # 注册人机验证（ALTCHA 自托管 PoW，2026-11-13）
     # 为什么不是 Turnstile/reCAPTCHA：官方不支持中国大陆（详见 app/core/captcha.py 头注释）
     # 2.1.0 起修补了 PoW v2 fallback 不校验 keyPrefix 的绕过漏洞（安全公告 2026-07-30）

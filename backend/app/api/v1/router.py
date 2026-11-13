@@ -21,6 +21,7 @@ from app.api.v1.endpoints import (
     billing,
     citation_styles,
     health,
+    llm_credentials,
     observability,
     reference_library,
     references,
@@ -55,5 +56,7 @@ api_router.include_router(workspaces.router)
 api_router.include_router(annotation_endpoints.router)
 # API Key 管理（Phase 2 开放 API）：**强制 JWT only**（Key 不能生成新 Key）
 api_router.include_router(api_keys.router)
+# 用户自带模型凭据（Issue #15 BYOK）：密钥加密存储，明文只进不出
+api_router.include_router(llm_credentials.router)
 # 计费套餐（Phase 2 最后一项）：用量/套餐列表/手工开通
 api_router.include_router(billing.router)

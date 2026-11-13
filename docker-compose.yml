@@ -153,6 +153,9 @@ services:
       RAG_RERANKER_MOCK: ${RAG_RERANKER_MOCK:-1}
       # JWT 密钥为必需项：.env 缺失时 compose 直接报错，避免回退弱密钥
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY is required in .env}
+      # 用户自带模型凭据的加密主密钥（Issue #15 BYOK）。缺失时凭据接口 503，
+      # 不影响其他功能；生产必须与 JWT_SECRET_KEY 不同。
+      SECRETS__ENCRYPTION_KEY: ${SECRETS__ENCRYPTION_KEY:-}
       # LLM 配置：必须用嵌套名（pydantic-settings 的 __ 分隔）才能被应用读到；
       # 扁平 OPENAI_API_KEY 只是 SDK 回退，值必须与嵌套项一致，避免误用占位密钥。
       LLM__DEFAULT_PROVIDER: ${LLM__DEFAULT_PROVIDER:-openai}
