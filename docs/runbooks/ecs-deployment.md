@@ -1196,3 +1196,82 @@ gh run list --workflow=uptime.yml --limit 5
 - **没有长期指标存储**：`/metrics` 存在但没有 Prometheus 抓取，只能看"当下"，
   查不了"上周三 14:00 的 5xx 是多少"。真要做趋势，再上 Prometheus；
 - 站内自检的 5xx 判断依赖后端进程存活（进程死了这一项拿不到数据，由 `api_health` 兜）。
+
+## 21. 邮件发送接入 Resend（2026-11-13）
+
+此前注册验证 / 密码重置邮件**只写日志不真发**（`email.sender=logging`，生产无 SMTP）。
+本次接入 Resend（resend.com）作为 SMTP 中继，**应用代码零改动**——`SmtpEmailSender`
+走标准 STARTTLS，Resend 只是另一个 SMTP 端点。
+
+### 21.1 架构与凭据
+
+| 项 | 值 |
+| --- | --- |
+| 发信域名 | `mail.veripaper.me`（子域隔离：主域声誉不受发信质量影响） |
+| Resend 区域 | `ap-northeast-1`（东京，对中日用户延迟最低） |
+| 域名 ID | `020b7baf-c1b1-4443-b4d0-b0377b5b2783` |
+| API key | `veripaper-smtp-mail`：**sending_access + 仅限该域名**（即使泄露也不能读域名/发其它域） |
+| SMTP | `smtp.resend.com:587` STARTTLS，用户名 `resend`，密码 = API key |
+
+环境变量（`/opt/veripaper/.env`，600）：
+
+```
+EMAIL__SENDER=smtp
+EMAIL__FROM_ADDRESS=VeriPaper <noreply@mail.veripaper.me>
+EMAIL__SMTP_HOST=smtp.resend.com
+EMAIL__SMTP_PORT=587            # smtp_use_tls=true 走 starttls()，必须 587 不是 465
+EMAIL__SMTP_USERNAME=resend
+EMAIL__SMTP_PASSWORD=<API key>
+EMAIL__SMTP_USE_TLS=true
+EMAIL__FRONTEND_BASE_URL=https://veripaper.me   # 验证/重置链接指向生产
+```
+
+### 21.2 DNS（Cloudflare，veripaper.me zone）
+
+4 条记录全部为**新增子域记录**，不触碰根域任何现有解析：
+
+| 类型 | 名称 | 值 | 作用 |
+| --- | --- | --- | --- |
+| TXT | `resend._domainkey.mail` | `p=MIGf…`（2048 位公钥） | DKIM 签名 |
+| MX | `bounce.mail` | `feedback-smtp.ap-northeast-1.amazonses.com`（10） | 退信回报 |
+| TXT | `bounce.mail` | `v=spf1 include:amazonses.com ~all` | Return-Path SPF |
+| CNAME | `rbounce.mail` | `send.forge.rmta.net`（**不可开橙云代理**） | 根域退信别名 |
+
+域名验证：DKIM + SPF × 3 全部 `verified`（Cloudflare API 加记录 → `resend domains verify` → 约 1 分钟生效）。
+
+### 21.3 运维与排查
+
+```bash
+# 查域名/密钥状态（CLI 登录存于 Windows 凭据管理器，profile=default）
+npx resend-cli@latest domains get 020b7baf-c1b1-4443-b4d0-b0377b5b2783
+
+# 应用侧发信事件（email_sent=true 才是真发）
+docker logs vp-backend --since 10m 2>&1 | grep -E "verify_email_issued|smtp"
+
+# 手工测试链路（不发真邮件版：只确认 sender 类型与 configured）
+docker exec vp-backend python -c "
+from app.services.email_sender import build_email_sender
+s = build_email_sender(); print(type(s).__name__, s.is_configured)"
+
+# 撤销/重建密钥（泄露或轮换）
+npx resend-cli@latest api-keys create --name veripaper-smtp-mail --permission sending_access \
+  --domain-id 020b7baf-c1b1-4443-b4d0-b0377b5b2783
+# 旧 key 作废：npx resend-cli@latest api-keys 里有 remove 子命令；然后更新 .env 的 SMTP_PASSWORD 并 up -d backend
+```
+
+### 21.4 实测证据（2026-11-13 10:38 JST）
+
+| 检查点 | 结果 |
+| --- | --- |
+| 域名验证 | `verified`（DKIM/SPF×3，创建后约 1 分钟） |
+| 直发测试（`SmtpEmailSender`） | `configured: True`，`send()` 返回 `True` → `yanglin125210@gmail.com` |
+| **业务端到端** | `POST /auth/register` → **201**，日志 `verify_email_issued email_sent=true` → 验证邮件真实送达 `yanglin125210+resend-test@gmail.com` |
+| 后端重启 | `up -d backend` 后发送器单例重读配置（`get_cached_email_sender` 是 `lru_cache`） |
+
+### 21.5 已知注意
+
+1. **送达率**：Resend 出口在海外，发往 QQ/163 等国内邮箱初期可能进垃圾箱；Gmail 正常。
+   验证码类事务邮件可接受；后续观察退信率再决定是否做域名预热。
+2. **API key 出现在过一次 CLI 输出**（创建时的 token 回显）。它只有 sending_access 且限定单域名，
+   风险可控；介意的话撤销重建一条，改 `.env` 后 `up -d backend` 即可。
+3. Resend 免费层：100 封/天、3000 封/月——当前用户量级完全够用；超了再升计划。
