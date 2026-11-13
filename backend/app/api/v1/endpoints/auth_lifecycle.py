@@ -26,7 +26,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_active_user
-from app.core.config import get_settings
+from app.core.config import get_settings, settings
 from app.core.exceptions import ValidationException
 from app.core.logging import get_logger
 from app.core.security import hash_password
@@ -265,7 +265,6 @@ async def request_email_verification(
     邮箱会触发发信，且受按邮箱冷却（``verification_resend_cooldown_seconds``）
     限制；枚举不存在的邮箱零发信、零成本差異。
     """
-    settings = get_settings()
     cooldown = timedelta(seconds=settings.email.verification_resend_cooldown_seconds)
 
     result = await db.execute(select(User).where(func.lower(User.email) == payload.email.lower()))
