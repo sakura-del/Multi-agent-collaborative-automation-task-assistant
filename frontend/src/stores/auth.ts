@@ -33,9 +33,10 @@ export const useAuthStore = defineStore("auth", () => {
   }
 
   async function register(input: RegisterInput): Promise<void> {
+    // 2026-11-13：不再自动登录——邮箱未验证就被门禁挡住（403 EMAIL_NOT_VERIFIED），
+    // 这里的静默失败曾让用户「没验证邮箱也进了系统」。注册成功即返回，
+    // 由 LoginView 引导去邮箱点验证链接。
     await authApi.register(input);
-    // 注册成功后自动登录，避免二次输入
-    await login({ account: input.username, password: input.password });
   }
 
   /** 主动轮换 token（401 拦截器内部有自己的单飞刷新） */

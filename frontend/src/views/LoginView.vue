@@ -1,17 +1,20 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ArrowRight, BookMarked, Check, Loader2, LockKeyhole } from "lucide-vue-next";
+import { ArrowRight, BookMarked, Check, Loader2, LockKeyhole, MailCheck } from "lucide-vue-next";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
+import { Alert } from "@/components/ui/alert";
+import { requestEmailVerification } from "@/api/account";
 import { useAuthStore } from "@/stores/auth";
 
-// 登录/注册页：成功后回到 redirect 指向的页面（默认任务列表）。
+// 登录/注册页。2026-11-13 起邮箱验证是登录门禁（EMAIL__REQUIRE_VERIFIED_LOGIN）：
+// - 注册成功 → 不再自动进系统，改为引导去邮箱点验证链接（本页直接提供重发）；
+// - 登录遇 403 EMAIL_NOT_VERIFIED → 展示未验证提示 + 重发按钮，而不是让用户反复试密码。
 // 视觉采用「学术编辑感」：衬线标题 + 正文证据示例，直接表达产品的差异化。
-// 所有认证逻辑、字段 id 和账号生命周期入口保持既有契约。
 const auth = useAuthStore();
 const route = useRoute();
 const router = useRouter();
@@ -23,6 +26,11 @@ const email = ref("");
 const password = ref("");
 const loading = ref(false);
 const errorMessage = ref("");
+// 注册成功后待验证的邮箱；非空时显示「查收邮件」引导卡
+const pendingVerificationEmail = ref("");
+// 登录被门禁拦下时后端回传的邮箱（密码已验证，给本人无碍）
+const unverifiedEmail = ref("");
+const resending = ref(false);
 
 const submitLabel = computed(() => (mode.value === "login" ? "登录" : "注册并登录"));
 
@@ -32,6 +40,8 @@ const CAPABILITIES = ["证据约束", "引用可核验", "人机协同"] as cons
 async function handleSubmit() {
   loading.value = true;
   errorMessage.value = "";
+  pendingVerificationEmail.value = "";
+  unverifiedEmail.value = "";
   try {
     if (mode.value === "register") {
       await auth.register({
@@ -39,15 +49,43 @@ async function handleSubmit() {
         email: email.value,
         password: password.value,
       });
-    } else {
-      await auth.login({ account: account.value, password: password.value });
+      // 注册成功 ≠ 进系统：邮箱验证链接已发出，验证后再登录
+      pendingVerificationEmail.value = email.value;
+      mode.value = "login";
+      account.value = email.value;
+      return;
     }
+    await auth.login({ account: account.value, password: password.value });
     const redirect = route.query.redirect;
     await router.push(typeof redirect === "string" ? redirect : { name: "tasks" });
   } catch (error) {
-    errorMessage.value = (error as Error).message;
+    const apiError = error as Error & {
+      code?: string;
+      details?: { email?: string };
+    };
+    if (apiError.code === "EMAIL_NOT_VERIFIED") {
+      unverifiedEmail.value = apiError.details?.email ?? "";
+      errorMessage.value = "";
+    } else {
+      errorMessage.value = apiError.message;
+    }
   } finally {
     loading.value = false;
+  }
+}
+
+/** 重发验证邮件。后端响应恒定（防邮箱枚举），总是展示同样的成功文案。 */
+async function handleResend() {
+  const target = unverifiedEmail.value || pendingVerificationEmail.value;
+  if (!target) return;
+  resending.value = true;
+  try {
+    await requestEmailVerification(target);
+    errorMessage.value = "";
+  } catch (error) {
+    errorMessage.value = (error as Error).message;
+  } finally {
+    resending.value = false;
   }
 }
 </script>
@@ -218,6 +256,45 @@ async function handleSubmit() {
               :autocomplete="mode === 'login' ? 'current-password' : 'new-password'"
               class="h-11 bg-card/70"
             />
+          </div>
+
+          <Alert
+            v-if="pendingVerificationEmail"
+            variant="success"
+            class="mb-1"
+            data-test="register-pending-verification"
+          >
+            <MailCheck />
+            <span>
+              验证邮件已发送至
+              <strong>{{ pendingVerificationEmail }}</strong
+              >。请点击邮件里的链接完成验证，再回来登录。
+            </span>
+          </Alert>
+          <div
+            v-if="unverifiedEmail"
+            class="rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm"
+            data-test="login-unverified"
+          >
+            <p class="font-medium">邮箱还没验证</p>
+            <p class="mt-1 text-muted-foreground">
+              我们已向
+              <strong>{{ unverifiedEmail }}</strong>
+              发送了验证邮件，点击邮件里的链接后即可登录。
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              class="mt-2"
+              data-test="resend-verification"
+              :disabled="resending"
+              @click="handleResend"
+            >
+              <Loader2 v-if="resending" class="size-4 animate-spin" aria-hidden="true" />
+              <MailCheck v-else :size="14" aria-hidden="true" />
+              {{ resending ? "发送中…" : "重新发送验证邮件" }}
+            </Button>
           </div>
 
           <ErrorBanner :message="errorMessage" />

@@ -113,6 +113,25 @@ describe("auth store", () => {
     expect(store.user).toBeNull();
   });
 
+  it("register 成功后不再自动登录（邮箱验证门禁，2026-11-13）", async () => {
+    vi.mocked(authApi.register).mockResolvedValue({
+      id: "11111111-1111-1111-1111-111111111111",
+      username: "ylin",
+      email: "ylin@example.com",
+      role: "user",
+      is_active: true,
+      created_at: "2026-11-13T00:00:00Z",
+    });
+    const store = useAuthStore();
+
+    await store.register({ username: "ylin", email: "ylin@example.com", password: "x" });
+
+    // 关键：login 不得被调用——未验证邮箱没有资格拿令牌
+    expect(authApi.login).not.toHaveBeenCalled();
+    expect(localStorage.getItem("access_token")).toBeNull();
+    expect(store.authenticated).toBe(false);
+  });
+
   it("surfaces register errors without persisting tokens", async () => {
     vi.mocked(authApi.register).mockRejectedValue(new Error("用户名已存在"));
     const store = useAuthStore();

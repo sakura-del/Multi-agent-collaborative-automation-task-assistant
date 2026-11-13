@@ -46,6 +46,17 @@ class ForbiddenException(AppException):
     error_code = "FORBIDDEN"
 
 
+class EmailNotVerifiedException(ForbiddenException):
+    """登录被邮箱验证门禁拦截（2026-11-13）。
+
+    403 而非 401：账号密码本身是对的，是「身份已确认但被规则禁止」；
+    前端据此展示「查收验证邮件 + 重发」而不是引导重新输入密码。
+    """
+
+    default_message = "邮箱尚未验证，请查收验证邮件后再登录"
+    error_code = "EMAIL_NOT_VERIFIED"
+
+
 class ValidationException(AppException):
     status_code = 422
     default_message = "请求参数校验失败"

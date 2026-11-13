@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 __all__ = [
     "EmailVerificationConfirm",
+    "EmailVerificationRequest",
     "LifecycleMessageOut",
     "PasswordResetConfirm",
     "PasswordResetRequest",
@@ -41,6 +42,17 @@ class PasswordResetConfirm(BaseModel):
 
     token: str = Field(min_length=8, max_length=256, description="邮件里的一次性令牌")
     new_password: str = Field(min_length=8, max_length=128, description="新密码明文")
+
+
+class EmailVerificationRequest(BaseModel):
+    """重发验证邮件的请求体：只按邮箱，不需要登录态。
+
+    旧设计要求登录态——未验证用户恰恰没有 token，死锁（2026-11-13 修复）。
+    """
+
+    email: EmailStr
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class LifecycleMessageOut(BaseModel):

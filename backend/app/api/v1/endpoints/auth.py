@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_active_user
 from app.core.config import settings
 from app.core.exceptions import (
+    EmailNotVerifiedException,
     RateLimitedException,
     UnauthorizedException,
     ValidationException,
@@ -142,6 +143,19 @@ async def login(
         raise UnauthorizedException("账号或密码错误")
     if not user.is_active:
         raise UnauthorizedException("账号已被禁用")
+
+    # 邮箱验证门禁（2026-11-13）：显式配置才启用（SMTP 可用的生产环境）。
+    # 放在失败计数逻辑之外：用户没输错密码，只是没点邮件——计入 M-3 的失败退避
+    # 会把正常用户锁 15 分钟，机制反噬自己。
+    if settings.email.require_verified_login and user.email_verified_at is None:
+        logger.warning(
+            "login_blocked_unverified_email",
+            user_id=str(user.id),
+            account_hash=_hashed_account(account_key),
+        )
+        raise EmailNotVerifiedException(
+            details={"reason": "email_not_verified", "email": user.email}
+        )
 
     await _throttle_reset(throttle, account_key)
 

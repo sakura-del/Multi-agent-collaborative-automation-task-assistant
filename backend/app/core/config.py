@@ -237,6 +237,16 @@ class EmailConfig(BaseModel):
     frontend_base_url: str = "http://localhost:5173"
     """用于拼接前端确认页链接（`{base}/verify-email?token=...`）。"""
 
+    require_verified_login: bool = False
+    """登录是否要求邮箱已验证（2026-11-13）。
+
+    默认 **False**：铁律是「未配置 SMTP 时绝不阻塞用户」——sender=logging 时
+    验证邮件发不出去，开了门禁会把本地开发 / CI 全部锁在门外。
+    生产（SMTP=Resend）在 .env 显式设 true。"""
+
+    verification_resend_cooldown_seconds: int = 60
+    """重发验证邮件的按邮箱冷却（秒）。防滥发；响应消息不区分命中与否。"""
+
 
 class RateLimitRule(BaseModel):
     """单条限流规则（Phase 1 P1-D）：窗口内允许次数 + 窗口长度。"""

@@ -45,12 +45,30 @@ export function setUnauthorizedHandler(handler: (() => void) | null): void {
   unauthorizedHandler = handler;
 }
 
-function normalizeError(error: unknown): Error {
+/**
+ * 归一化 API 错误：message 之外保留后端的 `error_code` 与 `details`。
+ *
+ * 登录页要据 `code === "EMAIL_NOT_VERIFIED"` 展示「查收验证邮件 + 重发」，
+ * 而不是引导用户反复试密码（2026-11-13）。
+ */
+export interface ApiError extends Error {
+  code?: string;
+  details?: Record<string, unknown>;
+}
+
+function normalizeError(error: unknown): ApiError {
   if (error instanceof AxiosError) {
-    const message = error.response?.data?.message ?? error.message;
-    return new Error(String(message));
+    const data = (error.response?.data ?? {}) as {
+      message?: unknown;
+      error_code?: unknown;
+      details?: Record<string, unknown>;
+    };
+    const apiError = new Error(String(data.message ?? error.message)) as ApiError;
+    if (typeof data.error_code === "string") apiError.code = data.error_code;
+    if (data.details && typeof data.details === "object") apiError.details = data.details;
+    return apiError;
   }
-  return error instanceof Error ? error : new Error(String(error));
+  return error instanceof Error ? (error as ApiError) : new Error(String(error));
 }
 
 async function rotateTokens(): Promise<string> {

@@ -22,6 +22,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_active_user
@@ -36,6 +37,7 @@ from app.db.repositories.user import UserRepository
 from app.db.session import get_db
 from app.schemas.auth_lifecycle import (
     EmailVerificationConfirm,
+    EmailVerificationRequest,
     LifecycleMessageOut,
     PasswordResetConfirm,
     PasswordResetRequest,
@@ -246,16 +248,35 @@ async def issue_password_reset_email(
 @router.post(
     "/verify-email/request",
     response_model=LifecycleMessageOut,
-    summary="重发邮箱验证邮件",
+    summary="重发邮箱验证邮件（免登录，按邮箱）",
 )
 async def request_email_verification(
-    current_user: CurrentUserDep,
+    payload: EmailVerificationRequest,
     db: DbDep,
     sender: SenderDep,
 ) -> LifecycleMessageOut:
-    """给当前登录用户重发验证邮件；已验证则告知无需重复验证。"""
-    sent = await issue_verification_email(db, current_user, sender=sender)
-    return LifecycleMessageOut(message=MSG_VERIFY_SENT if sent else MSG_ALREADY_VERIFIED)
+    """按邮箱重发验证邮件；**不需要登录态**。
+
+    2026-11-13 重构：旧版要求 ``CurrentUserDep``——未验证用户恰恰没有令牌，
+    邮件过期后永远无法重发（死锁）。
+
+    响应**恒定**（防邮箱枚举）：邮箱不存在 / 已验证 / 冷却中，与成功重发
+    返回同一 message、同一状态码。滥用面分析：只有「真实存在且未验证」的
+    邮箱会触发发信，且受按邮箱冷却（``verification_resend_cooldown_seconds``）
+    限制；枚举不存在的邮箱零发信、零成本差異。
+    """
+    settings = get_settings()
+    cooldown = timedelta(seconds=settings.email.verification_resend_cooldown_seconds)
+
+    result = await db.execute(select(User).where(func.lower(User.email) == payload.email.lower()))
+    user = result.scalar_one_or_none()
+    if user is not None and user.email_verified_at is None:
+        token_repo = EmailTokenRepository(db)
+        last_created = await token_repo.latest_created_at(user.id, EmailTokenPurpose.VERIFY)
+        # 冷却判断放在时间线最前：now 必须晚于 last_created（同毫秒提交也算在冷却内）
+        if last_created is None or datetime.now(UTC) - _as_utc(last_created) >= cooldown:
+            await issue_verification_email(db, user, sender=sender)
+    return LifecycleMessageOut(message=MSG_VERIFY_SENT)
 
 
 @router.post(

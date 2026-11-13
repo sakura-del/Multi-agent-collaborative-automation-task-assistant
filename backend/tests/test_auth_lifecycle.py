@@ -109,11 +109,19 @@ def env(tmp_path: Path) -> Iterator[Env]:
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[auth_lifecycle.get_email_sender] = lambda: sender
 
+    # 2026-11-13：重发端点新增「按邮箱冷却」（默认 60s），而注册本身就会签发一封——
+    # 不把冷却设 0，_request_verify 会全被冷却挡住、fake 一封都收不到。
+    from app.core.config import settings
+
+    original_cooldown = settings.email.verification_resend_cooldown_seconds
+    settings.email.verification_resend_cooldown_seconds = 0
+
     client = TestClient(app)
     client.__enter__()
     try:
         yield Env(client=client, sender=sender, session_factory=session_factory, app=app)
     finally:
+        settings.email.verification_resend_cooldown_seconds = original_cooldown
         client.__exit__(None, None, None)
         app.dependency_overrides.clear()
         asyncio.run(engine.dispose())
@@ -144,6 +152,11 @@ def _login(client: TestClient, *, account: str = USERNAME, password: str = PASSW
     resp = client.post(f"{API}/login", json={"account": account, "password": password})
     assert resp.status_code == 200, resp.text
     return str(resp.json()["access_token"])
+
+
+def _request_verify(client: TestClient, email: str = EMAIL):
+    """新契约（2026-11-13）：重发端点免登录、按邮箱、响应恒定。"""
+    return client.post(f"{API}/verify-email/request", json={"email": email})
 
 
 def _register_and_login(client: TestClient) -> str:
@@ -203,9 +216,9 @@ def _user_row(env: Env, email: str = EMAIL) -> dict[str, Any]:
 
 class TestVerifyEmail:
     def test_request_then_confirm_marks_email_verified(self, env: Env) -> None:
-        access = _register_and_login(env.client)
+        _register(env.client)
 
-        requested = env.client.post(f"{API}/verify-email/request", headers=_auth(access))
+        requested = _request_verify(env.client)
 
         assert requested.status_code == 200, requested.text
         assert len(env.sender.sent) == 1
@@ -223,8 +236,8 @@ class TestVerifyEmail:
         assert used_at is not None
 
     def test_confirm_token_is_single_use(self, env: Env) -> None:
-        access = _register_and_login(env.client)
-        env.client.post(f"{API}/verify-email/request", headers=_auth(access))
+        _register_and_login(env.client)
+        _request_verify(env.client)
         token = env.sender.tokens()[0]
 
         first = env.client.post(f"{API}/verify-email/confirm", json={"token": token})
@@ -241,8 +254,8 @@ class TestVerifyEmail:
         assert "无效" in resp.json()["message"] or "过期" in resp.json()["message"]
 
     def test_confirm_rejects_expired_token(self, env: Env) -> None:
-        access = _register_and_login(env.client)
-        env.client.post(f"{API}/verify-email/request", headers=_auth(access))
+        _register_and_login(env.client)
+        _request_verify(env.client)
         token = env.sender.tokens()[0]
         _execute(
             env,
@@ -254,24 +267,29 @@ class TestVerifyEmail:
         assert resp.status_code == 422, resp.text
         assert "过期" in resp.json()["message"]
 
-    def test_request_requires_authentication(self, env: Env) -> None:
-        assert env.client.post(f"{API}/verify-email/request").status_code == 401
+    def test_request_works_without_authentication(self, env: Env) -> None:
+        """2026-11-13 契约反转：免登录按邮箱重发（旧版要登录态，未验证用户死锁）。"""
+        _register(env.client)
+        resp = _request_verify(env.client)
+
+        assert resp.status_code == 200, resp.text
 
     def test_request_when_already_verified_does_not_resend(self, env: Env) -> None:
-        access = _register_and_login(env.client)
-        env.client.post(f"{API}/verify-email/request", headers=_auth(access))
+        """已验证的邮箱不给重发，但响应与其他情形**完全一致**（防邮箱枚举）。"""
+        _register(env.client)
+        _request_verify(env.client)
         env.client.post(f"{API}/verify-email/confirm", json={"token": env.sender.tokens()[0]})
         sent_before = len(env.sender.sent)
 
-        again = env.client.post(f"{API}/verify-email/request", headers=_auth(access))
+        again = _request_verify(env.client)
 
         assert again.status_code == 200, again.text
-        assert "已验证" in again.json()["message"]
+        assert again.json()["message"] == "验证邮件已发送，请查收并在有效期内完成验证。"
         assert len(env.sender.sent) == sent_before
 
     def test_verify_token_ttl_defaults_to_24_hours(self, env: Env) -> None:
-        access = _register_and_login(env.client)
-        env.client.post(f"{API}/verify-email/request", headers=_auth(access))
+        _register_and_login(env.client)
+        _request_verify(env.client)
 
         hours = _scalar(
             env,
@@ -282,8 +300,8 @@ class TestVerifyEmail:
         assert 23.5 <= float(hours) <= 24.5
 
     def test_token_is_stored_as_hash_only(self, env: Env) -> None:
-        access = _register_and_login(env.client)
-        env.client.post(f"{API}/verify-email/request", headers=_auth(access))
+        _register_and_login(env.client)
+        _request_verify(env.client)
         # ⚠️ 注册时已自动发过一封验证邮件（Phase 1 P1-C 接线），重发会作废旧令牌；
         # 因此取**最后一封**（最新），并查「仍未被消费」的那一行（旧行是作废状态）。
         token = env.sender.tokens()[-1]
@@ -394,8 +412,8 @@ class TestPasswordReset:
 
     def test_verify_token_cannot_be_used_for_password_reset(self, env: Env) -> None:
         """用途隔离：验证 token 不能当重置 token 用（purpose 必须匹配）。"""
-        access = _register_and_login(env.client)
-        env.client.post(f"{API}/verify-email/request", headers=_auth(access))
+        _register_and_login(env.client)
+        _request_verify(env.client)
         verify_token = env.sender.tokens()[0]
 
         resp = env.client.post(

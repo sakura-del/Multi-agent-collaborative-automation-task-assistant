@@ -15,9 +15,15 @@ export interface LifecycleMessage {
  * 后端在「已发送」与「已验证」两种情况返回不同文案，但都是 200——
  * 调用方直接展示 `message` 即可。
  */
-export function requestEmailVerification(): Promise<LifecycleMessage> {
+/**
+ * 重发验证邮件（2026-11-13 契约：免登录、按邮箱、响应恒定）。
+ *
+ * 后端对「不存在 / 已验证 / 冷却中」返回**同一**消息（防邮箱枚举），
+ * 前端只需原样展示，不要据此推断账号状态。
+ */
+export function requestEmailVerification(email: string): Promise<LifecycleMessage> {
   return api
-    .post<LifecycleMessage>("/auth/verify-email/request")
+    .post<LifecycleMessage>("/auth/verify-email/request", { email })
     .then((response) => response.data);
 }
 

@@ -23,6 +23,11 @@ vi.mock("vue-router", () => ({
   useRouter: () => ({ push: routerPush, replace: routerPush }),
 }));
 
+// VerifyEmailView 2026-11-13 起读 auth.user 预填重发邮箱；测试里保持未登录
+vi.mock("@/stores/auth", () => ({
+  useAuthStore: () => ({ user: null }),
+}));
+
 describe("VerifyEmailView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -38,7 +43,7 @@ describe("VerifyEmailView", () => {
     expect(wrapper.find('[data-test="verify-success"]').text()).toContain("验证成功");
   });
 
-  it("无 token 时展示重发入口（需登录态）", async () => {
+  it("无 token 时展示重发入口（按邮箱，免登录）", async () => {
     const wrapper = mount(VerifyEmailView, { props: { token: "" } });
     await flushPromises();
 
@@ -46,17 +51,27 @@ describe("VerifyEmailView", () => {
     expect(confirmEmailVerification).not.toHaveBeenCalled();
   });
 
-  it("点击重发调用 requestEmailVerification 并展示后端文案", async () => {
+  it("填写邮箱后点击重发调用 requestEmailVerification 并展示后端文案", async () => {
     vi.mocked(requestEmailVerification).mockResolvedValue({
       message: "验证邮件已发送，请查收。",
     });
 
     const wrapper = mount(VerifyEmailView, { props: { token: "" } });
+    await wrapper.find('[data-test="verify-email-input"]').setValue("ylin@example.com");
     await wrapper.find('[data-test="verify-request"]').trigger("click");
     await flushPromises();
 
-    expect(requestEmailVerification).toHaveBeenCalledTimes(1);
+    expect(requestEmailVerification).toHaveBeenCalledWith("ylin@example.com");
     expect(wrapper.find('[data-test="verify-message"]').text()).toContain("验证邮件已发送");
+  });
+
+  it("邮箱为空时点击重发不发请求", async () => {
+    const wrapper = mount(VerifyEmailView, { props: { token: "" } });
+    await wrapper.find('[data-test="verify-request"]').trigger("click");
+    await flushPromises();
+
+    expect(requestEmailVerification).not.toHaveBeenCalled();
+    expect(wrapper.find('[data-test="verify-error"]').text()).toContain("邮箱");
   });
 
   it("确认失败时展示后端可读原因", async () => {

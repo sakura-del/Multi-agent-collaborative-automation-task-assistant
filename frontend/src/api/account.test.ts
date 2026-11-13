@@ -27,9 +27,11 @@ describe("account api", () => {
       data: { message: "验证邮件已发送，请查收并在有效期内完成验证。" },
     });
 
-    const result = await requestEmailVerification();
+    const result = await requestEmailVerification("ylin@example.com");
 
-    expect(api.post).toHaveBeenCalledWith("/auth/verify-email/request");
+    expect(api.post).toHaveBeenCalledWith("/auth/verify-email/request", {
+      email: "ylin@example.com",
+    });
     expect(result.message).toContain("验证邮件已发送");
   });
 

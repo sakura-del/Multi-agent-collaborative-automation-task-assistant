@@ -21,6 +21,16 @@ class EmailTokenRepository(BaseRepository[EmailToken]):
 
     model = EmailToken
 
+    async def latest_created_at(self, user_id: UUID, purpose: str) -> datetime | None:
+        """该用户某用途最近一次签发时间（用于重发冷却；无记录返回 None）。"""
+        result = await self.db.execute(
+            select(EmailToken.created_at)
+            .where(EmailToken.user_id == user_id, EmailToken.purpose == purpose)
+            .order_by(EmailToken.created_at.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
     async def get_by_hash(self, token_hash: str) -> EmailToken | None:
         """按哈希查询令牌；不存在返回 ``None``（不区分「无效」与「不存在」）。"""
         result = await self.db.execute(
