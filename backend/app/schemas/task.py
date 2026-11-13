@@ -62,6 +62,12 @@ class TaskCreate(BaseModel):
     verify_references: bool | None = None
     """是否做外部引用核验（Issue #3）：None=沿用全局配置；True=强制核验（含离线任务）；False=跳过。"""
 
+    llm_credential_id: UUID | None = Field(
+        default=None,
+        description="用户自带的模型凭据ID（Issue #15 BYOK）；不传=使用平台模型",
+    )
+    """只影响本任务用哪把 key，不进入编排层合约（`to_contract` 会剔除）。"""
+
     # ===== 实验画像开关（2026-10-22 实验矩阵）=====
     # 默认全开 = 与改造前行为一致。`to_contract()` 用 `model_dump()` 全量透传，
     # 所以这里加同名字段即可，无需改映射代码。
@@ -76,7 +82,11 @@ class TaskCreate(BaseModel):
 
     def to_contract(self) -> LiteratureReviewRequest:
         """映射为编排层契约（HTTP 层不向编排层传递自身模型）。"""
-        return LiteratureReviewRequest(**self.model_dump())
+        data = self.model_dump()
+        # BYOK 凭据是「任务归属/计费」层面的信息，编排层合约不认它；
+        # 留着会触发 `extra="forbid"`，或诱使业务层误以为模型参数在请求体里。
+        data.pop("llm_credential_id", None)
+        return LiteratureReviewRequest(**data)
 
 
 class TaskControl(BaseModel):

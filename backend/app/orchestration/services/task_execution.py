@@ -25,7 +25,12 @@ from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy import func, select
 
 from app.core.config import get_settings
-from app.core.exceptions import HumanActionRequiredError, NotFoundException, ValidationException
+from app.core.exceptions import (
+    HumanActionRequiredError,
+    LLMException,
+    NotFoundException,
+    ValidationException,
+)
 from app.core.logging import get_logger
 from app.db.models.log import ExecutionLog
 from app.db.models.task import Subtask, Task
@@ -38,6 +43,7 @@ from app.orchestration.agents.validator import ValidatorAgent
 from app.orchestration.contracts import (
     ExecutionResult,
     LiteratureReviewRequest,
+    ModelSelectionSnapshot,
     SubtaskSnapshot,
     TaskCommand,
     TaskControlRequest,
@@ -339,8 +345,19 @@ class TaskExecution:
 
     # ===== 对外接口 =====
 
-    async def submit(self, user_id: UUID, request: LiteratureReviewRequest) -> UUID:
-        """创建任务：持久化 CREATED → PLANNING，提交后启动后台规划。"""
+    async def submit(
+        self,
+        user_id: UUID,
+        request: LiteratureReviewRequest,
+        *,
+        llm_credential_id: UUID | None = None,
+        model_snapshot: dict[str, Any] | None = None,
+    ) -> UUID:
+        """创建任务：持久化 CREATED → PLANNING，提交后启动后台规划。
+
+        `llm_credential_id` 只影响「用哪把 key」：运行时由 `_bind_task_llm`
+        解析并在当前协程内绑定。**不写进 `config`**（那是编排层合约）。
+        """
         trace_id = uuid.uuid4().hex
         config = request.model_dump(mode="json")
         config["trace_id"] = trace_id
@@ -355,6 +372,8 @@ class TaskExecution:
                 task_type="literature_review",
                 status=TaskStatus.CREATED.value,
                 config=config,
+                llm_credential_id=llm_credential_id,
+                model_snapshot=model_snapshot,
             )
             session.add(task)
             await session.flush()
@@ -597,6 +616,47 @@ class TaskExecution:
 
     # ===== 后台流程：规划 =====
 
+    async def _bind_task_llm(self, task: Any | None) -> None:
+        """把当前后台协程的 LLM 固定到任务指定的凭据（Issue #15 BYOK）。
+
+        必须在 `asyncio.create_task` **之前**执行：子任务会复制当前 context，
+        晚于创建就复制不到，会静默回落到平台模型。
+
+        解析失败**不回退平台模型**：那会在用户不知情时花平台的钱。
+        抛 `LLMException`，由调用方按既有路径把任务转人工并给出可读原因。
+        """
+        if task is None:
+            return
+        credential_id = getattr(task, "llm_credential_id", None)
+        if credential_id is None:
+            # 凭据被删除时外键 SET NULL，但快照还在。**不能**因此静默回落到平台模型：
+            # 用户以为在用自己的 key，实际花的是平台的钱。直接失败并说明原因。
+            snapshot = getattr(task, "model_snapshot", None)
+            if isinstance(snapshot, dict) and snapshot.get("is_byok"):
+                raise LLMException("任务指定的模型凭据已被删除，无法继续；请新建任务或改用平台模型")
+            return
+
+        from app.core.exceptions import AppException
+        from app.llm.byok import get_credential_resolver
+        from app.llm.scope import bind_llm_client
+
+        try:
+            async with self._session_factory() as session:
+                client = await get_credential_resolver().resolve(
+                    session, task.user_id, credential_id
+                )
+        except AppException as exc:
+            raise LLMException(f"任务指定的模型凭据不可用：{exc.message}") from exc
+
+        bind_llm_client(client)
+        logger.info(
+            "task_llm_bound",
+            task_id=str(task.id),
+            credential_id=str(credential_id),
+            provider=client.provider,
+            model=client.model,
+        )
+
     async def _plan(self, task_id: UUID) -> None:
         """后台规划：生成 TaskPlan + DAG，失败时进行一次 schema 修复。
 
@@ -612,6 +672,9 @@ class TaskExecution:
                 requirement = self._requirement(task)
                 trace_id = self._trace_id(task)
                 task_type = task.task_type
+
+            # 规划阶段就要用对模型：用户选了 BYOK，规划也必须走他的 key
+            await self._bind_task_llm(task)
 
             if task_type == "literature_review":
                 # 文献场景：由工作流承担规划 + 一次契约修复；失败抛 HumanActionRequiredError
@@ -802,6 +865,9 @@ class TaskExecution:
                 if block_reason:
                     await self._mark_waiting_human(task_id, block_reason)
                 return
+
+            # 执行阶段的 Agent/工作流都从容器取 LLM，必须在建它们之前绑定
+            await self._bind_task_llm(task)
 
             observer = self.container.create_observer()
             scheduler = self.container.create_scheduler(observer)
@@ -1458,6 +1524,13 @@ class TaskExecution:
             )
         ).one_or_none()
         created_at, updated_at = timestamp_row if timestamp_row is not None else (None, None)
+        model = None
+        snapshot = getattr(task, "model_snapshot", None)
+        if isinstance(snapshot, dict):
+            try:
+                model = ModelSelectionSnapshot(**snapshot)
+            except Exception:  # 历史脏数据不该让整个详情接口 500
+                logger.warning("task_model_snapshot_invalid", task_id=str(task.id))
         return TaskSnapshot(
             task_id=task.id,
             status=task.status,
@@ -1468,6 +1541,7 @@ class TaskExecution:
             subtasks=subtasks,
             artifacts=list(task.artifacts or []),
             review_report=task.review_report,
+            model=model,
             # 正文必须随快照下发：MCP/开放 API 的 get_task_output 读的就是它。
             # 曾经漏掉 → MCP 永远返回 markdown: null（tests 用 dict 替身掩盖了）。
             final_output=task.final_output,

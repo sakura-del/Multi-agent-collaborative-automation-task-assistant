@@ -56,6 +56,19 @@ class Task(Base):
         comment="工作区ID（NULL=个人任务；非空=工作区成员可见）",
     )
 
+    # ===== 用户自带模型（Issue #15 BYOK）=====
+    llm_credential_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("llm_credential.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+        comment="任务使用的模型凭据ID（NULL=平台模型）",
+    )
+    model_snapshot: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON,
+        nullable=True,
+        comment="创建时的模型快照（名称/厂商/模型）；凭据删除后仍可追溯",
+    )
+
     title: Mapped[str] = mapped_column(String(256), nullable=False, comment="任务标题")
     description: Mapped[str] = mapped_column(Text, nullable=False, comment="任务自然语言描述")
 

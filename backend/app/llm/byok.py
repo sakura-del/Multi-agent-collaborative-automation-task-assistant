@@ -247,3 +247,15 @@ class CredentialLLMResolver:
             model=record.model,
         )
         return client
+
+
+#: 进程级默认解析器：任务执行层直接用，复用适配器缓存。
+_default_resolver: CredentialLLMResolver | None = None
+
+
+def get_credential_resolver() -> CredentialLLMResolver:
+    """取默认解析器单例（首次调用时创建，密钥在首次 resolve 时才读）。"""
+    global _default_resolver
+    if _default_resolver is None:
+        _default_resolver = CredentialLLMResolver()
+    return _default_resolver

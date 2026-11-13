@@ -46,3 +46,16 @@ def use_llm_client(client: Any) -> Iterator[None]:
 def get_scoped_llm() -> Any | None:
     """取当前作用域的客户端；不在作用域内返回 None。"""
     return _current_client.get()
+
+
+def bind_llm_client(client: Any) -> None:
+    """在当前 asyncio Task 的 context 里绑定客户端，**不还原**。
+
+    只给后台任务协程用（`TaskExecution._plan` / `_execute`）：context 随协程
+    结束一起丢弃，不会影响其他请求；子协程在 `create_task` 时复制当前 context，
+    所以必须**先绑定再创建**。
+
+    HTTP 请求内请用 `with use_llm_client(...)`：那里需要精确还原，
+    否则同一个请求后续的数据库/事件逻辑可能误用用户模型。
+    """
+    _current_client.set(client)

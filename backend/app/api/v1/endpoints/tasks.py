@@ -28,7 +28,7 @@ from app.api.deps import (
 )
 from app.billing.services.plan_service import PlanService
 from app.core.config import get_settings
-from app.core.exceptions import ValidationException
+from app.core.exceptions import ForbiddenException, ValidationException
 from app.core.quota import QuotaService
 from app.db.models.user import User
 from app.db.session import get_db
@@ -42,6 +42,7 @@ from app.schemas.task import (
     TaskEventPage,
     TaskSummaryOut,
 )
+from app.security.llm_credential_service import LLMCredentialService
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -191,12 +192,14 @@ async def create_task(
     current_user: ApiUserDep,
     _scope: TasksWriteScope,
     plan_service: PlanServiceDep,
+    db: Annotated[Any, Depends(get_db)],
     quota: QuotaDep = None,
 ) -> TaskCreateOut:
-    """创建任务：**先查篇数，再查 token，最后落库**。
+    """创建任务：**先查凭据，再查篇数，最后查 token**。
 
     ## 检查顺序（不能颠倒）
 
+    0. **模型凭据**（BYOK）—— 不存在/停用是用户能立刻修的，且不能因此白扣篇数；
     1. **篇数（月，套餐）** —— 用户可理解的限制，可通过升级/等下月解决；
     2. **token（日，成本护栏）** —— 内部保护，用户无法自行解决。
 
@@ -212,6 +215,26 @@ async def create_task(
     任务失败也消耗了真实算力，所以篇数不退。这与 token 预扣不同
     （token 在任务终态按实际用量退还差额）。
     """
+    credential = None
+    model_snapshot: dict[str, Any] | None = None
+    if payload.llm_credential_id is not None:
+        # 越权/不存在统一 404（服务层保证），停用单独 403
+        credential = await LLMCredentialService().get(
+            db, current_user.id, payload.llm_credential_id
+        )
+        if credential.status != "active":
+            raise ForbiddenException("该模型凭据已停用，请先启用或更换")
+        model_snapshot = {
+            "credential_id": str(credential.id),
+            "name": credential.name,
+            "provider": credential.provider,
+            "model": credential.model,
+            "base_url": credential.base_url,
+            "is_byok": True,
+        }
+
+    contract = payload.to_contract()
+
     # ① 篇数（数据库原子扣减；超限抛 PLAN_QUOTA_EXCEEDED）
     await plan_service.check_and_consume_review(current_user.id)
 
@@ -219,7 +242,16 @@ async def create_task(
     if quota is not None:
         await quota.check_and_consume(current_user.id, tokens=ESTIMATED_TOKENS_PER_TASK)
 
-    task_id = await execution.submit(current_user.id, payload.to_contract())
+    # 不带凭据时保持原调用形状：编排层替身（测试/验收）无需感知 BYOK 参数
+    if payload.llm_credential_id is None:
+        task_id = await execution.submit(current_user.id, contract)
+    else:
+        task_id = await execution.submit(
+            current_user.id,
+            contract,
+            llm_credential_id=payload.llm_credential_id,
+            model_snapshot=model_snapshot,
+        )
     return TaskCreateOut(task_id=task_id, status=TaskStatus.PLANNING.value)
 
 

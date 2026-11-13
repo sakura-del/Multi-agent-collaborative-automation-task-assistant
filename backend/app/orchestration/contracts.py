@@ -319,6 +319,23 @@ class TaskListSummary(BaseModel):
     updated_at: datetime | None = None
 
 
+class ModelSelectionSnapshot(BaseModel):
+    """任务创建时选择的模型快照（Issue #15 BYOK）。
+
+    存快照而不是只存外键：用户删掉凭据后外键变 NULL，历史任务仍然要能回答
+    「这篇综述是用什么模型写的」——这是可复现性的一部分。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    credential_id: UUID | None = None
+    name: str
+    provider: str
+    model: str
+    base_url: str | None = None
+    is_byok: bool = True
+
+
 class TaskSnapshot(BaseModel):
     """任务状态快照：供查询、断线重连与前端轮询使用。"""
 
@@ -333,6 +350,8 @@ class TaskSnapshot(BaseModel):
     subtasks: list[SubtaskSnapshot] = Field(default_factory=list)
     artifacts: list[dict[str, Any]] = Field(default_factory=list)
     review_report: dict[str, Any] | None = None
+    model: ModelSelectionSnapshot | None = None
+    """本任务使用的模型；None = 平台模型（存量任务的默认值）。"""
     #: 综述正文（Markdown）。**必须随快照下发** —— 开放 API / MCP 直接消费它：
     #: `app/mcp/tools.py::get_task_output` 读 `snapshot["final_output"]`，
     #: `get_task_status` 用 `bool(final_output)` 判断「有没有产出」。
