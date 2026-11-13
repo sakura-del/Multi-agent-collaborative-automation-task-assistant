@@ -14,14 +14,17 @@ from __future__ import annotations
 import hashlib
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_active_user
+from app.core.captcha import CaptchaService, build_captcha_service, client_ip_of
 from app.core.config import settings
 from app.core.exceptions import (
+    CaptchaFailedException,
     EmailNotVerifiedException,
     RateLimitedException,
     UnauthorizedException,
@@ -65,12 +68,30 @@ def _access_token_expires_in() -> int:
     return settings.jwt_access_token_expire_minutes * 60
 
 
+@router.get("/captcha/challenge", summary="获取注册人机验证挑战（免登录）")
+async def captcha_challenge(request: Request) -> dict[str, Any]:
+    """签发 ALTCHA 挑战；`CAPTCHA__ENABLED=false` 时返回 `{"enabled": false}`。
+
+    无状态（HMAC 签名）、无副作用——被刷不产生费用，也无需限流。
+    """
+    return _resolve_captcha(request).create_challenge(client_ip_of(request))
+
+
 @router.post("/register", response_model=UserOut, status_code=201, summary="注册新用户")
 async def register(
     payload: UserCreate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    """注册新用户：用户名与邮箱均唯一，冲突时返回 422。"""
+    """注册新用户：人机验证 → 唯一性校验 → 建号并签发验证邮件。"""
+    # 人机验证放在最前：被挡的请求不消耗数据库与发信资源
+    captcha_ok, captcha_reason = await _resolve_captcha(request).verify(
+        payload.captcha, client_ip_of(request)
+    )
+    if not captcha_ok:
+        logger.warning("register_captcha_rejected", reason=captcha_reason)
+        raise CaptchaFailedException(details={"reason": captcha_reason})
+
     repo = UserRepository(db)
     # 预查重：利用 Repository 封装，给出更友好的冲突字段提示
     existing = await repo.exists(payload.username, payload.email)
@@ -169,6 +190,16 @@ async def login(
 def _hashed_account(account: str) -> str:
     """日志里只留账号名的哈希前缀：退避排障需要，明文用户名不该进日志。"""
     return hashlib.sha256(account.encode("utf-8")).hexdigest()[:8]
+
+
+def _resolve_captcha(request: Request) -> CaptchaService:
+    """注册人机验证服务：进程级单例（含 Redis 客户端），按 app 惰性创建。"""
+    existing = getattr(request.app.state, "captcha", None)
+    if existing is not None:
+        return existing  # type: ignore[no-any-return]
+    service = build_captcha_service()
+    request.app.state.captcha = service
+    return service
 
 
 def _resolve_login_throttle(request: Request) -> LoginThrottle:

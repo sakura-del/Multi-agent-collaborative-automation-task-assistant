@@ -18,6 +18,11 @@ class UserCreate(BaseModel):
     username: str = Field(..., min_length=3, max_length=64, description="登录用户名")
     email: EmailStr = Field(..., description="邮箱")
     password: str = Field(..., min_length=8, max_length=128, description="密码明文")
+    captcha: str | None = Field(
+        default=None,
+        max_length=8192,
+        description="ALTCHA PoW payload（CAPTCHA__ENABLED=true 时必填）",
+    )
 
 
 class UserLogin(BaseModel):

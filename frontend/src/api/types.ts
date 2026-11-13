@@ -24,6 +24,8 @@ export interface RegisterInput {
   username: string;
   email: string;
   password: string;
+  /** ALTCHA PoW payload（后端 CAPTCHA__ENABLED=true 时必填） */
+  captcha?: string;
 }
 
 // ===== 任务契约（与后端 app/orchestration/contracts.py 对齐）=====

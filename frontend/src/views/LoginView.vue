@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ArrowRight, BookMarked, Check, Loader2, LockKeyhole, MailCheck } from "lucide-vue-next";
 
@@ -8,7 +8,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import { Alert } from "@/components/ui/alert";
+import "altcha"; // 注册 <altcha-widget>（ALTCHA PoW 自托管，零第三方请求）
+import "altcha/i18n/zh-cn"; // 界面文案中文（组件只自带 en）
+
 import { requestEmailVerification } from "@/api/account";
+import api from "@/api/client";
 import { useAuthStore } from "@/stores/auth";
 
 // 登录/注册页。2026-11-13 起邮箱验证是登录门禁（EMAIL__REQUIRE_VERIFIED_LOGIN）：
@@ -32,6 +36,34 @@ const pendingVerificationEmail = ref("");
 const unverifiedEmail = ref("");
 const resending = ref(false);
 
+// 注册人机验证（ALTCHA）：启动时探测一次后端是否启用，避免给国内用户渲染无用的空组件
+const captchaEnabled = ref(false);
+const captchaSolved = ref(false);
+const captchaPayload = ref("");
+const captchaError = ref("");
+// widget 自己 fetch 挑战，必须给绝对地址（相对路径会打到 Pages 域名）
+const captchaChallengeUrl = computed(
+  () => `${api.defaults.baseURL ?? ""}/auth/captcha/challenge`,
+);
+
+function onCaptchaStateChange(event: Event) {
+  const detail = (event as CustomEvent<{ state: string; payload?: string }>).detail;
+  captchaSolved.value = detail?.state === "verified";
+  captchaPayload.value = detail?.state === "verified" ? (detail.payload ?? "") : "";
+  captchaError.value = detail?.state === "error" ? "人机验证加载失败，请刷新页面重试" : "";
+}
+
+onMounted(async () => {
+  try {
+    // 用统一 axios 实例：baseURL 指向 API 子域（相对路径会打到 Pages 域名 → 404）
+    const { data } = await api.get<{ enabled?: boolean }>("/auth/captcha/challenge");
+    captchaEnabled.value = data.enabled === true;
+  } catch {
+    // 探测失败按「不启用」处理：宁可少一层防护，也不能让注册页打不开
+    captchaEnabled.value = false;
+  }
+});
+
 const submitLabel = computed(() => (mode.value === "login" ? "登录" : "注册并登录"));
 
 /** 页脚能力点：三条都对应系统里真实存在的功能，不是营销词。 */
@@ -44,10 +76,15 @@ async function handleSubmit() {
   unverifiedEmail.value = "";
   try {
     if (mode.value === "register") {
+      if (captchaEnabled.value && !captchaSolved.value) {
+        errorMessage.value = "请先完成人机验证";
+        return;
+      }
       await auth.register({
         username: username.value,
         email: email.value,
         password: password.value,
+        ...(captchaEnabled.value ? { captcha: captchaPayload.value } : {}),
       });
       // 注册成功 ≠ 进系统：邮箱验证链接已发出，验证后再登录
       pendingVerificationEmail.value = email.value;
@@ -297,9 +334,25 @@ async function handleResend() {
             </Button>
           </div>
 
+          <div v-if="mode === 'register' && captchaEnabled" class="grid gap-1.5">
+            <altcha-widget
+              :challengeurl="captchaChallengeUrl"
+              auto="onload"
+              language="zh-cn"
+              hidefooter
+              refetchonexpire
+              @statechange="onCaptchaStateChange"
+            />
+            <p v-if="captchaError" class="text-xs text-destructive">{{ captchaError }}</p>
+          </div>
+
           <ErrorBanner :message="errorMessage" />
 
-          <Button type="submit" :disabled="loading" class="h-11 w-full">
+          <Button
+            type="submit"
+            :disabled="loading || (mode === 'register' && captchaEnabled && !captchaSolved)"
+            class="h-11 w-full"
+          >
             <Loader2 v-if="loading" class="animate-spin" aria-hidden="true" />
             <span>{{ loading ? "处理中…" : submitLabel }}</span>
             <ArrowRight v-if="!loading" :size="15" aria-hidden="true" />

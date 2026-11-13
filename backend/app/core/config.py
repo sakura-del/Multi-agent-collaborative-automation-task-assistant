@@ -285,6 +285,36 @@ class RateLimitRules(BaseModel):
     """模板渲染：跑 docxtpl + python-docx 重打包，单次开销最大，限额最严。"""
 
 
+class CaptchaConfig(BaseModel):
+    """注册人机验证（ALTCHA 自托管 PoW，2026-11-13）。
+
+    为什么是 ALTCHA 而不是 Turnstile/reCAPTCHA：Cloudflare 官方声明 Turnstile
+    **不支持中国大陆**（大陆探针实测 60s 加载不完），Google 域名更不可用；
+    ALTCHA 的挑战生成/校验全在本后端，无第三方请求、无跨境数据传输。
+    """
+
+    enabled: bool = False
+    """默认关闭：本地开发/CI 不该被验证码挡住（与「未配 SMTP 不阻塞」同一原则）。
+    生产 .env 显式 `CAPTCHA__ENABLED=true`。"""
+
+    hmac_secret: str = ""
+    """挑战签名密钥。**必须与 JWT 密钥不同**：一个泄露不该连带另一个。
+    enabled=true 而它为空时，主程序拒绝启动（见 `app/main.py` 校验）。"""
+
+    algorithm: str = "PBKDF2/SHA-256"
+    """PoW v2 的 KDF。PBKDF2 是浏览器原生可得、GPU 收益低的默认档。"""
+
+    cost: int = Field(default=5000, ge=1, le=2_000_000)
+    """迭代次数。移动端实测建议 3000~8000：再高会让低端机卡 5s+。"""
+
+    ttl_seconds: int = Field(default=600, ge=30, le=3600)
+    """挑战有效期（秒）。也是「已用 nonce」记录的保留时长。"""
+
+    bind_ip: bool = True
+    """是否把客户端 IP 指纹绑定进挑战（防「一处解、批量用」）。
+    IPv6 前缀变化频繁的网络（移动网）可能造成误拒——真出问题再关。"""
+
+
 class RateLimitConfig(BaseModel):
     """速率限制与按用户配额（Phase 1 P1-D）。
 
@@ -457,6 +487,7 @@ class Settings(BaseSettings):
     orchestration: OrchestrationConfig = OrchestrationConfig()
     reference_verification: ReferenceVerificationConfig = ReferenceVerificationConfig()
     email: EmailConfig = EmailConfig()
+    captcha: CaptchaConfig = CaptchaConfig()
     rate_limit: RateLimitConfig = RateLimitConfig()
     quota: QuotaConfig = QuotaConfig()
     cors: CORSConfig = CORSConfig()

@@ -57,6 +57,18 @@ class EmailNotVerifiedException(ForbiddenException):
     error_code = "EMAIL_NOT_VERIFIED"
 
 
+class CaptchaFailedException(AppException):
+    """注册人机验证未通过（2026-11-13，ALTCHA）。
+
+    422 而非 403：与「请求参数不合法」同层——payload 缺失/过期/重放都属于
+    请求本身不可用；前端只需展示 message 并让用户重试（组件会自动换挑战）。
+    """
+
+    status_code = 422
+    default_message = "人机验证未通过，请刷新页面后重试"
+    error_code = "CAPTCHA_FAILED"
+
+
 class ValidationException(AppException):
     status_code = 422
     default_message = "请求参数校验失败"
