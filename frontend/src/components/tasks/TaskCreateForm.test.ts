@@ -365,4 +365,42 @@ describe("TaskCreateForm 引用库文献源", () => {
     const offline = wrapper.find('[data-test="offline"]');
     expect((offline.element as HTMLInputElement).disabled).toBe(true);
   });
+
+  it("选择自带模型时 payload 带上 llm_credential_id", async () => {
+    vi.mocked(api.get).mockImplementation((url: string) => {
+      if (url === "/llm-credentials") {
+        return Promise.resolve({
+          data: [
+            {
+              credential_id: "cred-1",
+              name: "我的 DeepSeek",
+              provider: "deepseek",
+              provider_label: "DeepSeek",
+              model: "deepseek-chat",
+            },
+          ],
+        });
+      }
+      return Promise.reject(new Error("其它接口不可用"));
+    });
+
+    const wrapper = mountForm();
+    await flushPromises();
+    await fillValidForm(wrapper);
+    await wrapper.find('[data-test="model-select"]').setValue("cred-1");
+    await wrapper.find("form").trigger("submit");
+
+    const payload = wrapper.emitted("submit")?.[0]?.[0] as Record<string, unknown>;
+    expect(payload.llm_credential_id).toBe("cred-1");
+  });
+
+  it("不选模型时 payload 里没有 llm_credential_id（保持旧契约）", async () => {
+    const wrapper = mountForm();
+    await flushPromises();
+    await fillValidForm(wrapper);
+    await wrapper.find("form").trigger("submit");
+
+    const payload = wrapper.emitted("submit")?.[0]?.[0] as Record<string, unknown>;
+    expect("llm_credential_id" in payload).toBe(false);
+  });
 });

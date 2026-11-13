@@ -2,6 +2,7 @@
 import {
   Activity,
   BookMarked,
+  Cpu,
   CreditCard,
   FileInput,
   FileText,
@@ -64,6 +65,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   {
     label: "设置",
     items: [
+      { name: "models", label: "我的模型", icon: Cpu },
       { name: "api-keys", label: "API Key", icon: KeyRound },
       { name: "plan", label: "我的套餐", icon: CreditCard },
     ],

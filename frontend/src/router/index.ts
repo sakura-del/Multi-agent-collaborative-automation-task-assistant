@@ -5,6 +5,7 @@ import ApiKeyView from "@/views/ApiKeyView.vue";
 import PlanView from "@/views/PlanView.vue";
 import KnowledgeView from "@/views/KnowledgeView.vue";
 import LoginView from "@/views/LoginView.vue";
+import ModelSettingsView from "@/views/ModelSettingsView.vue";
 import ObservabilityView from "@/views/ObservabilityView.vue";
 import PasswordResetView from "@/views/PasswordResetView.vue";
 import ReferenceImportView from "@/views/ReferenceImportView.vue";
@@ -83,6 +84,8 @@ export const router = createRouter({
           name: "workspace-detail",
           component: WorkspaceDetailView,
         },
+        // 我的模型（Issue #15 BYOK）：用户自带 API Key
+        { path: "settings/models", name: "models", component: ModelSettingsView },
         // API Key 管理（Phase 2 开放 API）
         { path: "settings/api-keys", name: "api-keys", component: ApiKeyView },
         // 我的套餐（Phase 2 计费套餐）

@@ -78,6 +78,11 @@ export interface TaskCreate {
   reference_library?: boolean;
   /** 本任务是否做外部引用核验：true 时即使离线语料也与 CrossRef/OpenAlex 比对（Issue #3 遗留项） */
   verify_references?: boolean;
+  /**
+   * 本任务使用的模型凭据（Issue #15 BYOK）。
+   * 不传 = 平台默认模型；传了则规划与写作都走该凭据。
+   */
+  llm_credential_id?: string | null;
 }
 
 export interface TaskCreateOut {
@@ -142,6 +147,16 @@ export interface ReviewReport {
   stats: Record<string, unknown>;
 }
 
+/** 任务创建时选择的模型快照（Issue #15 BYOK）；凭据删除后仍保留。 */
+export interface ModelSelectionSnapshot {
+  credential_id: string | null;
+  name: string;
+  provider: string;
+  model: string;
+  base_url: string | null;
+  is_byok: boolean;
+}
+
 export interface TaskSnapshot {
   task_id: string;
   status: TaskStatus;
@@ -152,6 +167,8 @@ export interface TaskSnapshot {
   subtasks: SubtaskSnapshot[];
   artifacts: Artifact[];
   review_report: ReviewReport | null;
+  /** null = 平台默认模型（存量任务） */
+  model?: ModelSelectionSnapshot | null;
   created_at: string | null;
   updated_at: string | null;
 }
@@ -746,4 +763,66 @@ export interface SubscriptionInfo {  subscription_id: string;
   /** manual / payment */
   source: string;
   note: string | null;
+}
+
+// ===== 用户自带模型凭据（Issue #15 BYOK）=====
+
+/** 后端支持的厂商键；`custom` 表示任意 OpenAI 兼容端点。 */
+export type LLMProviderKey =
+  | "openai"
+  | "deepseek"
+  | "glm"
+  | "qwen"
+  | "siliconflow"
+  | "moonshot"
+  | "custom";
+
+/** 厂商目录项（`GET /llm-credentials/providers`）。 */
+export interface LLMProviderOption {
+  provider: LLMProviderKey;
+  label: string;
+  /** 预置厂商由服务端写死；custom 为 null */
+  base_url: string | null;
+  requires_base_url: boolean;
+}
+
+/** 凭据元数据。**后端永不返回明文**，只有 masked_key。 */
+export interface LLMCredentialInfo {
+  credential_id: string;
+  name: string;
+  provider: LLMProviderKey;
+  provider_label: string;
+  model: string;
+  base_url: string;
+  /** 如 `sk-…abcd` */
+  masked_key: string;
+  /** 换 key 时 +1（前端不需要用，但可用于排查） */
+  key_version: number;
+  is_default: boolean;
+  status: "active" | "invalid" | "disabled";
+  capabilities: Record<string, unknown>;
+  last_verified_at: string | null;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LLMCredentialCreate {
+  name: string;
+  provider: LLMProviderKey;
+  model: string;
+  /** 明文只进不出：提交后任何响应都不再包含它 */
+  api_key: string;
+  base_url?: string | null;
+  is_default?: boolean;
+}
+
+export interface LLMCredentialUpdate {
+  name?: string;
+  model?: string;
+  /** 留空表示不更换 */
+  api_key?: string;
+  base_url?: string;
+  is_default?: boolean;
+  status?: "active" | "disabled";
 }

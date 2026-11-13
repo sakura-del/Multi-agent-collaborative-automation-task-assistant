@@ -10,7 +10,7 @@ import AppLayout from "@/layouts/AppLayout.vue";
  *
  * 这些断言锁的是**导航结构与 E2E 契约**，不是版式细节：
  * - 分组顺序（日常用的在上，配一次就不动的沉到底部）；
- * - 所有 9 个目的地都还在（重设计不能丢页面入口）；
+ * - 所有 11 个目的地都还在（重设计不能丢页面入口）；
  * - `app-nav__links` 类名必须保留 —— `e2e/phase1-pages.spec.ts`
  *   的 resetScroll 依赖它把横向滚动归位。
  */
@@ -28,6 +28,7 @@ function buildRouter() {
       { path: "/reference-library", name: "reference-library", component: stub },
       { path: "/workspaces", name: "workspaces", component: stub },
       { path: "/observability", name: "observability", component: stub },
+      { path: "/settings/models", name: "models", component: stub },
       { path: "/settings/api-keys", name: "api-keys", component: stub },
       { path: "/settings/plan", name: "plan", component: stub },
     ],
@@ -54,7 +55,7 @@ describe("AppLayout 侧栏", () => {
     expect(wrapper.find(".app-nav__links").exists()).toBe(true);
   });
 
-  it("十个导航目的地一个都不能少", async () => {
+  it("十一个导航目的地一个都不能少", async () => {
     const wrapper = await mountLayout();
     const labels = wrapper.findAll(".app-nav__links a").map((a) => a.text());
 
@@ -68,12 +69,14 @@ describe("AppLayout 侧栏", () => {
       "引用库",
       "团队",
       "用量",
+      // Issue #15 BYOK：用户自带模型凭据的入口
+      "我的模型",
       "API Key",
       "我的套餐",
     ]) {
       expect(labels).toContain(expected);
     }
-    expect(labels).toHaveLength(10);
+    expect(labels).toHaveLength(11);
   });
 
   it("按使用频率分组：工作台 → 素材 → 协作 → 设置", async () => {
@@ -92,6 +95,7 @@ describe("AppLayout 侧栏", () => {
     const wrapper = await mountLayout();
     const groups = wrapper.findAll(".app-nav__links > div");
     const last = groups[groups.length - 1];
+    expect(last.text()).toContain("我的模型");
     expect(last.text()).toContain("API Key");
     expect(last.text()).toContain("我的套餐");
   });

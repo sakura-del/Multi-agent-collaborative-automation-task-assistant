@@ -7,8 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { listCitationStyles } from "@/api/citation-styles";
+import { listLLMCredentials } from "@/api/llm-credentials";
 import { getLibrarySummary } from "@/api/reference-library";
-import type { CitationStyleSource, TaskCreate } from "@/api/types";
+import type { CitationStyleSource, LLMCredentialInfo, TaskCreate } from "@/api/types";
 
 // 创建表单：只做校验与 payload 组装，提交动作由父组件负责（保持可测）
 const props = withDefaults(
@@ -59,6 +60,11 @@ const verifyReferences = ref(false);
 const selectedDocuments = ref<string[]>([]);
 const validationMessages = ref<string[]>([]);
 
+// BYOK（Issue #15）：用户可选自己的模型；空串 = 平台默认。
+// 列表失败静默降级为「只有平台默认」——建任务不能被模型列表拖垮。
+const credentials = ref<LLMCredentialInfo[]>([]);
+const selectedCredential = ref("");
+
 const canSubmit = computed(() => !props.pending);
 
 onMounted(async () => {
@@ -86,6 +92,13 @@ onMounted(async () => {
     libraryCount.value = summary.usable_as_source;
   } catch {
     libraryCount.value = 0;
+  }
+
+  // 自带模型列表：失败就只剩「平台默认」，同样不阻塞建任务
+  try {
+    credentials.value = await listLLMCredentials();
+  } catch {
+    credentials.value = [];
   }
 });
 
@@ -160,6 +173,7 @@ function handleSubmit() {
     reference_library: useReferenceLibrary.value,
     document_ids: [...selectedDocuments.value],
     verify_references: verifyReferences.value,
+    ...(selectedCredential.value ? { llm_credential_id: selectedCredential.value } : {}),
   };
   emit("submit", payload);
 }
@@ -295,6 +309,33 @@ function handleSubmit() {
           </button>
         </div>
       </div>
+    </div>
+
+    <div class="grid gap-1.5">
+      <Label for="task-model">使用的模型</Label>
+      <select
+        id="task-model"
+        v-model="selectedCredential"
+        data-test="model-select"
+        class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+      >
+        <option value="">平台默认模型</option>
+        <option
+          v-for="item in credentials"
+          :key="item.credential_id"
+          :value="item.credential_id"
+        >
+          {{ item.name }}（{{ item.provider_label }} · {{ item.model }}）
+        </option>
+      </select>
+      <p class="text-xs text-muted-foreground">
+        <template v-if="credentials.length">
+          选自己的模型时，规划与写作都会走它；key 失效会直接失败，不会自动改用平台模型。
+        </template>
+        <template v-else>
+          还没有接入自己的模型，可到「我的模型」添加；当前使用平台默认模型。
+        </template>
+      </p>
     </div>
 
     <div class="grid gap-2">

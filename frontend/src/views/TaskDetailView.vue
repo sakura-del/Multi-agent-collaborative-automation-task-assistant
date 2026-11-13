@@ -171,6 +171,14 @@ onBeforeUnmount(() => {
             修订 {{ store.snapshot?.revision ?? "—" }} · 更新于
             {{ formatDateTime(store.snapshot?.updated_at) }}
           </span>
+          <!-- 模型快照（Issue #15 BYOK）：凭据删除后仍能看到当时用的模型 -->
+          <span v-if="store.snapshot" class="text-xs" data-test="task-model">
+            {{
+              store.snapshot.model
+                ? `模型：${store.snapshot.model.name}（${store.snapshot.model.model}）`
+                : "模型：平台默认"
+            }}
+          </span>
         </p>
       </div>
 
