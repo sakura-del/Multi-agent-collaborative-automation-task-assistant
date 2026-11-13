@@ -26,7 +26,7 @@
 | 项 | 值 |
 | --- | --- |
 | 分支 | `main` |
-| HEAD | **`9fceda6`**（CI/CD 重构 + 冒烟修复，自动部署已验证）（`feat(ops): 站内自检 + 外部探测的双层监控告警` + 格式修复）← `dfd6b0f`（`chore(ops): SSH 加固 + 清密钥备份 + 系统包 + 源站只允许 Cloudflare 回源`）← `54ce78a`（`fix(security): refresh 令牌轮换后旧令牌立即失效`）→ `105b383`（口令轮换）→ `5421a98`（SSTI 修复）→ `090e29a`（M3 上线）、Pages Git 集成、安全排查与 `security.txt` |
+| HEAD | **`57f14cc`**（邮箱验证门禁）（CI/CD 重构 + 冒烟修复，自动部署已验证）（`feat(ops): 站内自检 + 外部探测的双层监控告警` + 格式修复）← `dfd6b0f`（`chore(ops): SSH 加固 + 清密钥备份 + 系统包 + 源站只允许 Cloudflare 回源`）← `54ce78a`（`fix(security): refresh 令牌轮换后旧令牌立即失效`）→ `105b383`（口令轮换）→ `5421a98`（SSTI 修复）→ `090e29a`（M3 上线）、Pages Git 集成、安全排查与 `security.txt` |
 | 冻结 tag | `defense-v1` |
 | Plan 状态 | Plan 2 / 3 / 4 / 5 **全部 Exit Gate PASSED**；**Phase 1 五项全部端到端可用且遗留清零**；**Phase 2 五项全部交付完成**（PRISMA ✅ + 可观测性 ✅ + 团队工作区 ✅ + 开放 API ✅ + 计费套餐 ✅） |
 | 产品化进度 | **Issue #2~#7 全部关闭且遗留清零**；**P1-D 配额遗留已修复**；**`max_results` 已夹紧**；**PRISMA 完成**；**可观测性完成**（8 指标 + `/metrics` + 看板，**看板数字已全部为真**）；**团队工作区完成**；**开放 API 完成**；**计费套餐完成**（四档 + 四条功能门禁 + 手工开通 + **套餐页已重设计**）；**引用样式页已重设计**（**真实渲染预览** + 删除二次确认）；**Word 模板页已修**（**不再把示例填充谎称成稿** + 删除二次确认）；**前端已迁移到 Tailwind v4 + shadcn-vue**；**引用库 + 证据闭环完成**；**review 长度上限缺陷已修**（`max_length` 不再施加到机器汇总） |
@@ -193,6 +193,7 @@ docker compose up -d backend
 | 59 | **CI 不要每次跑全量；本地迭代同理**（2026-11-12） | 3209 条用例本地 19 分钟、GitHub 2 核 runner 超过 45 分钟——每次 push 都等一遍的结果是没人看结果。现在 push 只跑 `scripts/ci/select_tests.py` 选中的测试（全局前提改动→全量，未映射模块→全量，纯文档→不跑），全量与覆盖率门禁在 `nightly.yml`。**本地迭代也用 `python scripts/ci/run_selected_tests.py --base origin/main`**，别再习惯性跑全量 |
 | 60 | **CD 必须是「测试绿 → 部署 → 冒烟 → 失败回滚」四段**（2026-11-12） | 用 `workflow_run` 触发（`on: push` 会在测试没跑完时部署），目标提交取 `github.event.workflow_run.head_sha`（该事件里 `github.sha` 是默认分支头，不是被测提交）。部署前打 `veripaper-backend:rollback` 标签；启动后轮询 `/health/ready` 并做一次真实检索；任一失败就回滚镜像 + `git reset --hard` 到部署前 sha。**没有回滚点的自动化部署等于把手工操作搬到流水线** |
 | 61 | **会话中途失联，先查 fail2ban 再怀疑网络**（2026-11-12） | CD 部署会话挂 15 分钟无输出，服务器上却找不到报错 —— 是 `ssh-keyscan` 的多次密钥协商失败触发了 fail2ban，**封禁发生在会话已建立之后**，已建立的连接被 DROP，客户端只见 `Timeout, server not responding`。判据：`fail2ban-client status sshd` 看 Banned IP 是否是自己/CI 的出口；修法：脚本别开多条连接，CI 网段进 `ignoreip` |
+| 62 | **「单跑绿、全量红」也可能是 get_settings() 对象分叉的镜像**（2026-11-13） | 端点里写 `get_settings()`、测试 patch 模块级 `settings`：CI 全量先跑 `test_config_priority`（cache_clear）后 get_settings() 返回新对象，patch 落空；本地单跑没有 cache_clear，两对象同一 → 绿。**修法不是改测试，是统一读取路径**：端点也读模块级 settings（生产里两者本来就是同一对象） |
 
 ---
 

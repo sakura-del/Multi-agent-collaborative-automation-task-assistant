@@ -1275,3 +1275,38 @@ npx resend-cli@latest api-keys create --name veripaper-smtp-mail --permission se
 2. **API key 出现在过一次 CLI 输出**（创建时的 token 回显）。它只有 sending_access 且限定单域名，
    风险可控；介意的话撤销重建一条，改 `.env` 后 `up -d backend` 即可。
 3. Resend 免费层：100 封/天、3000 封/月——当前用户量级完全够用；超了再升计划。
+
+## 22. 邮箱验证门禁：未验证不能登录（2026-11-13）
+
+用户实测：注册后邮箱没验证就直接进系统（验证邮件形同虚设）。根因三件事叠加：
+前端注册后自动登录、后端登录不查 `email_verified_at`、重发端点要求登录态（死锁）。
+
+### 22.1 行为（生产现状）
+
+| 场景 | 行为 |
+| --- | --- |
+| 注册 | 201 + 立即发验证邮件；**前端不再自动登录**，展示「查收邮件」引导 |
+| 未验证登录 | **403 `EMAIL_NOT_VERIFIED`**（details 带注册邮箱）；**不计入** M-3 登录失败退避 |
+| 点邮件链接 | `email_verified_at` 落库；之后登录正常 |
+| 重发验证邮件 | `/auth/verify-email/request` 免登录、按邮箱；**响应恒定**（不存在/已验证/冷却中同一 message，防邮箱枚举）；按邮箱冷却 60s |
+| 门禁开关 | `EMAIL__REQUIRE_VERIFIED_LOGIN=true`（生产已开）。默认关：sender=logging 时邮件发不出去，开门禁会把本地/CI 锁在门外 |
+
+### 22.2 存量用户回填
+
+迁移 `b8e4f2a6c9d1` 把迁移时刻 `email_verified_at IS NULL` 的用户回填为 now——
+真实发信通道 2026-11-12 才接入，存量用户不可能验证过，不回填门禁一开全员锁死。
+迁移 SQL 用 `CURRENT_TIMESTAMP`（`now()` 是 PG 专用，SQLite 迁移测试抓到）。
+不可逆（无法区分回填与真实点击）；降级时关闭配置开关即可，不动数据。
+
+### 22.3 本次生产实测（2026-11-13 12:57 JST）
+
+注册 `gate-prod-test`（Gmail 别名）→ 登录 **403**（无 token）→ Resend 邮件 delivered
+→ 从 Resend API 取回正文提取 token → confirm 200「邮箱验证成功」→ **登录 200**。
+未知邮箱重发与真实邮箱**同一响应**；回填用户（Lingrove 等 4 个）登录不受影响。
+探针账号已删除；日志有 `login_blocked_unverified_email` 事件可查。
+
+### 22.4 CI 抓出的一个坑（记入 AGENTS §5 #62）
+
+端点里 `settings = get_settings()`，测试 patch 模块级 `settings`——CI 全量先跑
+`test_config_priority`（`cache_clear`）后 `get_settings()` 返回**新对象**，patch 落空
+（冷却恒为 60s，重发测试红）；本地单跑没有 cache_clear 所以绿。统一读模块级 settings。
