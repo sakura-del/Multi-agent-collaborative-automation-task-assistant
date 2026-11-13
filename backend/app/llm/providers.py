@@ -102,8 +102,13 @@ def _is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     )
 
 
-def normalize_base_url(raw: str, *, allow_insecure: bool = False) -> str:
+def normalize_base_url(
+    raw: str, *, allow_insecure: bool = False, allow_private: bool = False
+) -> str:
     """校验并规范化自定义端点；不合法抛 422。
+
+    `allow_private` 只给本地联调（对接本机 vLLM/假服务）：生产打开它等于
+    允许把用户 prompt 发到容器网络内的任意地址。
 
     规范化只做两件事：主机小写、去掉尾部 `/`。**不补 `/v1`** ——
     补错路径比报错更难排查。
@@ -134,18 +139,21 @@ def normalize_base_url(raw: str, *, allow_insecure: bool = False) -> str:
     except ValueError as exc:
         raise ValidationException("base_url 的端口不合法") from exc
 
-    allowed_ports = {80, 443} if allow_insecure and scheme == "http" else {443}
-    effective_port = port or (443 if scheme == "https" else 80)
-    if effective_port not in allowed_ports:
-        raise ValidationException(
-            f"base_url 只允许 {'/'.join(map(str, sorted(allowed_ports)))} 端口"
-        )
+    # 端口白名单：生产只允许 443，避免把服务端当端口扫描器。
+    # 本地联调（allow_private）放开任意端口：vLLM/Ollama 常跑在 8000/11434。
+    if not allow_private:
+        allowed_ports = {80, 443} if allow_insecure and scheme == "http" else {443}
+        effective_port = port or (443 if scheme == "https" else 80)
+        if effective_port not in allowed_ports:
+            raise ValidationException(
+                f"base_url 只允许 {'/'.join(map(str, sorted(allowed_ports)))} 端口"
+            )
 
     ip = _as_ip(host)
     if ip is not None:
-        if _is_blocked_ip(ip):
+        if _is_blocked_ip(ip) and not allow_private:
             raise ValidationException("base_url 不能指向内网、环回或链路本地地址")
-    else:
+    elif not allow_private:
         if host == "localhost" or host.endswith(".localhost"):
             raise ValidationException("base_url 不能指向本机")
         # 单标签主机名（redis / gateway / intranet）只会出现在内网 DNS 里

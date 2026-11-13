@@ -34,6 +34,11 @@ _ADAPTER_REGISTRY: dict[str, type[BaseLLM]] = {
     "qwen": QwenAdapter,
     # DeepSeek 使用 OpenAI 兼容协议，直接复用 OpenAIAdapter（base_url 指向 api.deepseek.com）
     "deepseek": OpenAIAdapter,
+    # BYOK（Issue #15）：以下厂商/自定义端点都是 OpenAI 兼容协议，复用同一适配器；
+    # base_url 必须由凭据显式传入（create_llm 的 base_url 参数），不能依赖默认值。
+    "siliconflow": OpenAIAdapter,
+    "moonshot": OpenAIAdapter,
+    "custom": OpenAIAdapter,
 }
 
 # 确定性适配器：仅用于离线演练 / 冒烟 / 回归（`LLM__DEFAULT_PROVIDER=deterministic`）。

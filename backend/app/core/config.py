@@ -161,6 +161,14 @@ class LLMConfig(BaseModel):
     模型的 prompt 与结果都会走这条链路，明文传输等于把用户论文内容广播到链路上。
     """
 
+    byok_allow_private_base_url: bool = False
+    """自定义端点是否允许私网 / 环回地址。
+
+    **只在本地联调时打开**：生产打开等于把服务器变成内网探测器
+    （`127.0.0.1`、`172.18.0.x`、`169.254.169.254` 全部可达）。
+    关闭时，创建阶段拦 IP 字面量，运行时再拦 DNS 解析结果。
+    """
+
 
 class SecretsConfig(BaseModel):
     """应用级密钥（BYOK 凭据加密，Issue #15）。

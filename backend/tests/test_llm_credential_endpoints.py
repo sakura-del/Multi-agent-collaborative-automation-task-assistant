@@ -212,6 +212,24 @@ class TestCreate:
         assert resp.json()["name"] == "我的 key"
         assert resp.json()["model"] == "deepseek-chat"
 
+    def test_dev_mode_allows_local_endpoint(
+        self, credential_app: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """两个开发开关都打开时才允许本机端点（生产默认全关）。"""
+        monkeypatch.setattr(config.settings.llm, "byok_allow_insecure_base_url", True)
+        monkeypatch.setattr(config.settings.llm, "byok_allow_private_base_url", True)
+        user = _make_user(credential_app.state.factory, "cred_dev_mode")
+
+        resp = _create(
+            credential_app,
+            user,
+            provider="custom",
+            base_url="http://127.0.0.1:8000/v1",
+        )
+
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["base_url"] == "http://127.0.0.1:8000/v1"
+
     def test_credential_count_is_capped(
         self, credential_app: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:

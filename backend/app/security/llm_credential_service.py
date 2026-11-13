@@ -96,6 +96,7 @@ class LLMCredentialService:
             return normalize_base_url(
                 base_url or "",
                 allow_insecure=settings.llm.byok_allow_insecure_base_url,
+                allow_private=settings.llm.byok_allow_private_base_url,
             )
         if base_url:
             # 预置厂商的端点若可被用户覆盖，平台 key 就能被导向任意服务器

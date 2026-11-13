@@ -219,7 +219,7 @@ class RuntimeContainer:
 
     def create_planner(self) -> Any:
         """创建规划 Agent 实例（注入容器 LLM，缺失时保留降级路径）。"""
-        llm = self._llm_client()
+        llm = self.create_llm()
         try:
             return self._planner_factory(llm=llm)  # type: ignore[call-arg]
         except TypeError:
@@ -231,7 +231,21 @@ class RuntimeContainer:
         return self._agent_factory(agent_type)
 
     def create_llm(self) -> Any | None:
-        """取容器 LLM 客户端（供工作流内部自建 Agent 时注入，缺失时返回 None）。"""
+        """取当前任务应使用的 LLM 客户端。
+
+        优先级：
+        1. **任务作用域**（BYOK，Issue #15）——由 `use_llm_client()` 注入；
+        2. 容器显式注入的客户端（测试/验收）；
+        3. 平台全局 `LLMManager`（带降级链）。
+
+        作用域必须在 `asyncio.create_task` **之前**进入，否则后台协程
+        复制不到当前 context，会静默回落到平台模型。
+        """
+        from app.llm.scope import get_scoped_llm
+
+        scoped = get_scoped_llm()
+        if scoped is not None:
+            return scoped
         return self._llm_client()
 
     def use_planner(self, factory: PlannerFactory) -> None:
@@ -289,7 +303,7 @@ class RuntimeContainer:
 
     def _build_default_agent(self, agent_type: str) -> Any:
         """默认 Agent 工厂：有 LLM 时注入真实模型，缺失时保留降级路径。"""
-        llm = self._llm_client()
+        llm = self.create_llm()
         if agent_type == "executor":
             return ExecutorAgent(llm=llm)
         if agent_type == "validator":
