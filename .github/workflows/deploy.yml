@@ -159,7 +159,7 @@ jobs:
           pwd = open("/opt/veripaper/.demo-password").read().strip()
           req = urllib.request.Request(
               BASE + "/auth/login",
-              data=json.dumps({"account": "demo", "password": pwd}).encode(),
+              data=json.dumps({"account": "Lingrove", "password": pwd}).encode(),
               method="POST",
               headers=dict(HDR),
           )
