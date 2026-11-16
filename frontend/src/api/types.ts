@@ -722,6 +722,20 @@ export interface BillingPlan {
  *
  * 只显示 `period_key` 会让用户以为「10 月底才续费」，而订阅可能 11 月到期。
  */
+/** 单一来源（平台 / 自带）的本月任务数与 token 数。 */
+export interface ModelUsageBucket {
+  tasks: number;
+  tokens: number;
+}
+
+/** 平台模型与自带模型的用量分账（Issue #15 P2）。 */
+export interface ModelUsage {
+  period_key: string;
+  platform: ModelUsageBucket;
+  byok: ModelUsageBucket;
+  total: ModelUsageBucket;
+}
+
 export interface BillingUsage {
   /** 用量周期 YYYY-MM（UTC 年月） */
   period_key: string;
@@ -750,6 +764,9 @@ export interface BillingUsage {
   period_end?: string | null;
   /** 已购席位数；免费档为 null */
   seats_purchased?: number | null;
+
+  /** 模型用量分账；旧后端可能不返回 */
+  model_usage?: ModelUsage | null;
 }
 
 /** 订阅信息（管理员开通后返回）。 */

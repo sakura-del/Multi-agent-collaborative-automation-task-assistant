@@ -341,4 +341,50 @@ describe("ModelSettingsView", () => {
     expect(wrapper.get('[data-test="models-error"]').text()).toContain("密钥被拒绝");
     expect(wrapper.get('[data-test="model-row-c1"]').text()).toContain("校验失败");
   });
+
+  it("搜索按名称/厂商/模型过滤，并显示总数", async () => {
+    vi.mocked(listLLMCredentials).mockResolvedValue([
+      credential(),
+      credential({
+        credential_id: "c2",
+        name: "备用 OpenAI",
+        provider: "openai",
+        provider_label: "OpenAI",
+        model: "gpt-4o-mini",
+        is_default: false,
+      }),
+    ] as never);
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.get('[data-test="model-count"]').text()).toContain("共 2 把");
+    expect(wrapper.find('[data-test="model-row-c1"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="model-row-c2"]').exists()).toBe(true);
+
+    // 按厂商搜
+    await wrapper.get('[data-test="model-search"]').setValue("openai");
+    expect(wrapper.find('[data-test="model-row-c1"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="model-row-c2"]').exists()).toBe(true);
+
+    // 按模型名搜
+    await wrapper.get('[data-test="model-search"]').setValue("deepseek");
+    expect(wrapper.find('[data-test="model-row-c1"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="model-row-c2"]').exists()).toBe(false);
+  });
+
+  it("搜索无结果时给出明确空态，而不是空白列表", async () => {
+    vi.mocked(listLLMCredentials).mockResolvedValue([credential()] as never);
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.get('[data-test="model-search"]').setValue("不存在的模型");
+
+    expect(wrapper.find('[data-test="model-row-c1"]').exists()).toBe(false);
+    const hint = wrapper.get('[data-test="models-no-match"]');
+    expect(hint.text()).toContain("不存在的模型");
+    // 总数仍显示真实条数，便于用户知道「不是被删了」
+    expect(wrapper.get('[data-test="model-count"]').text()).toContain("共 1 把");
+  });
 });

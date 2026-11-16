@@ -24,7 +24,7 @@ from alembic.script import ScriptDirectory
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 NEW_REVISION = "d5a8c1e3f7b2"
 # 迁移链单一 head 的守卫：新增迁移后更新这里（当前 head = 凭据失败计数，Issue #15 P1）
-EXPECTED_HEAD = "e5b1c8a3d7f2"
+EXPECTED_HEAD = "a4c8d2f6b9e1"
 MIGRATION_FILE = BACKEND_DIR / "alembic" / "versions" / f"{NEW_REVISION}_add_knowledge_vectors.py"
 
 

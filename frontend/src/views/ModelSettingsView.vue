@@ -41,7 +41,8 @@ import type {
  * `model-provider` / `model-id` / `model-key` / `model-base-url` /
  * `model-submit` / `model-cancel` / `model-edit-<id>` / `model-set-default-<id>` /
  * `model-delete-<id>` / `model-confirm-delete-<id>` /
- * `model-probe` / `model-probe-result` / `model-probe-error` / `model-test-<id>`。
+ * `model-probe` / `model-probe-result` / `model-probe-error` / `model-test-<id>` /
+ * `model-search` / `model-count` / `models-no-match`。
  */
 const credentials = ref<LLMCredentialInfo[]>([]);
 const providers = ref<LLMProviderOption[]>([]);
@@ -62,6 +63,8 @@ const formDefault = ref(false);
 
 const busyId = ref<string | null>(null);
 const confirmDeleteId = ref<string | null>(null);
+/** 列表内搜索（凭据上限 20，客户端过滤足够；不需要服务端分页）。 */
+const search = ref("");
 
 /**
  * 测试连接状态（Issue #15 P1）。
@@ -81,6 +84,17 @@ const selectedProvider = computed(
 );
 const requiresBaseUrl = computed(() => selectedProvider.value?.requires_base_url ?? false);
 const isEmpty = computed(() => credentials.value.length === 0);
+const filteredCredentials = computed(() => {
+  const query = search.value.trim().toLowerCase();
+  if (!query) {
+    return credentials.value;
+  }
+  return credentials.value.filter((credential) =>
+    [credential.name, credential.provider_label, credential.model].some((value) =>
+      value.toLowerCase().includes(query)
+    )
+  );
+});
 
 onMounted(() => {
   void refresh();
@@ -499,16 +513,26 @@ function statusOf(credential: LLMCredentialInfo): {
       description="添加一把 API Key 后，建任务时就能选择它；不添加则一切照旧使用平台默认模型。"
     />
 
-    <ul
-      v-else
-      class="divide-y divide-border rounded-lg border border-border"
-      data-test="models-list"
-    >
-      <li
-        v-for="credential in credentials"
-        :key="credential.credential_id"
-        class="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-sm"
-        :data-test="`model-row-${credential.credential_id}`"
+    <template v-else>
+      <div class="mb-3 flex flex-wrap items-center gap-2">
+        <Input
+          v-model="search"
+          data-test="model-search"
+          class="sm:max-w-xs"
+          placeholder="搜索名称 / 厂商 / 模型"
+          aria-label="搜索模型凭据"
+        />
+        <span class="text-xs text-muted-foreground" data-test="model-count">
+          共 {{ credentials.length }} 把
+        </span>
+      </div>
+
+      <ul class="divide-y divide-border rounded-lg border border-border" data-test="models-list">
+        <li
+          v-for="credential in filteredCredentials"
+          :key="credential.credential_id"
+          class="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-sm"
+          :data-test="`model-row-${credential.credential_id}`"
       >
         <div class="min-w-0 flex-1">
           <div class="flex flex-wrap items-center gap-1.5">
@@ -580,7 +604,16 @@ function statusOf(credential: LLMCredentialInfo): {
           </Button>
         </div>
       </li>
-    </ul>
+      </ul>
+
+      <p
+        v-if="filteredCredentials.length === 0"
+        data-test="models-no-match"
+        class="mt-3 text-sm text-muted-foreground"
+      >
+        没有匹配「{{ search.trim() }}」的凭据。
+      </p>
+    </template>
 
     <p v-if="!isEmpty" class="mt-3 text-xs text-muted-foreground">
       删除凭据不会影响历史任务：任务里保存了当时使用的模型快照。

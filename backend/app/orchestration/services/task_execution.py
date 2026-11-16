@@ -386,6 +386,8 @@ class TaskExecution:
                 config=config,
                 llm_credential_id=llm_credential_id,
                 model_snapshot=model_snapshot,
+                # 分账口径在创建时写死：凭据之后被删也不改变历史任务归属
+                is_byok=llm_credential_id is not None,
             )
             session.add(task)
             await session.flush()
@@ -633,10 +635,13 @@ class TaskExecution:
         """任务是否使用用户自带模型（Issue #15）。
 
         两个判据缺一不可：
-        - `llm_credential_id`：常规情况；
-        - `model_snapshot.is_byok`：凭据被删后外键变 NULL，但快照仍在 ——
+        - `is_byok`：创建时写死的分账标记（P2 起）；
+        - `llm_credential_id` / `model_snapshot.is_byok`：兼容 P2 之前的历史任务
+          （那时还没有 `is_byok` 列），凭据被删后快照仍在 ——
           此时若不认 BYOK，会去退一笔**从未预扣过**的 token，凭空多给额度。
         """
+        if getattr(task, "is_byok", None) is True:
+            return True
         if getattr(task, "llm_credential_id", None) is not None:
             return True
         snapshot = getattr(task, "model_snapshot", None)

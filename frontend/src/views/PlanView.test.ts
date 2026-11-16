@@ -26,6 +26,12 @@ function usage(overrides: Record<string, unknown> = {}) {
     price_cents: 1900,
     period_end: "2026-11-22T13:39:27+08:00",
     seats_purchased: 1,
+    model_usage: {
+      period_key: "2026-10",
+      platform: { tasks: 3, tokens: 12000 },
+      byok: { tasks: 1, tokens: 4000 },
+      total: { tasks: 4, tokens: 16000 },
+    },
     ...overrides,
   };
 }
@@ -461,5 +467,35 @@ describe("PlanView 重设计（2026-10-26）", () => {
     // 当前卡在对比区里应该有明确「当前」标记，且不可点（没有支付网关，点了也没用）
     const currentCard = wrapper.find('[data-test="plan-card-student"]');
     expect(currentCard.text()).toContain("当前");
+  });
+
+  it("模型用量分账：平台与自带模型分开显示，数字来自接口", async () => {
+    vi.mocked(getBillingUsage).mockResolvedValue(usage() as never);
+    vi.mocked(listBillingPlans).mockResolvedValue(PLANS as never);
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const card = wrapper.find('[data-test="plan-model-usage"]');
+    expect(card.exists()).toBe(true);
+    expect(wrapper.get('[data-test="model-usage-platform"]').text()).toContain("12,000");
+    expect(wrapper.get('[data-test="model-usage-platform"]').text()).toContain("3 个任务");
+    expect(wrapper.get('[data-test="model-usage-byok"]').text()).toContain("4,000");
+    expect(wrapper.get('[data-test="model-usage-byok"]').text()).toContain("1 个任务");
+    // 平台占 75%，自带 25%
+    expect(wrapper.get('[data-test="model-usage-platform-bar"]').attributes("style")).toContain(
+      "75%",
+    );
+    expect(wrapper.get('[data-test="model-usage-byok-bar"]').attributes("style")).toContain("25%");
+  });
+
+  it("旧后端不返回 model_usage 时整块不渲染（不显示一排 0）", async () => {
+    vi.mocked(getBillingUsage).mockResolvedValue(usage({ model_usage: null }) as never);
+    vi.mocked(listBillingPlans).mockResolvedValue(PLANS as never);
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.find('[data-test="plan-model-usage"]').exists()).toBe(false);
   });
 });

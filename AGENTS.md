@@ -89,9 +89,12 @@ git fetch origin main && git reset --hard origin/main
 
 - `run-tests.sh` 已注入测试环境变量（`APP_ENV=test`、SQLite 内存库、JWT 密钥、
   `RAG_*_MOCK=1`、BYOK 测试用加密密钥），并带 300s 单测超时
-- 依赖变更后：`cd ~/vp-test/backend && .venv/bin/pip install -e ".[dev]"`
+- 依赖变更后：`cd ~/vp-test/backend && .venv/bin/pip install -e ".[dev,chroma]"`
   （用清华镜像；Python 3.12）
-- 前端：本机可 `npm run test`（轻量），完整构建与 E2E 由 CI 负责
+- 前端：`cd ~/vp-test/frontend && npm ci && npm run test`（已装 Node 18）
+  - 若报 `Cannot find native binding`：lock 在 Windows 生成，Linux 可选依赖没落盘。
+    补装 `@rollup/rollup-linux-x64-gnu` 与 `@tailwindcss/oxide-linux-x64-gnu@4.3.3`
+    （`--no-save`；CI 的 Ubuntu runner 不受影响）
 
 ### 4.1b 本地（Windows）—— 仅格式与类型检查
 

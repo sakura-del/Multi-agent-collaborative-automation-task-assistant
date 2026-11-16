@@ -131,6 +131,29 @@ const periodEndText = computed(() => {
   return `${parsed.toLocaleDateString("zh-CN")} 到期`;
 });
 
+/**
+ * 模型用量分账（Issue #15 P2）。
+ *
+ * 旧后端可能不返回 `model_usage`（滚动发布窗口），此时整块不渲染，
+ * 而不是显示一排 0 让用户以为「本月没跑过任务」。
+ */
+const modelUsage = computed(() => usage.value?.model_usage ?? null);
+const modelTotalTokens = computed(() => modelUsage.value?.total.tokens ?? 0);
+const platformPercent = computed(() => {
+  const total = modelTotalTokens.value;
+  if (total <= 0) return 0;
+  return Math.round(((modelUsage.value?.platform.tokens ?? 0) / total) * 100);
+});
+const byokPercent = computed(() => {
+  const total = modelTotalTokens.value;
+  if (total <= 0) return 0;
+  return 100 - platformPercent.value;
+});
+
+function formatTokens(tokens: number): string {
+  return tokens.toLocaleString("zh-CN");
+}
+
 /** 分 → 元。免费档显示「免费」。 */
 function formatPrice(cents: number | undefined): string {
   if (!cents) return "免费";
@@ -336,6 +359,66 @@ onMounted(load);
         title="暂无套餐信息"
         description="请先登录后查看套餐。"
       />
+
+      <!-- 模型用量分账（Issue #15 P2）：平台模型 vs 自带模型 -->
+      <Card v-if="usage && modelUsage" data-test="plan-model-usage">
+        <CardHeader>
+          <CardTitle class="flex flex-wrap items-baseline justify-between gap-2 text-base">
+            <span>模型用量（本月）</span>
+            <span class="text-xs font-normal text-muted-foreground">
+              按任务创建时的模型来源统计 · {{ modelUsage.period_key }}
+            </span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent class="space-y-3">
+          <div class="grid gap-2 sm:grid-cols-2">
+            <div
+              data-test="model-usage-platform"
+              class="rounded-md border border-border px-2.5 py-2"
+            >
+              <p class="text-[11px] text-muted-foreground">平台模型</p>
+              <p class="mt-0.5 text-sm font-medium tabular-nums">
+                {{ formatTokens(modelUsage.platform.tokens) }} tokens
+                <span class="font-normal text-muted-foreground">
+                  · {{ modelUsage.platform.tasks }} 个任务
+                </span>
+              </p>
+            </div>
+            <div data-test="model-usage-byok" class="rounded-md border border-border px-2.5 py-2">
+              <p class="text-[11px] text-muted-foreground">我的模型</p>
+              <p class="mt-0.5 text-sm font-medium tabular-nums">
+                {{ formatTokens(modelUsage.byok.tokens) }} tokens
+                <span class="font-normal text-muted-foreground">
+                  · {{ modelUsage.byok.tasks }} 个任务
+                </span>
+              </p>
+            </div>
+          </div>
+
+          <div
+            v-if="modelTotalTokens > 0"
+            class="flex h-2 w-full overflow-hidden rounded-full bg-muted"
+            role="img"
+            :aria-label="`平台模型 ${platformPercent}%，自带模型 ${byokPercent}%`"
+          >
+            <div
+              data-test="model-usage-platform-bar"
+              class="h-full bg-primary"
+              :style="{ width: `${platformPercent}%` }"
+            />
+            <div
+              data-test="model-usage-byok-bar"
+              class="h-full bg-success"
+              :style="{ width: `${byokPercent}%` }"
+            />
+          </div>
+
+          <p class="text-xs text-muted-foreground">
+            合计 {{ formatTokens(modelTotalTokens) }} tokens / {{ modelUsage.total.tasks }}
+            个任务。自带模型的消耗不占平台 token 配额。
+          </p>
+        </CardContent>
+      </Card>
 
       <!-- 套餐对比区 -->
       <section ref="plansSection" class="space-y-3">

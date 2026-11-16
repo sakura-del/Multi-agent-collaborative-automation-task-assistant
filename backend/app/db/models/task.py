@@ -31,6 +31,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    false,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -67,6 +68,13 @@ class Task(Base):
         JSON,
         nullable=True,
         comment="创建时的模型快照（名称/厂商/模型）；凭据删除后仍可追溯",
+    )
+    is_byok: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default=false(),
+        nullable=False,
+        comment="是否使用用户自带模型（创建时写死，用于用量分账）",
     )
 
     title: Mapped[str] = mapped_column(String(256), nullable=False, comment="任务标题")

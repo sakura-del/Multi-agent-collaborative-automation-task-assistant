@@ -36,6 +36,26 @@ class PlanOut(BaseModel):
     description: str | None = None
 
 
+class ModelUsageBucket(BaseModel):
+    """一个模型来源的任务数与 token 数。"""
+
+    tasks: int = Field(default=0, description="本月任务数")
+    tokens: int = Field(default=0, description="本月消耗 token（含失败任务的真实消耗）")
+
+
+class ModelUsageOut(BaseModel):
+    """平台模型 / 自带模型的分账（Issue #15 P2）。
+
+    口径是**任务创建时**的 `is_byok`，不是当前凭据状态：
+    凭据删除后，历史 BYOK 任务仍算在 `byok` 里。
+    """
+
+    period_key: str = Field(description="用量周期 YYYY-MM（UTC）")
+    platform: ModelUsageBucket
+    byok: ModelUsageBucket
+    total: ModelUsageBucket
+
+
 class UsageOut(BaseModel):
     """我的用量 + **当前套餐权益**（2026-10-26 套餐页重设计扩充）。
 
@@ -70,6 +90,9 @@ class UsageOut(BaseModel):
     # ===== 订阅信息（与用量周期区分）=====
     period_end: datetime | None = Field(default=None, description="订阅到期时间；免费档为 null")
     seats_purchased: int | None = Field(default=None, description="已购席位数；免费档为 null")
+
+    # ===== 模型用量分账（Issue #15 P2）=====
+    model_usage: ModelUsageOut = Field(description="平台模型 / 自带模型的 token 与任务数")
 
 
 class SubscribeRequest(BaseModel):

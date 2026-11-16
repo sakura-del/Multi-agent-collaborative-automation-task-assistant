@@ -53,6 +53,7 @@ from app.db.models.billing import (
     UsageCounter,
     period_key_for,
 )
+from app.db.models.task import Task
 
 logger = get_logger(__name__)
 
@@ -369,6 +370,7 @@ class PlanService:
                 )
             )
             subscription = await self._active_subscription(session, user_id, now)
+            model_usage = await self._model_usage(session, user_id, period_key)
         used_count = int(used or 0)
         limit = plan.monthly_reviews
         remaining = None if limit == UNLIMITED_REVIEWS else max(0, limit - used_count)
@@ -390,6 +392,63 @@ class PlanService:
             "seats_purchased": (
                 int(subscription.seats_purchased) if subscription is not None else None
             ),
+            # ===== 模型用量分账（Issue #15 P2）=====
+            "model_usage": model_usage,
+        }
+
+    @staticmethod
+    def _period_bounds(period_key: str) -> tuple[datetime, datetime]:
+        """`YYYY-MM` → [月初, 下月初) 的 UTC 区间。"""
+        year, month = (int(part) for part in period_key.split("-", 1))
+        start = datetime(year, month, 1, tzinfo=UTC)
+        end = (
+            datetime(year + 1, 1, 1, tzinfo=UTC)
+            if month == 12
+            else datetime(year, month + 1, 1, tzinfo=UTC)
+        )
+        return start, end
+
+    async def _model_usage(
+        self, session: AsyncSession, user_id: uuid.UUID, period_key: str
+    ) -> dict[str, object]:
+        """按 `task.is_byok` 分组的 token / 任务数（当月，UTC）。
+
+        `is_byok` 是创建时写死的标记：凭据删除后历史任务仍算 BYOK，
+        不会被算成平台成本。
+        """
+        start, end = self._period_bounds(period_key)
+        rows = (
+            await session.execute(
+                select(
+                    Task.is_byok,
+                    func.count(Task.id),
+                    func.coalesce(func.sum(Task.used_tokens), 0),
+                )
+                .where(
+                    Task.user_id == user_id,
+                    Task.created_at >= start,
+                    Task.created_at < end,
+                )
+                .group_by(Task.is_byok)
+            )
+        ).all()
+
+        buckets = {
+            "platform": {"tasks": 0, "tokens": 0},
+            "byok": {"tasks": 0, "tokens": 0},
+        }
+        for is_byok, tasks, tokens in rows:
+            key = "byok" if is_byok else "platform"
+            buckets[key] = {"tasks": int(tasks or 0), "tokens": int(tokens or 0)}
+
+        return {
+            "period_key": period_key,
+            "platform": buckets["platform"],
+            "byok": buckets["byok"],
+            "total": {
+                "tasks": buckets["platform"]["tasks"] + buckets["byok"]["tasks"],
+                "tokens": buckets["platform"]["tokens"] + buckets["byok"]["tokens"],
+            },
         }
 
     async def check_and_consume_review(

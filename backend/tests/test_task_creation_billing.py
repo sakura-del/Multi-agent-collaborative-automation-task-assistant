@@ -315,6 +315,25 @@ class TestUsageEndpoint:
         assert body["period_end"] is not None
         assert body["seats_purchased"] == 1
 
+    def test_usage_exposes_model_split_over_http(self, api) -> None:
+        """HTTP 契约必须带 `model_usage`（Issue #15 P2 分账）。
+
+        服务层已测过计算口径，这里只锁「端点有没有把它带出去」：
+        `UsageOut` 漏字段时，前端分账卡会整块消失，而用户看不出原因。
+        """
+        user = _user(api, "u_split")
+        client = api.state.client
+
+        resp = client.get("/api/v1/billing/usage", headers=_headers(user))
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        split = body["model_usage"]
+        assert split["period_key"] == body["period_key"]
+        assert split["platform"] == {"tasks": 0, "tokens": 0}
+        assert split["byok"] == {"tasks": 0, "tokens": 0}
+        assert split["total"] == {"tasks": 0, "tokens": 0}
+
     def test_usage_period_end_is_null_for_free_plan(self, api) -> None:
         """免费档没有订阅行 → `period_end` / `seats_purchased` 必须是 null。
 
