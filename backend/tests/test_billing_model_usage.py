@@ -20,7 +20,9 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import csv
+import io
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -193,3 +195,135 @@ class TestTaskMark:
             await session.refresh(task)
 
         assert task.is_byok is False
+
+
+class TestUsageExport:
+    @pytest.mark.asyncio
+    async def test_export_includes_summary_and_rows(self, factory) -> None:
+        user = await _user(factory, "export_user")
+        now = datetime(2026, 11, 16, 12, 0, tzinfo=UTC)
+        await _task(factory, user.id, tokens=100, is_byok=False, created_at=now)
+        await _task(
+            factory,
+            user.id,
+            tokens=50,
+            is_byok=True,
+            credential_id=None,
+            snapshot={
+                "is_byok": True,
+                "provider": "deepseek",
+                "model": "deepseek-chat",
+                "name": "我的 DeepSeek",
+            },
+            created_at=now + timedelta(minutes=1),
+        )
+
+        data = await PlanService(factory).model_usage_export(user.id, period_key="2026-11")
+
+        assert data["period_key"] == "2026-11"
+        assert data["total"] == {"tasks": 2, "tokens": 150}
+        rows = data["rows"]
+        assert len(rows) == 2
+        assert rows[0]["is_byok"] is False
+        assert rows[0]["tokens"] == 100
+        assert rows[1]["is_byok"] is True
+        assert rows[1]["provider"] == "deepseek"
+        assert rows[1]["model"] == "deepseek-chat"
+        assert rows[1]["credential_name"] == "我的 DeepSeek"
+
+    @pytest.mark.asyncio
+    async def test_export_is_scoped_to_user_and_period(self, factory) -> None:
+        user = await _user(factory, "export_scope")
+        other = await _user(factory, "export_scope_other")
+        inside = datetime(2026, 11, 2, tzinfo=UTC)
+        outside = datetime(2026, 10, 31, 23, 59, tzinfo=UTC)
+        await _task(factory, user.id, tokens=10, is_byok=False, created_at=inside)
+        await _task(factory, user.id, tokens=20, is_byok=False, created_at=outside)
+        await _task(factory, other.id, tokens=30, is_byok=True, created_at=inside)
+
+        data = await PlanService(factory).model_usage_export(user.id, period_key="2026-11")
+
+        assert data["total"] == {"tasks": 1, "tokens": 10}
+        assert len(data["rows"]) == 1
+
+
+class TestCsv:
+    def _summary(self) -> dict:
+        return {
+            "platform": {"tasks": 1, "tokens": 100},
+            "byok": {"tasks": 1, "tokens": 50},
+            "total": {"tasks": 2, "tokens": 150},
+        }
+
+    def test_csv_has_bom_headers_summary_and_detail(self) -> None:
+        from app.billing.export import build_usage_csv
+
+        rows = [
+            {
+                "task_id": "t1",
+                "created_at": datetime(2026, 11, 1, tzinfo=UTC),
+                "title": "综述 A",
+                "status": "completed",
+                "is_byok": False,
+                "provider": "",
+                "model": "",
+                "credential_name": "",
+                "tokens": 100,
+            },
+            {
+                "task_id": "t2",
+                "created_at": datetime(2026, 11, 2, tzinfo=UTC),
+                "title": "综述 B",
+                "status": "failed",
+                "is_byok": True,
+                "provider": "deepseek",
+                "model": "deepseek-chat",
+                "credential_name": "我的 DeepSeek",
+                "tokens": 50,
+            },
+        ]
+
+        text = build_usage_csv("2026-11", self._summary(), rows)
+
+        assert text.startswith("\ufeff")
+        parsed = list(csv.reader(io.StringIO(text.lstrip("\ufeff"))))
+        assert parsed[0][:5] == ["类型", "周期", "模型来源", "任务数", "Token数"]
+        assert parsed[1][:5] == ["汇总", "2026-11", "平台模型", "1", "100"]
+        assert parsed[2][:5] == ["汇总", "2026-11", "自带模型", "1", "50"]
+        assert parsed[3][:5] == ["汇总", "2026-11", "合计", "2", "150"]
+        assert parsed[4][0] == "明细"
+        assert parsed[4][2] == "平台模型"
+        assert parsed[4][7] == "综述 A"
+        assert parsed[5][9:12] == ["deepseek", "deepseek-chat", "我的 DeepSeek"]
+
+    def test_csv_formula_injection_is_neutralized(self) -> None:
+        from app.billing.export import build_usage_csv
+
+        rows = [
+            {
+                "task_id": "t1",
+                "created_at": datetime(2026, 11, 1, tzinfo=UTC),
+                "title": "=cmd|' /C calc'!A0",
+                "status": "completed",
+                "is_byok": False,
+                "provider": '=HYPERLINK("http://evil")',
+                "model": "@SUM(1+1)",
+                "credential_name": "+1",
+                "tokens": 1,
+            }
+        ]
+
+        text = build_usage_csv("2026-11", self._summary(), rows)
+        parsed = list(csv.reader(io.StringIO(text.lstrip("\ufeff"))))
+        detail = parsed[4]
+
+        assert detail[7].startswith("'=")
+        assert detail[9].startswith("'=")
+        assert detail[10].startswith("'@")
+        assert detail[11].startswith("'+")
+
+    def test_safe_cell_leaves_normal_text(self) -> None:
+        from app.billing.export import safe_cell
+
+        assert safe_cell("综述 A") == "综述 A"
+        assert safe_cell(None) == ""

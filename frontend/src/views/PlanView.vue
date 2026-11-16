@@ -31,12 +31,13 @@
  * 前端会静默显示旧值。这些字段后端 `Plan` 表本来就有，只是之前没返回。
  */
 import { computed, onMounted, ref } from "vue";
-import { ArrowUpRight, Check, Loader2, X } from "lucide-vue-next";
+import { ArrowUpRight, Check, Download, Loader2, X } from "lucide-vue-next";
 import PageHeader from "@/components/common/PageHeader.vue";
 
-import { getBillingUsage, listBillingPlans } from "@/api/billing";
+import { exportBillingUsageCsv, getBillingUsage, listBillingPlans } from "@/api/billing";
 import type { BillingPlan, BillingUsage } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import EmptyState from "@/components/common/EmptyState.vue";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
@@ -45,6 +46,8 @@ const usage = ref<BillingUsage | null>(null);
 const plans = ref<BillingPlan[]>([]);
 const loading = ref(true);
 const error = ref("");
+/** 导出进行中（防重复点击）。 */
+const exporting = ref(false);
 /** 套餐对比区的锚点：升级引导按钮滚到这里。 */
 const plansSection = ref<HTMLElement | null>(null);
 
@@ -152,6 +155,34 @@ const byokPercent = computed(() => {
 
 function formatTokens(tokens: number): string {
   return tokens.toLocaleString("zh-CN");
+}
+
+/**
+ * 下载本月账单 CSV。
+ *
+ * 必须走 `fetch → blob → a[download]`：端点要 `Authorization` 头，
+ * 直接 `<a href>` 带不上，只会拿到 401。
+ */
+async function exportUsage() {
+  const current = modelUsage.value;
+  if (!current || exporting.value) {
+    return;
+  }
+  exporting.value = true;
+  error.value = "";
+  try {
+    const blob = await exportBillingUsageCsv(current.period_key);
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `veripaper-usage-${current.period_key}.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    error.value = (err as Error).message || "导出失败";
+  } finally {
+    exporting.value = false;
+  }
 }
 
 /** 分 → 元。免费档显示「免费」。 */
@@ -365,9 +396,21 @@ onMounted(load);
         <CardHeader>
           <CardTitle class="flex flex-wrap items-baseline justify-between gap-2 text-base">
             <span>模型用量（本月）</span>
-            <span class="text-xs font-normal text-muted-foreground">
-              按任务创建时的模型来源统计 · {{ modelUsage.period_key }}
-            </span>
+            <div class="ml-auto flex flex-wrap items-center gap-2">
+              <span class="text-xs font-normal text-muted-foreground">
+                按任务创建时的模型来源统计 · {{ modelUsage.period_key }}
+              </span>
+              <Button
+                variant="secondary"
+                size="sm"
+                :disabled="exporting"
+                data-test="export-usage-csv"
+                @click="exportUsage"
+              >
+                <Download />
+                {{ exporting ? "导出中…" : "导出 CSV" }}
+              </Button>
+            </div>
           </CardTitle>
         </CardHeader>
         <CardContent class="space-y-3">

@@ -1,10 +1,11 @@
 """计费端点（Phase 2 · 计费套餐 Task 5）。
 
-## 三个端点
+## 四个端点
 
 | 方法 | 路径 | 鉴权 | 说明 |
 | --- | --- | --- | --- |
-| `GET` | `/billing/usage` | 双通道 | 我的当前套餐与本月用量 |
+| `GET` | `/billing/usage` | 双通道 | 我的当前套餐与本月用量（含平台/自带模型分账） |
+| `GET` | `/billing/usage/export` | 双通道 | 导出指定月份账单 CSV（汇总 + 明细） |
 | `GET` | `/billing/plans` | **公开** | 套餐列表（定价页要用） |
 | `POST` | `/billing/subscribe` | **admin only** | 手工开通/变更套餐 |
 
@@ -25,10 +26,11 @@ from __future__ import annotations
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_admin_user, get_current_user_or_api_key
+from app.billing.export import build_usage_csv
 from app.billing.services.plan_service import DEFAULT_PERIOD_DAYS, PlanService
 from app.db.models.user import User
 from app.db.session import get_db
@@ -63,6 +65,50 @@ async def get_usage(current_user: ApiUserDep, db: DbDep) -> UsageOut:
     service = _service(db)
     usage = await service.get_usage(current_user.id)
     return UsageOut(**usage)  # type: ignore[arg-type]
+
+
+@router.get("/usage/export", summary="导出模型用量账单（CSV）")
+async def export_usage(
+    current_user: ApiUserDep,
+    db: DbDep,
+    period: Annotated[str | None, Query(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")] = None,
+) -> Response:
+    """导出指定月份（默认本月）的用量账单。
+
+    ## 为什么是 CSV 而不是 Excel
+
+    不引入 openpyxl 之类的重依赖；CSV 带 BOM，中文 Excel 直接双击不乱码，
+    也方便财务/脚本二次处理。
+
+    ## 为什么同时有汇总和明细
+
+    用户看汇总，对账看明细。两者放在同一文件里用「类型」列区分，
+    避免两个文件数字对不上。
+
+    ## 鉴权
+
+    与 `/usage` 一致走双通道（JWT / 开放 API Key），但只导出**当前用户**
+    自己的任务；管理员也不能借这个端点读别人的账单。
+    """
+    service = _service(db)
+    data = await service.model_usage_export(current_user.id, period_key=period)
+    period_key = str(data["period_key"])
+    summary = {
+        "platform": data["platform"],
+        "byok": data["byok"],
+        "total": data["total"],
+    }
+    body = build_usage_csv(period_key, summary, data["rows"])  # type: ignore[arg-type]
+    return Response(
+        content=body,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="veripaper-usage-{period_key}.csv"',
+            "X-Content-Type-Options": "nosniff",
+            # CSV 含用户数据，禁止任何中间层缓存
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 @router.get("/plans", response_model=list[PlanOut], summary="套餐列表（公开）")

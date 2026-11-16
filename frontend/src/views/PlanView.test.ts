@@ -6,9 +6,10 @@ import PlanView from "@/views/PlanView.vue";
 vi.mock("@/api/billing", () => ({
   getBillingUsage: vi.fn(),
   listBillingPlans: vi.fn(),
+  exportBillingUsageCsv: vi.fn(),
 }));
 
-import { getBillingUsage, listBillingPlans } from "@/api/billing";
+import { exportBillingUsageCsv, getBillingUsage, listBillingPlans } from "@/api/billing";
 
 function usage(overrides: Record<string, unknown> = {}) {
   return {
@@ -94,6 +95,7 @@ function mountView() {
 beforeEach(() => {
   vi.mocked(getBillingUsage).mockReset();
   vi.mocked(listBillingPlans).mockReset();
+  vi.mocked(exportBillingUsageCsv).mockReset();
 });
 
 describe("PlanView", () => {
@@ -497,5 +499,36 @@ describe("PlanView 重设计（2026-10-26）", () => {
     await flushPromises();
 
     expect(wrapper.find('[data-test="plan-model-usage"]').exists()).toBe(false);
+  });
+
+  it("导出账单：按当前周期请求 CSV 并触发浏览器下载", async () => {
+    vi.mocked(getBillingUsage).mockResolvedValue(usage() as never);
+    vi.mocked(listBillingPlans).mockResolvedValue(PLANS as never);
+    vi.mocked(exportBillingUsageCsv).mockResolvedValue(
+      new Blob(["类型,周期"], { type: "text/csv" }) as never,
+    );
+    const createObjectURL = vi.fn(() => "blob:mock");
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: createObjectURL,
+    });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      value: revokeObjectURL,
+    });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.get('[data-test="export-usage-csv"]').trigger("click");
+    await flushPromises();
+
+    expect(exportBillingUsageCsv).toHaveBeenCalledWith("2026-10");
+    expect(createObjectURL).toHaveBeenCalled();
+    expect(click).toHaveBeenCalled();
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:mock");
+
+    click.mockRestore();
   });
 });

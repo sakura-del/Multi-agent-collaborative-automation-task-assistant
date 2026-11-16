@@ -451,6 +451,70 @@ class PlanService:
             },
         }
 
+    async def model_usage_export(
+        self, user_id: uuid.UUID, *, period_key: str | None = None
+    ) -> dict[str, object]:
+        """账单导出：汇总 + 逐任务明细（当月，UTC 自然月）。
+
+        汇总由明细行现算，**不另跑一次聚合查询**：两套口径迟早会漂移，
+        导出文件里的合计必须等于明细之和。
+        """
+        key = period_key or period_key_for(datetime.now(UTC))
+        start, end = self._period_bounds(key)
+
+        async with self._session_factory() as session:
+            tasks = (
+                (
+                    await session.execute(
+                        select(Task)
+                        .where(
+                            Task.user_id == user_id,
+                            Task.created_at >= start,
+                            Task.created_at < end,
+                        )
+                        .order_by(Task.created_at.asc(), Task.id.asc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
+
+        buckets = {
+            "platform": {"tasks": 0, "tokens": 0},
+            "byok": {"tasks": 0, "tokens": 0},
+        }
+        rows: list[dict[str, object]] = []
+        for task in tasks:
+            snapshot = task.model_snapshot if isinstance(task.model_snapshot, dict) else {}
+            source = "byok" if task.is_byok else "platform"
+            tokens = int(task.used_tokens or 0)
+            buckets[source]["tasks"] += 1
+            buckets[source]["tokens"] += tokens
+            rows.append(
+                {
+                    "task_id": str(task.id),
+                    "created_at": task.created_at,
+                    "title": task.title,
+                    "status": task.status,
+                    "is_byok": bool(task.is_byok),
+                    "provider": str(snapshot.get("provider") or ""),
+                    "model": str(snapshot.get("model") or ""),
+                    "credential_name": str(snapshot.get("name") or ""),
+                    "tokens": tokens,
+                }
+            )
+
+        return {
+            "period_key": key,
+            "platform": buckets["platform"],
+            "byok": buckets["byok"],
+            "total": {
+                "tasks": buckets["platform"]["tasks"] + buckets["byok"]["tasks"],
+                "tokens": buckets["platform"]["tokens"] + buckets["byok"]["tokens"],
+            },
+            "rows": rows,
+        }
+
     async def check_and_consume_review(
         self, user_id: uuid.UUID, *, moment: datetime | None = None
     ) -> None:

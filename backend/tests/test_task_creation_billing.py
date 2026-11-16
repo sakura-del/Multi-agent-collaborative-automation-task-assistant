@@ -41,6 +41,7 @@ from app.core.quota import QuotaService
 from app.core.security import create_access_token
 from app.db.base import Base
 from app.db.models.billing import SEED_PLANS, Plan
+from app.db.models.task import Task
 from app.db.models.user import User
 from app.db.session import get_db
 
@@ -166,6 +167,28 @@ def _payload(suffix: str = "") -> dict[str, Any]:
         "keywords": ["billing"],
         "max_documents": 2,
     }
+
+
+def _insert_task(api, user: User, *, tokens: int = 42, title: str = "导出任务") -> None:
+    """直接落一条任务：`_FakeExecution` 不写库，导出用例需要真实行。"""
+
+    async def _run() -> None:
+        async with api.state.factory() as session:
+            session.add(
+                Task(
+                    user_id=user.id,
+                    title=title,
+                    description="d",
+                    task_type="literature_review",
+                    status="completed",
+                    config={},
+                    used_tokens=tokens,
+                    quota_settled=True,
+                )
+            )
+            await session.commit()
+
+    asyncio.run(_run())
 
 
 def _subscribe(api, user: User, plan_id: str) -> None:
@@ -333,6 +356,32 @@ class TestUsageEndpoint:
         assert split["platform"] == {"tasks": 0, "tokens": 0}
         assert split["byok"] == {"tasks": 0, "tokens": 0}
         assert split["total"] == {"tasks": 0, "tokens": 0}
+
+    def test_usage_export_returns_csv(self, api) -> None:
+        """账单导出：CSV + BOM + 附件文件名 + 汇总/明细都在。"""
+        user = _user(api, "u_export")
+        _insert_task(api, user, tokens=42, title="计费套餐测试 export")
+        client = api.state.client
+
+        resp = client.get("/api/v1/billing/usage/export", headers=_headers(user))
+
+        assert resp.status_code == 200, resp.text
+        assert resp.headers["content-type"].startswith("text/csv")
+        assert "attachment" in resp.headers["content-disposition"]
+        body = resp.content.decode("utf-8-sig")
+        assert body.startswith("类型,周期,模型来源,任务数,Token数")
+        assert "汇总,2026-" in body
+        assert "明细,2026-" in body
+        assert "计费套餐测试 export" in body
+        assert ",42," in body
+
+    def test_usage_export_rejects_bad_period(self, api) -> None:
+        user = _user(api, "u_export_bad")
+        client = api.state.client
+
+        resp = client.get("/api/v1/billing/usage/export?period=2026-13", headers=_headers(user))
+
+        assert resp.status_code == 422, resp.text
 
     def test_usage_period_end_is_null_for_free_plan(self, api) -> None:
         """免费档没有订阅行 → `period_end` / `seats_purchased` 必须是 null。

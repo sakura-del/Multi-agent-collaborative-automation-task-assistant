@@ -23,6 +23,20 @@ export async function listBillingPlans(): Promise<BillingPlan[]> {
   return response.data;
 }
 
+/**
+ * 导出某月用量账单（CSV，含汇总与逐任务明细）。
+ *
+ * 用 blob 而不是 `<a href>`：端点需要 `Authorization` 头，直接跳转带不上。
+ * 后端返回 UTF-8 BOM，中文 Excel 双击不乱码。
+ */
+export async function exportBillingUsageCsv(period: string): Promise<Blob> {
+  const response = await api.get("/billing/usage/export", {
+    params: { period },
+    responseType: "blob",
+  });
+  return response.data as Blob;
+}
+
 /** 手工开通/变更套餐（**仅管理员**）。 */
 export async function subscribePlan(payload: {
   user_id: string;
