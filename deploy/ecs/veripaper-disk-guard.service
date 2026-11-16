@@ -6,6 +6,7 @@ Requires=docker.service
 
 [Service]
 Type=oneshot
-ExecStart=/opt/veripaper/deploy/ecs/disk-guard.sh
+# 用 bash 显式调用：git 检出后文件权限是 644，直接 ExecStart 会 203/EXEC
+ExecStart=/bin/bash /opt/veripaper/deploy/ecs/disk-guard.sh
 Nice=10
 IOSchedulingClass=idle
