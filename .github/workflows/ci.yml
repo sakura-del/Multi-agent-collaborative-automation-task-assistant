@@ -286,6 +286,90 @@ jobs:
           push: false
           tags: maa-smoke:ci
 
+  # 浏览器级验收（Issue #15 P1）：页面打的是**真实后端**，不是 mock。
+  #
+  # 为什么单独起栈而不复用 smoke 作业：
+  # smoke 脚本退出时会 `down --volumes`，跨作业共享容器不可靠；这里用
+  # project=maa-e2e + 冒烟 override（高位端口 48082）自建自拆，失败不污染生产。
+  #
+  # 账号：CI 里现注册一个随机用户（注册即用，登录不要求邮箱已验证）。
+  # 只跑 model-settings.spec.ts：其余 E2E 依赖生产数据/固定账号，不适合 CI。
+  e2e:
+    name: E2E (Playwright)
+    runs-on: ubuntu-latest
+    needs: [changes]
+    # 后端或前端任一有改动都跑：页面操作会穿透到真实 API
+    if: needs.changes.outputs.frontend == 'true' || needs.changes.outputs.mode != 'none'
+    timeout-minutes: 40  # 含一次全栈构建；实测待补
+    env:
+      JWT_SECRET_KEY: ci-e2e-secret-not-for-production
+      # 测试专用固定值（32 字节，公开在仓库里也无所谓）：BYOK 凭据加密主密钥。
+      # 不配的话 /llm-credentials 返回 503，E2E 会以「功能未启用」失败。
+      SECRETS__ENCRYPTION_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+      POSTGRES_PASSWORD: e2e_secret_pwd
+      PIP_INDEX_URL: https://pypi.org/simple
+      E2E_BASE_URL: http://127.0.0.1:48082
+      E2E_DEMO_PASSWORD: e2e-password-2026
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start isolated stack (project=maa-e2e)
+        run: |
+          docker compose -p maa-e2e -f docker-compose.yml -f docker-compose.smoke.yml \
+            up -d --build
+
+      - name: Wait for readiness
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS "$E2E_BASE_URL/api/v1/health/ready"; then
+              echo
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "栈在 5 分钟内未就绪" >&2
+          exit 1
+
+      - name: Register throwaway account
+        run: |
+          ACCOUNT="e2e$(date +%s)"
+          curl -fsS -X POST "$E2E_BASE_URL/api/v1/auth/register" \
+            -H 'Content-Type: application/json' \
+            -d "{\"username\":\"$ACCOUNT\",\"email\":\"$ACCOUNT@example.com\",\"password\":\"$E2E_DEMO_PASSWORD\"}" \
+            > /dev/null
+          echo "E2E_DEMO_ACCOUNT=$ACCOUNT" >> "$GITHUB_ENV"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run model settings E2E
+        working-directory: frontend
+        run: npx playwright test e2e/model-settings.spec.ts --project=chromium
+
+      - name: Dump service logs on failure
+        if: failure()
+        run: |
+          docker compose -p maa-e2e -f docker-compose.yml -f docker-compose.smoke.yml \
+            logs --tail 150 backend nginx || true
+
+      - name: Tear down stack
+        if: always()
+        run: |
+          docker compose -p maa-e2e -f docker-compose.yml -f docker-compose.smoke.yml \
+            down --volumes --remove-orphans || true
+
   smoke:
     name: Compose Release Smoke
     runs-on: ubuntu-latest
@@ -310,7 +394,7 @@ jobs:
   ci-summary:
     name: CI Summary
     runs-on: ubuntu-latest
-    needs: [changes, lint, test, migration, frontend, build-check, smoke]
+    needs: [changes, lint, test, migration, frontend, build-check, smoke, e2e]
     if: always()
     timeout-minutes: 5
     steps:
@@ -325,7 +409,8 @@ jobs:
             "migration=${{ needs.migration.result }}" \
             "frontend=${{ needs.frontend.result }}" \
             "build-check=${{ needs.build-check.result }}" \
-            "smoke=${{ needs.smoke.result }}"; do
+            "smoke=${{ needs.smoke.result }}" \
+            "e2e=${{ needs.e2e.result }}"; do
             name="${item%%=*}"; result="${item#*=}"
             echo "$name: $result"
             case "$result" in

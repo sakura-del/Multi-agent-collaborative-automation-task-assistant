@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import time
 from collections import OrderedDict
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 from urllib.parse import urlsplit
 from uuid import UUID
@@ -102,23 +102,36 @@ class BYOKClient:
     def is_byok(self) -> bool:
         return True
 
+    async def _notify_auth_failure(self, exc: Exception) -> None:
+        """累计一次鉴权失败；记账自身出错不能掩盖原始错误。"""
+        if self._on_auth_failure is None:
+            return
+        try:
+            await self._on_auth_failure(f"{type(exc).__name__}: {exc}"[:500])
+        except Exception:  # pragma: no cover - 记账失败不影响主流程
+            logger.warning("byok_failure_record_failed", credential_id=str(self.credential_id))
+
     async def chat(self, messages: Any, **kwargs: Any) -> Any:
         try:
             return await self._llm.chat(messages, **kwargs)
         except (AuthenticationError, PermissionDeniedError) as exc:
             # 401/403 才计数：超时/5xx 是上游抖动，不该把凭据打成无效。
-            # 计数失败不能掩盖原始错误 —— 用户首先要看到的是「key 被拒」。
-            if self._on_auth_failure is not None:
-                try:
-                    await self._on_auth_failure(f"{type(exc).__name__}: {exc}"[:500])
-                except Exception:  # pragma: no cover - 记账失败不影响主流程
-                    logger.warning(
-                        "byok_failure_record_failed", credential_id=str(self.credential_id)
-                    )
+            await self._notify_auth_failure(exc)
             raise
 
-    def stream_chat(self, messages: Any, **kwargs: Any) -> Any:
-        return self._llm.stream_chat(messages, **kwargs)
+    async def stream_chat(self, messages: Any, **kwargs: Any) -> AsyncIterator[str]:
+        """流式调用同样累计鉴权失败。
+
+        `stream_chat` 是异步生成器：厂商 401 在**迭代时**才抛，直接透传会让
+        计数路径完全失效（任务走流式时凭据永远不会被自动停用）。这里包一层
+        `async for`，只在鉴权错误上记账，其余异常原样抛出。
+        """
+        try:
+            async for chunk in self._llm.stream_chat(messages, **kwargs):
+                yield chunk
+        except (AuthenticationError, PermissionDeniedError) as exc:
+            await self._notify_auth_failure(exc)
+            raise
 
     def __repr__(self) -> str:
         return f"<BYOKClient provider={self.provider} model={self.model}>"

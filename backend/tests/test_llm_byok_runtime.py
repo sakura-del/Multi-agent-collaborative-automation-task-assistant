@@ -17,11 +17,12 @@ from __future__ import annotations
 import json
 import threading
 import uuid
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
+import httpx
 import pytest
 from openai import AuthenticationError
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -30,7 +31,7 @@ from app.core import config
 from app.core.exceptions import ForbiddenException, NotFoundException, ValidationException
 from app.db.models.llm_credential import LLMCredential
 from app.db.models.user import User
-from app.llm.byok import CredentialLLMResolver
+from app.llm.byok import BYOKClient, CredentialLLMResolver
 from app.llm.models import Message, MessageRole
 from app.llm.scope import get_scoped_llm, use_llm_client
 from app.orchestration.runtime import RuntimeContainer
@@ -391,3 +392,106 @@ class TestScope:
             container.create_planner()
 
         assert captured["llm"] is scoped
+
+
+def _auth_error() -> AuthenticationError:
+    """构造真实的 openai 401 异常（不是 mock 类名）。"""
+    request = httpx.Request("POST", "https://vendor.test/v1/chat/completions")
+    response = httpx.Response(401, request=request)
+    return AuthenticationError("invalid api key", response=response, body=None)
+
+
+class _StubStreamLLM:
+    """只实现 stream_chat 的替身：用于验证包装层的异常路径。"""
+
+    def __init__(self, *, error: Exception | None = None, chunks: list[str] | None = None):
+        self._error = error
+        self._chunks = chunks or []
+
+    async def stream_chat(self, messages: Any, **kwargs: Any) -> AsyncIterator[str]:
+        if self._error is not None:
+            raise self._error
+        for chunk in self._chunks:
+            yield chunk
+
+
+class TestStreamAuthFailure:
+    """流式调用也要累计鉴权失败（Issue #15 P1 缺口）。
+
+    `stream_chat` 是异步生成器：异常在**迭代时**才抛，包一层 `async for`
+    才能捕获。否则任务走流式撞 401 时不计数，凭据永远不会被自动停用。
+    """
+
+    def _client(self, stub: Any, recorder: list[str]) -> BYOKClient:
+        async def record(error: str) -> None:
+            recorder.append(error)
+
+        return BYOKClient(
+            credential_id=uuid.uuid4(),
+            provider="custom",
+            model="stub-model",
+            base_url="https://vendor.test/v1",
+            llm=stub,
+            on_auth_failure=record,
+        )
+
+    async def test_stream_auth_error_is_counted_and_reraised(self) -> None:
+        recorder: list[str] = []
+        client = self._client(_StubStreamLLM(error=_auth_error()), recorder)
+
+        with pytest.raises(AuthenticationError):
+            async for _ in client.stream_chat(
+                [Message(role=MessageRole.USER, content="hi")]
+            ):
+                pass
+
+        assert len(recorder) == 1
+        assert recorder[0].startswith("AuthenticationError")
+
+    async def test_stream_success_passes_chunks_without_counting(self) -> None:
+        recorder: list[str] = []
+        client = self._client(_StubStreamLLM(chunks=["a", "b"]), recorder)
+
+        chunks = [
+            chunk
+            async for chunk in client.stream_chat(
+                [Message(role=MessageRole.USER, content="hi")]
+            )
+        ]
+
+        assert chunks == ["a", "b"]
+        assert recorder == []
+
+    async def test_stream_non_auth_error_is_not_counted(self) -> None:
+        """超时/5xx 等上游抖动不该把好 key 打成无效。"""
+        recorder: list[str] = []
+        client = self._client(_StubStreamLLM(error=RuntimeError("upstream 502")), recorder)
+
+        with pytest.raises(RuntimeError):
+            async for _ in client.stream_chat(
+                [Message(role=MessageRole.USER, content="hi")]
+            ):
+                pass
+
+        assert recorder == []
+
+    async def test_stream_counting_failure_does_not_mask_original_error(self) -> None:
+        """记账失败（数据库抖了）不能让用户看到「记账错误」而不是「key 被拒」。"""
+
+        async def broken(error: str) -> None:
+            raise RuntimeError("db down")
+
+        client = BYOKClient(
+            credential_id=uuid.uuid4(),
+            provider="custom",
+            model="stub-model",
+            base_url="https://vendor.test/v1",
+            llm=_StubStreamLLM(error=_auth_error()),
+            on_auth_failure=broken,
+        )
+
+        with pytest.raises(AuthenticationError):
+            async for _ in client.stream_chat(
+                [Message(role=MessageRole.USER, content="hi")]
+            ):
+                pass
