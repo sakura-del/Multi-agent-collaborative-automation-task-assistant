@@ -309,7 +309,7 @@ jobs:
       POSTGRES_PASSWORD: e2e_secret_pwd
       PIP_INDEX_URL: https://pypi.org/simple
       E2E_BASE_URL: http://127.0.0.1:48082
-      E2E_DEMO_PASSWORD: e2e-password-2026
+      E2E_DEMO_PASSWORD: ci-e2e-pass-7QmZ
     steps:
       - uses: actions/checkout@v4
 
