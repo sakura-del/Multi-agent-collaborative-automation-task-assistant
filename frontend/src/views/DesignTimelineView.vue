@@ -138,7 +138,7 @@ function onSelect(id: string) {
           </p>
           <h1 class="font-display text-3xl font-medium tracking-[-0.035em]">研究时间线</h1>
           <p class="mt-2 max-w-xl text-sm text-muted-foreground">
-            新配色（纸墨 + 钴蓝）、beUI 时间线与新表面的设计演示。拖拽、滚轮或方向键浏览；
+            新配色（纯白 + 钴蓝）、beUI 时间线与新表面的设计演示。拖拽、滚轮或方向键浏览；
             生产页面暂未改动。
           </p>
         </div>
@@ -246,12 +246,11 @@ function onSelect(id: string) {
       </section>
 
       <section class="mt-8">
-        <p class="mb-2 text-xs text-muted-foreground">配色（候选 A：纸墨 + 钴蓝）</p>
+        <p class="mb-2 text-xs text-muted-foreground">配色（候选 A：纯白 + 钴蓝，卡片靠发丝边框分层）</p>
         <div class="flex flex-wrap gap-2">
           <div
             v-for="swatch in [
-              { name: '纸底', value: '#F7F6F3' },
-              { name: '卡片', value: '#FFFFFF' },
+              { name: '底色', value: '#FFFFFF' },
               { name: '墨色', value: '#17181A' },
               { name: '强调', value: '#2F5BFF' },
               { name: '浅强调', value: '#E9EEFF' },
@@ -276,11 +275,11 @@ function onSelect(id: string) {
 <style scoped>
 /* 演示页专属 token 覆盖：确认后迁移到全局 main.css */
 .design-demo {
-  --background: #f7f6f3;
+  --background: #ffffff;
   --foreground: #17181a;
   --card: #ffffff;
   --card-foreground: #17181a;
-  --muted: #efedea;
+  --muted: #f5f5f6;
   --muted-foreground: #5f6066;
   --border: rgba(23, 24, 26, 0.12);
   --border-strong: rgba(23, 24, 26, 0.18);
