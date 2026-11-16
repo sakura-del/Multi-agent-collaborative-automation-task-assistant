@@ -11,36 +11,25 @@
  * - 吸附 spring stiffness=120 / damping=24 / mass=1；
  * - ←/→、Home/End、aria-current、focus ring、reduced-motion 降级。
  *
- * 卡片内容通过 `media` / `meta` slot 注入，业务方不需要了解 MotionValue。
+ * 卡片/线缆/刻度/年份各自是子组件：每张卡在自己的 setup 里创建
+ * `useTransform`，事件列表动态变化（详情页 WS 事件流）时无需重建。
+ * 卡片内容通过 `media` / `meta` slot 注入。
  */
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { animate, Motion,
-  useMotionValue,
-  useReducedMotion,
-  useTransform,
-} from "motion-v";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { animate, useMotionValue, useReducedMotion } from "motion-v";
 
+import BeTimelineCard from "./BeTimelineCard.vue";
+import BeTimelineCables from "./BeTimelineCables.vue";
+import BeTimelineTicks from "./BeTimelineTicks.vue";
+import BeTimelineYear from "./BeTimelineYear.vue";
 import {
-  CABLE_FADE,
-  CABLE_HOLD,
-  CABLE_REACH,
   CARD_CENTER,
-  clamp,
-  FLICK_MOMENTUM,
-  GAP_TICKS,
-  GAP_TICK_SPAN,
-  MAX_FLICK_EVENTS,
   DRAG_THRESHOLD,
-  RUBBER_BAND,
-  SIDE_DIM,
-  SIDE_SCALE,
-  TICK_SHORT,
-  TICK_TALL,
-  YEAR_INSET,
-  YEAR_PARALLAX,
-  cardScale,
-  cardX,
+  FLICK_MOMENTUM,
   GLIDE_SPRING,
+  MAX_FLICK_EVENTS,
+  RUBBER_BAND,
+  clamp,
   type TimelineGeometry,
 } from "./timeline-geometry";
 
@@ -49,7 +38,6 @@ export interface BeTimelineEvent {
   date: string | Date;
   title: string;
 }
-
 
 const props = withDefaults(
   defineProps<{
@@ -60,6 +48,8 @@ const props = withDefaults(
     ruler?: boolean;
     cables?: boolean;
     ariaLabel?: string;
+    /** 初始聚焦第几张卡（详情页默认聚焦最新一条）。 */
+    initialIndex?: number;
     formatDate?: (date: Date) => string;
   }>(),
   {
@@ -69,6 +59,7 @@ const props = withDefaults(
     ruler: true,
     cables: true,
     ariaLabel: "Timeline",
+    initialIndex: 0,
     formatDate: (date: Date) =>
       `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
         date.getDate(),
@@ -80,17 +71,22 @@ const emit = defineEmits<{
   (event: "change", id: string): void;
 }>();
 
+defineSlots<{
+  media?: (props: { event: BeTimelineEvent; active: boolean }) => unknown;
+  meta?: (props: { event: BeTimelineEvent; active: boolean }) => unknown;
+}>();
+
 const stageRef = ref<HTMLElement | null>(null);
 const stageWidth = ref(1024);
-const activeIndex = ref(0);
-const scroll = useMotionValue(0);
+const activeIndex = ref(clamp(props.initialIndex, 0, Math.max(0, props.events.length - 1)));
+const scroll = useMotionValue(activeIndex.value);
 const reducedMotion = useReducedMotion();
 
 const geometry = ref<TimelineGeometry>({
-  cardWidth: 340,
-  gap: 72,
-  step: 340 * SIDE_SCALE + 72,
-  near: (340 * (1 + SIDE_SCALE)) / 2 + 72,
+  cardWidth: props.itemWidth,
+  gap: clamp(props.itemWidth * 0.22, 40, 72),
+  step: props.itemWidth * 0.72 + clamp(props.itemWidth * 0.22, 40, 72),
+  near: (props.itemWidth * (1 + 0.72)) / 2 + clamp(props.itemWidth * 0.22, 40, 72),
   halfWidth: 512,
 });
 
@@ -100,40 +96,13 @@ function updateGeometry(width: number) {
   geometry.value = {
     cardWidth,
     gap,
-    step: cardWidth * SIDE_SCALE + gap,
-    near: (cardWidth * (1 + SIDE_SCALE)) / 2 + gap,
+    step: cardWidth * 0.72 + gap,
+    near: (cardWidth * (1 + 0.72)) / 2 + gap,
     halfWidth: width / 2,
   };
 }
 
-// 演示与业务页都是「给定一批事件」；事件数组在组件生命周期内保持稳定。
-const cards = props.events.map((event, index) => {
-  const offset = useTransform(scroll, (s) => index - s);
-  const x = useTransform(offset, (o) => cardX(o, geometry.value));
-  const scale = useTransform(offset, cardScale);
-  const zIndex = useTransform(offset, (o) => 100 - Math.round(Math.abs(o) * 10));
-  const veilOpacity = useTransform(offset, (o) => SIDE_DIM * Math.min(Math.abs(o), 1));
-  return { event, index, offset, x, scale, zIndex, veilOpacity };
-});
-
-const cableLines = props.events.map((event, index) => {
-  const offset = useTransform(scroll, (s) => index - s);
-  const reach = (o: number) => (geometry.value.cardWidth / 2) * cardScale(o) * CABLE_REACH;
-  const left = useTransform(
-    offset,
-    (o) => geometry.value.halfWidth + cardX(o, geometry.value) - reach(o),
-  );
-  const right = useTransform(
-    offset,
-    (o) => geometry.value.halfWidth + cardX(o, geometry.value) + reach(o),
-  );
-  const opacity = useTransform(offset, (o) =>
-    clamp((CABLE_FADE - Math.abs(o)) / (CABLE_FADE - CABLE_HOLD), 0, 1),
-  );
-  return { event, index, left, right, opacity };
-});
-
-const yearMarks = (() => {
+const yearMarks = computed(() => {
   const seen = new Map<number, number>();
   props.events.forEach((event, index) => {
     const year = new Date(event.date).getFullYear();
@@ -141,25 +110,12 @@ const yearMarks = (() => {
       seen.set(year, index);
     }
   });
-  return [...seen.entries()].map(([year, position]) => {
-    const x = useTransform(
-      scroll,
-      (s) => (position - s) * geometry.value.step * YEAR_PARALLAX,
-    );
-    return { year, position, x };
-  });
-})();
-
-const tickGroups = props.events.slice(0, -1).map((event, index) => {
-  const x = useTransform(scroll, (s) => {
-    const g = geometry.value;
-    const o = index - s;
-    const right = cardX(o, g) + (g.cardWidth * cardScale(o)) / 2;
-    const left = cardX(o + 1, g) - (g.cardWidth * cardScale(o + 1)) / 2;
-    return (right + left) / 2;
-  });
-  return { event, index, x };
+  return [...seen.entries()].map(([year, position]) => ({ year, position }));
 });
+
+const tickIndices = computed(() =>
+  props.events.length > 1 ? props.events.slice(0, -1).map((_, index) => index) : [],
+);
 
 let controls: { stop: () => void } | undefined;
 
@@ -312,6 +268,10 @@ onMounted(() => {
     window.addEventListener("resize", onWindowResize);
   }
   element.addEventListener("wheel", onWheel, { passive: false });
+  // 初始聚焦直接定位，不做入场动画（详情页默认聚焦最新一条）。
+  if (activeIndex.value > 0) {
+    scroll.set(activeIndex.value);
+  }
 });
 
 onBeforeUnmount(() => {
@@ -355,20 +315,15 @@ const hintId = `be-timeline-hint-${Math.random().toString(36).slice(2, 9)}`;
     <p :id="hintId" class="sr-only">使用左右方向键在事件之间移动。</p>
 
     <template v-if="years">
-      <Motion
+      <BeTimelineYear
         v-for="mark in yearMarks"
         :key="mark.year"
-        aria-hidden="true"
-        class="absolute left-1/2"
-        :style="{ x: mark.x, top: `${height * 0.2 * YEAR_INSET}px` }"
-      >
-        <span
-          class="block -translate-x-1/2 font-medium leading-none tracking-tighter tabular-nums text-foreground/[0.06]"
-          :style="{ fontSize: `${height * 0.2}px` }"
-        >
-          {{ mark.year }}
-        </span>
-      </Motion>
+        :scroll="scroll"
+        :position="mark.position"
+        :step="geometry.step"
+        :label="String(mark.year)"
+        :font-size="height * 0.2"
+      />
     </template>
 
     <svg
@@ -378,37 +333,14 @@ const hintId = `be-timeline-hint-${Math.random().toString(36).slice(2, 9)}`;
       fill="none"
       stroke-width="1"
     >
-      <Motion
-        v-for="line in cableLines"
-        :key="line.event.id"
-        as="g"
-        :style="{ opacity: line.opacity }"
-      >
-        <line
-          :x1="geometry.halfWidth"
-          :y1="0"
-          :x2="(line.left as unknown as number)"
-          :y2="height * CARD_CENTER"
-        />
-        <line
-          :x1="geometry.halfWidth"
-          :y1="0"
-          :x2="(line.right as unknown as number)"
-          :y2="height * CARD_CENTER"
-        />
-        <line
-          :x1="geometry.halfWidth"
-          :y1="height"
-          :x2="(line.left as unknown as number)"
-          :y2="height * CARD_CENTER"
-        />
-        <line
-          :x1="geometry.halfWidth"
-          :y1="height"
-          :x2="(line.right as unknown as number)"
-          :y2="height * CARD_CENTER"
-        />
-      </Motion>
+      <BeTimelineCables
+        v-for="(event, index) in events"
+        :key="event.id"
+        :scroll="scroll"
+        :index="index"
+        :geometry="geometry"
+        :height="height"
+      />
     </svg>
 
     <div
@@ -421,82 +353,35 @@ const hintId = `be-timeline-hint-${Math.random().toString(36).slice(2, 9)}`;
     />
 
     <template v-if="ruler">
-      <Motion
-        v-for="group in tickGroups"
-        :key="group.event.id"
-        aria-hidden="true"
-        class="absolute left-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center"
-        :style="{
-          x: group.x,
-          top: `${CARD_CENTER * 100}%`,
-          gap: `${(geometry.gap * GAP_TICK_SPAN) / (GAP_TICKS - 1) - 1}px`,
-        }"
-      >
-        <span
-          v-for="i in GAP_TICKS"
-          :key="i"
-          class="block w-px rounded-full"
-          :class="i === (GAP_TICKS + 1) / 2 ? 'bg-foreground/45' : 'bg-foreground/25'"
-          :style="{
-            height: `${geometry.cardWidth * (i === (GAP_TICKS + 1) / 2 ? TICK_TALL : TICK_SHORT)}px`,
-          }"
-        />
-      </Motion>
+      <BeTimelineTicks
+        v-for="index in tickIndices"
+        :key="`ticks-${index}`"
+        :scroll="scroll"
+        :index="index"
+        :geometry="geometry"
+      />
     </template>
 
     <ul class="absolute inset-0">
-      <Motion
-        v-for="card in cards"
-        :key="card.event.id"
-        as="li"
-        :data-index="card.index"
-        :data-test="`be-timeline-card-${card.event.id}`"
-        :data-active="card.index === activeIndex || undefined"
-        class="absolute left-1/2"
-        :style="{
-          top: `${CARD_CENTER * 100}%`,
-          x: card.x,
-          scale: card.scale,
-          zIndex: card.zIndex,
-          width: `${geometry.cardWidth}px`,
-          marginLeft: `${-geometry.cardWidth / 2}px`,
-        }"
+      <BeTimelineCard
+        v-for="(event, index) in events"
+        :key="event.id"
+        :scroll="scroll"
+        :index="index"
+        :geometry="geometry"
+        :event="event"
+        :date-label="dateLabel(event.date)"
+        :active="index === activeIndex"
+        @select="select($event)"
+        @keydown="onCardKeydown"
       >
-        <div class="relative -translate-y-1/2">
-          <div class="relative overflow-hidden rounded-3xl border border-border bg-card">
-            <div class="px-3.5 pt-3 pb-2">
-              <p class="text-xs tabular-nums text-muted-foreground">
-                {{ dateLabel(card.event.date) }}
-              </p>
-              <h3 class="truncate text-base font-medium tracking-tight text-foreground">
-                {{ card.event.title }}
-              </h3>
-            </div>
-            <div class="px-2">
-              <div class="aspect-[16/10] overflow-hidden rounded-2xl border border-border bg-background">
-                <slot name="media" :event="card.event" :active="card.index === activeIndex" />
-              </div>
-            </div>
-            <div class="flex items-center gap-1.5 px-3.5 py-2.5 text-sm tabular-nums text-muted-foreground">
-              <slot name="meta" :event="card.event" :active="card.index === activeIndex" />
-            </div>
-            <Motion
-              aria-hidden="true"
-              class="pointer-events-none absolute inset-0 bg-background"
-              :style="{ opacity: card.veilOpacity }"
-            />
-          </div>
-          <button
-            type="button"
-            class="absolute inset-0 cursor-pointer rounded-3xl outline-none focus-visible:ring-2 focus-visible:ring-foreground"
-            :tabindex="card.index === activeIndex ? 0 : -1"
-            :aria-current="card.index === activeIndex ? 'step' : undefined"
-            :aria-label="`${dateLabel(card.event.date)} ${card.event.title}`"
-            @click="select(card.index)"
-            @keydown="onCardKeydown($event, card.index)"
-          />
-        </div>
-      </Motion>
+        <template #media>
+          <slot name="media" :event="event" :active="index === activeIndex" />
+        </template>
+        <template #meta>
+          <slot name="meta" :event="event" :active="index === activeIndex" />
+        </template>
+      </BeTimelineCard>
     </ul>
   </section>
 </template>

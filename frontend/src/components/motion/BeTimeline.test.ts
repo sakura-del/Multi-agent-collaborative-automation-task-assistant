@@ -132,4 +132,30 @@ describe("BeTimeline", () => {
     expect(wrapper.emitted("change")?.length).toBe(1);
     expect(wrapper.emitted("change")?.[0]).toEqual(["b"]);
   });
+  it("initialIndex 直接聚焦指定卡（详情页默认最新一条）", () => {
+    const wrapper = mount(BeTimeline, {
+      props: { events: EVENTS, height: 400, itemWidth: 300, initialIndex: 3 },
+    });
+
+    const active = wrapper
+      .findAll("[data-test^='be-timeline-card-']")
+      .find((node) => node.attributes("data-active") !== undefined);
+    expect(active?.attributes("data-test")).toBe("be-timeline-card-d");
+  });
+
+  it("事件数组动态追加后新卡可用（详情页 WS 场景）", async () => {
+    const wrapper = mount(BeTimeline, {
+      props: { events: EVENTS.slice(0, 2), height: 400, itemWidth: 300 },
+    });
+    expect(wrapper.findAll("[data-test^='be-timeline-card-']").length).toBe(2);
+
+    await wrapper.setProps({ events: EVENTS });
+    await flushPromises();
+    expect(wrapper.findAll("[data-test^='be-timeline-card-']").length).toBe(5);
+
+    await wrapper.get("[data-test='be-timeline-card-e'] button").trigger("click");
+    await flushPromises();
+    const emitted = wrapper.emitted("change");
+    expect(emitted?.[emitted.length - 1]).toEqual(["e"]);
+  });
 });

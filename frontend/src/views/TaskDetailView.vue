@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ListFilter, MessageSquare, X } from "lucide-vue-next";
 
+import BeTimeline from "@/components/motion/BeTimeline.vue";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
 import StatusBadge from "@/components/common/StatusBadge.vue";
@@ -15,7 +16,7 @@ import TaskResult from "@/components/tasks/TaskResult.vue";
 import TaskToolbar from "@/components/tasks/TaskToolbar.vue";
 import { useAuthStore } from "@/stores/auth";
 import { useTaskStore } from "@/stores/tasks";
-import type { PlanNode, SubtaskStatus, TaskControl } from "@/api/types";
+import type { PlanNode, SubtaskStatus, TaskControl, TaskEvent } from "@/api/types";
 import { formatDateTime, needsUserAction } from "@/utils/task-status";
 
 // 任务详情：Tab 由路由 query 驱动（刷新不丢），规划确认与 DAG 联查。
@@ -144,6 +145,55 @@ watch(
     void refresh();
   }
 );
+
+// ===== 执行事件时间线（beUI 风格）=====
+
+const TIMELINE_EVENTS = 12;
+
+const timelineEvents = computed(() =>
+  store.events.slice(-TIMELINE_EVENTS).map((event) => ({
+    id: String(event.event_id),
+    date: event.occurred_at,
+    title: event.event_type,
+  })),
+);
+
+function eventById(id: string): TaskEvent | undefined {
+  return store.events.find((event) => String(event.event_id) === id);
+}
+
+function eventLevel(event: TaskEvent | undefined): string {
+  if (!event) return "info";
+  const explicit = event.payload?.["level"];
+  if (explicit) return String(explicit);
+  if (/failed|error|exhausted/.test(event.event_type)) return "error";
+  if (/retry|waiting_human|warning/.test(event.event_type)) return "warning";
+  return "info";
+}
+
+const EVENT_LEVEL_LABEL: Record<string, string> = {
+  info: "信息",
+  warning: "警告",
+  error: "错误",
+};
+
+const EVENT_TONE_CLASS: Record<string, string> = {
+  info: "bg-muted text-muted-foreground",
+  warning: "bg-warning/12 text-warning",
+  error: "bg-destructive/10 text-destructive",
+};
+
+function eventToneClass(level: string): string {
+  return EVENT_TONE_CLASS[level] ?? "bg-muted text-muted-foreground";
+}
+
+/** 点击时间线卡片 → 定位到下方对应日志行（尊重减少动效偏好）。 */
+function scrollToLogEvent(id: string) {
+  const row = document.querySelector(`[data-test="log-row-${id}"]`);
+  if (!row) return;
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  row.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "center" });
+}
 
 onMounted(() => {
   void refresh();
@@ -290,7 +340,43 @@ onBeforeUnmount(() => {
       <NodeDetail :node="selectedNode" :subtask="selectedSubtask" @close="selectedNodeId = null" />
     </div>
 
-    <div v-else-if="activeTab === 'logs'">
+    <div v-else-if="activeTab === 'logs'" class="space-y-4">
+      <!-- beUI 时间线：最近 12 条执行事件，默认聚焦最新一条；点击定位下方日志行 -->
+      <div
+        v-if="timelineEvents.length"
+        data-test="event-timeline"
+        class="rounded-3xl border border-border bg-card p-2"
+      >
+        <BeTimeline
+          :events="timelineEvents"
+          :height="360"
+          :item-width="300"
+          :initial-index="timelineEvents.length - 1"
+          aria-label="执行事件时间线"
+          @change="scrollToLogEvent"
+        >
+          <template #media="{ event }">
+            <div
+              class="flex h-full w-full flex-col justify-between p-3"
+              :class="eventToneClass(eventLevel(eventById(event.id)))"
+            >
+              <div class="flex items-center justify-between text-xs font-medium">
+                <span>{{ EVENT_LEVEL_LABEL[eventLevel(eventById(event.id))] ?? "信息" }}</span>
+                <span class="tabular-nums">#{{ eventById(event.id)?.event_id }}</span>
+              </div>
+              <p class="truncate text-[11px] opacity-80">
+                {{ eventById(event.id)?.event_type }}
+              </p>
+            </div>
+          </template>
+          <template #meta="{ event }">
+            <span>{{ formatDateTime(eventById(event.id)?.occurred_at) }}</span>
+          </template>
+        </BeTimeline>
+        <p class="px-4 pb-2 text-xs text-muted-foreground">
+          最近 {{ timelineEvents.length }} 条事件 · 点击卡片定位下方日志
+        </p>
+      </div>
       <TaskLog :events="store.events" />
     </div>
 
