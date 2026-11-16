@@ -440,9 +440,7 @@ class TestStreamAuthFailure:
         client = self._client(_StubStreamLLM(error=_auth_error()), recorder)
 
         with pytest.raises(AuthenticationError):
-            async for _ in client.stream_chat(
-                [Message(role=MessageRole.USER, content="hi")]
-            ):
+            async for _ in client.stream_chat([Message(role=MessageRole.USER, content="hi")]):
                 pass
 
         assert len(recorder) == 1
@@ -454,9 +452,7 @@ class TestStreamAuthFailure:
 
         chunks = [
             chunk
-            async for chunk in client.stream_chat(
-                [Message(role=MessageRole.USER, content="hi")]
-            )
+            async for chunk in client.stream_chat([Message(role=MessageRole.USER, content="hi")])
         ]
 
         assert chunks == ["a", "b"]
@@ -468,9 +464,7 @@ class TestStreamAuthFailure:
         client = self._client(_StubStreamLLM(error=RuntimeError("upstream 502")), recorder)
 
         with pytest.raises(RuntimeError):
-            async for _ in client.stream_chat(
-                [Message(role=MessageRole.USER, content="hi")]
-            ):
+            async for _ in client.stream_chat([Message(role=MessageRole.USER, content="hi")]):
                 pass
 
         assert recorder == []
@@ -491,7 +485,5 @@ class TestStreamAuthFailure:
         )
 
         with pytest.raises(AuthenticationError):
-            async for _ in client.stream_chat(
-                [Message(role=MessageRole.USER, content="hi")]
-            ):
+            async for _ in client.stream_chat([Message(role=MessageRole.USER, content="hi")]):
                 pass
