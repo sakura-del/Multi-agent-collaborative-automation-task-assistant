@@ -327,3 +327,26 @@ class TestCsv:
 
         assert safe_cell("综述 A") == "综述 A"
         assert safe_cell(None) == ""
+
+    def test_naive_created_at_is_exported_as_utc(self) -> None:
+        """SQLite 默认值是 naive UTC；导出必须补上时区，否则跨时区对账会误读。"""
+        from app.billing.export import build_usage_csv
+
+        rows = [
+            {
+                "task_id": "t1",
+                "created_at": datetime(2026, 11, 1, 8, 0),  # naive
+                "title": "A",
+                "status": "completed",
+                "is_byok": False,
+                "provider": "",
+                "model": "",
+                "credential_name": "",
+                "tokens": 1,
+            }
+        ]
+
+        text = build_usage_csv("2026-11", self._summary(), rows)
+        parsed = list(csv.reader(io.StringIO(text.lstrip("\ufeff"))))
+
+        assert parsed[4][6] == "2026-11-01T08:00:00+00:00"

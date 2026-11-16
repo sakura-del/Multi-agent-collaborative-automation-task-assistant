@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import csv
 import io
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 #: CSV 表头（顺序即列顺序）。
@@ -53,9 +53,16 @@ def safe_cell(value: Any) -> str:
 
 
 def _created_at(value: datetime | None) -> str:
+    """统一成带时区的 UTC ISO 8601。
+
+    SQLite 的 `CURRENT_TIMESTAMP` 存的是**无时区**字符串（值本身是 UTC）；
+    直接 `isoformat()` 会导出一个没有时区的时间，跨时区对账时会被误读。
+    """
     if value is None:
         return ""
-    return value.isoformat()
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC).isoformat()
 
 
 def build_usage_csv(period_key: str, summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
