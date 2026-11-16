@@ -5,6 +5,8 @@ import {
   deleteLLMCredential,
   listLLMCredentials,
   listLLMProviders,
+  probeLLMCredential,
+  testLLMCredential,
   updateLLMCredential,
 } from "@/api/llm-credentials";
 
@@ -85,5 +87,34 @@ describe("llm-credentials api", () => {
     await deleteLLMCredential("c1");
 
     expect(api.delete).toHaveBeenCalledWith("/llm-credentials/c1");
+  });
+
+  it("probeLLMCredential 测未保存配置：明文只在请求体里", async () => {
+    vi.mocked(api.post).mockResolvedValue({
+      status: 200,
+      data: { ok: true, latency_ms: 12, models: ["m1"], error: null, credential_status: null },
+    });
+
+    const result = await probeLLMCredential({
+      provider: "deepseek",
+      api_key: "sk-live-0123456789abcdef",
+    });
+
+    expect(api.post).toHaveBeenCalledWith("/llm-credentials/probe", {
+      provider: "deepseek",
+      api_key: "sk-live-0123456789abcdef",
+    });
+    expect(result.models).toEqual(["m1"]);
+  });
+
+  it("testLLMCredential 走已保存凭据端点，不传 key", async () => {
+    vi.mocked(api.post).mockResolvedValue({
+      status: 200,
+      data: { ok: false, latency_ms: 30, models: [], error: "401", credential_status: "invalid" },
+    });
+
+    await testLLMCredential("c 1");
+
+    expect(api.post).toHaveBeenCalledWith("/llm-credentials/c%201/test");
   });
 });

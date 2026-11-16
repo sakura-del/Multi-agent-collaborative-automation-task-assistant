@@ -24,9 +24,11 @@ from typing import Any
 
 import pytest
 from openai import AuthenticationError
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.core import config
 from app.core.exceptions import ForbiddenException, NotFoundException, ValidationException
+from app.db.models.llm_credential import LLMCredential
 from app.db.models.user import User
 from app.llm.byok import CredentialLLMResolver
 from app.llm.models import Message, MessageRole
@@ -152,8 +154,10 @@ async def _make_credential(
     )
 
 
-def _resolver() -> CredentialLLMResolver:
-    return CredentialLLMResolver(cipher=CredentialCipher.from_settings())
+def _resolver(session_factory: Any | None = None) -> CredentialLLMResolver:
+    return CredentialLLMResolver(
+        cipher=CredentialCipher.from_settings(), session_factory=session_factory
+    )
 
 
 class TestResolve:
@@ -304,6 +308,43 @@ class TestResolve:
         user = await _make_user(db_session, "byok_missing")
         with pytest.raises(NotFoundException):
             await _resolver().resolve(db_session, user.id, uuid.uuid4())
+
+    async def test_auth_failures_count_and_auto_disable(
+        self,
+        db_session: Any,
+        fake_openai: FakeOpenAI,
+        allow_local_endpoints: None,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """运行时 401 也要计数：连续两次就把凭据打为 invalid，下次直接拒绝。"""
+        monkeypatch.setattr(config.settings.llm, "byok_failure_threshold", 2)
+        fake_openai.status = 401
+        user = await _make_user(db_session, "byok_auth_fail")
+        record = await _make_credential(db_session, user, base_url=fake_openai.base_url)
+        factory = async_sessionmaker(db_session.bind, expire_on_commit=False)
+        resolver = _resolver(factory)
+        client = await resolver.resolve(db_session, user.id, record.id)
+
+        with pytest.raises(AuthenticationError):
+            await client.chat([Message(role=MessageRole.USER, content="hi")])
+        async with factory() as check:
+            row = await check.get(LLMCredential, record.id)
+            assert row is not None
+            assert row.consecutive_failures == 1
+            assert row.status == "active"
+
+        with pytest.raises(AuthenticationError):
+            await client.chat([Message(role=MessageRole.USER, content="hi")])
+        async with factory() as check:
+            row = await check.get(LLMCredential, record.id)
+            assert row is not None
+            assert row.consecutive_failures == 2
+            assert row.status == "invalid"
+
+        # 用新会话（生产就是这样）：缓存里的客户端不能绕过状态检查
+        async with factory() as fresh:
+            with pytest.raises(ForbiddenException):
+                await resolver.resolve(fresh, user.id, record.id)
 
 
 class TestScope:

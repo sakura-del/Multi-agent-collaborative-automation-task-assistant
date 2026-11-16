@@ -72,6 +72,9 @@ _ROUTE_RULES: tuple[tuple[str, str, str], ...] = (
     ("template_write", "DELETE", "/api/v1/templates"),
     # ===== 参考文献导入 =====
     ("verify", "POST", "/api/v1/references/import"),
+    # ===== 用户自带模型（新增/测试连接都会用用户的 key 主动外呼）=====
+    # 不限流的话，单客户端可以把本服务当成「带认证的端口探测器 + 厂商压力放大器」。
+    ("verify", "POST", "/api/v1/llm-credentials"),
 )
 
 

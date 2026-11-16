@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { Check, Cpu, Pencil, Plus, Star, Trash2 } from "lucide-vue-next";
+import { Check, Cpu, Pencil, Plus, Star, Trash2, Wifi } from "lucide-vue-next";
 
 import EmptyState from "@/components/common/EmptyState.vue";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
@@ -14,10 +14,13 @@ import {
   deleteLLMCredential,
   listLLMCredentials,
   listLLMProviders,
+  probeLLMCredential,
+  testLLMCredential,
   updateLLMCredential,
 } from "@/api/llm-credentials";
 import type {
   LLMCredentialInfo,
+  LLMProbeResult,
   LLMProviderKey,
   LLMProviderOption,
 } from "@/api/types";
@@ -37,7 +40,8 @@ import type {
  * `model-row-<id>` / `model-create-open` / `model-form` / `model-name` /
  * `model-provider` / `model-id` / `model-key` / `model-base-url` /
  * `model-submit` / `model-cancel` / `model-edit-<id>` / `model-set-default-<id>` /
- * `model-delete-<id>` / `model-confirm-delete-<id>`。
+ * `model-delete-<id>` / `model-confirm-delete-<id>` /
+ * `model-probe` / `model-probe-result` / `model-probe-error` / `model-test-<id>`。
  */
 const credentials = ref<LLMCredentialInfo[]>([]);
 const providers = ref<LLMProviderOption[]>([]);
@@ -58,6 +62,18 @@ const formDefault = ref(false);
 
 const busyId = ref<string | null>(null);
 const confirmDeleteId = ref<string | null>(null);
+
+/**
+ * 测试连接状态（Issue #15 P1）。
+ *
+ * 刻意分成表单态与列表态两套：表单里测的是「还没保存的配置」，
+ * 列表里测的是「库里的凭据」。混用一个 ref 会让结果串台。
+ */
+const probeBusy = ref(false);
+const probeResult = ref<LLMProbeResult | null>(null);
+const probeError = ref<string | null>(null);
+const modelOptions = ref<string[]>([]);
+const testingId = ref<string | null>(null);
 
 const isEditing = computed(() => editingId.value !== null);
 const selectedProvider = computed(
@@ -97,6 +113,9 @@ function resetForm() {
   formApiKey.value = "";
   formBaseUrl.value = "";
   formDefault.value = false;
+  probeResult.value = null;
+  probeError.value = null;
+  modelOptions.value = [];
 }
 
 function openCreate() {
@@ -116,6 +135,9 @@ function openEdit(credential: LLMCredentialInfo) {
   formApiKey.value = "";
   formBaseUrl.value = credential.provider === "custom" ? credential.base_url : "";
   formDefault.value = credential.is_default;
+  probeResult.value = null;
+  probeError.value = null;
+  modelOptions.value = [];
   showForm.value = true;
 }
 
@@ -138,6 +160,80 @@ function validate(): string | null {
     return "自定义端点必须填写 base_url（OpenAI 兼容）";
   }
   return null;
+}
+
+/**
+ * 测试连接（表单态）。
+ *
+ * 编辑已有凭据且 key 留空时，只能测库里的那份（前端拿不到明文），
+ * 因此走 `credential_id`；否则测用户刚填的配置，**不落库**。
+ */
+async function probeForm() {
+  probeResult.value = null;
+  probeError.value = null;
+  modelOptions.value = [];
+
+  const editing = editingId.value;
+  const useSaved = editing !== null && !formApiKey.value.trim();
+  if (!useSaved) {
+    if (!formApiKey.value.trim()) {
+      probeError.value = "请先填写 API Key 再测试";
+      return;
+    }
+    if (requiresBaseUrl.value && !formBaseUrl.value.trim()) {
+      probeError.value = "自定义端点必须先填写 base_url";
+      return;
+    }
+  }
+
+  probeBusy.value = true;
+  try {
+    const result = await probeLLMCredential(
+      useSaved
+        ? { credential_id: editing }
+        : {
+            provider: formProvider.value,
+            api_key: formApiKey.value.trim(),
+            ...(requiresBaseUrl.value ? { base_url: formBaseUrl.value.trim() } : {}),
+          }
+    );
+    probeResult.value = result;
+    if (result.ok) {
+      modelOptions.value = result.models;
+      // 模型名还空着就替用户填第一个，省掉手打错名字导致的 404
+      if (!formModel.value.trim() && result.models.length > 0) {
+        formModel.value = result.models[0];
+      }
+    }
+  } catch (err) {
+    // 4xx/5xx 与「连通性失败」是两件事：这里只可能是请求本身被拒
+    probeError.value = (err as Error).message || "测试请求失败";
+  } finally {
+    probeBusy.value = false;
+  }
+}
+
+/** 测试已保存凭据（列表态）；失败会累加计数，达阈值自动标为 invalid。 */
+async function probeSaved(credential: LLMCredentialInfo) {
+  testingId.value = credential.credential_id;
+  error.value = null;
+  success.value = null;
+  try {
+    const result = await testLLMCredential(credential.credential_id);
+    // 必须先刷新再写消息：refresh() 会清空 error，顺序反了消息就没了
+    await refresh();
+    if (result.ok) {
+      success.value = `「${credential.name}」连接正常（${result.latency_ms}ms，${
+        result.models.length
+      } 个模型）`;
+    } else {
+      error.value = `「${credential.name}」测试失败：${result.error ?? "未知错误"}`;
+    }
+  } catch (err) {
+    error.value = (err as Error).message || "测试失败";
+  } finally {
+    testingId.value = null;
+  }
 }
 
 async function submitForm() {
@@ -297,9 +393,16 @@ function statusOf(credential: LLMCredentialInfo): {
             id="model-id"
             v-model="formModel"
             data-test="model-id"
+            list="model-options"
             placeholder="例如：deepseek-chat / gpt-4o-mini"
             maxlength="160"
           />
+          <datalist id="model-options">
+            <option v-for="item in modelOptions" :key="item" :value="item" />
+          </datalist>
+          <p v-if="modelOptions.length > 0" class="text-xs text-muted-foreground">
+            已从厂商拉到 {{ modelOptions.length }} 个模型，可直接选。
+          </p>
         </div>
         <div class="grid gap-1.5">
           <Label for="model-key">
@@ -341,14 +444,45 @@ function statusOf(credential: LLMCredentialInfo): {
         <span>设为默认模型（首个凭据会自动成为默认）</span>
       </label>
 
+      <div
+        v-if="probeError"
+        class="rounded-md border border-destructive/40 bg-destructive/5 px-2.5 py-2 text-xs text-destructive"
+        data-test="model-probe-error"
+      >
+        {{ probeError }}
+      </div>
+      <div
+        v-else-if="probeResult"
+        class="rounded-md border border-border bg-muted px-2.5 py-2 text-xs"
+        :class="probeResult.ok ? 'text-foreground' : 'text-destructive'"
+        data-test="model-probe-result"
+      >
+        <template v-if="probeResult.ok">
+          连接成功（{{ probeResult.latency_ms }}ms），拉到
+          {{ probeResult.models.length }} 个模型。
+        </template>
+        <template v-else>连接失败：{{ probeResult.error ?? "未知错误" }}</template>
+      </div>
+
       <p class="rounded-md bg-muted px-2.5 py-2 text-xs text-muted-foreground">
-        保存后不会立刻联网校验。任务首次调用时若 key 无效，会直接失败并提示厂商错误，
-        不会自动改用平台模型。
+        「测试连接」会真实请求厂商的 <code>/models</code>；保存本身<strong>不做</strong>联网校验。
+        任务调用时若 key 无效，会直接失败并提示厂商错误，不会自动改用平台模型。
       </p>
 
-      <div class="flex gap-2">
+      <div class="flex flex-wrap gap-2">
         <Button type="submit" size="sm" :disabled="submitting" data-test="model-submit">
           {{ submitting ? "保存中…" : isEditing ? "保存修改" : "保存" }}
+        </Button>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          :disabled="probeBusy"
+          data-test="model-probe"
+          @click="probeForm"
+        >
+          <Wifi />
+          {{ probeBusy ? "测试中…" : "测试连接" }}
         </Button>
         <Button type="button" variant="ghost" size="sm" data-test="model-cancel" @click="closeForm">
           取消
@@ -400,6 +534,16 @@ function statusOf(credential: LLMCredentialInfo): {
         </div>
 
         <div class="flex shrink-0 flex-wrap items-center gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            :disabled="testingId === credential.credential_id"
+            :data-test="`model-test-${credential.credential_id}`"
+            @click="probeSaved(credential)"
+          >
+            <Wifi />
+            {{ testingId === credential.credential_id ? "测试中…" : "测试" }}
+          </Button>
           <Button
             v-if="!credential.is_default"
             variant="ghost"

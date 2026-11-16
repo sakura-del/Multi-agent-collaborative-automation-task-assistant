@@ -36,6 +36,7 @@ class OpenAIAdapter(BaseLLM):
         default_temperature: float = 0.7,
         default_max_tokens: int | None = None,
         embedding_model: str = "text-embedding-3-small",
+        http_client: Any | None = None,
     ) -> None:
         super().__init__(
             model,
@@ -49,6 +50,8 @@ class OpenAIAdapter(BaseLLM):
         )
         # 嵌入模型独立配置，与聊天模型解耦
         self.embedding_model = embedding_model
+        # BYOK DNS pinning（Issue #15 P1）：外部传入的 httpx.AsyncClient 会接管连接
+        self._http_client = http_client
 
     def _create_client(self) -> AsyncOpenAI:
         """创建 AsyncOpenAI 异步客户端。"""
@@ -57,6 +60,7 @@ class OpenAIAdapter(BaseLLM):
             base_url=self.base_url,
             timeout=self.timeout,
             max_retries=0,  # 重试由 BaseLLM.chat 统一管理，避免双层重试
+            http_client=self._http_client,
         )
 
     # ===== 消息/工具格式转换 =====

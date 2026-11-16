@@ -826,3 +826,21 @@ export interface LLMCredentialUpdate {
   is_default?: boolean;
   status?: "active" | "disabled";
 }
+
+/** 测试连接：二选一——已保存凭据 id，或未保存的配置。 */
+export interface LLMProbeRequest {
+  credential_id?: string;
+  provider?: LLMProviderKey;
+  api_key?: string;
+  base_url?: string | null;
+}
+
+/** 测试结果。**不含密钥**，只有状态、延迟与厂商模型 id 列表。 */
+export interface LLMProbeResult {
+  ok: boolean;
+  latency_ms: number;
+  models: string[];
+  error: string | null;
+  /** 测已保存凭据时回传最新状态；未保存配置为 null */
+  credential_status: "active" | "invalid" | "disabled" | null;
+}

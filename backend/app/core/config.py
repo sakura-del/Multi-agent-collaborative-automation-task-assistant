@@ -169,6 +169,14 @@ class LLMConfig(BaseModel):
     关闭时，创建阶段拦 IP 字面量，运行时再拦 DNS 解析结果。
     """
 
+    byok_failure_threshold: int = Field(default=3, ge=1, le=10)
+    """连续失败多少次自动把凭据置为 `invalid`。
+
+    计数来源：手动「测试连接」失败 + 运行时鉴权失败（401/403）。
+    达阈值后任务会直接拒绝使用该凭据，而不是每次跑到一半才报错。
+    用户换 key 或重新测试成功会清零并恢复 `active`。
+    """
+
 
 class SecretsConfig(BaseModel):
     """应用级密钥（BYOK 凭据加密，Issue #15）。

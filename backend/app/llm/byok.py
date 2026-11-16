@@ -31,35 +31,28 @@ P0 接受该窗口（缓存 5 分钟）；P1 改为连接时校验 IP（自定�
 
 from __future__ import annotations
 
-import asyncio
-import ipaddress
-import socket
 import time
 from collections import OrderedDict
+from collections.abc import Awaitable, Callable
 from typing import Any
 from urllib.parse import urlsplit
 from uuid import UUID
 
+import httpx
+from openai import AuthenticationError, PermissionDeniedError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.exceptions import (
-    ForbiddenException,
-    LLMException,
-    NotFoundException,
-    ValidationException,
-)
+from app.core.exceptions import ForbiddenException, NotFoundException, ValidationException
 from app.core.logging import get_logger
 from app.db.models.llm_credential import LLMCredential
+from app.llm.endpoint_guard import PinnedDNSAsyncHTTPTransport, resolve_public_ips
 from app.llm.factory import create_llm
 from app.security.credential_cipher import CredentialCipher
 from app.security.llm_credential_service import LLMCredentialService
 
 logger = get_logger(__name__)
-
-#: DNS 复核超时（秒）。域名解析卡住不该把任务启动拖死。
-_DNS_TIMEOUT_SECONDS = 5.0
 
 #: 适配器缓存默认 TTL（秒）。
 DEFAULT_CACHE_TTL_SECONDS = 300
@@ -68,47 +61,17 @@ DEFAULT_CACHE_TTL_SECONDS = 300
 DEFAULT_MAX_CACHE_ENTRIES = 128
 
 
-def _is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-    return any(
-        (
-            ip.is_private,
-            ip.is_loopback,
-            ip.is_link_local,
-            ip.is_multicast,
-            ip.is_reserved,
-            ip.is_unspecified,
-        )
-    )
-
-
 async def ensure_public_endpoint(base_url: str) -> None:
-    """解析域名并拒绝任何内网/环回/链路本地地址。
+    """解析域名并拒绝任何内网/环回/链路本地地址（P0 的快速失败检查）。
 
-    只在 `custom` 厂商上调用：预置厂商的 `base_url` 由服务端写死，
-    不存在「用户把它指向内网」的路径。
+    真正的防护在每个请求的 `PinnedDNSAsyncHTTPTransport` 里：它校验后**只连
+    已校验的 IP**，消灭「检查完再改解析」的窗口。这里保留一次预检，是为了
+    任务启动时就能给出可读错误，而不是等第一次 LLM 调用才失败。
     """
     host = (urlsplit(base_url).hostname or "").strip()
     if not host:
         raise ValidationException("自定义端点缺少主机名")
-
-    loop = asyncio.get_running_loop()
-    try:
-        infos = await asyncio.wait_for(
-            loop.getaddrinfo(host, None, type=socket.SOCK_STREAM),
-            timeout=_DNS_TIMEOUT_SECONDS,
-        )
-    except (socket.gaierror, TimeoutError) as exc:
-        raise LLMException(f"自定义端点的域名无法解析：{host}") from exc
-
-    for info in infos:
-        address = str(info[4][0]).split("%", 1)[0]
-        try:
-            ip = ipaddress.ip_address(address)
-        except ValueError:  # pragma: no cover - getaddrinfo 理论上只返回合法地址
-            continue
-        if _is_blocked_ip(ip):
-            logger.warning("byok_endpoint_blocked", host=host, resolved=address)
-            raise ValidationException("自定义端点解析到内网地址，已拒绝")
+    await resolve_public_ips(host, allow_private=False)
 
 
 class BYOKClient:
@@ -126,19 +89,33 @@ class BYOKClient:
         model: str,
         base_url: str,
         llm: Any,
+        on_auth_failure: Callable[[str], Awaitable[None]] | None = None,
     ) -> None:
         self.credential_id = credential_id
         self.provider = provider
         self.model = model
         self.base_url = base_url
         self._llm = llm
+        self._on_auth_failure = on_auth_failure
 
     @property
     def is_byok(self) -> bool:
         return True
 
     async def chat(self, messages: Any, **kwargs: Any) -> Any:
-        return await self._llm.chat(messages, **kwargs)
+        try:
+            return await self._llm.chat(messages, **kwargs)
+        except (AuthenticationError, PermissionDeniedError) as exc:
+            # 401/403 才计数：超时/5xx 是上游抖动，不该把凭据打成无效。
+            # 计数失败不能掩盖原始错误 —— 用户首先要看到的是「key 被拒」。
+            if self._on_auth_failure is not None:
+                try:
+                    await self._on_auth_failure(f"{type(exc).__name__}: {exc}"[:500])
+                except Exception:  # pragma: no cover - 记账失败不影响主流程
+                    logger.warning(
+                        "byok_failure_record_failed", credential_id=str(self.credential_id)
+                    )
+            raise
 
     def stream_chat(self, messages: Any, **kwargs: Any) -> Any:
         return self._llm.stream_chat(messages, **kwargs)
@@ -156,10 +133,13 @@ class CredentialLLMResolver:
         cipher: CredentialCipher | None = None,
         ttl_seconds: int = DEFAULT_CACHE_TTL_SECONDS,
         max_entries: int = DEFAULT_MAX_CACHE_ENTRIES,
+        session_factory: Callable[[], Any] | None = None,
     ) -> None:
         self._cipher_impl = cipher
         self._ttl = max(1, int(ttl_seconds))
         self._max_entries = max(1, int(max_entries))
+        # 失败计数要写库；可注入便于测试，默认用全局会话工厂
+        self._session_factory = session_factory
         # key: (credential_id, key_version, model, base_url) → (expires_at, client)
         self._cache: OrderedDict[tuple[Any, ...], tuple[float, BYOKClient]] = OrderedDict()
 
@@ -219,10 +199,19 @@ class CredentialLLMResolver:
 
         api_key = LLMCredentialService(cipher=self.cipher).decrypt_api_key(record)
 
-        # 自定义端点：创建期只拦了 IP 字面量，域名解析必须在这里再查一次
+        # 自定义端点：启动时先给可读错误；真正的防护在每次请求的 pin 传输层
         if record.provider == "custom" and not settings.llm.byok_allow_private_base_url:
             await ensure_public_endpoint(record.base_url)
 
+        extra: dict[str, Any] = {}
+        if record.provider == "custom":
+            # DNS pinning：校验与连接用同一个 IP，堵住 rebinding 窗口
+            extra["http_client"] = httpx.AsyncClient(
+                transport=PinnedDNSAsyncHTTPTransport(
+                    allow_private=settings.llm.byok_allow_private_base_url
+                ),
+                timeout=settings.llm.request_timeout,
+            )
         llm = create_llm(
             record.provider,
             record.model,
@@ -230,13 +219,30 @@ class CredentialLLMResolver:
             base_url=record.base_url,
             timeout=settings.llm.request_timeout,
             max_retries=settings.llm.max_retries,
+            **extra,
         )
+
+        async def _record_auth_failure(error: str) -> None:
+            factory = self._session_factory
+            if factory is None:
+                from app.db.session import AsyncSessionLocal
+
+                factory = AsyncSessionLocal
+            async with factory() as failure_session:
+                await LLMCredentialService().record_failure(
+                    failure_session,
+                    user_id=record.user_id,
+                    credential_id=record.id,
+                    error=error,
+                )
+
         client = BYOKClient(
             credential_id=record.id,
             provider=record.provider,
             model=record.model,
             base_url=record.base_url,
             llm=llm,
+            on_auth_failure=_record_auth_failure,
         )
         self._store(cache_key, client)
         logger.info(

@@ -3,6 +3,8 @@ import type {
   LLMCredentialCreate,
   LLMCredentialInfo,
   LLMCredentialUpdate,
+  LLMProbeRequest,
+  LLMProbeResult,
   LLMProviderOption,
 } from "./types";
 
@@ -48,4 +50,26 @@ export async function updateLLMCredential(
 /** 删除凭据（物理删除密文；历史任务仍保留模型快照） */
 export async function deleteLLMCredential(credentialId: string): Promise<void> {
   await api.delete(`/llm-credentials/${encodeURIComponent(credentialId)}`);
+}
+
+/**
+ * 测试连接并拉取厂商模型列表。
+ *
+ * 两种用法：
+ * - 传 `credential_id`：测已保存的凭据（前端只有密文句柄，明文不出后端）；
+ * - 传 `provider + api_key (+ base_url)`：测还没保存的配置。
+ *
+ * 这是唯一会用用户 key 主动外呼的接口，后端必须走 pin 传输层。
+ */
+export async function probeLLMCredential(payload: LLMProbeRequest): Promise<LLMProbeResult> {
+  const response = await api.post<LLMProbeResult>("/llm-credentials/probe", payload);
+  return response.data;
+}
+
+/** 测试已保存凭据（列表页「测试」按钮；失败会累加计数，达阈值自动停用） */
+export async function testLLMCredential(credentialId: string): Promise<LLMProbeResult> {
+  const response = await api.post<LLMProbeResult>(
+    `/llm-credentials/${encodeURIComponent(credentialId)}/test`
+  );
+  return response.data;
 }

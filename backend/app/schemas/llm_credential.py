@@ -23,7 +23,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 ProviderKey = Literal[
     "openai",
@@ -138,3 +138,54 @@ class ProviderOut(BaseModel):
     label: str
     base_url: str | None
     requires_base_url: bool
+
+
+class LLMProbeRequest(BaseModel):
+    """测试连接请求（Issue #15 P1）。
+
+    两种用法：
+    - `credential_id`：测已保存的凭据（复用库里的 key，前端列表页/编辑页用）；
+    - `provider + api_key (+ base_url)`：测还没保存的配置（新建表单用）。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    credential_id: uuid.UUID | None = None
+    provider: ProviderKey | None = None
+    api_key: str | None = Field(default=None, min_length=8, max_length=512)
+    base_url: str | None = Field(default=None, max_length=512)
+
+    @field_validator("api_key", mode="before")
+    @classmethod
+    def _clean_key(cls, value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+        stripped = value.strip()
+        if any(ch.isspace() for ch in stripped):
+            raise ValueError("API Key 不能包含空白字符，请检查是否复制了多余内容")
+        return stripped
+
+    @model_validator(mode="after")
+    def _check_source(self) -> LLMProbeRequest:
+        if self.credential_id is not None:
+            if self.api_key:
+                raise ValueError("credential_id 与 api_key 只能二选一")
+            return self
+        if self.provider is None:
+            raise ValueError("未提供 credential_id 时必须指定 provider")
+        if not self.api_key:
+            raise ValueError("未提供 credential_id 时必须填写 API Key")
+        return self
+
+
+class LLMProbeOut(BaseModel):
+    """测试连接结果。**不含密钥**，只回可读状态与模型列表。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ok: bool
+    latency_ms: int
+    models: list[str] = Field(default_factory=list)
+    error: str | None = None
+    credential_status: str | None = None
+    """测已保存凭据时回传最新状态：active / invalid。未保存配置为 None。"""

@@ -24,6 +24,7 @@ key —— 这属于「看起来成功、实际花了平台的钱」。递补规
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import func, select, update
@@ -90,7 +91,12 @@ class LLMCredentialService:
         )
 
     @staticmethod
-    def _resolve_base_url(provider: str, base_url: str | None) -> str:
+    def resolve_base_url(provider: str, base_url: str | None) -> str:
+        """按厂商策略得出实际端点（预置写死、自定义校验）。
+
+        「测试连接」与「建任务」共用同一套规则，避免出现
+        「测试通过的端点」与「实际调用的端点」不是同一个的假绿。
+        """
         spec = get_provider_spec(provider)
         if spec.requires_base_url:
             return normalize_base_url(
@@ -136,7 +142,7 @@ class LLMCredentialService:
     async def create(
         self, session: AsyncSession, user_id: uuid.UUID, payload: LLMCredentialCreate
     ) -> LLMCredential:
-        base_url = self._resolve_base_url(payload.provider, payload.base_url)
+        base_url = self.resolve_base_url(payload.provider, payload.base_url)
         cipher = self.cipher
 
         existing = await session.scalar(
@@ -207,13 +213,15 @@ class LLMCredentialService:
             record.api_key_hint = mask_secret(data["api_key"])
             record.key_fingerprint = self.cipher.fingerprint(data["api_key"])
             record.key_version += 1
-            # 换了 key，上一次的连通性结论就不作数了
+            # 换了 key，上一次的连通性结论与失败计数都不再适用
             record.last_verified_at = None
             record.last_error = None
+            record.consecutive_failures = 0
+            record.status = "active"
 
         if data.get("base_url"):
             # 只有 custom 能改端点；预置项走 provider 校验会直接 422
-            record.base_url = self._resolve_base_url(record.provider, data["base_url"])
+            record.base_url = self.resolve_base_url(record.provider, data["base_url"])
 
         if data.get("is_default") is True:
             await self._clear_defaults(session, user_id)
@@ -269,3 +277,49 @@ class LLMCredentialService:
     def decrypt_api_key(self, record: LLMCredential) -> str:
         """还原明文（**只给发往厂商的调用链用，不要放进任何响应**）。"""
         return self.cipher.decrypt(record.api_key_ciphertext, user_id=record.user_id)
+
+    # ===== 失败计数与自动停用（Issue #15 P1）=====
+
+    async def record_failure(
+        self,
+        session: AsyncSession,
+        *,
+        user_id: uuid.UUID,
+        credential_id: uuid.UUID,
+        error: str,
+        threshold: int | None = None,
+    ) -> LLMCredential:
+        """记一次失败；达到阈值把凭据置为 `invalid`。
+
+        触发点只有两类：用户点「测试连接」失败、运行时厂商返回 401/403。
+        **超时/5xx 不计**：上游抖动不该把一把好 key 打成无效。
+        """
+        record = await self.get(session, user_id, credential_id)
+        limit = settings.llm.byok_failure_threshold if threshold is None else max(1, threshold)
+        record.consecutive_failures = int(record.consecutive_failures or 0) + 1
+        record.last_error = (error or "未知错误")[:512]
+        if record.consecutive_failures >= limit:
+            record.status = "invalid"
+        await session.commit()
+        await session.refresh(record)
+        logger.warning(
+            "llm_credential_failure",
+            credential_id=str(record.id),
+            user_id=str(user_id),
+            failures=record.consecutive_failures,
+            status=record.status,
+        )
+        return record
+
+    async def record_probe_success(
+        self, session: AsyncSession, record: LLMCredential
+    ) -> LLMCredential:
+        """自检成功：清零失败计数、恢复 active、记录验证时间。"""
+        record.consecutive_failures = 0
+        record.status = "active"
+        record.last_verified_at = datetime.now(UTC)
+        record.last_error = None
+        await session.commit()
+        await session.refresh(record)
+        logger.info("llm_credential_verified", credential_id=str(record.id))
+        return record

@@ -9,6 +9,8 @@ vi.mock("@/api/llm-credentials", () => ({
   createLLMCredential: vi.fn(),
   updateLLMCredential: vi.fn(),
   deleteLLMCredential: vi.fn(),
+  probeLLMCredential: vi.fn(),
+  testLLMCredential: vi.fn(),
 }));
 
 import {
@@ -16,6 +18,8 @@ import {
   deleteLLMCredential,
   listLLMCredentials,
   listLLMProviders,
+  probeLLMCredential,
+  testLLMCredential,
   updateLLMCredential,
 } from "@/api/llm-credentials";
 
@@ -82,6 +86,8 @@ beforeEach(() => {
   vi.mocked(createLLMCredential).mockReset();
   vi.mocked(updateLLMCredential).mockReset();
   vi.mocked(deleteLLMCredential).mockReset();
+  vi.mocked(probeLLMCredential).mockReset();
+  vi.mocked(testLLMCredential).mockReset();
   vi.mocked(listLLMProviders).mockResolvedValue(PROVIDERS as never);
 });
 
@@ -225,5 +231,114 @@ describe("ModelSettingsView", () => {
     expect(wrapper.find('[data-test="model-row-c1"]').exists()).toBe(true);
     // 凭据列表正常时不该弹错误横幅（局部失败不连坐）
     expect(wrapper.find('[data-test="models-error"]').exists()).toBe(false);
+  });
+
+  it("表单测试连接成功后填充模型候选，并替用户填第一个模型", async () => {
+    vi.mocked(listLLMCredentials).mockResolvedValue([] as never);
+    vi.mocked(probeLLMCredential).mockResolvedValue({
+      ok: true,
+      latency_ms: 42,
+      models: ["deepseek-chat", "deepseek-reasoner"],
+      error: null,
+      credential_status: null,
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+    await openCreate(wrapper);
+
+    await wrapper.get('[data-test="model-key"]').setValue("sk-live-0123456789abcdef");
+    await wrapper.get('[data-test="model-probe"]').trigger("click");
+    await flushPromises();
+
+    // 只测配置，不落库
+    expect(probeLLMCredential).toHaveBeenCalledWith({
+      provider: "deepseek",
+      api_key: "sk-live-0123456789abcdef",
+    });
+    expect(wrapper.get('[data-test="model-probe-result"]').text()).toContain("42ms");
+    expect((wrapper.get('[data-test="model-id"]').element as HTMLInputElement).value).toBe(
+      "deepseek-chat"
+    );
+    expect(wrapper.findAll("#model-options option")).toHaveLength(2);
+    expect(createLLMCredential).not.toHaveBeenCalled();
+  });
+
+  it("表单测试连接失败时展示厂商错误，不填模型", async () => {
+    vi.mocked(listLLMCredentials).mockResolvedValue([] as never);
+    vi.mocked(probeLLMCredential).mockResolvedValue({
+      ok: false,
+      latency_ms: 30,
+      models: [],
+      error: "401 密钥被拒绝",
+      credential_status: null,
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+    await openCreate(wrapper);
+
+    await wrapper.get('[data-test="model-key"]').setValue("sk-live-0123456789abcdef");
+    await wrapper.get('[data-test="model-probe"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get('[data-test="model-probe-result"]').text()).toContain("401 密钥被拒绝");
+    expect((wrapper.get('[data-test="model-id"]').element as HTMLInputElement).value).toBe("");
+  });
+
+  it("没填 key 就点测试：本地拦住，不发请求", async () => {
+    vi.mocked(listLLMCredentials).mockResolvedValue([] as never);
+
+    const wrapper = mountView();
+    await flushPromises();
+    await openCreate(wrapper);
+
+    await wrapper.get('[data-test="model-probe"]').trigger("click");
+    await flushPromises();
+
+    expect(probeLLMCredential).not.toHaveBeenCalled();
+    expect(wrapper.get('[data-test="model-probe-error"]').text()).toContain("API Key");
+  });
+
+  it("编辑态留空 key 时按 credential_id 测试（不发明文）", async () => {
+    vi.mocked(listLLMCredentials).mockResolvedValue([credential()] as never);
+    vi.mocked(probeLLMCredential).mockResolvedValue({
+      ok: true,
+      latency_ms: 20,
+      models: ["deepseek-chat"],
+      error: null,
+      credential_status: "active",
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.get('[data-test="model-edit-c1"]').trigger("click");
+    await wrapper.get('[data-test="model-probe"]').trigger("click");
+    await flushPromises();
+
+    expect(probeLLMCredential).toHaveBeenCalledWith({ credential_id: "c1" });
+  });
+
+  it("列表「测试」失败：报错并刷新（状态可能被标为 invalid）", async () => {
+    vi.mocked(listLLMCredentials)
+      .mockResolvedValueOnce([credential()] as never)
+      .mockResolvedValueOnce([credential({ status: "invalid", last_error: "密钥被拒绝" })] as never);
+    vi.mocked(testLLMCredential).mockResolvedValue({
+      ok: false,
+      latency_ms: 25,
+      models: [],
+      error: "密钥被拒绝",
+      credential_status: "invalid",
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.get('[data-test="model-test-c1"]').trigger("click");
+    await flushPromises();
+
+    expect(testLLMCredential).toHaveBeenCalledWith("c1");
+    expect(wrapper.get('[data-test="models-error"]').text()).toContain("密钥被拒绝");
+    expect(wrapper.get('[data-test="model-row-c1"]').text()).toContain("校验失败");
   });
 });

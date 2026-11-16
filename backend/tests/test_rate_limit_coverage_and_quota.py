@@ -68,6 +68,10 @@ class TestAllWriteEndpointsAreCovered:
             ("POST", "/api/v1/templates/tpl-1/render", "template_render"),
             # 参考文献导入
             ("POST", "/api/v1/references/import", "verify"),
+            # 用户自带模型：创建与「测试连接」都会外呼厂商
+            ("POST", "/api/v1/llm-credentials", "verify"),
+            ("POST", "/api/v1/llm-credentials/probe", "verify"),
+            ("POST", "/api/v1/llm-credentials/abc/test", "verify"),
         ],
     )
     def test_write_endpoint_has_rule(self, method: str, path: str, expected_label: str) -> None:

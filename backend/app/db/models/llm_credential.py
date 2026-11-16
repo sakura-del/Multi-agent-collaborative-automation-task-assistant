@@ -109,6 +109,12 @@ class LLMCredential(Base):
     status: Mapped[str] = mapped_column(
         String(16), default="active", nullable=False, comment="active/invalid/disabled"
     )
+    consecutive_failures: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        nullable=False,
+        comment="连续失败次数（自检或运行时鉴权失败）；达阈值自动置 invalid",
+    )
     last_verified_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, comment="最近一次连通性自检通过时间"
     )

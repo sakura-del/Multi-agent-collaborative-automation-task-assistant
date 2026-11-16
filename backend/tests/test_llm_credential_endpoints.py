@@ -13,8 +13,11 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -525,3 +528,162 @@ class TestModelContract:
                 )
 
         assert asyncio.run(_count()) == 1
+
+
+# ===== 测试连接 / 模型列表 / 自动停用（Issue #15 P1）=====
+
+
+@pytest.fixture
+def local_endpoint_flags(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(config.settings.llm, "byok_allow_insecure_base_url", True)
+    monkeypatch.setattr(config.settings.llm, "byok_allow_private_base_url", True)
+
+
+@pytest.fixture
+def models_endpoint(local_endpoint_flags: None, monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
+    state = SimpleNamespace(
+        status=200,
+        body=b'{"data": [{"id": "model-a"}, {"id": "model-b"}]}',
+        base_url="",
+    )
+
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def do_GET(self) -> None:
+            self.send_response(state.status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(state.body)))
+            self.end_headers()
+            self.wfile.write(state.body)
+
+        def log_message(self, *args: Any) -> None:
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    state.base_url = f"http://relay.test:{server.server_port}/v1"
+
+    async def _resolve(host: str, *, allow_private: bool = False) -> list[str]:
+        assert host == "relay.test"
+        return ["127.0.0.1"]
+
+    monkeypatch.setattr("app.llm.endpoint_guard.resolve_public_ips", _resolve)
+    try:
+        yield state
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
+
+
+class TestProbe:
+    def test_unsaved_probe_returns_models_without_writing(
+        self, credential_app: Any, models_endpoint: Any
+    ) -> None:
+        user = _make_user(credential_app.state.factory, "probe_new")
+        resp = credential_app.state.client.post(
+            "/api/v1/llm-credentials/probe",
+            headers=_headers(user),
+            json={
+                "provider": "custom",
+                "base_url": models_endpoint.base_url,
+                "api_key": PLAINTEXT,
+            },
+        )
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["ok"] is True
+        assert body["models"] == ["model-a", "model-b"]
+        assert body["credential_status"] is None
+        assert PLAINTEXT not in resp.text
+        # 未保存的配置不落库
+        assert _rows(credential_app.state.factory) == []
+
+    def test_saved_probe_marks_verified(self, credential_app: Any, models_endpoint: Any) -> None:
+        user = _make_user(credential_app.state.factory, "probe_saved")
+        created = _create(
+            credential_app, user, provider="custom", base_url=models_endpoint.base_url
+        ).json()
+
+        resp = credential_app.state.client.post(
+            f"/api/v1/llm-credentials/{created['credential_id']}/test",
+            headers=_headers(user),
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["ok"] is True
+        assert resp.json()["credential_status"] == "active"
+
+        listed = credential_app.state.client.get(
+            "/api/v1/llm-credentials", headers=_headers(user)
+        ).json()
+        assert listed[0]["last_verified_at"] is not None
+        assert listed[0]["last_error"] is None
+
+    def test_repeated_failures_auto_invalidate(
+        self,
+        credential_app: Any,
+        models_endpoint: Any,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(config.settings.llm, "byok_failure_threshold", 2)
+        user = _make_user(credential_app.state.factory, "probe_invalid")
+        created = _create(
+            credential_app, user, provider="custom", base_url=models_endpoint.base_url
+        ).json()
+        models_endpoint.status = 401
+        models_endpoint.body = b'{"error": "invalid key"}'
+
+        first = credential_app.state.client.post(
+            f"/api/v1/llm-credentials/{created['credential_id']}/test",
+            headers=_headers(user),
+        ).json()
+        assert first["ok"] is False
+        assert first["credential_status"] == "active"  # 第 1 次只计数
+
+        second = credential_app.state.client.post(
+            f"/api/v1/llm-credentials/{created['credential_id']}/test",
+            headers=_headers(user),
+        ).json()
+        assert second["credential_status"] == "invalid"
+
+        listed = credential_app.state.client.get(
+            "/api/v1/llm-credentials", headers=_headers(user)
+        ).json()
+        assert listed[0]["status"] == "invalid"
+        assert "被拒绝" in listed[0]["last_error"]
+
+    def test_disabled_credential_cannot_be_probed(
+        self, credential_app: Any, models_endpoint: Any
+    ) -> None:
+        user = _make_user(credential_app.state.factory, "probe_disabled")
+        created = _create(
+            credential_app, user, provider="custom", base_url=models_endpoint.base_url
+        ).json()
+        credential_app.state.client.patch(
+            f"/api/v1/llm-credentials/{created['credential_id']}",
+            headers=_headers(user),
+            json={"status": "disabled"},
+        )
+
+        resp = credential_app.state.client.post(
+            f"/api/v1/llm-credentials/{created['credential_id']}/test",
+            headers=_headers(user),
+        )
+        assert resp.status_code == 403, resp.text
+
+    def test_probe_cross_user_is_404(self, credential_app: Any, models_endpoint: Any) -> None:
+        alice = _make_user(credential_app.state.factory, "probe_alice")
+        bob = _make_user(credential_app.state.factory, "probe_bob")
+        created = _create(
+            credential_app, alice, provider="custom", base_url=models_endpoint.base_url
+        ).json()
+
+        resp = credential_app.state.client.post(
+            f"/api/v1/llm-credentials/{created['credential_id']}/test",
+            headers=_headers(bob),
+        )
+        assert resp.status_code == 404

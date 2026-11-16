@@ -78,6 +78,8 @@ SECRETS__ENCRYPTION_KEY=<32 字节 base64>
 # BYOK 计费口径：false=用户自带模型不占篇数（默认）；true=与平台模型一致。
 # token 日配额不受此开关影响：BYOK 任务始终不预扣平台 token。
 BILLING__BYOK_CONSUMES_REVIEW_QUOTA=false
+# 连续失败多少次自动把凭据标为 invalid（只计手动测试失败与运行时 401/403）。
+LLM__BYOK_FAILURE_THRESHOLD=3
 
 STORAGE__BACKEND=s3
 STORAGE__S3_ENDPOINT=https://s3-cn-south-1.qiniucs.com

@@ -25,14 +25,19 @@ from fastapi import APIRouter, Depends, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_active_user
+from app.core.config import settings
+from app.core.exceptions import ForbiddenException
 from app.db.models.llm_credential import LLMCredential
 from app.db.models.user import User
 from app.db.session import get_db
+from app.llm.probe import fetch_models
 from app.llm.providers import PRESET_PROVIDERS, PROVIDER_ORDER, get_provider_spec
 from app.schemas.llm_credential import (
     LLMCredentialCreate,
     LLMCredentialOut,
     LLMCredentialUpdate,
+    LLMProbeOut,
+    LLMProbeRequest,
     ProviderOut,
 )
 from app.security.llm_credential_service import LLMCredentialService
@@ -68,6 +73,55 @@ def _service() -> LLMCredentialService:
     return LLMCredentialService()
 
 
+async def _probe(payload: LLMProbeRequest, current_user: User, db: AsyncSession) -> LLMProbeOut:
+    """共用的探活逻辑：已保存凭据复用库里的 key，未保存配置直接测。
+
+    失败会写回凭据（计数 + 可读错误）；成功清零并恢复 active。
+    未保存配置失败不落库（用户可能只是在试）。
+    """
+    service = _service()
+    record: LLMCredential | None = None
+
+    if payload.credential_id is not None:
+        record = await service.get(db, current_user.id, payload.credential_id)
+        if record.status == "disabled":
+            raise ForbiddenException("该凭据已停用，请先启用再测试")
+        base_url = record.base_url
+        api_key = service.decrypt_api_key(record)
+    else:
+        # provider 已由 schema 校验非空；这里再取一次保证类型收敛
+        provider = payload.provider or "custom"
+        base_url = service.resolve_base_url(provider, payload.base_url)
+        api_key = payload.api_key or ""
+
+    result = await fetch_models(
+        base_url=base_url,
+        api_key=api_key,
+        allow_private=settings.llm.byok_allow_private_base_url,
+    )
+
+    credential_status: str | None = None
+    if record is not None:
+        if result.ok:
+            record = await service.record_probe_success(db, record)
+        else:
+            record = await service.record_failure(
+                db,
+                user_id=current_user.id,
+                credential_id=record.id,
+                error=result.error or "测试失败",
+            )
+        credential_status = record.status
+
+    return LLMProbeOut(
+        ok=result.ok,
+        latency_ms=result.latency_ms,
+        models=result.models,
+        error=result.error,
+        credential_status=credential_status,
+    )
+
+
 @router.get("/providers", response_model=list[ProviderOut], summary="模型厂商目录")
 async def list_providers(current_user: CurrentUserDep) -> list[ProviderOut]:
     """返回预置厂商与「自定义」选项。**不含任何密钥或平台配置。**"""
@@ -80,6 +134,25 @@ async def list_providers(current_user: CurrentUserDep) -> list[ProviderOut]:
         )
         for key in PROVIDER_ORDER
     ]
+
+
+@router.post("/probe", response_model=LLMProbeOut, summary="测试连接并拉取模型列表")
+async def probe_credential(
+    payload: LLMProbeRequest, current_user: CurrentUserDep, db: DbDep
+) -> LLMProbeOut:
+    """测已保存凭据或未保存配置；成功会返回厂商的模型 id 列表。
+
+    这是**唯一**会用用户 key 主动外呼的端点，因此必须走 pin 传输层
+    （`fetch_models` 内部完成），不能裸 `httpx`。
+    """
+    return await _probe(payload, current_user, db)
+
+
+@router.post("/{credential_id}/test", response_model=LLMProbeOut, summary="测试已保存凭据")
+async def test_credential(
+    credential_id: UUID, current_user: CurrentUserDep, db: DbDep
+) -> LLMProbeOut:
+    return await _probe(LLMProbeRequest(credential_id=credential_id), current_user, db)
 
 
 @router.get("", response_model=list[LLMCredentialOut], summary="我的模型凭据")
