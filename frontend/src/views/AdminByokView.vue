@@ -146,7 +146,7 @@ onMounted(load);
 
     <div
       v-if="loading && !overview"
-      class="mt-3 flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-8 text-sm text-muted-foreground"
+      class="mt-3 flex items-center gap-2 rounded-2xl border border-border bg-card px-4 py-8 text-sm text-muted-foreground"
     >
       <RefreshCw :size="15" class="animate-spin motion-reduce:animate-none" aria-hidden="true" />
       正在统计…
@@ -162,7 +162,7 @@ onMounted(load);
     <template v-else-if="overview">
       <!-- 四个渗透率：每个数字都带分母，避免「0%」歧义 -->
       <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-        <div class="rounded-lg border border-border bg-card px-3 py-2.5">
+        <div class="rounded-2xl border border-border bg-card px-3 py-2.5">
           <p class="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
             BYOK 任务占比
           </p>
@@ -174,7 +174,7 @@ onMounted(load);
           </p>
         </div>
 
-        <div class="rounded-lg border border-border bg-card px-3 py-2.5">
+        <div class="rounded-2xl border border-border bg-card px-3 py-2.5">
           <p class="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
             BYOK Token 占比
           </p>
@@ -187,7 +187,7 @@ onMounted(load);
           </p>
         </div>
 
-        <div class="rounded-lg border border-border bg-card px-3 py-2.5">
+        <div class="rounded-2xl border border-border bg-card px-3 py-2.5">
           <p class="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
             BYOK 用户渗透率
           </p>
@@ -200,7 +200,7 @@ onMounted(load);
           </p>
         </div>
 
-        <div class="rounded-lg border border-border bg-card px-3 py-2.5">
+        <div class="rounded-2xl border border-border bg-card px-3 py-2.5">
           <p class="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
             有凭据用户占比
           </p>
@@ -217,7 +217,7 @@ onMounted(load);
       <!-- 凭据健康：接入不等于可用，invalid 要能看见 -->
       <div
         data-test="byok-credentials"
-        class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-lg border border-border bg-card px-3 py-2 text-xs text-muted-foreground"
+        class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-2xl border border-border bg-card px-3 py-2 text-xs text-muted-foreground"
       >
         <span class="inline-flex items-center gap-1 font-medium text-foreground">
           <ShieldCheck :size="13" aria-hidden="true" />
@@ -235,7 +235,7 @@ onMounted(load);
 
       <!-- 成本估算：用户自费 vs 平台承担（公开标价，不是结算账单） -->
       <div data-test="byok-cost" class="mt-3 grid gap-2 sm:grid-cols-3">
-        <div class="rounded-lg border border-border bg-card px-3 py-2.5">
+        <div class="rounded-2xl border border-border bg-card px-3 py-2.5">
           <p class="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
             用户自费成本（估算）
           </p>
@@ -244,7 +244,7 @@ onMounted(load);
           </p>
           <p class="mt-0.5 text-[11px] text-muted-foreground">BYOK 任务的等值成本</p>
         </div>
-        <div class="rounded-lg border border-border bg-card px-3 py-2.5">
+        <div class="rounded-2xl border border-border bg-card px-3 py-2.5">
           <p class="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
             平台承担成本（估算）
           </p>
@@ -253,7 +253,7 @@ onMounted(load);
           </p>
           <p class="mt-0.5 text-[11px] text-muted-foreground">平台模型任务</p>
         </div>
-        <div class="rounded-lg border border-border bg-card px-3 py-2.5">
+        <div class="rounded-2xl border border-border bg-card px-3 py-2.5">
           <p class="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
             合计
           </p>
@@ -276,7 +276,7 @@ onMounted(load);
 
       <div class="mt-4 grid gap-4 lg:grid-cols-2">
         <!-- 趋势：最近 14 天。外层宽度=总量，内层深色=BYOK 部分 -->
-        <Card>
+        <Card class="rounded-3xl">
           <CardHeader>
             <CardTitle class="flex items-baseline justify-between gap-2 text-base">
               <span>最近 14 天趋势</span>
@@ -311,7 +311,7 @@ onMounted(load);
         </Card>
 
         <!-- 厂商分布：只统计 BYOK 任务 -->
-        <Card>
+        <Card class="rounded-3xl">
           <CardHeader>
             <CardTitle class="text-base">BYOK 厂商 / 模型</CardTitle>
           </CardHeader>
@@ -356,7 +356,7 @@ onMounted(load);
       </div>
 
       <!-- 配了但没用：推动切换的靶子名单（全站历史口径） -->
-      <Card class="mt-4" data-test="byok-dormant">
+      <Card class="mt-4 rounded-3xl" data-test="byok-dormant">
         <CardHeader>
           <CardTitle class="flex flex-wrap items-baseline justify-between gap-2 text-base">
             <span class="flex items-center gap-2">
@@ -416,7 +416,7 @@ onMounted(load);
       </Card>
 
       <!-- Top 用户：按 BYOK token 排序，没有 BYOK 的用户不在表里 -->
-      <Card class="mt-4">
+      <Card class="mt-4 rounded-3xl">
         <CardHeader>
           <CardTitle class="flex items-baseline justify-between gap-2 text-base">
             <span>BYOK Top 用户</span>

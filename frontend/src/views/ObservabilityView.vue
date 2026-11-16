@@ -237,7 +237,7 @@ async function refresh() {
     <template v-else-if="overview">
       <!-- 概览：四项。成功率带分母，token 带口径说明 —— 孤零零的数字无法核对。 -->
       <div class="mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-        <div class="rounded-lg border border-border bg-card px-3 py-2.5">
+        <div class="rounded-2xl border border-border bg-card px-3 py-2.5">
           <p class="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
             任务总数
           </p>
@@ -246,7 +246,7 @@ async function refresh() {
           </p>
         </div>
 
-        <div class="rounded-lg border border-border bg-card px-3 py-2.5">
+        <div class="rounded-2xl border border-border bg-card px-3 py-2.5">
           <p class="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
             成功率
           </p>
@@ -265,7 +265,7 @@ async function refresh() {
           </p>
         </div>
 
-        <div class="rounded-lg border border-border bg-card px-3 py-2.5">
+        <div class="rounded-2xl border border-border bg-card px-3 py-2.5">
           <p class="flex items-center gap-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
             <Coins :size="11" aria-hidden="true" /> 累计 token
           </p>
@@ -293,7 +293,7 @@ async function refresh() {
           </p>
         </div>
 
-        <div class="rounded-lg border border-border bg-card px-3 py-2.5">
+        <div class="rounded-2xl border border-border bg-card px-3 py-2.5">
           <p class="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
             平均每任务 token
           </p>
@@ -308,7 +308,7 @@ async function refresh() {
       </div>
 
       <!-- 状态分布：全量状态（含 waiting_approval），并显示合计供核对 -->
-      <section class="mb-4 rounded-lg border border-border bg-card px-3 py-2.5">
+      <section class="mb-4 rounded-2xl border border-border bg-card px-3 py-2.5">
         <div class="mb-2 flex items-baseline justify-between gap-2">
           <h2 class="text-sm font-medium">状态分布</h2>
           <!-- 合计是「看板自洽」的可见证据：合计 ≠ 总数就说明漏了状态 -->
@@ -333,7 +333,7 @@ async function refresh() {
       <!-- 最近任务：标题是唯一能认出「哪次运行」的信息，UUID 只作辅助 -->
       <section
         v-if="overview.recent.length"
-        class="overflow-hidden rounded-lg border border-border bg-card"
+        class="overflow-hidden rounded-2xl border border-border bg-card"
       >
         <h2 class="border-b border-border px-3 py-2 text-sm font-medium">最近任务</h2>
         <ul class="divide-y divide-border">

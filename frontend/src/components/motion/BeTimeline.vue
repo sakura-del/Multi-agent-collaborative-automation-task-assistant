@@ -77,7 +77,6 @@ defineSlots<{
 }>();
 
 const stageRef = ref<HTMLElement | null>(null);
-const stageWidth = ref(1024);
 const activeIndex = ref(clamp(props.initialIndex, 0, Math.max(0, props.events.length - 1)));
 const scroll = useMotionValue(activeIndex.value);
 const reducedMotion = useReducedMotion();

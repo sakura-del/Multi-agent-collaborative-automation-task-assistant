@@ -304,7 +304,7 @@ onMounted(load);
 
     <template v-else>
       <!-- 当前套餐：名字 + 月费 + 用量 + **权益** + 到期日 -->
-      <Card v-if="usage" data-test="plan-current">
+      <Card v-if="usage" class="rounded-3xl" data-test="plan-current">
         <CardHeader>
           <CardTitle class="flex flex-wrap items-center gap-2 text-base">
             <span>{{ usage.plan_name }}</span>
@@ -420,7 +420,7 @@ onMounted(load);
       />
 
       <!-- 模型用量分账（Issue #15 P2）：平台模型 vs 自带模型 -->
-      <Card v-if="usage && modelUsage" data-test="plan-model-usage">
+      <Card v-if="usage && modelUsage" class="rounded-3xl" data-test="plan-model-usage">
         <CardHeader>
           <CardTitle class="flex flex-wrap items-baseline justify-between gap-2 text-base">
             <span>模型用量（本月）</span>
@@ -492,7 +492,7 @@ onMounted(load);
       </Card>
 
       <!-- 按模型单价估算成本（Issue #15 P2）：估算值，不是结算账单 -->
-      <Card v-if="cost" data-test="plan-model-cost">
+      <Card v-if="cost" class="rounded-3xl" data-test="plan-model-cost">
         <CardHeader>
           <CardTitle class="flex flex-wrap items-baseline justify-between gap-2 text-base">
             <span class="flex items-center gap-2">
