@@ -159,6 +159,7 @@ class TestOverview:
         assert data["providers"] == [
             {"provider": "deepseek", "model": "deepseek-chat", "tasks": 1, "tokens": 50}
         ]
+        assert len(data["top_users"]) == 1
         assert data["top_users"][0]["username"] == "alice"
         assert data["top_users"][0]["byok_token_share"] == 0.3333
         # 30 天窗口每天都有点，图表不断档

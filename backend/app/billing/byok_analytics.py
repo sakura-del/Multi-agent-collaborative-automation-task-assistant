@@ -134,11 +134,17 @@ async def build_byok_overview(
         if status in credential_counts and status != "total":
             credential_counts[status] += 1
 
-    top_ids = sorted(
-        per_user,
-        key=lambda uid: (per_user[uid]["byok_tokens"], per_user[uid]["byok_tasks"]),
-        reverse=True,
-    )[:10]
+    # 只列真正用过 BYOK 的用户：把 0 个 BYOK 任务的人放进「BYOK Top 用户」
+    # 会让运营误以为他在用自己的 key。
+    top_ids = [
+        uid
+        for uid in sorted(
+            per_user,
+            key=lambda uid: (per_user[uid]["byok_tokens"], per_user[uid]["byok_tasks"]),
+            reverse=True,
+        )
+        if per_user[uid]["byok_tasks"] > 0
+    ][:10]
     usernames: dict[uuid.UUID, str] = {}
     if top_ids:
         rows = (
