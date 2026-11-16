@@ -20,15 +20,17 @@ exec >>"${LOG_FILE}" 2>&1
 before=$(df --output=pcent / | tail -1 | tr -dc '0-9')
 echo "=== $(date -Is) start (disk ${before}%) ==="
 
-# ① 构建缓存：保留 72 小时。最近几次部署仍能命中；再老的缓存只会白占空间。
-docker builder prune -af --filter until=72h || true
+# ① 构建缓存：保留 24 小时。一天内通常有多次部署，缓存够用；
+#    今天实测 4 次部署就堆到 7.4G，72 小时会直接顶到告警线。
+docker builder prune -af --filter until=24h || true
 
 # ② 悬空镜像（无 tag 的中间层）：没有任何回滚价值。
 docker image prune -f || true
 
-# ③ 14 天未被任何容器使用的镜像：旧版 backend / 旧 rollback。
-#    运行中镜像受保护；最近两周的镜像保留，足够回滚。
-docker image prune -a -f --filter until=336h || true
+# ③ 72 小时未被任何容器使用的镜像：旧版 backend / 旧 rollback。
+#    运行中镜像受保护；保留最近 3 天，足够回滚，也不会让每天多次部署
+#    的镜像把 40G 盘堆满（2026-11-16 实测：14 天策略下一天涨到 64%）。
+docker image prune -a -f --filter until=72h || true
 
 # ④ 系统日志与 apt 缓存
 journalctl --vacuum-size=200M || true

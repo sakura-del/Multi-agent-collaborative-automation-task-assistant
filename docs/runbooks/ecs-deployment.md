@@ -1437,9 +1437,10 @@ docker exec vp-redis redis-cli --scan --pattern 'captcha:used:*' | head -5
 ### 24.2 永久措施
 
 1. **每日磁盘护栏**（`veripaper-disk-guard.timer`，04:40 本地时区，随机延迟 10 分钟）：
-   - 构建缓存只保留 72 小时；
+   - 构建缓存只保留 24 小时（一天内多次部署仍能命中）；
    - 删除悬空镜像；
-   - 删除 **14 天未被容器使用** 的镜像（运行中镜像受 Docker 保护）；
+   - 删除 **72 小时未被容器使用** 的镜像（运行中镜像受 Docker 保护；
+     保留最近 3 天足够回滚）；
    - `journalctl --vacuum-size=200M`、`apt-get clean`；
    - 容器日志单文件 >200MB 时截断（兜底，正常由日志轮转控制）。
    - 日志：`/var/log/veripaper-disk-guard.log`。
