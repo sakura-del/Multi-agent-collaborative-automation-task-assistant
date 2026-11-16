@@ -3,7 +3,7 @@
  * beUI 时间线的背景年份数字（视差层）。
  * 年份移动速度是卡片的 0.5 倍（YEAR_PARALLAX），产生纵深。
  */
-import { useTransform, type MotionValue } from "motion-v";
+import { Motion, useTransform, type MotionValue } from "motion-v";
 
 import { YEAR_INSET, YEAR_PARALLAX } from "./timeline-geometry";
 

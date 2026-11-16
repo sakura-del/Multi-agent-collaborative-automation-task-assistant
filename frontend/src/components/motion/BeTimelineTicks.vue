@@ -3,7 +3,7 @@
  * beUI 时间线的间隙刻度：位于卡 index 与下一张卡之间的中点。
  * 间隙宽度在拖动中保持不变（见 cardX），所以刻度组只做平移。
  */
-import { useTransform, type MotionValue } from "motion-v";
+import { Motion, useTransform, type MotionValue } from "motion-v";
 
 import { GAP_TICKS, GAP_TICK_SPAN, TICK_SHORT, TICK_TALL, cardScale, cardX, type TimelineGeometry } from "./timeline-geometry";
 

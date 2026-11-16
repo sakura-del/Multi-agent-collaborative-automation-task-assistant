@@ -6,7 +6,7 @@
  * 事件列表动态变化（任务详情的 WS 事件流）时，新卡挂载即有自己的变换，
  * 旧卡卸载即清理 —— 父组件不需要为「事件数组变了」做任何重建。
  */
-import { useTransform, type MotionValue } from "motion-v";
+import { Motion, useTransform, type MotionValue } from "motion-v";
 
 import { SIDE_DIM, cardScale, cardX, type TimelineGeometry } from "./timeline-geometry";
 

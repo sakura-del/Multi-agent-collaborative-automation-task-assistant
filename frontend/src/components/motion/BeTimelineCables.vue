@@ -2,12 +2,24 @@
 /**
  * beUI 时间线的连接线：从舞台上下中心发散到某张卡的近角。
  *
- * 线只画到卡的垂直中心（藏在卡的不透明表面后面），视觉上正好
- * 「挂」在卡的上下边缘，不需要量卡的实际位置。
+ * 为什么不用 MotionValue 直接绑到 `<line>`：motion-v 的 `Motion` 只接管
+ * HTML 标签；SVG `<line>` 是普通元素，Vue 会把 MotionValue 对象原样
+ * 绑到属性上（`[object Object]`）。所以这里用
+ * `useMotionValueEvent` 把 scroll 变化写进响应式数字，由 Vue 正常渲染。
  */
-import { useTransform, type MotionValue } from "motion-v";
+import { ref, watch } from "vue";
+import { useMotionValueEvent, type MotionValue } from "motion-v";
 
-import { CABLE_FADE, CABLE_HOLD, CABLE_REACH, CARD_CENTER, cardScale, cardX, clamp, type TimelineGeometry } from "./timeline-geometry";
+import {
+  CABLE_FADE,
+  CABLE_HOLD,
+  CABLE_REACH,
+  CARD_CENTER,
+  cardScale,
+  cardX,
+  clamp,
+  type TimelineGeometry,
+} from "./timeline-geometry";
 
 const props = defineProps<{
   scroll: MotionValue<number>;
@@ -16,47 +28,53 @@ const props = defineProps<{
   height: number;
 }>();
 
-const offset = useTransform(props.scroll, (s) => props.index - s);
-const reach = (o: number) =>
-  (props.geometry.cardWidth / 2) * cardScale(o) * CABLE_REACH;
-const left = useTransform(
-  offset,
-  (o) => props.geometry.halfWidth + cardX(o, props.geometry) - reach(o),
-);
-const right = useTransform(
-  offset,
-  (o) => props.geometry.halfWidth + cardX(o, props.geometry) + reach(o),
-);
-const opacity = useTransform(offset, (o) =>
-  clamp((CABLE_FADE - Math.abs(o)) / (CABLE_FADE - CABLE_HOLD), 0, 1),
+const left = ref(0);
+const right = ref(0);
+const opacity = ref(0);
+
+function update(scrollValue: number) {
+  const g = props.geometry;
+  const o = props.index - scrollValue;
+  const reach = (g.cardWidth / 2) * cardScale(o) * CABLE_REACH;
+  left.value = g.halfWidth + cardX(o, g) - reach;
+  right.value = g.halfWidth + cardX(o, g) + reach;
+  opacity.value = clamp((CABLE_FADE - Math.abs(o)) / (CABLE_FADE - CABLE_HOLD), 0, 1);
+}
+
+useMotionValueEvent(props.scroll, "change", update);
+// 几何尺寸变化（resize）与首次挂载都要重算
+watch(
+  () => [props.geometry, props.index, props.height],
+  () => update(props.scroll.get()),
+  { immediate: true },
 );
 </script>
 
 <template>
-  <Motion as="g" :style="{ opacity }">
+  <g :style="{ opacity }">
     <line
       :x1="props.geometry.halfWidth"
       :y1="0"
-      :x2="(left as unknown as number)"
+      :x2="left"
       :y2="props.height * CARD_CENTER"
     />
     <line
       :x1="props.geometry.halfWidth"
       :y1="0"
-      :x2="(right as unknown as number)"
+      :x2="right"
       :y2="props.height * CARD_CENTER"
     />
     <line
       :x1="props.geometry.halfWidth"
       :y1="props.height"
-      :x2="(left as unknown as number)"
+      :x2="left"
       :y2="props.height * CARD_CENTER"
     />
     <line
       :x1="props.geometry.halfWidth"
       :y1="props.height"
-      :x2="(right as unknown as number)"
+      :x2="right"
       :y2="props.height * CARD_CENTER"
     />
-  </Motion>
+  </g>
 </template>
