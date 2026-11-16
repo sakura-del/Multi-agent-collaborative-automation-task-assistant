@@ -300,6 +300,25 @@ class TestUsedTokensAccumulation:
         finally:
             await engine.dispose()
 
+    async def test_accumulates_prompt_and_completion_split(self, tmp_path: Path) -> None:
+        """输入/输出拆分也要增量累加（成本估算依赖它）。"""
+        engine, factory = await _setup_engine(tmp_path)
+        try:
+            task_id, _ = await _seed_task(factory, used_tokens=0)
+            execution = _make_execution(factory, _FakeQuota())
+
+            await execution.add_used_tokens(task_id, 300, prompt_tokens=100, completion_tokens=200)
+            await execution.add_used_tokens(task_id, 200, prompt_tokens=150, completion_tokens=50)
+
+            async with factory() as session:
+                task = await session.get(Task, task_id)
+                assert task is not None
+                assert task.used_tokens == 500
+                assert task.prompt_tokens == 250
+                assert task.completion_tokens == 250
+        finally:
+            await engine.dispose()
+
     async def test_ignores_non_positive_amounts(self, tmp_path: Path) -> None:
         engine, factory = await _setup_engine(tmp_path)
         try:

@@ -736,6 +736,35 @@ export interface ModelUsage {
   total: ModelUsageBucket;
 }
 
+/** 单个模型的估算成本（USD）。`total_cost` 为 null = 未收录单价。 */
+export interface ModelCostRow {
+  provider: string;
+  model: string;
+  is_byok: boolean;
+  model_source: "task_snapshot" | "platform_default";
+  tasks: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  input_cost: string | null;
+  output_cost: string | null;
+  total_cost: string | null;
+  input_price_per_mtok: string | null;
+  output_price_per_mtok: string | null;
+  priced: boolean;
+  split_estimated: boolean;
+}
+
+/** 按模型单价估算的成本（估算值，不是结算账单）。 */
+export interface ModelCost {
+  period_key: string;
+  currency: string;
+  total_cost: string;
+  unpriced_tokens: number;
+  split_estimated_tokens: number;
+  models: ModelCostRow[];
+}
+
 export interface BillingUsage {
   /** 用量周期 YYYY-MM（UTC 年月） */
   period_key: string;

@@ -379,6 +379,13 @@ class BillingConfig(BaseModel):
     注意：token 日配额不受本开关影响 —— BYOK 任务**始终**不预扣平台 token。
     """
 
+    cost_output_ratio: float = Field(default=0.3, ge=0.0, le=1.0)
+    """历史任务没有输入/输出拆分时，用于成本估算的输出占比。
+
+    2026-11-16 之前的任务只存 `used_tokens` 总量，无法还原拆分；
+    估算时按该比例拆分并标记 `split_estimated=true`，不伪装成实测值。
+    """
+
 
 class RateLimitConfig(BaseModel):
     """速率限制与按用户配额（Phase 1 P1-D）。

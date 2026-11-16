@@ -34,8 +34,13 @@ import { computed, onMounted, ref } from "vue";
 import { ArrowUpRight, Check, Download, Loader2, X } from "lucide-vue-next";
 import PageHeader from "@/components/common/PageHeader.vue";
 
-import { exportBillingUsageCsv, getBillingUsage, listBillingPlans } from "@/api/billing";
-import type { BillingPlan, BillingUsage } from "@/api/types";
+import {
+  exportBillingUsageCsv,
+  getBillingUsage,
+  getBillingUsageCost,
+  listBillingPlans,
+} from "@/api/billing";
+import type { BillingPlan, BillingUsage, ModelCost } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -44,6 +49,8 @@ import ErrorBanner from "@/components/common/ErrorBanner.vue";
 
 const usage = ref<BillingUsage | null>(null);
 const plans = ref<BillingPlan[]>([]);
+/** 成本估算（可选数据；失败不影响套餐与用量展示）。 */
+const cost = ref<ModelCost | null>(null);
 const loading = ref(true);
 const error = ref("");
 /** 导出进行中（防重复点击）。 */
@@ -158,6 +165,22 @@ function formatTokens(tokens: number): string {
 }
 
 /**
+ * 金额展示：小额保留 6 位，大额 4 位。
+ *
+ * `null` 是「未收录单价」，**不是 0**，必须显式区分。
+ */
+function formatUsd(value: string | null | undefined): string {
+  if (value === null || value === undefined) {
+    return "未收录单价";
+  }
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) {
+    return "—";
+  }
+  return amount < 0.01 ? `$${amount.toFixed(6)}` : `$${amount.toFixed(4)}`;
+}
+
+/**
  * 下载本月账单 CSV。
  *
  * 必须走 `fetch → blob → a[download]`：端点要 `Authorization` 头，
@@ -219,9 +242,10 @@ async function load(): Promise<void> {
   loading.value = true;
   error.value = "";
   try {
-    const [usageResult, plansResult] = await Promise.allSettled([
+    const [usageResult, plansResult, costResult] = await Promise.allSettled([
       getBillingUsage(),
       listBillingPlans(),
+      getBillingUsageCost(),
     ]);
 
     if (plansResult.status === "fulfilled") {
@@ -229,6 +253,10 @@ async function load(): Promise<void> {
     }
     if (usageResult.status === "fulfilled") {
       usage.value = usageResult.value;
+    }
+    // 成本是附加信息：失败就隐藏这张卡，不拖累套餐与用量
+    if (costResult.status === "fulfilled") {
+      cost.value = costResult.value;
     }
 
     // 错误消息：优先报用量（用户更关心「我这个月还能不能跑」）
@@ -459,6 +487,78 @@ onMounted(load);
           <p class="text-xs text-muted-foreground">
             合计 {{ formatTokens(modelTotalTokens) }} tokens / {{ modelUsage.total.tasks }}
             个任务。自带模型的消耗不占平台 token 配额。
+          </p>
+        </CardContent>
+      </Card>
+
+      <!-- 按模型单价估算成本（Issue #15 P2）：估算值，不是结算账单 -->
+      <Card v-if="cost" data-test="plan-model-cost">
+        <CardHeader>
+          <CardTitle class="flex flex-wrap items-baseline justify-between gap-2 text-base">
+            <span class="flex items-center gap-2">
+              模型成本估算
+              <Badge variant="outline">估算</Badge>
+            </span>
+            <span class="text-xs font-normal text-muted-foreground">
+              USD · 公开标价 / 100 万 token · {{ cost.period_key }}
+            </span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent class="space-y-3">
+          <div class="flex flex-wrap items-baseline gap-2">
+            <span data-test="cost-total" class="text-2xl font-semibold tabular-nums">
+              {{ formatUsd(cost.total_cost) }}
+            </span>
+            <span class="text-xs text-muted-foreground">已收录单价部分合计</span>
+          </div>
+
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="border-b border-border text-left text-xs text-muted-foreground">
+                  <th class="py-1.5 pr-3 font-medium">模型</th>
+                  <th class="py-1.5 pr-3 font-medium">来源</th>
+                  <th class="py-1.5 pr-3 text-right font-medium">Tokens</th>
+                  <th class="py-1.5 text-right font-medium">估算成本</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="row in cost.models"
+                  :key="`${row.provider}-${row.model}-${row.is_byok}`"
+                  :data-test="`cost-row-${row.provider}-${row.model}`"
+                  class="border-b border-border/60 last:border-0"
+                >
+                  <td class="py-1.5 pr-3 font-medium">{{ row.model || "未知模型" }}</td>
+                  <td class="py-1.5 pr-3 text-muted-foreground">
+                    {{ row.is_byok ? "我的模型" : "平台模型" }}
+                    <span v-if="row.model_source === 'platform_default'" class="text-[11px]">
+                      （按默认模型估）
+                    </span>
+                  </td>
+                  <td class="py-1.5 pr-3 text-right tabular-nums">
+                    {{ formatTokens(row.total_tokens) }}
+                  </td>
+                  <td
+                    class="py-1.5 text-right tabular-nums"
+                    :class="row.priced ? '' : 'text-warning'"
+                  >
+                    {{ formatUsd(row.total_cost) }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <p v-if="cost.unpriced_tokens > 0" data-test="cost-unpriced" class="text-xs text-warning">
+            {{ formatTokens(cost.unpriced_tokens) }} tokens 的模型未收录单价，未计入合计。
+          </p>
+          <p class="text-xs text-muted-foreground">
+            按厂商公开标价估算，不含折扣、缓存命中与批处理优惠，也不含汇率换算。
+            <span v-if="cost.split_estimated_tokens > 0">
+              其中 {{ formatTokens(cost.split_estimated_tokens) }} tokens
+              的输入/输出拆分按比例估算。
+            </span>
           </p>
         </CardContent>
       </Card>

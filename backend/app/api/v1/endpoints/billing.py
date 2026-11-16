@@ -1,10 +1,11 @@
 """计费端点（Phase 2 · 计费套餐 Task 5）。
 
-## 四个端点
+## 五个端点
 
 | 方法 | 路径 | 鉴权 | 说明 |
 | --- | --- | --- | --- |
 | `GET` | `/billing/usage` | 双通道 | 我的当前套餐与本月用量（含平台/自带模型分账） |
+| `GET` | `/billing/usage/cost` | 双通道 | 按模型单价估算成本（USD） |
 | `GET` | `/billing/usage/export` | 双通道 | 导出指定月份账单 CSV（汇总 + 明细） |
 | `GET` | `/billing/plans` | **公开** | 套餐列表（定价页要用） |
 | `POST` | `/billing/subscribe` | **admin only** | 手工开通/变更套餐 |
@@ -34,7 +35,7 @@ from app.billing.export import build_usage_csv
 from app.billing.services.plan_service import DEFAULT_PERIOD_DAYS, PlanService
 from app.db.models.user import User
 from app.db.session import get_db
-from app.schemas.billing import PlanOut, SubscribeRequest, SubscriptionOut, UsageOut
+from app.schemas.billing import ModelCostOut, PlanOut, SubscribeRequest, SubscriptionOut, UsageOut
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
@@ -65,6 +66,26 @@ async def get_usage(current_user: ApiUserDep, db: DbDep) -> UsageOut:
     service = _service(db)
     usage = await service.get_usage(current_user.id)
     return UsageOut(**usage)  # type: ignore[arg-type]
+
+
+@router.get("/usage/cost", response_model=ModelCostOut, summary="按模型单价估算成本")
+async def get_usage_cost(
+    current_user: ApiUserDep,
+    db: DbDep,
+    period: Annotated[str | None, Query(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")] = None,
+) -> ModelCostOut:
+    """按模型公开单价估算本月成本（USD）。
+
+    ## 这是估算，不是账单
+
+    - 平台任务没有模型快照，按**平台默认模型**估算（fallback 时会偏）；
+    - 历史任务没有输入/输出拆分，按配置的输出占比拆分并标记；
+    - 未收录单价的模型不按 0 计，单独返回 `unpriced_tokens`；
+    - 不含厂商折扣、缓存命中、批处理优惠，也不做汇率换算。
+    """
+    service = _service(db)
+    data = await service.model_cost_estimate(current_user.id, period_key=period)
+    return ModelCostOut(**data)  # type: ignore[arg-type]
 
 
 @router.get("/usage/export", summary="导出模型用量账单（CSV）")

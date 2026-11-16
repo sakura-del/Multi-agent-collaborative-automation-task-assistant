@@ -125,6 +125,16 @@ class Task(Base):
     used_tokens: Mapped[int] = mapped_column(
         Integer, default=0, nullable=False, comment="实际已消耗 token（配额结算依据）"
     )
+    #: 输入/输出拆分（Issue #15 P2 成本估算，2026-11-16）。
+    #:
+    #: 只存总量无法按「输入/输出单价不同」计价；历史任务两列为 0，
+    #: 成本估算会退回「按输出占比估算」并标记为估算值。
+    prompt_tokens: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False, comment="输入 token（估算成本用）"
+    )
+    completion_tokens: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False, comment="输出 token（估算成本用）"
+    )
     #: 配额是否已结算（**幂等保护**）。
     #:
     #: 结算会调 `quota.refund()`，重复调用等于「越退越多」——额度能被刷成正收益。

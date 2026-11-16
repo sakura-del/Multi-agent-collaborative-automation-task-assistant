@@ -36,6 +36,7 @@ from fastapi.testclient import TestClient
 import app.db.models  # noqa: F401
 from app.api.v1.endpoints import tasks as tasks_endpoint
 from app.billing.services.plan_service import PlanService
+from app.core.config import get_settings
 from app.core.exceptions import AppException
 from app.core.quota import QuotaService
 from app.core.security import create_access_token
@@ -374,6 +375,28 @@ class TestUsageEndpoint:
         assert "明细,2026-" in body
         assert "计费套餐测试 export" in body
         assert ",42," in body
+
+    def test_usage_cost_estimates_by_model(self, api, monkeypatch) -> None:
+        """HTTP 契约：成本估算带上模型、单价与「估算」标记。"""
+        settings = get_settings()
+        monkeypatch.setattr(settings.llm, "default_provider", "openai")
+        monkeypatch.setattr(settings.llm, "default_model", "gpt-4o-mini")
+        user = _user(api, "u_cost")
+        _insert_task(api, user, tokens=1_000_000)
+        client = api.state.client
+
+        resp = client.get("/api/v1/billing/usage/cost", headers=_headers(user))
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["currency"] == "USD"
+        assert body["unpriced_tokens"] == 0
+        row = body["models"][0]
+        assert row["model"] == "gpt-4o-mini"
+        assert row["model_source"] == "platform_default"
+        assert row["priced"] is True
+        # 1M token 按 70/30 拆分：0.15*0.7 + 0.60*0.3 = 0.285
+        assert row["total_cost"] == "0.285000"
 
     def test_usage_export_rejects_bad_period(self, api) -> None:
         user = _user(api, "u_export_bad")

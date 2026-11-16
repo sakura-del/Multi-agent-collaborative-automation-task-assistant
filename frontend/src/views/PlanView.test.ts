@@ -7,9 +7,15 @@ vi.mock("@/api/billing", () => ({
   getBillingUsage: vi.fn(),
   listBillingPlans: vi.fn(),
   exportBillingUsageCsv: vi.fn(),
+  getBillingUsageCost: vi.fn(),
 }));
 
-import { exportBillingUsageCsv, getBillingUsage, listBillingPlans } from "@/api/billing";
+import {
+  exportBillingUsageCsv,
+  getBillingUsage,
+  getBillingUsageCost,
+  listBillingPlans,
+} from "@/api/billing";
 
 function usage(overrides: Record<string, unknown> = {}) {
   return {
@@ -48,6 +54,54 @@ function plan(overrides: Record<string, unknown> = {}) {
     allow_team: false,
     price_cents: 0,
     description: "每月 1 篇综述",
+    ...overrides,
+  };
+}
+
+
+function modelCost(overrides: Record<string, unknown> = {}) {
+  return {
+    period_key: "2026-10",
+    currency: "USD",
+    total_cost: "1.250285",
+    unpriced_tokens: 0,
+    split_estimated_tokens: 1000,
+    models: [
+      {
+        provider: "deepseek",
+        model: "deepseek-chat",
+        is_byok: true,
+        model_source: "task_snapshot",
+        tasks: 1,
+        prompt_tokens: 0,
+        completion_tokens: 1000000,
+        total_tokens: 1000000,
+        input_cost: "0.000000",
+        output_cost: "1.100000",
+        total_cost: "1.100000",
+        input_price_per_mtok: "0.27",
+        output_price_per_mtok: "1.10",
+        priced: true,
+        split_estimated: false,
+      },
+      {
+        provider: "openai",
+        model: "gpt-4o-mini",
+        is_byok: false,
+        model_source: "platform_default",
+        tasks: 2,
+        prompt_tokens: 1000700,
+        completion_tokens: 300,
+        total_tokens: 1001000,
+        input_cost: "0.150105",
+        output_cost: "0.000180",
+        total_cost: "0.150285",
+        input_price_per_mtok: "0.15",
+        output_price_per_mtok: "0.60",
+        priced: true,
+        split_estimated: true,
+      },
+    ],
     ...overrides,
   };
 }
@@ -96,6 +150,7 @@ beforeEach(() => {
   vi.mocked(getBillingUsage).mockReset();
   vi.mocked(listBillingPlans).mockReset();
   vi.mocked(exportBillingUsageCsv).mockReset();
+  vi.mocked(getBillingUsageCost).mockReset();
 });
 
 describe("PlanView", () => {
@@ -530,5 +585,59 @@ describe("PlanView 重设计（2026-10-26）", () => {
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:mock");
 
     click.mockRestore();
+  });
+  it("成本估算：显示合计、按模型明细与估算标记", async () => {
+    vi.mocked(getBillingUsage).mockResolvedValue(usage() as never);
+    vi.mocked(listBillingPlans).mockResolvedValue(PLANS as never);
+    vi.mocked(getBillingUsageCost).mockResolvedValue(modelCost() as never);
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.get("[data-test='cost-total']").text()).toContain("1.2503");
+    expect(wrapper.get("[data-test='cost-row-deepseek-deepseek-chat']").text()).toContain(
+      "1.1000",
+    );
+    expect(wrapper.get("[data-test='cost-row-openai-gpt-4o-mini']").text()).toContain(
+      "按默认模型估",
+    );
+    expect(wrapper.get("[data-test='plan-model-cost']").text()).toContain("按比例估算");
+  });
+
+  it("未收录单价不能显示成 0", async () => {
+    vi.mocked(getBillingUsage).mockResolvedValue(usage() as never);
+    vi.mocked(listBillingPlans).mockResolvedValue(PLANS as never);
+    vi.mocked(getBillingUsageCost).mockResolvedValue(
+      modelCost({
+        total_cost: "0.000000",
+        unpriced_tokens: 2000,
+        models: [
+          {
+            provider: "custom",
+            model: "my-private-model",
+            is_byok: true,
+            model_source: "task_snapshot",
+            tasks: 1,
+            prompt_tokens: 1000,
+            completion_tokens: 1000,
+            total_tokens: 2000,
+            input_cost: null,
+            output_cost: null,
+            total_cost: null,
+            input_price_per_mtok: null,
+            output_price_per_mtok: null,
+            priced: false,
+            split_estimated: false,
+          },
+        ],
+      }) as never,
+    );
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const row = wrapper.get("[data-test='cost-row-custom-my-private-model']");
+    expect(row.text()).toContain("未收录单价");
+    expect(wrapper.get("[data-test='cost-unpriced']").text()).toContain("2,000");
   });
 });

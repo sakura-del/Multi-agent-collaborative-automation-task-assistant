@@ -1,5 +1,5 @@
 import api from "./client";
-import type { BillingPlan, BillingUsage, SubscriptionInfo } from "./types";
+import type { BillingPlan, BillingUsage, ModelCost, SubscriptionInfo } from "./types";
 
 /**
  * 计费套餐 API（Phase 2 最后一项）。
@@ -20,6 +20,14 @@ export async function getBillingUsage(): Promise<BillingUsage> {
 /** 套餐列表（**公开**，登录前也可调用）。 */
 export async function listBillingPlans(): Promise<BillingPlan[]> {
   const response = await api.get<BillingPlan[]>("/billing/plans");
+  return response.data;
+}
+
+/** 按模型单价估算本月成本（USD，估算值）。 */
+export async function getBillingUsageCost(period?: string): Promise<ModelCost> {
+  const response = await api.get<ModelCost>("/billing/usage/cost", {
+    params: period ? { period } : undefined,
+  });
   return response.data;
 }
 

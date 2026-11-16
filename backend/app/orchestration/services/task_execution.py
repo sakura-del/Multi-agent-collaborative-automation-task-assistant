@@ -17,6 +17,7 @@ import asyncio
 import re
 import uuid
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 from uuid import UUID
@@ -104,13 +105,34 @@ _TERMINAL_STATUSES = frozenset({TaskStatus.COMPLETED, TaskStatus.CANCELLED, Task
 ESTIMATED_TOKENS_PER_TASK = 100_000
 
 
-def _tokens_from_payload(payload: Mapping[str, Any]) -> int:
-    """从一份 payload 读 token（`prompt_tokens + completion_tokens`，缺省按 0）。"""
-    return int(payload.get("prompt_tokens") or 0) + int(payload.get("completion_tokens") or 0)
+@dataclass(frozen=True)
+class TokenUsage:
+    """一次执行的真实 token 拆分（用于配额与成本估算）。"""
+
+    prompt: int = 0
+    completion: int = 0
+
+    @property
+    def total(self) -> int:
+        return self.prompt + self.completion
+
+    def __add__(self, other: TokenUsage) -> TokenUsage:
+        return TokenUsage(
+            prompt=self.prompt + other.prompt,
+            completion=self.completion + other.completion,
+        )
 
 
-def sum_actual_tokens(node_results: Mapping[str, Any]) -> int:
-    """从 DAG 各节点结果汇总**实际** token 用量。
+def _tokens_from_payload(payload: Mapping[str, Any]) -> TokenUsage:
+    """从一份 payload 读输入/输出 token（缺省按 0）。"""
+    return TokenUsage(
+        prompt=int(payload.get("prompt_tokens") or 0),
+        completion=int(payload.get("completion_tokens") or 0),
+    )
+
+
+def sum_actual_usage(node_results: Mapping[str, Any]) -> TokenUsage:
+    """从 DAG 各节点结果汇总**实际** token 用量（含输入/输出拆分）。
 
     ## 两个位置都要看（2026-10-26 用量看板修）
 
@@ -135,7 +157,7 @@ def sum_actual_tokens(node_results: Mapping[str, Any]) -> int:
     同一节点若两处都有值，**只取嵌套那一份**（生产权威来源）。两处相加会让用量
     翻倍，等于多扣用户额度——比少记更糟。
     """
-    total = 0
+    total = TokenUsage()
     for node_result in node_results.values():
         output = getattr(node_result, "output", None)
         if not isinstance(output, Mapping):
@@ -146,6 +168,11 @@ def sum_actual_tokens(node_results: Mapping[str, Any]) -> int:
         else:
             total += _tokens_from_payload(output)
     return total
+
+
+def sum_actual_tokens(node_results: Mapping[str, Any]) -> int:
+    """只要总量时的便捷入口（兼容旧调用与测试）。"""
+    return sum_actual_usage(node_results).total
 
 
 async def quota_refund_for_usage(quota: Any | None, user_id: UUID, *, actual_tokens: int) -> None:
@@ -206,11 +233,21 @@ class TaskExecution:
 
     # ===== 配额结算（P1-D 遗留修复）=====
 
-    async def add_used_tokens(self, task_id: UUID, tokens: int) -> None:
+    async def add_used_tokens(
+        self,
+        task_id: UUID,
+        tokens: int,
+        *,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+    ) -> None:
         """累加任务实际消耗的 token（**增量**，不覆盖）。
 
         为什么增量而不是赋值：任务可能分多段跑（重启续跑、重试节点），
         每段的 `node_results` 只含本段节点；累加才能得到全过程用量。
+
+        输入/输出拆分同时累加（Issue #15 P2）：成本估算要按不同单价计价。
+        老调用只传总量时拆分保持 0，导出会标记为「按占比估算」。
 
         失败只记 warning：用量记账失败不该让正在执行的任务崩掉
         （最坏情况是少退额度——宁可少退也不多退）。
@@ -218,11 +255,15 @@ class TaskExecution:
         amount = int(tokens)
         if amount <= 0:
             return
+        prompt_amount = max(0, int(prompt_tokens))
+        completion_amount = max(0, int(completion_tokens))
         try:
             async with self._session_factory() as session:
                 repo = TaskRepository(session)
                 task = await repo.lock_for_update(task_id)
                 task.used_tokens = int(task.used_tokens or 0) + amount
+                task.prompt_tokens = int(task.prompt_tokens or 0) + prompt_amount
+                task.completion_tokens = int(task.completion_tokens or 0) + completion_amount
                 await session.commit()
         except LookupError:
             return
@@ -924,7 +965,13 @@ class TaskExecution:
             # 先记账再判断成败：转人工 / 失败路径同样要按已用额度结算，
             # 若放在成功分支里就会漏记（「跑了 30k 然后转人工」被当成 0 用量全额退款）。
             node_results = getattr(result, "node_results", {}) or {}
-            await self.add_used_tokens(task_id, sum_actual_tokens(node_results))
+            usage = sum_actual_usage(node_results)
+            await self.add_used_tokens(
+                task_id,
+                usage.total,
+                prompt_tokens=usage.prompt,
+                completion_tokens=usage.completion,
+            )
             # 可观测性：节点维度能回答「卡在哪个环节」，成功率只说成/败
             self._record_node_metrics(node_results, _dag_node_types(dag))
 

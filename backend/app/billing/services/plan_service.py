@@ -37,11 +37,15 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
+from typing import Any, TypedDict
 
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.billing.model_prices import estimate_cost, lookup_price
+from app.core.config import get_settings
 from app.core.exceptions import AppException
 from app.core.logging import get_logger
 from app.db.models.billing import (
@@ -56,6 +60,17 @@ from app.db.models.billing import (
 from app.db.models.task import Task
 
 logger = get_logger(__name__)
+
+
+class _CostGroup(TypedDict):
+    """成本估算的中间聚合（按 provider/model/来源分组）。"""
+
+    tasks: int
+    prompt_tokens: int
+    completion_tokens: int
+    estimated_tokens: int
+    split_estimated: bool
+
 
 #: 默认订阅周期（天）。
 DEFAULT_PERIOD_DAYS = 30
@@ -514,6 +529,149 @@ class PlanService:
             },
             "rows": rows,
         }
+
+    async def model_cost_estimate(
+        self, user_id: uuid.UUID, *, period_key: str | None = None
+    ) -> dict[str, object]:
+        """按模型单价估算当月成本（USD）。
+
+        ## 口径与假设
+
+        - 平台任务没有模型快照（`model_snapshot` 只在 BYOK 时写），
+          按 `settings.llm.default_model` 估算，并标记 `model_source=platform_default`；
+          实际 fallback 到别的模型时会有偏差，这是**估算**不是账单。
+        - 历史任务没有输入/输出拆分（2026-11-16 前只存总量），
+          按 `billing.cost_output_ratio` 拆分并标记 `split_estimated=true`。
+        - 未收录单价的模型不按 0 计：`unpriced_tokens` 单独返回，前端必须提示。
+        """
+        key = period_key or period_key_for(datetime.now(UTC))
+        start, end = self._period_bounds(key)
+        settings = get_settings()
+        ratio = Decimal(str(settings.billing.cost_output_ratio))
+
+        async with self._session_factory() as session:
+            tasks = (
+                (
+                    await session.execute(
+                        select(Task)
+                        .where(
+                            Task.user_id == user_id,
+                            Task.created_at >= start,
+                            Task.created_at < end,
+                        )
+                        .order_by(Task.created_at.asc(), Task.id.asc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
+
+        groups: dict[tuple[str, bool, str, str], _CostGroup] = {}
+        for task in tasks:
+            snapshot = task.model_snapshot if isinstance(task.model_snapshot, dict) else {}
+            if task.is_byok:
+                provider = str(snapshot.get("provider") or "unknown")
+                model = str(snapshot.get("model") or "")
+                source = "task_snapshot"
+            else:
+                provider = settings.llm.default_provider
+                model = settings.llm.default_model
+                source = "platform_default"
+
+            prompt = int(task.prompt_tokens or 0)
+            completion = int(task.completion_tokens or 0)
+            split_estimated = False
+            if prompt + completion <= 0:
+                total = int(task.used_tokens or 0)
+                if total > 0:
+                    completion = int(Decimal(total) * ratio)
+                    prompt = total - completion
+                    split_estimated = True
+
+            group_key = (provider, bool(task.is_byok), model, source)
+            group = groups.setdefault(
+                group_key,
+                {
+                    "tasks": 0,
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "estimated_tokens": 0,
+                    "split_estimated": False,
+                },
+            )
+            group["tasks"] += 1
+            group["prompt_tokens"] += prompt
+            group["completion_tokens"] += completion
+            group["split_estimated"] = group["split_estimated"] or split_estimated
+            if split_estimated:
+                # 只累计**这条任务**的估算 token；不能用整组 tokens，
+                # 否则同模型下的精确任务也会被算进「估算」口径。
+                group["estimated_tokens"] += prompt + completion
+
+        rows: list[dict[str, Any]] = []
+        total_cost = Decimal("0")
+        unpriced_tokens = 0
+        split_estimated_tokens = 0
+        for (provider, is_byok, model, source), group in groups.items():
+            prompt = group["prompt_tokens"]
+            completion = group["completion_tokens"]
+            tokens = prompt + completion
+            price = lookup_price(model)
+            cost = estimate_cost(model, prompt, completion)
+            input_cost = estimate_cost(model, prompt, 0)
+            output_cost = estimate_cost(model, 0, completion)
+            if cost is None:
+                unpriced_tokens += tokens
+            else:
+                total_cost += cost
+            if group["split_estimated"]:
+                split_estimated_tokens += group["estimated_tokens"]
+            rows.append(
+                {
+                    "provider": provider,
+                    "model": model,
+                    "is_byok": is_byok,
+                    "model_source": source,
+                    "tasks": group["tasks"],
+                    "prompt_tokens": prompt,
+                    "completion_tokens": completion,
+                    "total_tokens": tokens,
+                    "input_cost": self._money(input_cost),
+                    "output_cost": self._money(output_cost),
+                    "total_cost": self._money(cost),
+                    "input_price_per_mtok": (
+                        str(price.input_per_mtok) if price is not None else None
+                    ),
+                    "output_price_per_mtok": (
+                        str(price.output_per_mtok) if price is not None else None
+                    ),
+                    "priced": price is not None,
+                    "split_estimated": bool(group["split_estimated"]),
+                }
+            )
+
+        rows.sort(
+            key=lambda row: (
+                not bool(row["priced"]),
+                -float(row["total_cost"] or 0),
+                -int(row["total_tokens"]),
+            )
+        )
+        return {
+            "period_key": key,
+            "currency": "USD",
+            "total_cost": self._money(total_cost),
+            "unpriced_tokens": unpriced_tokens,
+            "split_estimated_tokens": split_estimated_tokens,
+            "models": rows,
+        }
+
+    @staticmethod
+    def _money(value: Decimal | None) -> str | None:
+        """金额统一 6 位小数（USD）；`None` 表示未收录单价，不是 0。"""
+        if value is None:
+            return None
+        return f"{value:.6f}"
 
     async def check_and_consume_review(
         self, user_id: uuid.UUID, *, moment: datetime | None = None

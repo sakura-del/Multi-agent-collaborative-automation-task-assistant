@@ -56,6 +56,46 @@ class ModelUsageOut(BaseModel):
     total: ModelUsageBucket
 
 
+class ModelCostRow(BaseModel):
+    """一个模型的本月估算成本。
+
+    `total_cost` 为 `null` 表示**未收录单价**（不是免费）；
+    前端必须显示「未收录」，并且不能把它算进合计。
+    """
+
+    provider: str
+    model: str
+    is_byok: bool
+    model_source: str = Field(
+        description="task_snapshot = 任务快照；platform_default = 平台默认模型估算"
+    )
+    tasks: int
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    input_cost: str | None
+    output_cost: str | None
+    total_cost: str | None
+    input_price_per_mtok: str | None
+    output_price_per_mtok: str | None
+    priced: bool
+    split_estimated: bool = Field(description="输入/输出拆分是否为估算（历史任务）")
+
+
+class ModelCostOut(BaseModel):
+    """按模型单价估算的成本（USD）。
+
+    这是**估算**：不含厂商折扣 / 缓存命中 / 批处理优惠，也不做汇率换算。
+    """
+
+    period_key: str
+    currency: str = "USD"
+    total_cost: str = Field(description="已收录单价部分的合计（USD，6 位小数）")
+    unpriced_tokens: int = Field(description="未收录单价的 token，未计入 total_cost")
+    split_estimated_tokens: int = Field(description="按输出占比估算拆分的 token")
+    models: list[ModelCostRow]
+
+
 class UsageOut(BaseModel):
     """我的用量 + **当前套餐权益**（2026-10-26 套餐页重设计扩充）。
 
