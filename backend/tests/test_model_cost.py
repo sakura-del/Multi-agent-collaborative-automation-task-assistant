@@ -48,6 +48,12 @@ class TestPriceCatalog:
         assert price is not None
         assert price.output_per_mtok == Decimal("10.00")
 
+    def test_internal_relay_alias_is_priced(self) -> None:
+        """生产默认模型是 `workbuddy-ai/deepseek-v4.1-flash`；不能整月显示未收录。"""
+        price = lookup_price("workbuddy-ai/deepseek-v4.1-flash")
+        assert price is not None
+        assert price.input_per_mtok == Decimal("0.27")
+
     def test_unknown_model_returns_none(self) -> None:
         assert lookup_price("totally-unknown-model") is None
         assert lookup_price(None) is None

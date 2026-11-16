@@ -47,6 +47,9 @@ _PRICES: dict[str, ModelPrice] = {
     # DeepSeek
     "deepseek-chat": _price("0.27", "1.10"),
     "deepseek-reasoner": _price("0.55", "2.19"),
+    # 生产默认模型（model.rhzy.ai 中转别名）。中转站不公开单价，
+    # 按 deepseek-chat 的公开标价估算；实际结算价不同时改这一行即可。
+    "deepseek-v4.1-flash": _price("0.27", "1.10"),
     # 阿里云通义（国际站标价）
     "qwen-max": _price("1.60", "6.40"),
     "qwen-plus": _price("0.40", "1.20"),
