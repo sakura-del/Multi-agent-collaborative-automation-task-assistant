@@ -56,7 +56,9 @@ class TestConfigParsing:
 
     def test_invalid_numbers_fall_back_to_defaults(self, wd) -> None:
         cfg = wd.build_config({"WATCHDOG_DISK_WARN_PCT": "abc", "WATCHDOG_REPEAT_MINUTES": "x"})
-        assert cfg.disk_warn_pct == 85.0
+        # 2026-11-16：磁盘告警从 85/92 下调到 75/90（40G 盘留足反应时间）
+        assert cfg.disk_warn_pct == 75.0
+        assert cfg.disk_crit_pct == 90.0
         assert cfg.repeat_minutes == 180
 
     def test_thresholds_read_from_env(self, wd) -> None:
