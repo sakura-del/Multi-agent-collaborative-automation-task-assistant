@@ -1416,3 +1416,68 @@ docker logs vp-backend --since 1h 2>&1 | grep register_captcha_rejected | tail -
 # 已用 nonce（Redis）
 docker exec vp-redis redis-cli --scan --pattern 'captcha:used:*' | head -5
 ```
+
+## 24. 磁盘占用与自动护栏（2026-11-16）
+
+### 24.1 事故：40G 云盘用到 80%
+
+阿里云监控报警：`/` 30G/40G（80%），剩余 7.7G。现场拆解：
+
+| 项 | 占用 | 可回收 |
+| --- | --- | --- |
+| `/var/lib/containerd` 快照 | 17G | 大部分是旧镜像层 |
+| Docker 构建缓存 | 8.5G | 全部 |
+| 悬空镜像（26 个） | 10G | 全部 |
+| 数据卷（PG/Redis/上传/产物） | 1.3G | **不可删** |
+| 系统、日志、备份 | < 1G | 否 |
+
+根因不是业务数据，而是**每次部署产生约 1.8GB 镜像 + 构建缓存，从来没人清**。
+一次性回收 16G 后降到 38%。
+
+### 24.2 永久措施
+
+1. **每日磁盘护栏**（`veripaper-disk-guard.timer`，04:40 本地时区，随机延迟 10 分钟）：
+   - 构建缓存只保留 72 小时；
+   - 删除悬空镜像；
+   - 删除 **14 天未被容器使用** 的镜像（运行中镜像受 Docker 保护）；
+   - `journalctl --vacuum-size=200M`、`apt-get clean`；
+   - 容器日志单文件 >200MB 时截断（兜底，正常由日志轮转控制）。
+   - 日志：`/var/log/veripaper-disk-guard.log`。
+2. **容器日志轮转**：`deploy/ecs/docker-compose.yml` 用 `x-logging` 锚点，
+   每容器 50MB × 3 份上限。改动在服务下次 `up -d` 重建时生效。
+3. **告警提前**：watchdog 阈值从 85%/92% 下调到 **75%/90%**，
+   `/etc/veripaper/notify.env` 已同步；75% 就开始提醒，不再等到只剩 6G。
+4. **备份不动**：`/opt/veripaper/backup` 与 S3 备份不在自动清理范围，
+   数据库备份必须人工确认后才可删。
+
+### 24.3 运维命令
+
+```bash
+# 立即清理（幂等）
+systemctl start veripaper-disk-guard.service
+tail -20 /var/log/veripaper-disk-guard.log
+
+# 看防守结果
+df -h /
+docker system df
+systemctl list-timers veripaper-disk-guard.timer
+
+# 看谁在占（只读）
+du -x -h -d1 /var | sort -rh | head
+du -x -h -d1 /var/lib/containerd | sort -rh | head
+```
+
+### 24.4 磁盘 >75% 时的处置顺序
+
+1. `systemctl start veripaper-disk-guard.service`，再看 `df -h /`；
+2. `docker system df` 确认是镜像/缓存还是数据卷；
+3. **绝不** `docker volume prune`、**绝不**删 `/opt/veripaper/backup` 或
+   `/var/lib/docker/volumes/*` —— 那是用户数据和唯一回滚依据；
+4. 若是 `uploads` / `artifacts` 持续增长（真实用户数据），说明 40G 不够：
+   升配到 80G 或挂独立数据盘，不要靠删用户文件省空间。
+
+### 24.5 容量判断
+
+按当前节奏（每天若干次部署 + 每日护栏），稳态在 **15~20G**。
+用户产物超过 10G 或镜像常驻超过 2 个版本时，40G 会再次吃紧，
+应升配磁盘而不是继续加大清理频率。

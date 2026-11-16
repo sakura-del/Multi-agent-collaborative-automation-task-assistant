@@ -1,0 +1,11 @@
+[Unit]
+Description=VeriPaper: 磁盘护栏（清理可再生成的镜像/缓存/日志）
+Documentation=https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant/blob/main/deploy/ecs/disk-guard.sh
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/veripaper/deploy/ecs/disk-guard.sh
+Nice=10
+IOSchedulingClass=idle

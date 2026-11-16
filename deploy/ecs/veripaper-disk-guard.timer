@@ -1,0 +1,12 @@
+[Unit]
+Description=VeriPaper: 每天 04:40 清理磁盘（镜像/构建缓存/日志）
+
+[Timer]
+OnCalendar=*-*-* 04:40:00
+# 机器休眠/关机错过时，开机后补跑一次
+Persistent=true
+# 最多随机延迟 10 分钟，避免与其他定时任务同时抢 IO
+RandomizedDelaySec=600
+
+[Install]
+WantedBy=timers.target

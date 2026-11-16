@@ -12,11 +12,20 @@
 #   docker compose -f deploy/ecs/docker-compose.yml up -d gateway
 name: veripaper
 
+# 容器日志轮转（2026-11-16）：40G 云盘经不起 json-file 无限增长。
+# 单文件 50MB × 3 = 每容器上限 150MB，与每日 disk-guard 一起兜底。
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"
+
 services:
   postgres:
     # 与 Supabase（PG 17.11）对齐，避免 pg_restore 版本不匹配
     image: pgvector/pgvector:pg17
     container_name: vp-postgres
+    logging: *default-logging
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER 必填}
@@ -35,6 +44,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: vp-redis
+    logging: *default-logging
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
@@ -57,6 +67,7 @@ services:
         TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
         INSTALL_RAG_MODELS: ${INSTALL_RAG_MODELS:-false}
     container_name: vp-backend
+    logging: *default-logging
     restart: unless-stopped
     # 全部配置走 env_file（.env 里已是 pydantic-settings 的嵌套名），
     # 避免根 compose 那种「白名单漏项」问题
@@ -88,6 +99,7 @@ services:
     # 只做 API 反代：前端在 Cloudflare Pages，不需要在这里编译前端产物
     image: nginx:alpine
     container_name: vp-gateway
+    logging: *default-logging
     restart: unless-stopped
     ports:
       - "80:80"
@@ -110,6 +122,7 @@ services:
       dockerfile: deploy/db-backup/Dockerfile
     image: veripaper-db-backup:local
     container_name: vp-db-backup
+    logging: *default-logging
     restart: unless-stopped
     environment:
       PGHOST: postgres

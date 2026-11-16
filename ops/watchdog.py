@@ -22,7 +22,7 @@
 | --- | --- | --- |
 | `api_health` | 回环 `/api/v1/health/ready` 非 200，或 `checks` 里有非 ok | 红 |
 | `error_rate` | 窗口内 5xx 占比 ≥ 阈值且请求数达下限 | 红 |
-| `disk` | `/` 使用率 ≥ 85%（橙）/ ≥ 92%（红） | 橙/红 |
+| `disk` | `/` 使用率 ≥ 75%（橙）/ ≥ 90%（红） | 橙/红 |
 | `containers` | 有容器非 `Up` 或状态含 `unhealthy` | 红 |
 | `backup` | 最近一次成功备份超过 30 小时 | 橙 |
 
@@ -87,8 +87,8 @@ class Config:
     health_url: str = "http://127.0.0.1/api/v1/health/ready"
     health_host: str = "api.veripaper.me"
     metrics_url: str = ""
-    disk_warn_pct: float = 85.0
-    disk_crit_pct: float = 92.0
+    disk_warn_pct: float = 75.0
+    disk_crit_pct: float = 90.0
     error_rate_pct: float = 20.0
     error_min_requests: int = 20
     backup_max_age_hours: float = 30.0
