@@ -63,7 +63,7 @@ const STAGE_TONE: Record<string, NonNullable<BadgeVariants["variant"]>> = {
 
 const hint = computed(() => {
   if (!records.value.length) {
-    return "还没有候选记录。先在任务里执行检索，结果会自动进入筛选工作台。";
+    return "还没有候选记录。先在任务里执行检索，结果会自动进入筛选队列。";
   }
   return `${records.value.length} 条候选记录 · 已纳入 ${prisma.value?.included ?? 0} 条`;
 });
@@ -362,7 +362,7 @@ async function submitDecision(
       v-else-if="!records.length"
       testid="screening-empty"
       title="还没有候选记录"
-      description="先在任务里执行检索，检索结果会作为快照进入筛选工作台；跨源重复已在落库时去除。"
+      description="先在任务里执行检索，检索结果会作为快照进入筛选队列；跨源重复已在落库时去除。"
     />
 
     <ul v-else class="space-y-2">

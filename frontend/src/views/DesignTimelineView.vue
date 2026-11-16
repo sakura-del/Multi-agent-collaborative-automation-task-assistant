@@ -45,7 +45,7 @@ const TASKS: DemoTask[] = [
   {
     id: "t-0118",
     date: "2026-01-18",
-    title: "PRISMA 筛选工作台",
+    title: "PRISMA 筛选队列",
     kind: "筛选",
     status: "completed",
     progress: 100,

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ArrowRight, BookMarked, Check, Loader2, LockKeyhole, MailCheck } from "lucide-vue-next";
+import { ArrowRight, Check, Loader2, LockKeyhole, MailCheck } from "lucide-vue-next";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -139,14 +139,9 @@ async function handleResend() {
         aria-hidden="true"
       />
       <div class="relative flex items-center gap-2.5">
-        <span
-          class="flex size-9 items-center justify-center rounded-lg bg-foreground text-background"
-          aria-hidden="true"
-        >
-          <BookMarked :size="18" :stroke-width="1.8" />
-        </span>
+        <img src="/logo.svg" alt="" aria-hidden="true" class="size-9" />
         <div>
-          <p class="text-sm font-semibold tracking-tight">文献综述工作台</p>
+          <p class="text-sm font-semibold tracking-tight">VeriPaper</p>
           <p class="mt-0.5 text-[8px] tracking-[0.18em] text-muted-foreground">
             EVIDENCE-LED WRITING
           </p>
@@ -202,13 +197,8 @@ async function handleResend() {
       <div class="w-full max-w-sm">
         <div class="mb-9 lg:hidden">
           <div class="mb-5 flex items-center gap-2.5">
-            <span
-              class="flex size-8 items-center justify-center rounded-lg bg-foreground text-background"
-              aria-hidden="true"
-            >
-              <BookMarked :size="16" :stroke-width="1.8" />
-            </span>
-            <span class="text-sm font-semibold tracking-tight">文献综述工作台</span>
+            <img src="/logo.svg" alt="" aria-hidden="true" class="size-8" />
+            <span class="text-sm font-semibold tracking-tight">VeriPaper</span>
           </div>
           <h1 class="font-display text-3xl leading-snug font-medium tracking-[-0.035em]">
             让每一句论断，<br />都有迹可循。

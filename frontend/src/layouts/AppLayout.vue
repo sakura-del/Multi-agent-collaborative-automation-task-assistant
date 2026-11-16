@@ -99,14 +99,9 @@ function handleLogout() {
     >
       <!-- 品牌：引用书标 + 中英文两级字标，强调「证据驱动的学术写作」。 -->
       <div class="hidden items-center gap-2.5 px-2 md:flex">
-        <span
-          class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-foreground text-background"
-          aria-hidden="true"
-        >
-          <BookMarked :size="16" :stroke-width="1.8" />
-        </span>
+        <img src="/logo.svg" alt="" aria-hidden="true" class="size-8 shrink-0" />
         <span class="min-w-0">
-          <span class="block truncate text-sm font-semibold tracking-tight">文献综述工作台</span>
+          <span class="block truncate text-sm font-semibold tracking-tight">VeriPaper</span>
           <span class="mt-0.5 block text-[8px] tracking-[0.16em] text-muted-foreground">
             EVIDENCE-LED WRITING
           </span>
