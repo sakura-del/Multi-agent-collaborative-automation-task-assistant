@@ -890,3 +890,60 @@ export interface LLMProbeResult {
   /** 测已保存凭据时回传最新状态；未保存配置为 null */
   credential_status: "active" | "invalid" | "disabled" | null;
 }
+
+/** 管理员侧 BYOK 渗透率看板（Issue #15 P2）。 */
+export interface ByokTrendPoint {
+  date: string;
+  tasks: number;
+  tokens: number;
+  byok_tasks: number;
+  byok_tokens: number;
+}
+
+export interface ByokProviderRow {
+  provider: string;
+  model: string;
+  tasks: number;
+  tokens: number;
+}
+
+export interface ByokTopUser {
+  user_id: string;
+  username: string;
+  tasks: number;
+  tokens: number;
+  byok_tasks: number;
+  byok_tokens: number;
+  byok_token_share: number;
+}
+
+export interface ByokOverview {
+  window_days: number;
+  period_start: string;
+  period_end: string;
+  totals: {
+    tasks: number;
+    tokens: number;
+    byok_tasks: number;
+    byok_tokens: number;
+    byok_task_share: number;
+    byok_token_share: number;
+  };
+  users: {
+    active: number;
+    byok_active: number;
+    with_credentials: number;
+    with_active_credentials: number;
+    byok_penetration: number;
+    credential_penetration: number;
+  };
+  credentials: {
+    total: number;
+    active: number;
+    invalid: number;
+    disabled: number;
+  };
+  trend: ByokTrendPoint[];
+  providers: ByokProviderRow[];
+  top_users: ByokTopUser[];
+}

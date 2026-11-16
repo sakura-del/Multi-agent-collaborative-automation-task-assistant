@@ -6,6 +6,7 @@ import {
   CreditCard,
   FileInput,
   FileText,
+  Gauge,
   KeyRound,
   Library,
   ListChecks,
@@ -35,7 +36,13 @@ import { useAuthStore } from "@/stores/auth";
 const auth = useAuthStore();
 const router = useRouter();
 
-type NavItem = { name: string; label: string; icon: typeof ListChecks };
+type NavItem = {
+  name: string;
+  label: string;
+  icon: typeof ListChecks;
+  /** 仅管理员可见（服务端仍会鉴权，这里只是不展示入口） */
+  adminOnly?: boolean;
+};
 
 /** 导航分组：`label` 为空表示不显示分组标题（第一组省掉，避免视觉噪音）。 */
 const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
@@ -68,9 +75,15 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { name: "models", label: "我的模型", icon: Cpu },
       { name: "api-keys", label: "API Key", icon: KeyRound },
       { name: "plan", label: "我的套餐", icon: CreditCard },
+      { name: "admin-byok", label: "BYOK 看板", icon: Gauge, adminOnly: true },
     ],
   },
 ];
+
+/** 导航过滤：adminOnly 项只对管理员展示。 */
+function visibleItems(items: NavItem[]): NavItem[] {
+  return items.filter((item) => !item.adminOnly || auth.user?.role === "admin");
+}
 
 function handleLogout() {
   auth.logout();
@@ -116,7 +129,7 @@ function handleLogout() {
           </p>
           <div class="flex items-center gap-1 md:flex-col md:items-stretch">
             <RouterLink
-              v-for="item in group.items"
+              v-for="item in visibleItems(group.items)"
               :key="item.name"
               :to="{ name: item.name }"
               class="group flex items-center gap-2.5 whitespace-nowrap rounded-md px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"

@@ -9,12 +9,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
-    # 别名导入：`annotations` 与 `from __future__ import annotations` 的
-    # `__future__._Feature` 同名，直接 import 会让 mypy 把该名字推断成
-    # `_Feature`（`"_Feature" has no attribute "router"`）。
-    annotations as annotation_endpoints,
-)
-from app.api.v1.endpoints import (
+    admin_byok,
     api_keys,
     auth,
     auth_lifecycle,
@@ -31,6 +26,12 @@ from app.api.v1.endpoints import (
     templates,
     workspaces,
     ws,
+)
+from app.api.v1.endpoints import (
+    # 别名导入：`annotations` 与 `from __future__ import annotations` 的
+    # `__future__._Feature` 同名，直接 import 会让 mypy 把该名字推断成
+    # `_Feature`（`"_Feature" has no attribute "router"`）。
+    annotations as annotation_endpoints,
 )
 from app.knowledge.api.endpoints import router as knowledge_router
 
@@ -60,3 +61,5 @@ api_router.include_router(api_keys.router)
 api_router.include_router(llm_credentials.router)
 # 计费套餐（Phase 2 最后一项）：用量/套餐列表/手工开通
 api_router.include_router(billing.router)
+# 管理员看板（Issue #15 P2）：BYOK 渗透率，admin only、不走 API Key
+api_router.include_router(admin_byok.router)

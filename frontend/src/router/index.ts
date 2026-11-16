@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from "vue-router";
 
 import AppLayout from "@/layouts/AppLayout.vue";
+import AdminByokView from "@/views/AdminByokView.vue";
 import ApiKeyView from "@/views/ApiKeyView.vue";
 import PlanView from "@/views/PlanView.vue";
 import KnowledgeView from "@/views/KnowledgeView.vue";
@@ -90,6 +91,13 @@ export const router = createRouter({
         { path: "settings/api-keys", name: "api-keys", component: ApiKeyView },
         // 我的套餐（Phase 2 计费套餐）
         { path: "settings/plan", name: "plan", component: PlanView },
+        // 管理员侧 BYOK 渗透率看板（Issue #15 P2）：仅 admin
+        {
+          path: "admin/byok",
+          name: "admin-byok",
+          component: AdminByokView,
+          meta: { requiresAdmin: true },
+        },
         // 登录后也可从这里重发验证邮件（无 token 时展示重发按钮）
         { path: "account/verify", name: "account-verify", component: VerifyEmailView },
       ],
@@ -108,6 +116,10 @@ router.beforeEach(async (to) => {
     return { name: "login", query: { redirect: to.fullPath } };
   }
   if (auth.authenticated && to.name === "login") {
+    return { name: "tasks" };
+  }
+  // 管理员页面：非 admin 直接回任务列表，不暴露「有这一页」的错误信息
+  if (to.meta.requiresAdmin && auth.user?.role !== "admin") {
     return { name: "tasks" };
   }
   return true;
