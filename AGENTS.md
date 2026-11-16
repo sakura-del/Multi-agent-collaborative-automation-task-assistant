@@ -70,15 +70,39 @@
 
 ## 4. 环境与常用命令
 
-### 4.1 本地（Windows）
+### 4.1 测试机（10.0.10.2）—— **所有测试只在这里跑**
+
+> 2026-11-16 起：本机（Windows）内存不足、美东生产机（47.253.81.6）内存也不足，
+> **禁止**在本地或生产机跑后端测试/集成测试。本机只做 `black` / `ruff` / `mypy`
+> 这类轻量检查；浏览器验收交给 CI 的 E2E 作业。
+>
+> 登录：`ssh ylin-dev`（口令认证；本地 `ylin_10_0_10_2_ed25519` 有口令，
+> 非交互场景需 `SSH_ASKPASS`）。机器：192 核 / 2TB 内存 / `/home` 约 1T 空闲。
+
+```bash
+cd ~/vp-test                       # 独立检出，不碰 ~/projects 里的旧环境
+git fetch origin main && git reset --hard origin/main
+
+./run-tests.sh tests/test_llm_byok_runtime.py   # 定向
+./run-tests.sh tests --no-cov                   # 全量
+```
+
+- `run-tests.sh` 已注入测试环境变量（`APP_ENV=test`、SQLite 内存库、JWT 密钥、
+  `RAG_*_MOCK=1`、BYOK 测试用加密密钥），并带 300s 单测超时
+- 依赖变更后：`cd ~/vp-test/backend && .venv/bin/pip install -e ".[dev]"`
+  （用清华镜像；Python 3.12）
+- 前端：本机可 `npm run test`（轻量），完整构建与 E2E 由 CI 负责
+
+### 4.1b 本地（Windows）—— 仅格式与类型检查
 
 ```powershell
 cd 'E:\Multi-agent collaborative automation task assistant\backend'
-# 全量测试（必须指定 basetemp，否则会撞权限问题）
-.\.venv\Scripts\python.exe -m pytest tests -q --basetemp="$env:TEMP\pytest-dsh"
+.\.venv\Scripts\python.exe -m black --check app tests
+.\.venv\Scripts\python.exe -m ruff check app tests
+.\.venv\Scripts\python.exe -m mypy app
 ```
 
-- 前端（**只用 npm**，见 §6.5.6）：`cd frontend && npm run test` / `npm run build`
+- 前端（**只用 npm**，见 §6.5.6）：`cd frontend && npm run build`
 - 本机**无法访问** `model.rhzy.ai`（直连 reset / 代理 TLS 失败）→ **真实模型实验只能在服务器跑**
 
 ### 4.2 生产服务器（root@47.253.81.6，Ubuntu 24.04）
