@@ -52,6 +52,24 @@ function formatTokens(tokens: number): string {
   return tokens.toLocaleString("zh-CN");
 }
 
+/** 金额：小额 6 位、大额 4 位；null 是「未收录单价」，不是 0。 */
+function formatUsd(value: string | null | undefined): string {
+  if (value === null || value === undefined) {
+    return "未收录单价";
+  }
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) {
+    return "—";
+  }
+  return amount < 0.01 ? `$${amount.toFixed(6)}` : `$${amount.toFixed(4)}`;
+}
+
+function formatDate(value: string | null): string {
+  if (!value) return "—";
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? "—" : parsed.toLocaleDateString("zh-CN");
+}
+
 function trendWidth(tokens: number): number {
   return Math.max(2, Math.round((tokens / maxTrendTokens.value) * 100));
 }
@@ -215,6 +233,47 @@ onMounted(load);
         </span>
       </div>
 
+      <!-- 成本估算：用户自费 vs 平台承担（公开标价，不是结算账单） -->
+      <div data-test="byok-cost" class="mt-3 grid gap-2 sm:grid-cols-3">
+        <div class="rounded-lg border border-border bg-card px-3 py-2.5">
+          <p class="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+            用户自费成本（估算）
+          </p>
+          <p class="mt-1 text-xl font-semibold tabular-nums" data-test="byok-cost-byok">
+            {{ formatUsd(overview.cost.byok) }}
+          </p>
+          <p class="mt-0.5 text-[11px] text-muted-foreground">BYOK 任务的等值成本</p>
+        </div>
+        <div class="rounded-lg border border-border bg-card px-3 py-2.5">
+          <p class="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+            平台承担成本（估算）
+          </p>
+          <p class="mt-1 text-xl font-semibold tabular-nums" data-test="byok-cost-platform">
+            {{ formatUsd(overview.cost.platform) }}
+          </p>
+          <p class="mt-0.5 text-[11px] text-muted-foreground">平台模型任务</p>
+        </div>
+        <div class="rounded-lg border border-border bg-card px-3 py-2.5">
+          <p class="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+            合计
+          </p>
+          <p class="mt-1 text-xl font-semibold tabular-nums" data-test="byok-cost-total">
+            {{ formatUsd(overview.cost.total) }}
+          </p>
+          <p
+            v-if="overview.cost.unpriced_byok_tokens + overview.cost.unpriced_platform_tokens > 0"
+            class="mt-0.5 text-[11px] text-warning"
+          >
+            有 {{ formatTokens(overview.cost.unpriced_byok_tokens + overview.cost.unpriced_platform_tokens) }}
+            tokens 未收录单价
+          </p>
+          <p v-else class="mt-0.5 text-[11px] text-muted-foreground">USD · 公开标价估算</p>
+        </div>
+      </div>
+      <p class="mt-1 text-[11px] text-muted-foreground">
+        按厂商公开标价估算，不含折扣、缓存命中与批处理优惠；平台任务按默认模型估算。
+      </p>
+
       <div class="mt-4 grid gap-4 lg:grid-cols-2">
         <!-- 趋势：最近 14 天。外层宽度=总量，内层深色=BYOK 部分 -->
         <Card>
@@ -266,7 +325,8 @@ onMounted(load);
                   <tr class="border-b border-border text-left text-xs text-muted-foreground">
                     <th class="py-1.5 pr-3 font-medium">厂商 / 模型</th>
                     <th class="py-1.5 pr-3 text-right font-medium">任务</th>
-                    <th class="py-1.5 text-right font-medium">Tokens</th>
+                    <th class="py-1.5 pr-3 text-right font-medium">Tokens</th>
+                    <th class="py-1.5 text-right font-medium">成本</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -281,7 +341,12 @@ onMounted(load);
                       <span class="text-muted-foreground"> / {{ row.model }}</span>
                     </td>
                     <td class="py-1.5 pr-3 text-right tabular-nums">{{ row.tasks }}</td>
-                    <td class="py-1.5 text-right tabular-nums">{{ formatTokens(row.tokens) }}</td>
+                    <td class="py-1.5 pr-3 text-right tabular-nums">
+                      {{ formatTokens(row.tokens) }}
+                    </td>
+                    <td class="py-1.5 text-right tabular-nums">
+                      {{ row.cost === null ? "未收录" : formatUsd(row.cost) }}
+                    </td>
                   </tr>
                 </tbody>
               </table>
@@ -289,6 +354,66 @@ onMounted(load);
           </CardContent>
         </Card>
       </div>
+
+      <!-- 配了但没用：推动切换的靶子名单（全站历史口径） -->
+      <Card class="mt-4" data-test="byok-dormant">
+        <CardHeader>
+          <CardTitle class="flex flex-wrap items-baseline justify-between gap-2 text-base">
+            <span class="flex items-center gap-2">
+              配了但没用
+              <Badge variant="warning">{{ overview.dormant_count }}</Badge>
+            </span>
+            <span class="text-xs font-normal text-muted-foreground">
+              已配置凭据、但从未在任务里选择自己的模型（全站历史）
+            </span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p
+            v-if="overview.dormant_users.length === 0"
+            data-test="byok-dormant-empty"
+            class="text-sm text-muted-foreground"
+          >
+            没有这类用户。
+          </p>
+          <div v-else class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="border-b border-border text-left text-xs text-muted-foreground">
+                  <th class="py-1.5 pr-3 font-medium">用户</th>
+                  <th class="py-1.5 pr-3 text-right font-medium">可用 / 凭据</th>
+                  <th class="py-1.5 pr-3 font-medium">最近配置</th>
+                  <th class="py-1.5 pr-3 text-right font-medium">平台任务</th>
+                  <th class="py-1.5 text-right font-medium">平台 Tokens</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="user in overview.dormant_users"
+                  :key="user.user_id"
+                  :data-test="`byok-dormant-${user.username}`"
+                  class="border-b border-border/60 last:border-0"
+                >
+                  <td class="py-1.5 pr-3 font-medium">{{ user.username }}</td>
+                  <td class="py-1.5 pr-3 text-right tabular-nums">
+                    {{ user.active_credentials }} / {{ user.credentials }}
+                  </td>
+                  <td class="py-1.5 pr-3 text-muted-foreground">
+                    {{ formatDate(user.latest_credential_at) }}
+                    <span v-if="user.days_since_credential !== null" class="text-[11px]">
+                      （{{ user.days_since_credential }} 天前）
+                    </span>
+                  </td>
+                  <td class="py-1.5 pr-3 text-right tabular-nums">{{ user.platform_tasks }}</td>
+                  <td class="py-1.5 text-right tabular-nums">
+                    {{ formatTokens(user.platform_tokens) }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
 
       <!-- Top 用户：按 BYOK token 排序，没有 BYOK 的用户不在表里 -->
       <Card class="mt-4">
@@ -309,6 +434,7 @@ onMounted(load);
                   <th class="py-1.5 pr-3 font-medium">用户</th>
                   <th class="py-1.5 pr-3 text-right font-medium">BYOK 任务 / 总任务</th>
                   <th class="py-1.5 pr-3 text-right font-medium">BYOK Tokens</th>
+                  <th class="py-1.5 pr-3 text-right font-medium">自费成本</th>
                   <th class="py-1.5 text-right font-medium">自身 token 占比</th>
                 </tr>
               </thead>
@@ -325,6 +451,9 @@ onMounted(load);
                   </td>
                   <td class="py-1.5 pr-3 text-right tabular-nums">
                     {{ formatTokens(user.byok_tokens) }}
+                  </td>
+                  <td class="py-1.5 pr-3 text-right tabular-nums">
+                    {{ user.byok_cost === null ? "未收录" : formatUsd(user.byok_cost) }}
                   </td>
                   <td class="py-1.5 text-right tabular-nums">
                     {{ percent(user.byok_token_share) }}

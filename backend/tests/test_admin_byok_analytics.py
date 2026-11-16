@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 import app.db.models  # noqa: F401
 from app.api.v1.endpoints import admin_byok
 from app.billing.byok_analytics import build_byok_overview
+from app.core.config import get_settings
 from app.core.exceptions import AppException
 from app.core.security import create_access_token
 from app.db.base import Base
@@ -31,6 +32,15 @@ from app.db.models.llm_credential import LLMCredential
 from app.db.models.task import Task
 from app.db.models.user import User
 from app.db.session import get_db
+
+
+@pytest.fixture(autouse=True)
+def _pin_billing(monkeypatch):
+    """测试不依赖开发机/服务器的默认模型与占比配置。"""
+    settings = get_settings()
+    monkeypatch.setattr(settings.llm, "default_provider", "openai")
+    monkeypatch.setattr(settings.llm, "default_model", "gpt-4o-mini")
+    monkeypatch.setattr(settings.billing, "cost_output_ratio", 0.3)
 
 
 @pytest.fixture
@@ -156,16 +166,43 @@ class TestOverview:
             "credential_penetration": 1.0,
         }
         assert data["credentials"] == {"total": 3, "active": 2, "invalid": 1, "disabled": 0}
+        assert data["cost"] == {
+            "currency": "USD",
+            "byok": "0.000026",
+            "platform": "0.000086",
+            "total": "0.000111",
+            "unpriced_byok_tokens": 0,
+            "unpriced_platform_tokens": 0,
+            "split_estimated_tokens": 350,
+        }
+        # bob 有失效凭据、carol 有可用凭据，都没用过 BYOK → 靶子名单
+        assert data["dormant_count"] == 2
+        assert [row["username"] for row in data["dormant_users"]] == ["bob", "carol"]
+        assert data["dormant_users"][0]["credentials"] == 1
+        assert data["dormant_users"][0]["active_credentials"] == 0
+        assert data["dormant_users"][0]["platform_tokens"] == 200
+        assert data["dormant_users"][1]["active_credentials"] == 1
         assert data["providers"] == [
-            {"provider": "deepseek", "model": "deepseek-chat", "tasks": 1, "tokens": 50}
+            {
+                "provider": "deepseek",
+                "model": "deepseek-chat",
+                "tasks": 1,
+                "tokens": 50,
+                "cost": "0.000026",
+                "unpriced_tokens": 0,
+            }
         ]
         assert len(data["top_users"]) == 1
         assert data["top_users"][0]["username"] == "alice"
         assert data["top_users"][0]["byok_token_share"] == 0.3333
+        assert data["top_users"][0]["byok_cost"] == "0.000026"
         # 30 天窗口每天都有点，图表不断档
         assert len(data["trend"]) == 31
         assert data["trend"][-1]["date"] == "2026-11-16"
         assert data["trend"][-1]["byok_tasks"] == 1
+        assert data["trend"][-1]["byok_cost"] == "0.000026"
+        # 当天含平台 300 + BYOK 50，合计 0.000111（平台 0.000086 + BYOK 0.000026）
+        assert data["trend"][-1]["cost"] == "0.000111"
 
     @pytest.mark.asyncio
     async def test_empty_window(self, factory) -> None:

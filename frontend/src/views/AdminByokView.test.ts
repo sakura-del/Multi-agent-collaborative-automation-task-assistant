@@ -31,11 +31,45 @@ function overview(overrides: Record<string, unknown> = {}) {
       credential_penetration: 1,
     },
     credentials: { total: 2, active: 1, invalid: 1, disabled: 0 },
+    cost: {
+      currency: "USD",
+      byok: "0.000026",
+      platform: "0.000086",
+      total: "0.000111",
+      unpriced_byok_tokens: 0,
+      unpriced_platform_tokens: 0,
+      split_estimated_tokens: 350,
+    },
     trend: [
-      { date: "2026-11-15", tasks: 2, tokens: 250, byok_tasks: 0, byok_tokens: 0 },
-      { date: "2026-11-16", tasks: 1, tokens: 100, byok_tasks: 1, byok_tokens: 50 },
+      {
+        date: "2026-11-15",
+        tasks: 2,
+        tokens: 250,
+        byok_tasks: 0,
+        byok_tokens: 0,
+        cost: "0.000000",
+        byok_cost: "0.000000",
+      },
+      {
+        date: "2026-11-16",
+        tasks: 1,
+        tokens: 100,
+        byok_tasks: 1,
+        byok_tokens: 50,
+        cost: "0.000111",
+        byok_cost: "0.000026",
+      },
     ],
-    providers: [{ provider: "deepseek", model: "deepseek-chat", tasks: 1, tokens: 50 }],
+    providers: [
+      {
+        provider: "deepseek",
+        model: "deepseek-chat",
+        tasks: 1,
+        tokens: 50,
+        cost: "0.000026",
+        unpriced_tokens: 0,
+      },
+    ],
     top_users: [
       {
         user_id: "u1",
@@ -45,6 +79,30 @@ function overview(overrides: Record<string, unknown> = {}) {
         byok_tasks: 1,
         byok_tokens: 50,
         byok_token_share: 0.3333,
+        byok_cost: "0.000026",
+      },
+    ],
+    dormant_count: 2,
+    dormant_users: [
+      {
+        user_id: "u2",
+        username: "bob",
+        credentials: 1,
+        active_credentials: 0,
+        latest_credential_at: "2026-11-10T00:00:00Z",
+        days_since_credential: 6,
+        platform_tasks: 1,
+        platform_tokens: 200,
+      },
+      {
+        user_id: "u3",
+        username: "carol",
+        credentials: 1,
+        active_credentials: 1,
+        latest_credential_at: null,
+        days_since_credential: null,
+        platform_tasks: 0,
+        platform_tokens: 0,
       },
     ],
     ...overrides,
@@ -127,5 +185,43 @@ describe("AdminByokView", () => {
 
     expect(wrapper.get("[data-test='byok-error']").text()).toContain("403");
     expect(wrapper.find("[data-test='byok-empty']").exists()).toBe(false);
+  });
+  it("成本估算：用户自费与平台承担分开显示", async () => {
+    vi.mocked(getByokOverview).mockResolvedValue(overview() as never);
+
+    const wrapper = mount(AdminByokView);
+    await flushPromises();
+
+    expect(wrapper.get("[data-test='byok-cost-byok']").text()).toBe("$0.000026");
+    expect(wrapper.get("[data-test='byok-cost-platform']").text()).toBe("$0.000086");
+    expect(wrapper.get("[data-test='byok-cost-total']").text()).toBe("$0.000111");
+    expect(wrapper.get("[data-test='byok-provider-deepseek-deepseek-chat']").text()).toContain(
+      "$0.000026",
+    );
+    expect(wrapper.get("[data-test='byok-top-user-alice']").text()).toContain("$0.000026");
+  });
+
+  it("配了但没用：列出靶子用户与平台用量", async () => {
+    vi.mocked(getByokOverview).mockResolvedValue(overview() as never);
+
+    const wrapper = mount(AdminByokView);
+    await flushPromises();
+
+    const card = wrapper.get("[data-test='byok-dormant']");
+    expect(card.text()).toContain("2");
+    expect(wrapper.get("[data-test='byok-dormant-bob']").text()).toContain("0 / 1");
+    expect(wrapper.get("[data-test='byok-dormant-bob']").text()).toContain("200");
+    expect(wrapper.get("[data-test='byok-dormant-carol']").text()).toContain("1 / 1");
+  });
+
+  it("没有靶子用户时给出明确空态", async () => {
+    vi.mocked(getByokOverview).mockResolvedValue(
+      overview({ dormant_count: 0, dormant_users: [] }) as never,
+    );
+
+    const wrapper = mount(AdminByokView);
+    await flushPromises();
+
+    expect(wrapper.find("[data-test='byok-dormant-empty']").exists()).toBe(true);
   });
 });

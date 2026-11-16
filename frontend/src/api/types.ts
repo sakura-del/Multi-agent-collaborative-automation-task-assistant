@@ -898,6 +898,10 @@ export interface ByokTrendPoint {
   tokens: number;
   byok_tasks: number;
   byok_tokens: number;
+  /** 当天全部任务的估算成本（USD） */
+  cost: string;
+  /** 当天 BYOK 任务的估算成本（USD） */
+  byok_cost: string;
 }
 
 export interface ByokProviderRow {
@@ -905,6 +909,9 @@ export interface ByokProviderRow {
   model: string;
   tasks: number;
   tokens: number;
+  /** BYOK 估算成本；null = 全部未收录单价 */
+  cost: string | null;
+  unpriced_tokens: number;
 }
 
 export interface ByokTopUser {
@@ -915,6 +922,29 @@ export interface ByokTopUser {
   byok_tasks: number;
   byok_tokens: number;
   byok_token_share: number;
+  /** BYOK 估算成本；null = 全部未收录单价 */
+  byok_cost: string | null;
+}
+
+export interface ByokCost {
+  currency: string;
+  byok: string;
+  platform: string;
+  total: string;
+  unpriced_byok_tokens: number;
+  unpriced_platform_tokens: number;
+  split_estimated_tokens: number;
+}
+
+export interface ByokDormantUser {
+  user_id: string;
+  username: string;
+  credentials: number;
+  active_credentials: number;
+  latest_credential_at: string | null;
+  days_since_credential: number | null;
+  platform_tasks: number;
+  platform_tokens: number;
 }
 
 export interface ByokOverview {
@@ -943,7 +973,10 @@ export interface ByokOverview {
     invalid: number;
     disabled: number;
   };
+  cost: ByokCost;
   trend: ByokTrendPoint[];
   providers: ByokProviderRow[];
   top_users: ByokTopUser[];
+  dormant_count: number;
+  dormant_users: ByokDormantUser[];
 }
