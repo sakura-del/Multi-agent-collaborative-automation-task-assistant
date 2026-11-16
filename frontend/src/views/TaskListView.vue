@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { ChevronRight, Plus, Search } from "lucide-vue-next";
 
+import BeTimeline from "@/components/motion/BeTimeline.vue";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
 import StatusBadge from "@/components/common/StatusBadge.vue";
@@ -10,7 +11,7 @@ import TaskCreateForm from "@/components/tasks/TaskCreateForm.vue";
 import TaskStatusIcon from "@/components/tasks/TaskStatusIcon.vue";
 import { Button } from "@/components/ui/button";
 import { useTaskStore } from "@/stores/tasks";
-import type { TaskCreate, TaskSummary } from "@/api/types";
+import type { TaskCreate, TaskStatus, TaskSummary } from "@/api/types";
 import {
   formatDateTime,
   isActive,
@@ -102,6 +103,66 @@ const TERMINAL_TONE_CLASS: Record<string, string> = {
 function terminalToneClass(status: string): string {
   return TERMINAL_TONE_CLASS[status] ?? "bg-muted text-muted-foreground";
 }
+
+// ===== 时间线（beUI 风格，最近 8 个任务）=====
+
+const TIMELINE_STATUS_LABELS: Record<string, string> = {
+  created: "已创建",
+  planning: "规划中",
+  waiting_approval: "待确认",
+  running: "执行中",
+  retrying: "重试中",
+  paused: "已暂停",
+  reviewing: "复盘中",
+  waiting_human: "待人工",
+  completed: "已完成",
+  failed: "已失败",
+  cancelled: "已取消",
+};
+
+/** 完整类名查表，避免 Tailwind 扫描丢失（同 TERMINAL_TONE_CLASS 的做法）。 */
+const TIMELINE_TONE_CLASS: Record<string, string> = {
+  running: "bg-primary/8 text-primary",
+  planning: "bg-muted text-muted-foreground",
+  created: "bg-muted text-muted-foreground",
+  reviewing: "bg-primary/8 text-primary",
+  waiting_approval: "bg-warning/12 text-warning",
+  waiting_human: "bg-warning/12 text-warning",
+  retrying: "bg-warning/12 text-warning",
+  paused: "bg-muted text-muted-foreground",
+  completed: "bg-success/10 text-success",
+  failed: "bg-destructive/10 text-destructive",
+  cancelled: "bg-muted text-muted-foreground",
+};
+
+function timelineStatusLabel(status: string): string {
+  return TIMELINE_STATUS_LABELS[status] ?? status;
+}
+
+function timelineToneClass(status: string): string {
+  return TIMELINE_TONE_CLASS[status] ?? "bg-muted text-muted-foreground";
+}
+
+function timelineBarClass(status: TaskStatus): string {
+  if (status === "completed") return "bg-success";
+  if (status === "failed") return "bg-destructive";
+  if (needsUserAction(status)) return "bg-warning";
+  if (isTerminal(status)) return "bg-muted-foreground/40";
+  return "bg-primary";
+}
+
+function timelineTask(id: string): TaskSummary | undefined {
+  return store.items.find((task) => task.task_id === id);
+}
+
+/** 最近 8 个任务，按创建时间升序铺进时间线（左旧右新）。 */
+const timelineTasks = computed(() =>
+  store.items
+    .filter((task) => task.created_at)
+    .slice()
+    .sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""))
+    .slice(-8),
+);
 
 // ===== 汇总统计 =====
 
@@ -251,6 +312,51 @@ const rows = computed(() =>
         {{ filter === "needs-me" ? "查看全部" : "查看待办" }} →
       </span>
     </button>
+
+    <!-- beUI 时间线：最近 8 个任务（左旧右新）。点击进详情；列表保留完整浏览与 E2E 契约。 -->
+    <div v-if="timelineTasks.length" class="mb-8 rounded-3xl border border-border bg-card p-2">
+      <BeTimeline
+        :events="
+          timelineTasks.map((task) => ({
+            id: task.task_id,
+            date: task.created_at as string,
+            title: task.title,
+          }))
+        "
+        :height="400"
+        :item-width="320"
+        aria-label="最近任务时间线"
+        @change="openTask"
+      >
+        <template #media="{ event }">
+          <div
+            v-if="timelineTask(event.id)"
+            class="flex h-full w-full flex-col justify-between p-3"
+            :class="timelineToneClass(timelineTask(event.id)!.status)"
+          >
+            <div class="flex items-center justify-between text-xs font-medium">
+              <span>{{ timelineStatusLabel(timelineTask(event.id)!.status) }}</span>
+              <span class="tabular-nums">
+                {{ taskProgress(timelineTask(event.id)!.status) }}%
+              </span>
+            </div>
+            <div>
+              <p class="text-[11px] font-medium tracking-wide uppercase opacity-80">研究任务</p>
+              <div class="mt-1.5 h-1.5 rounded-full bg-foreground/10">
+                <div
+                  class="h-full rounded-full"
+                  :class="timelineBarClass(timelineTask(event.id)!.status)"
+                  :style="{ width: `${taskProgress(timelineTask(event.id)!.status)}%` }"
+                />
+              </div>
+            </div>
+          </div>
+        </template>
+        <template #meta="{ event }">
+          <span>{{ formatDateTime(timelineTask(event.id)?.updated_at) }}</span>
+        </template>
+      </BeTimeline>
+    </div>
 
     <!-- 筛选 + 搜索 -->
     <div v-if="store.items.length" class="mb-4 flex flex-wrap items-center gap-2">
