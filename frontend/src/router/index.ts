@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from "vue-router";
 
 import AppLayout from "@/layouts/AppLayout.vue";
 import AdminByokView from "@/views/AdminByokView.vue";
+import DesignTimelineView from "@/views/DesignTimelineView.vue";
 import ApiKeyView from "@/views/ApiKeyView.vue";
 import PlanView from "@/views/PlanView.vue";
 import KnowledgeView from "@/views/KnowledgeView.vue";
@@ -31,6 +32,13 @@ export const router = createRouter({
       path: "/login",
       name: "login",
       component: LoginView,
+      meta: { public: true },
+    },
+    // 设计演示页（不进导航）：新配色 + beUI 时间线，确认后再往生产页面铺
+    {
+      path: "/design/timeline",
+      name: "design-timeline",
+      component: DesignTimelineView,
       meta: { public: true },
     },
     {
