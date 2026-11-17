@@ -40,3 +40,13 @@
   MORPH/TIMELINE_GLIDE）。不要在组件里另写字面量。
 - `Card` 支持 `as`：放进 `ul/ol` 用 `li`，表单容器用 `form`，节点详情用 `aside`；
   默认 `div`。不要用 `div` 包裹列表项（非法结构）。
+
+## 列表分页契约（2026-11-17）
+
+- `GET /tasks` body 是数组，总数在 `X-Total-Count` 头；**新增响应头必须同步
+  加进 `CORS.expose_headers`**，否则跨域前端读不到。
+- 列表相关筛选一律下推服务端（`status_group` / `q` + skip/limit），
+  不要再在前端对当前页做筛选/搜索/统计——分页后一定会漏数据。
+- 顶部统计用 `GET /tasks/counts`（全量 GROUP BY），不用 `items.length`。
+- 状态分组定义在后端 `_STATUS_GROUP_STATUSES` 与前端 `task-status.ts` 两处，
+  改动必须同步，否则数字与列表对不上。
