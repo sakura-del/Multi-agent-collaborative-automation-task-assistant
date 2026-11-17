@@ -46,6 +46,27 @@ describe("FunnelChart", () => {
   it("没有数据时给出空态，不渲染空 SVG", () => {
     const wrapper = mount(FunnelChart, { props: { stages: [] } });
     expect(wrapper.find("svg").exists()).toBe(false);
-    expect(wrapper.text()).toContain("还没有可展示的筛选数据");
+    expect(wrapper.text()).toContain("还没有筛选数据");
+  });
+
+  it("全 0 同样走空态：不画五根等宽空条误导成「漏斗坏了」", () => {
+    const wrapper = mount(FunnelChart, {
+      props: {
+        stages: [
+          { id: "identified", label: "识别", value: 0 },
+          { id: "deduped", label: "去重后", value: 0 },
+          { id: "included", label: "纳入", value: 0 },
+        ],
+      },
+    });
+    expect(wrapper.find("svg").exists()).toBe(false);
+    expect(wrapper.text()).toContain("还没有筛选数据");
+  });
+
+  it("粒子层只在有数据时渲染，并带 reduced-motion 降级", () => {
+    const wrapper = mount(FunnelChart, { props: { stages: STAGES } });
+    expect(wrapper.find(".funnel-particles").exists()).toBe(true);
+    // 16 颗：密度够看出「有东西在流动」，又不至于挡住数字
+    expect(wrapper.findAll(".funnel-particle")).toHaveLength(16);
   });
 });

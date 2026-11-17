@@ -9,7 +9,6 @@ import EmptyState from "@/components/common/EmptyState.vue";
 import PageHeader from "@/components/common/PageHeader.vue";
 import { Alert } from "@/components/ui/alert";
 import { Badge, type BadgeVariants } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -44,6 +43,11 @@ const busyId = ref<string | null>(null);
 const excludeFormId = ref<string | null>(null);
 const excludeReason = ref("");
 const stageFilter = ref("");
+
+/** 任务还没跑筛选时五个计数全是 0：不画空漏斗（容易误读成「筛选坏了」）。 */
+const hasPrismaData = computed(
+  () => (prisma.value?.identified_total ?? 0) > 0 || (prisma.value?.included ?? 0) > 0,
+);
 
 /**
  * PRISMA 阶段（顺序即流程顺序）。
@@ -305,18 +309,15 @@ async function submitDecision(
     </Alert>
 
     <!-- PRISMA 漏斗：所有数字由后端明细现算，前端只展示 -->
-    <Card v-if="prisma" class="mb-4 rounded-3xl" data-test="screening-prisma">
-      <CardHeader>
-        <CardTitle as="h2">筛选漏斗</CardTitle>
-        <CardDescription>
-          宽度按相对「识别」的比例，数字是绝对条数；逐阶段转化率看的是这一步流失了多少，
-          不是累计。
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <FunnelChart :stages="funnelStages" unit="条" />
-      </CardContent>
-    </Card>
+    <FunnelChart
+      v-if="prisma && hasPrismaData"
+      class="mb-4"
+      data-test="screening-prisma"
+      :stages="funnelStages"
+      title="筛选漏斗"
+      unit="条"
+      :period-label="`共 ${prisma.identified_total} 条识别记录`"
+    />
 
     <div class="mb-3">
       <Label class="sr-only" for="screening-stage-filter">按阶段过滤</Label>
