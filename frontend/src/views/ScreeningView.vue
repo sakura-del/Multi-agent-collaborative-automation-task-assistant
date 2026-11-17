@@ -3,10 +3,13 @@ import { computed, onMounted, ref } from "vue";
 import { Check, CircleX, MinusCircle, Sparkles } from "lucide-vue-next";
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
+import FunnelChart from "@/components/charts/FunnelChart.vue";
+import type { FunnelStageInput } from "@/components/charts/build-funnel";
 import EmptyState from "@/components/common/EmptyState.vue";
 import PageHeader from "@/components/common/PageHeader.vue";
 import { Alert } from "@/components/ui/alert";
 import { Badge, type BadgeVariants } from "@/components/ui/badge";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -41,6 +44,24 @@ const busyId = ref<string | null>(null);
 const excludeFormId = ref<string | null>(null);
 const excludeReason = ref("");
 const stageFilter = ref("");
+
+/**
+ * PRISMA 阶段（顺序即流程顺序）。
+ *
+ * 每一段都是**进入该阶段的记录数**，不是排除数：排除数单独放在 `excluded`，
+ * 由阶段行右侧的转化率体现。混用会出现「越排越多人」的错误观感。
+ */
+const funnelStages = computed<FunnelStageInput[]>(() => {
+  const counts = prisma.value;
+  if (!counts) return [];
+  return [
+    { id: "identified", label: "识别", value: counts.identified_total },
+    { id: "deduped", label: "去重后", value: counts.records_screened },
+    { id: "title_abstract", label: "标题/摘要", value: counts.title_abstract.screened },
+    { id: "fulltext", label: "全文评估", value: counts.fulltext.assessed },
+    { id: "included", label: "纳入", value: counts.included },
+  ];
+});
 
 // 主动排序（默认关闭）：关闭时零额外请求，列表行为与旧版完全一致。
 const priorityEnabled = ref(false);
@@ -283,33 +304,19 @@ async function submitDecision(
       <span>{{ success }}</span>
     </Alert>
 
-    <!-- PRISMA 计数条：所有数字由后端明细现算，前端只展示 -->
-    <div
-      v-if="prisma"
-      class="mb-4 flex flex-wrap gap-2"
-      data-test="screening-prisma"
-    >
-      <div class="min-w-24 rounded-lg border border-border bg-card px-3 py-2">
-        <p class="text-xs text-muted-foreground">识别</p>
-        <p class="text-lg font-semibold tabular-nums">{{ prisma.identified_total }}</p>
-      </div>
-      <div class="min-w-24 rounded-lg border border-border bg-card px-3 py-2">
-        <p class="text-xs text-muted-foreground">去重后</p>
-        <p class="text-lg font-semibold tabular-nums">{{ prisma.records_screened }}</p>
-      </div>
-      <div class="min-w-24 rounded-lg border border-border bg-card px-3 py-2">
-        <p class="text-xs text-muted-foreground">标题/摘要排除</p>
-        <p class="text-lg font-semibold tabular-nums">{{ prisma.title_abstract.excluded }}</p>
-      </div>
-      <div class="min-w-24 rounded-lg border border-border bg-card px-3 py-2">
-        <p class="text-xs text-muted-foreground">全文排除</p>
-        <p class="text-lg font-semibold tabular-nums">{{ prisma.fulltext.excluded }}</p>
-      </div>
-      <div class="min-w-24 rounded-lg border border-primary/40 bg-primary/8 px-3 py-2">
-        <p class="text-xs text-primary">纳入</p>
-        <p class="text-lg font-semibold tabular-nums text-primary">{{ prisma.included }}</p>
-      </div>
-    </div>
+    <!-- PRISMA 漏斗：所有数字由后端明细现算，前端只展示 -->
+    <Card v-if="prisma" class="mb-4 rounded-3xl" data-test="screening-prisma">
+      <CardHeader>
+        <CardTitle as="h2">筛选漏斗</CardTitle>
+        <CardDescription>
+          宽度按相对「识别」的比例，数字是绝对条数；逐阶段转化率看的是这一步流失了多少，
+          不是累计。
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <FunnelChart :stages="funnelStages" unit="条" />
+      </CardContent>
+    </Card>
 
     <div class="mb-3">
       <Label class="sr-only" for="screening-stage-filter">按阶段过滤</Label>
