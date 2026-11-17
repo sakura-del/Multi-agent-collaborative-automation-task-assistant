@@ -60,6 +60,20 @@ class ScreeningRepository(BaseRepository[ScreeningRecord]):
         await self.db.refresh(log)
         return log
 
+    async def has_search_log(self, task_id: uuid.UUID, query: str) -> bool:
+        """该任务是否已记录过同一检索式。
+
+        检索节点可能重试或被重生成，**不能每跑一次就往筛选表里塞一份**：
+        PRISMA 的「识别」是「这次综述检索到多少」，重复计入会让数字虚高，
+        而且用户会看到重复文献。用「任务 + 检索式」做幂等键。
+        """
+        stmt = (
+            select(SearchLog.id)
+            .where(SearchLog.task_id == task_id, SearchLog.query == query)
+            .limit(1)
+        )
+        return (await self.db.execute(stmt)).scalar_one_or_none() is not None
+
     async def list_search_logs(self, task_id: uuid.UUID) -> list[SearchLog]:
         """按执行时间正序列出任务的检索日志（复现顺序）。"""
         stmt = (

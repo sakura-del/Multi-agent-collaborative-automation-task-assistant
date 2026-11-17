@@ -129,6 +129,7 @@ class LiteratureReviewWorkflow:
         source: Any | None = None,
         reference_verifier: Any | None = None,
         knowledge_query: Any | None = None,
+        screening_recorder: Any | None = None,
         top_k: int = 8,
     ) -> None:
         self._planner = planner
@@ -143,6 +144,8 @@ class LiteratureReviewWorkflow:
         # 与 `_context_builder` 分开是因为实验需要**显式区分**「没有检索」与
         # 「检索了但没命中」—— 前者不调用后端，后者调用后返回空。
         self._knowledge_query = knowledge_query
+        # 检索结果 -> 筛选表（PRISMA「识别」阶段）。None 表示不落（测试/实验可关）。
+        self._screening_recorder = screening_recorder
         self._top_k = top_k
         self._plan: TaskPlan | None = None
         # 节点证据缓存：重生成时复用同一证据集（Plan 3 Task 4）
@@ -560,6 +563,7 @@ class LiteratureReviewWorkflow:
         query = self._query_for(task, node, plan)
         max_results = clamp_max_results(node.input.get("max_results"))
         records = await self._source.search(LiteratureSearch(query=query, max_results=max_results))
+        await self._record_screening(task, query, records)
         content = "\n".join(
             f"- {record.title} ({record.source_id}) {record.source_url}" for record in records
         )
@@ -571,7 +575,38 @@ class LiteratureReviewWorkflow:
             node_type=node.type,
         )
 
-    # ===== 缝 4/5：校验与复盘 =====
+    async def _record_screening(
+        self,
+        task: Any,
+        query: str,
+        records: list[LiteratureRecord],
+    ) -> None:
+        """把检索结果写进筛选表（PRISMA 的「识别」阶段）。
+
+        ## 为什么必须在这里写
+
+        检索结果此前只落在节点 artifacts 里，`screening_record` 一直是空的 ——
+        用户跑完检索打开筛选页只看到「还没有候选记录」，PRISMA 全 0。
+        筛选页与 PRISMA 都读 screening 表，不落库就等于功能没启用。
+
+        ## 失败不阻断检索
+
+        筛选是附加能力（用户可以不筛直接看结果）。落库失败只记 warning，
+        不能让检索节点因此重试——否则外部检索会被重复调用。
+        """
+        if self._screening_recorder is None or not records:
+            return
+        task_id = getattr(task, "id", None)
+        if task_id is None:
+            return
+        try:
+            await self._screening_recorder(task_id, query, records)
+        except Exception:  # 落库异常不升级：不能让检索因此重试
+            logger.warning(
+                "screening_record_failed", task_id=str(task_id), query=query, exc_info=True
+            )
+
+    # ===== 缝 4/5：校验与复盘 ====
 
     async def validate_node(self, task: Any, result: ExecutionResult) -> ValidationReport:
         """委托校验 Agent；返回类型化 `ValidationReport`。

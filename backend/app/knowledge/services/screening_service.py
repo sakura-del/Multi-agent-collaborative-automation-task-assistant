@@ -234,6 +234,10 @@ class ScreeningService:
     async def list_search_logs(self, task_id: uuid.UUID) -> list[SearchLog]:
         return await self._repo.list_search_logs(task_id)
 
+    async def has_search_log(self, task_id: uuid.UUID, query: str) -> bool:
+        """同一任务 + 同一检索式是否已落库（检索节点重试时用于幂等）。"""
+        return await self._repo.has_search_log(task_id, query)
+
     async def priority(self, task_id: uuid.UUID) -> PriorityRanking:
         """按任务全员标签排序未筛的标题/摘要记录。
 

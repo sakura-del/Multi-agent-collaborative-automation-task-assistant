@@ -39,6 +39,7 @@ from app.db.repositories.event import EventRepository
 from app.db.repositories.task import TaskRepository
 from app.knowledge.services.citation_validator import CitationValidator, ReferenceCheckMode
 from app.knowledge.services.context_builder import LiteratureContextBuilder
+from app.knowledge.services.screening_service import ScreeningService, source_of
 from app.orchestration.agents.planner import PlannerAgent
 from app.orchestration.agents.validator import ValidatorAgent
 from app.orchestration.contracts import (
@@ -1119,8 +1120,39 @@ class TaskExecution:
             ),
             # 引用真实性核验（Issue #3）：核验器未启用或离线任务（R6）时为 None
             reference_verifier=self._reference_verifier_for_task(task),
+            # 检索结果落筛选表：不接这条线，筛选页永远是空的（PRISMA 全 0）
+            screening_recorder=self._record_screening,
         )
         return workflow.use_plan(plan)
+
+    async def _record_screening(
+        self,
+        task_id: UUID,
+        query: str,
+        records: list[Any],
+    ) -> None:
+        """检索结果 → 筛选记录（PRISMA「识别」阶段）。
+
+        ## 幂等
+
+        检索节点可能因重试、重生成而重复执行。同一任务 + 同一检索式只写一次，
+        否则 PRISMA「识别」会翻倍，筛选队列里也会出现重复文献。
+
+        ## 为什么不在这里 try/except
+
+        调用方（工作流）已经兜住异常并且只记 warning。这里让异常照常抛出，
+        是为了在测试里能直接断言失败原因，而不是被静默吞掉。
+        """
+        async with self._session_factory() as session:
+            service = ScreeningService(session)
+            if await service.has_search_log(task_id, query):
+                return
+            await service.record_search(
+                task_id,
+                query=query,
+                sources=sorted({source_of(record) for record in records}),
+                records=records,
+            )
 
     @staticmethod
     def _reference_mode() -> ReferenceCheckMode:
