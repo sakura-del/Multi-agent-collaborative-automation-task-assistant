@@ -427,7 +427,7 @@ function handleSubmit() {
                 </button>
             </div>
 
-            <template v-if="modelSource === 'byok'">
+            <div v-if="modelSource === 'byok'" class="grid gap-1.5">
                 <select
                     id="task-model"
                     v-model="selectedCredential"
@@ -448,7 +448,7 @@ function handleSubmit() {
                     规划与写作都会走这把凭据；key
                     失效会直接失败并说明原因，不会自动改用平台模型。
                 </p>
-            </template>
+            </div>
             <p v-else class="text-xs text-muted-foreground">
                 任务将使用平台配置的模型。要用自己的 API Key，切到「自带模型」。
             </p>

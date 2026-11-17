@@ -554,7 +554,10 @@ function statusOf(credential: LLMCredentialInfo): {
                         </option>
                         <option :value="CUSTOM_MODEL">自定义…</option>
                     </select>
-                    <template v-if="customModel || modelOptions.length === 0">
+                    <div
+                        v-if="customModel || modelOptions.length === 0"
+                        class="grid gap-1.5"
+                    >
                         <Input
                             v-if="customModel"
                             id="model-id"
@@ -580,15 +583,13 @@ function statusOf(credential: LLMCredentialInfo): {
                         >
                             返回下拉选择
                         </button>
-                    </template>
+                    </div>
                     <p
                         v-if="modelOptions.length > 0"
                         class="text-xs text-muted-foreground"
                     >
                         已从厂商拉到
-                        {{
-                            modelOptions.length
-                        }}
+                        {{ modelOptions.length }}
                         个模型；先「测试连接」可刷新列表。
                     </p>
 

@@ -158,6 +158,9 @@ describe("ModelSettingsView", () => {
             model: "deepseek-chat",
             api_key: "sk-live-0123456789abcdef",
             is_default: true,
+            // 未填容量 = 显式传 null（空串在 schema 层也按未填处理）
+            context_window: null,
+            max_output_tokens: null,
         });
     });
 
@@ -302,10 +305,10 @@ describe("ModelSettingsView", () => {
         const select = wrapper.get('[data-test="model-select"]')
             .element as HTMLSelectElement;
         expect(select.value).toBe("deepseek-chat");
-        // 2 个真实模型 + 1 个「自定义…」
+        // 1 个「请选择」+ 2 个真实模型 + 1 个「自定义…」
         expect(
             wrapper.findAll('[data-test="model-select"] option'),
-        ).toHaveLength(3);
+        ).toHaveLength(4);
         expect(createLLMCredential).not.toHaveBeenCalled();
     });
 
