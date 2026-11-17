@@ -111,7 +111,7 @@ describe("TaskLog", () => {
     const wrapper = mount(TaskLog, { props: { events } });
 
     expect(wrapper.findAll('[data-test^="log-row-"]')).toHaveLength(100);
-    await wrapper.find('[data-test="log-next"]').trigger("click");
+    await wrapper.find('[aria-label="下一页"]').trigger("click");
     expect(wrapper.find('[data-test="log-page"]').text()).toContain("2 / 2");
     expect(wrapper.findAll('[data-test^="log-row-"]')).toHaveLength(30);
   });

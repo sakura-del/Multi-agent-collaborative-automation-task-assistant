@@ -14,6 +14,7 @@ import { ArrowLeft } from "lucide-vue-next";
 
 import BeTimeline, { type BeTimelineEvent } from "@/components/motion/BeTimeline.vue";
 import { Alert } from "@/components/ui/alert";
+import { Pagination } from "@/components/ui/pagination";
 import {
   Card,
   CardAction,
@@ -126,6 +127,8 @@ const ALERTS = [
 const alertVersion = ref(0);
 /** 演示 selected 视觉：点击卡片切换。 */
 const cardSelected = ref(true);
+/** 分页演示：20 页足够看到两组省略号。 */
+const demoPage = ref(1);
 
 const STATUS_LABEL: Record<DemoStatus, string> = {
   running: "运行中",
@@ -295,6 +298,19 @@ function onSelect(id: string) {
             :title="item.title"
             :description="item.description"
           />
+        </div>
+      </section>
+
+      <section class="mt-10">
+        <p class="mb-2 text-xs text-muted-foreground">分页（beUI Motion Pagination）</p>
+        <p class="text-xs text-muted-foreground">
+          当前页是一个共享胶囊，翻页时滑过去；省略号悬停变双箭头，点一次跳 5 页。
+        </p>
+        <div class="mt-3 flex flex-col items-start gap-2">
+          <Pagination v-model="demoPage" :total-pages="20" aria-label="演示分页" />
+          <p class="text-xs tabular-nums text-muted-foreground">
+            第 {{ demoPage }} 页 / 共 20 页
+          </p>
         </div>
       </section>
 

@@ -4,6 +4,7 @@ import { computed, ref, watch } from "vue";
 import { Badge } from "@/components/ui/badge";
 import type { BadgeVariants } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Pagination } from "@/components/ui/pagination";
 import { Label } from "@/components/ui/label";
 import type { TaskEvent } from "@/api/types";
 import { formatDateTime } from "@/utils/task-status";
@@ -186,30 +187,15 @@ watch(pageCount, (count) => {
 
     <p v-if="!visible.length" class="text-sm text-muted-foreground">没有匹配的事件。</p>
 
-    <div v-if="pageCount > 1" class="flex items-center gap-2">
-      <Button
-        variant="outline"
-        size="sm"
-        type="button"
-        data-test="log-prev"
-        :disabled="page === 1"
-        @click="page -= 1"
-      >
-        上一页
-      </Button>
+    <!-- 日志可能上百页：只给「上一页/下一页」翻不到中间，换成可跳页的分页 -->
+    <div
+      v-if="pageCount > 1"
+      class="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3"
+    >
       <span class="text-xs text-muted-foreground" data-test="log-page">
         {{ page }} / {{ pageCount }}
       </span>
-      <Button
-        variant="outline"
-        size="sm"
-        type="button"
-        data-test="log-next"
-        :disabled="page === pageCount"
-        @click="page += 1"
-      >
-        下一页
-      </Button>
+      <Pagination v-model="page" :total-pages="pageCount" aria-label="日志分页" />
     </div>
   </section>
 </template>
