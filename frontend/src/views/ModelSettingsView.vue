@@ -10,19 +10,19 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  createLLMCredential,
-  deleteLLMCredential,
-  listLLMCredentials,
-  listLLMProviders,
-  probeLLMCredential,
-  testLLMCredential,
-  updateLLMCredential,
+    createLLMCredential,
+    deleteLLMCredential,
+    listLLMCredentials,
+    listLLMProviders,
+    probeLLMCredential,
+    testLLMCredential,
+    updateLLMCredential,
 } from "@/api/llm-credentials";
 import type {
-  LLMCredentialInfo,
-  LLMProbeResult,
-  LLMProviderKey,
-  LLMProviderOption,
+    LLMCredentialInfo,
+    LLMProbeResult,
+    LLMProviderKey,
+    LLMProviderOption,
 } from "@/api/types";
 
 /**
@@ -60,6 +60,9 @@ const formModel = ref("");
 const formApiKey = ref("");
 const formBaseUrl = ref("");
 const formDefault = ref(false);
+/** 容量声明：保持字符串原样，提交时再解析（清空要能区分「未填」与 0）。 */
+const formContextWindow = ref("");
+const formMaxOutput = ref("");
 
 const busyId = ref<string | null>(null);
 const confirmDeleteId = ref<string | null>(null);
@@ -76,104 +79,200 @@ const probeBusy = ref(false);
 const probeResult = ref<LLMProbeResult | null>(null);
 const probeError = ref<string | null>(null);
 const modelOptions = ref<string[]>([]);
+/** 下拉里选中「自定义」后切回输入框：厂商 /models 不一定列全所有可用模型。 */
+const customModel = ref(false);
 const testingId = ref<string | null>(null);
+
+/**
+ * 模型预设（2026-11-17）：上下文窗口 / 最大输出是**模型本身的属性**，
+ * 放在设置模型的地方随模型一起保存，不是给用户看的展示项。
+ * 快捷值按厂商常见规格成对给出，一键填两框；仍可手改。
+ */
+const MODEL_PRESETS = [
+    { label: "1M / 128K", context: 1_000_000, output: 128_000 },
+    { label: "200K / 64K", context: 200_000, output: 64_000 },
+    { label: "128K / 16K", context: 128_000, output: 16_384 },
+    { label: "64K / 8K", context: 65_536, output: 8_192 },
+] as const;
+
+function applyPreset(preset: (typeof MODEL_PRESETS)[number]) {
+    formContextWindow.value = String(preset.context);
+    formMaxOutput.value = String(preset.output);
+}
 
 const isEditing = computed(() => editingId.value !== null);
 const selectedProvider = computed(
-  () => providers.value.find((item) => item.provider === formProvider.value) ?? null
+    () =>
+        providers.value.find((item) => item.provider === formProvider.value) ??
+        null,
 );
-const requiresBaseUrl = computed(() => selectedProvider.value?.requires_base_url ?? false);
+const requiresBaseUrl = computed(
+    () => selectedProvider.value?.requires_base_url ?? false,
+);
 const isEmpty = computed(() => credentials.value.length === 0);
 const filteredCredentials = computed(() => {
-  const query = search.value.trim().toLowerCase();
-  if (!query) {
-    return credentials.value;
-  }
-  return credentials.value.filter((credential) =>
-    [credential.name, credential.provider_label, credential.model].some((value) =>
-      value.toLowerCase().includes(query)
-    )
-  );
+    const query = search.value.trim().toLowerCase();
+    if (!query) {
+        return credentials.value;
+    }
+    return credentials.value.filter((credential) =>
+        [credential.name, credential.provider_label, credential.model].some(
+            (value) => value.toLowerCase().includes(query),
+        ),
+    );
 });
 
 onMounted(() => {
-  void refresh();
+    void refresh();
 });
 
+/** 下拉里「自定义」的哨兵值：不能与真实模型名冲突。 */
+const CUSTOM_MODEL = "__custom__";
+
+/** 把输入框里的字符串解析成正整数；空串 = 未填写（null）。 */
+function parseTokens(raw: string): number | null {
+    const text = raw.trim();
+    if (!text) {
+        return null;
+    }
+    const value = Number(text);
+    if (!Number.isFinite(value) || !Number.isInteger(value) || value <= 0) {
+        return null;
+    }
+    return value;
+}
+
+/**
+ * 人类可读的 token 数。
+ *
+ * 1000000 写成「1M」、128000 写成「128K」—— 这是用户在厂商文档里看到的写法，
+ * 写成一串零要靠数才知道是多大。
+ */
+function formatTokens(value: number | null | undefined): string {
+    if (value === null || value === undefined) {
+        return "未设置";
+    }
+    if (value >= 1_000_000) {
+        const millions = value / 1_000_000;
+        return `${Number.isInteger(millions) ? millions : millions.toFixed(1)}M`;
+    }
+    if (value >= 1_000) {
+        const thousands = value / 1_000;
+        return `${Number.isInteger(thousands) ? thousands : thousands.toFixed(1)}K`;
+    }
+    return String(value);
+}
+
+/** 下拉选中真实模型 or 切到自定义输入。 */
+function selectModel(value: string) {
+    if (value === CUSTOM_MODEL) {
+        customModel.value = true;
+        formModel.value = "";
+        return;
+    }
+    customModel.value = false;
+    formModel.value = value;
+}
+
 async function refresh() {
-  loading.value = true;
-  error.value = null;
-  // 两个接口独立失败：厂商目录挂了不该让「已保存的凭据」也消失
-  const [listResult, providerResult] = await Promise.allSettled([
-    listLLMCredentials(),
-    listLLMProviders(),
-  ]);
-  if (listResult.status === "fulfilled") {
-    credentials.value = listResult.value;
-  } else {
-    error.value = (listResult.reason as Error)?.message || "模型凭据加载失败";
-  }
-  if (providerResult.status === "fulfilled") {
-    providers.value = providerResult.value;
-  }
-  loading.value = false;
+    loading.value = true;
+    error.value = null;
+    // 两个接口独立失败：厂商目录挂了不该让「已保存的凭据」也消失
+    const [listResult, providerResult] = await Promise.allSettled([
+        listLLMCredentials(),
+        listLLMProviders(),
+    ]);
+    if (listResult.status === "fulfilled") {
+        credentials.value = listResult.value;
+    } else {
+        error.value =
+            (listResult.reason as Error)?.message || "模型凭据加载失败";
+    }
+    if (providerResult.status === "fulfilled") {
+        providers.value = providerResult.value;
+    }
+    loading.value = false;
 }
 
 function resetForm() {
-  editingId.value = null;
-  formName.value = "";
-  formProvider.value = "deepseek";
-  formModel.value = "";
-  formApiKey.value = "";
-  formBaseUrl.value = "";
-  formDefault.value = false;
-  probeResult.value = null;
-  probeError.value = null;
-  modelOptions.value = [];
+    editingId.value = null;
+    formName.value = "";
+    formProvider.value = "deepseek";
+    formModel.value = "";
+    formApiKey.value = "";
+    formBaseUrl.value = "";
+    formDefault.value = false;
+    formContextWindow.value = "";
+    formMaxOutput.value = "";
+    probeResult.value = null;
+    probeError.value = null;
+    modelOptions.value = [];
+    customModel.value = false;
 }
 
 function openCreate() {
-  resetForm();
-  if (providers.value.length > 0) {
-    formProvider.value = providers.value[0].provider;
-  }
-  formDefault.value = credentials.value.length === 0;
-  showForm.value = true;
+    resetForm();
+    if (providers.value.length > 0) {
+        formProvider.value = providers.value[0].provider;
+    }
+    formDefault.value = credentials.value.length === 0;
+    showForm.value = true;
 }
 
 function openEdit(credential: LLMCredentialInfo) {
-  editingId.value = credential.credential_id;
-  formName.value = credential.name;
-  formProvider.value = credential.provider;
-  formModel.value = credential.model;
-  formApiKey.value = "";
-  formBaseUrl.value = credential.provider === "custom" ? credential.base_url : "";
-  formDefault.value = credential.is_default;
-  probeResult.value = null;
-  probeError.value = null;
-  modelOptions.value = [];
-  showForm.value = true;
+    editingId.value = credential.credential_id;
+    formName.value = credential.name;
+    formProvider.value = credential.provider;
+    formModel.value = credential.model;
+    formApiKey.value = "";
+    formBaseUrl.value =
+        credential.provider === "custom" ? credential.base_url : "";
+    formDefault.value = credential.is_default;
+    formContextWindow.value = credential.context_window?.toString() ?? "";
+    formMaxOutput.value = credential.max_output_tokens?.toString() ?? "";
+    probeResult.value = null;
+    probeError.value = null;
+    modelOptions.value = [];
+    customModel.value = false;
+    showForm.value = true;
 }
 
 function closeForm() {
-  showForm.value = false;
-  resetForm();
+    showForm.value = false;
+    resetForm();
 }
 
 function validate(): string | null {
-  if (!formName.value.trim()) {
-    return "请填写名称（用于辨认是哪把 key）";
-  }
-  if (!formModel.value.trim()) {
-    return "请填写模型名，例如 deepseek-chat";
-  }
-  if (!isEditing.value && !formApiKey.value.trim()) {
-    return "请填写 API Key";
-  }
-  if (requiresBaseUrl.value && !formBaseUrl.value.trim()) {
-    return "自定义端点必须填写 base_url（OpenAI 兼容）";
-  }
-  return null;
+    if (!formName.value.trim()) {
+        return "请填写名称（用于辨认是哪把 key）";
+    }
+    if (!formModel.value.trim()) {
+        return "请填写模型名，例如 deepseek-chat";
+    }
+    if (!isEditing.value && !formApiKey.value.trim()) {
+        return "请填写 API Key";
+    }
+    if (requiresBaseUrl.value && !formBaseUrl.value.trim()) {
+        return "自定义端点必须填写 base_url（OpenAI 兼容）";
+    }
+    if (
+        formContextWindow.value.trim() &&
+        parseTokens(formContextWindow.value) === null
+    ) {
+        return "上下文窗口需为正整数（token）";
+    }
+    if (
+        formMaxOutput.value.trim() &&
+        parseTokens(formMaxOutput.value) === null
+    ) {
+        return "最大输出需为正整数（token）";
+    }
+    const context = parseTokens(formContextWindow.value);
+    const output = parseTokens(formMaxOutput.value);
+    if (context !== null && output !== null && output > context) {
+        return "最大输出不能大于上下文窗口";
+    }
+    return null;
 }
 
 /**
@@ -183,440 +282,609 @@ function validate(): string | null {
  * 因此走 `credential_id`；否则测用户刚填的配置，**不落库**。
  */
 async function probeForm() {
-  probeResult.value = null;
-  probeError.value = null;
-  modelOptions.value = [];
+    probeResult.value = null;
+    probeError.value = null;
+    modelOptions.value = [];
 
-  const editing = editingId.value;
-  const useSaved = editing !== null && !formApiKey.value.trim();
-  if (!useSaved) {
-    if (!formApiKey.value.trim()) {
-      probeError.value = "请先填写 API Key 再测试";
-      return;
+    const editing = editingId.value;
+    const useSaved = editing !== null && !formApiKey.value.trim();
+    if (!useSaved) {
+        if (!formApiKey.value.trim()) {
+            probeError.value = "请先填写 API Key 再测试";
+            return;
+        }
+        if (requiresBaseUrl.value && !formBaseUrl.value.trim()) {
+            probeError.value = "自定义端点必须先填写 base_url";
+            return;
+        }
     }
-    if (requiresBaseUrl.value && !formBaseUrl.value.trim()) {
-      probeError.value = "自定义端点必须先填写 base_url";
-      return;
-    }
-  }
 
-  probeBusy.value = true;
-  try {
-    const result = await probeLLMCredential(
-      useSaved
-        ? { credential_id: editing }
-        : {
-            provider: formProvider.value,
-            api_key: formApiKey.value.trim(),
-            ...(requiresBaseUrl.value ? { base_url: formBaseUrl.value.trim() } : {}),
-          }
-    );
-    probeResult.value = result;
-    if (result.ok) {
-      modelOptions.value = result.models;
-      // 模型名还空着就替用户填第一个，省掉手打错名字导致的 404
-      if (!formModel.value.trim() && result.models.length > 0) {
-        formModel.value = result.models[0];
-      }
+    probeBusy.value = true;
+    try {
+        const result = await probeLLMCredential(
+            useSaved
+                ? { credential_id: editing }
+                : {
+                      provider: formProvider.value,
+                      api_key: formApiKey.value.trim(),
+                      ...(requiresBaseUrl.value
+                          ? { base_url: formBaseUrl.value.trim() }
+                          : {}),
+                  },
+        );
+        probeResult.value = result;
+        if (result.ok) {
+            modelOptions.value = result.models;
+            customModel.value = false;
+            // 模型名还空着就替用户填第一个，省掉手打错名字导致的 404
+            if (!formModel.value.trim() && result.models.length > 0) {
+                formModel.value = result.models[0];
+            }
+        }
+    } catch (err) {
+        // 4xx/5xx 与「连通性失败」是两件事：这里只可能是请求本身被拒
+        probeError.value = (err as Error).message || "测试请求失败";
+    } finally {
+        probeBusy.value = false;
     }
-  } catch (err) {
-    // 4xx/5xx 与「连通性失败」是两件事：这里只可能是请求本身被拒
-    probeError.value = (err as Error).message || "测试请求失败";
-  } finally {
-    probeBusy.value = false;
-  }
 }
 
 /** 测试已保存凭据（列表态）；失败会累加计数，达阈值自动标为 invalid。 */
 async function probeSaved(credential: LLMCredentialInfo) {
-  testingId.value = credential.credential_id;
-  error.value = null;
-  success.value = null;
-  try {
-    const result = await testLLMCredential(credential.credential_id);
-    // 必须先刷新再写消息：refresh() 会清空 error，顺序反了消息就没了
-    await refresh();
-    if (result.ok) {
-      success.value = `「${credential.name}」连接正常（${result.latency_ms}ms，${
-        result.models.length
-      } 个模型）`;
-    } else {
-      error.value = `「${credential.name}」测试失败：${result.error ?? "未知错误"}`;
+    testingId.value = credential.credential_id;
+    error.value = null;
+    success.value = null;
+    try {
+        const result = await testLLMCredential(credential.credential_id);
+        // 必须先刷新再写消息：refresh() 会清空 error，顺序反了消息就没了
+        await refresh();
+        if (result.ok) {
+            success.value = `「${credential.name}」连接正常（${result.latency_ms}ms，${
+                result.models.length
+            } 个模型）`;
+        } else {
+            error.value = `「${credential.name}」测试失败：${result.error ?? "未知错误"}`;
+        }
+    } catch (err) {
+        error.value = (err as Error).message || "测试失败";
+    } finally {
+        testingId.value = null;
     }
-  } catch (err) {
-    error.value = (err as Error).message || "测试失败";
-  } finally {
-    testingId.value = null;
-  }
 }
 
 async function submitForm() {
-  const problem = validate();
-  if (problem) {
-    error.value = problem;
-    return;
-  }
-  submitting.value = true;
-  error.value = null;
-  success.value = null;
-  try {
-    if (editingId.value) {
-      await updateLLMCredential(editingId.value, {
-        name: formName.value.trim(),
-        model: formModel.value.trim(),
-        ...(formApiKey.value.trim() ? { api_key: formApiKey.value.trim() } : {}),
-        ...(requiresBaseUrl.value ? { base_url: formBaseUrl.value.trim() } : {}),
-      });
-      success.value = `已更新「${formName.value.trim()}」`;
-    } else {
-      await createLLMCredential({
-        name: formName.value.trim(),
-        provider: formProvider.value,
-        model: formModel.value.trim(),
-        api_key: formApiKey.value.trim(),
-        ...(requiresBaseUrl.value ? { base_url: formBaseUrl.value.trim() } : {}),
-        is_default: formDefault.value,
-      });
-      success.value = `已添加「${formName.value.trim()}」`;
+    const problem = validate();
+    if (problem) {
+        error.value = problem;
+        return;
     }
-    closeForm();
-    await refresh();
-  } catch (err) {
-    error.value = (err as Error).message || "保存失败";
-  } finally {
-    submitting.value = false;
-  }
+    submitting.value = true;
+    error.value = null;
+    success.value = null;
+    // 空输入 = 清除声明（update 显式传 null，后端按「清除」处理）
+    const contextWindow = parseTokens(formContextWindow.value);
+    const maxOutput = parseTokens(formMaxOutput.value);
+    try {
+        if (editingId.value) {
+            await updateLLMCredential(editingId.value, {
+                name: formName.value.trim(),
+                model: formModel.value.trim(),
+                context_window: contextWindow,
+                max_output_tokens: maxOutput,
+                ...(formApiKey.value.trim()
+                    ? { api_key: formApiKey.value.trim() }
+                    : {}),
+                ...(requiresBaseUrl.value
+                    ? { base_url: formBaseUrl.value.trim() }
+                    : {}),
+            });
+            success.value = `已更新「${formName.value.trim()}」`;
+        } else {
+            await createLLMCredential({
+                name: formName.value.trim(),
+                provider: formProvider.value,
+                model: formModel.value.trim(),
+                api_key: formApiKey.value.trim(),
+                context_window: contextWindow,
+                max_output_tokens: maxOutput,
+                ...(requiresBaseUrl.value
+                    ? { base_url: formBaseUrl.value.trim() }
+                    : {}),
+                is_default: formDefault.value,
+            });
+            success.value = `已添加「${formName.value.trim()}」`;
+        }
+        closeForm();
+        await refresh();
+    } catch (err) {
+        error.value = (err as Error).message || "保存失败";
+    } finally {
+        submitting.value = false;
+    }
 }
 
 async function setDefault(credential: LLMCredentialInfo) {
-  if (credential.is_default) {
-    return;
-  }
-  busyId.value = credential.credential_id;
-  error.value = null;
-  try {
-    await updateLLMCredential(credential.credential_id, { is_default: true });
-    success.value = `「${credential.name}」已设为默认模型`;
-    await refresh();
-  } catch (err) {
-    error.value = (err as Error).message || "设置默认失败";
-  } finally {
-    busyId.value = null;
-  }
+    if (credential.is_default) {
+        return;
+    }
+    busyId.value = credential.credential_id;
+    error.value = null;
+    try {
+        await updateLLMCredential(credential.credential_id, {
+            is_default: true,
+        });
+        success.value = `「${credential.name}」已设为默认模型`;
+        await refresh();
+    } catch (err) {
+        error.value = (err as Error).message || "设置默认失败";
+    } finally {
+        busyId.value = null;
+    }
 }
 
 async function removeCredential(credential: LLMCredentialInfo) {
-  if (confirmDeleteId.value !== credential.credential_id) {
-    // 第一次点击只进入确认态：删掉后 key 无法恢复
-    confirmDeleteId.value = credential.credential_id;
-    return;
-  }
-  busyId.value = credential.credential_id;
-  error.value = null;
-  try {
-    await deleteLLMCredential(credential.credential_id);
-    success.value = `已删除「${credential.name}」`;
-    confirmDeleteId.value = null;
-    await refresh();
-  } catch (err) {
-    error.value = (err as Error).message || "删除失败";
-  } finally {
-    busyId.value = null;
-  }
+    if (confirmDeleteId.value !== credential.credential_id) {
+        // 第一次点击只进入确认态：删掉后 key 无法恢复
+        confirmDeleteId.value = credential.credential_id;
+        return;
+    }
+    busyId.value = credential.credential_id;
+    error.value = null;
+    try {
+        await deleteLLMCredential(credential.credential_id);
+        success.value = `已删除「${credential.name}」`;
+        confirmDeleteId.value = null;
+        await refresh();
+    } catch (err) {
+        error.value = (err as Error).message || "删除失败";
+    } finally {
+        busyId.value = null;
+    }
 }
 
 function statusOf(credential: LLMCredentialInfo): {
-  label: string;
-  variant: "success" | "warning" | "muted";
+    label: string;
+    variant: "success" | "warning" | "muted";
 } {
-  if (credential.status === "disabled") {
-    return { label: "已停用", variant: "muted" };
-  }
-  if (credential.status === "invalid") {
-    return { label: "校验失败", variant: "warning" };
-  }
-  return { label: "可用", variant: "success" };
+    if (credential.status === "disabled") {
+        return { label: "已停用", variant: "muted" };
+    }
+    if (credential.status === "invalid") {
+        return { label: "校验失败", variant: "warning" };
+    }
+    return { label: "可用", variant: "success" };
 }
 </script>
 
 <template>
-  <section>
-    <PageHeader
-      eyebrow="Model settings"
-      title="我的模型"
-      description="接入你自己的模型 API Key。任务会使用你选择的模型，密钥加密存储、只进不出。"
-    >
-      <Button variant="secondary" size="sm" data-test="model-create-open" @click="openCreate">
-        <Plus />
-        添加模型
-      </Button>
-    </PageHeader>
-
-    <ErrorBanner :message="error" testid="models-error" />
-
-    <p
-      v-if="success"
-      class="mb-3 flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-2 text-sm"
-      data-test="models-success"
-    >
-      <Check class="size-4 text-primary" />
-      {{ success }}
-    </p>
-
-    <!-- 新增 / 编辑表单 -->
-    <form
-      v-if="showForm"
-      class="mb-4 grid gap-3 rounded-lg border border-border bg-card p-3"
-      data-test="model-form"
-      @submit.prevent="submitForm"
-    >
-      <div class="grid gap-2 sm:grid-cols-2">
-        <div class="grid gap-1.5">
-          <Label for="model-name">名称（用于辨认）</Label>
-          <Input
-            id="model-name"
-            v-model="formName"
-            data-test="model-name"
-            placeholder="例如：我的 DeepSeek"
-            maxlength="64"
-          />
-        </div>
-        <div class="grid gap-1.5">
-          <Label for="model-provider">厂商</Label>
-          <select
-            id="model-provider"
-            v-model="formProvider"
-            data-test="model-provider"
-            :disabled="isEditing"
-            class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <option v-for="item in providers" :key="item.provider" :value="item.provider">
-              {{ item.label }}
-            </option>
-          </select>
-          <p v-if="isEditing" class="text-xs text-muted-foreground">
-            厂商不可修改；换厂商请新建一把。
-          </p>
-        </div>
-      </div>
-
-      <div class="grid gap-2 sm:grid-cols-2">
-        <div class="grid gap-1.5">
-          <Label for="model-id">模型名</Label>
-          <Input
-            id="model-id"
-            v-model="formModel"
-            data-test="model-id"
-            list="model-options"
-            placeholder="例如：deepseek-chat / gpt-4o-mini"
-            maxlength="160"
-          />
-          <datalist id="model-options">
-            <option v-for="item in modelOptions" :key="item" :value="item" />
-          </datalist>
-          <p v-if="modelOptions.length > 0" class="text-xs text-muted-foreground">
-            已从厂商拉到 {{ modelOptions.length }} 个模型，可直接选。
-          </p>
-        </div>
-        <div class="grid gap-1.5">
-          <Label for="model-key">
-            API Key
-            <span v-if="isEditing" class="font-normal text-muted-foreground">（留空不更换）</span>
-          </Label>
-          <Input
-            id="model-key"
-            v-model="formApiKey"
-            data-test="model-key"
-            type="password"
-            autocomplete="off"
-            :placeholder="isEditing ? '留空则保持原 key' : '粘贴厂商控制台的 API Key'"
-          />
-        </div>
-      </div>
-
-      <div v-if="requiresBaseUrl" class="grid gap-1.5">
-        <Label for="model-base-url">Base URL（OpenAI 兼容）</Label>
-        <Input
-          id="model-base-url"
-          v-model="formBaseUrl"
-          data-test="model-base-url"
-          placeholder="https://your-relay.example.com/v1"
-          maxlength="512"
-        />
-        <p class="text-xs text-muted-foreground">
-          仅支持 https、443 端口；不能指向内网或本机地址。
-        </p>
-      </div>
-
-      <label v-if="!isEditing" class="flex items-center gap-2 text-sm">
-        <input
-          v-model="formDefault"
-          data-test="model-default"
-          type="checkbox"
-          class="size-4 rounded border-input accent-primary"
-        />
-        <span>设为默认模型（首个凭据会自动成为默认）</span>
-      </label>
-
-      <div
-        v-if="probeError"
-        class="rounded-md border border-destructive/40 bg-destructive/5 px-2.5 py-2 text-xs text-destructive"
-        data-test="model-probe-error"
-      >
-        {{ probeError }}
-      </div>
-      <div
-        v-else-if="probeResult"
-        class="rounded-md border border-border bg-muted px-2.5 py-2 text-xs"
-        :class="probeResult.ok ? 'text-foreground' : 'text-destructive'"
-        data-test="model-probe-result"
-      >
-        <template v-if="probeResult.ok">
-          连接成功（{{ probeResult.latency_ms }}ms），拉到
-          {{ probeResult.models.length }} 个模型。
-        </template>
-        <template v-else>连接失败：{{ probeResult.error ?? "未知错误" }}</template>
-      </div>
-
-      <p class="rounded-md bg-muted px-2.5 py-2 text-xs text-muted-foreground">
-        「测试连接」会真实请求厂商的 <code>/models</code>；保存本身<strong>不做</strong>联网校验。
-        任务调用时若 key 无效，会直接失败并提示厂商错误，不会自动改用平台模型。
-      </p>
-
-      <div class="flex flex-wrap gap-2">
-        <Button type="submit" size="sm" :disabled="submitting" data-test="model-submit">
-          {{ submitting ? "保存中…" : isEditing ? "保存修改" : "保存" }}
-        </Button>
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          :disabled="probeBusy"
-          data-test="model-probe"
-          @click="probeForm"
+    <section>
+        <PageHeader
+            eyebrow="Model settings"
+            title="我的模型"
+            description="接入你自己的模型 API Key。任务会使用你选择的模型，密钥加密存储、只进不出。"
         >
-          <Wifi />
-          {{ probeBusy ? "测试中…" : "测试连接" }}
-        </Button>
-        <Button type="button" variant="ghost" size="sm" data-test="model-cancel" @click="closeForm">
-          取消
-        </Button>
-      </div>
-    </form>
+            <Button
+                variant="secondary"
+                size="sm"
+                data-test="model-create-open"
+                @click="openCreate"
+            >
+                <Plus />
+                添加模型
+            </Button>
+        </PageHeader>
 
-    <p v-if="loading" class="text-sm text-muted-foreground">加载中…</p>
+        <ErrorBanner :message="error" testid="models-error" />
 
-    <EmptyState
-      v-else-if="isEmpty && !error"
-      data-test="models-empty"
-      title="还没有接入自己的模型"
-      description="添加一把 API Key 后，建任务时就能选择它；不添加则一切照旧使用平台默认模型。"
-    />
+        <p
+            v-if="success"
+            class="mb-3 flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-2 text-sm"
+            data-test="models-success"
+        >
+            <Check class="size-4 text-primary" />
+            {{ success }}
+        </p>
 
-    <template v-else>
-      <div class="mb-3 flex flex-wrap items-center gap-2">
-        <Input
-          v-model="search"
-          data-test="model-search"
-          class="sm:max-w-xs"
-          placeholder="搜索名称 / 厂商 / 模型"
-          aria-label="搜索模型凭据"
+        <!-- 新增 / 编辑表单 -->
+        <form
+            v-if="showForm"
+            class="mb-4 grid gap-3 rounded-lg border border-border bg-card p-3"
+            data-test="model-form"
+            @submit.prevent="submitForm"
+        >
+            <div class="grid gap-2 sm:grid-cols-2">
+                <div class="grid gap-1.5">
+                    <Label for="model-name">名称（用于辨认）</Label>
+                    <Input
+                        id="model-name"
+                        v-model="formName"
+                        data-test="model-name"
+                        placeholder="例如：我的 DeepSeek"
+                        maxlength="64"
+                    />
+                </div>
+                <div class="grid gap-1.5">
+                    <Label for="model-provider">厂商</Label>
+                    <select
+                        id="model-provider"
+                        v-model="formProvider"
+                        data-test="model-provider"
+                        :disabled="isEditing"
+                        class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                        <option
+                            v-for="item in providers"
+                            :key="item.provider"
+                            :value="item.provider"
+                        >
+                            {{ item.label }}
+                        </option>
+                    </select>
+                    <p v-if="isEditing" class="text-xs text-muted-foreground">
+                        厂商不可修改；换厂商请新建一把。
+                    </p>
+                </div>
+            </div>
+
+            <div class="grid gap-2 sm:grid-cols-2">
+                <div class="grid content-start gap-1.5 sm:col-span-2">
+                    <Label for="model-id">模型名</Label>
+                    <!-- 拉到模型列表后变成真下拉；厂商 /models 列不全时可选「自定义」手填 -->
+                    <select
+                        v-if="modelOptions.length > 0 && !customModel"
+                        id="model-id"
+                        data-test="model-select"
+                        class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                        :value="
+                            modelOptions.includes(formModel) ? formModel : ''
+                        "
+                        @change="
+                            selectModel(
+                                ($event.target as HTMLSelectElement).value,
+                            )
+                        "
+                    >
+                        <option value="" disabled>请选择模型…</option>
+                        <option
+                            v-for="item in modelOptions"
+                            :key="item"
+                            :value="item"
+                        >
+                            {{ item }}
+                        </option>
+                        <option :value="CUSTOM_MODEL">自定义…</option>
+                    </select>
+                    <template v-if="customModel || modelOptions.length === 0">
+                        <Input
+                            v-if="customModel"
+                            id="model-id"
+                            v-model="formModel"
+                            data-test="model-id"
+                            placeholder="手动输入模型名，例如 glm-4.6"
+                            maxlength="160"
+                        />
+                        <Input
+                            v-else
+                            id="model-id"
+                            v-model="formModel"
+                            data-test="model-id"
+                            placeholder="例如：deepseek-chat / gpt-4o-mini"
+                            maxlength="160"
+                        />
+                        <button
+                            v-if="customModel"
+                            type="button"
+                            class="justify-self-start text-xs text-primary underline underline-offset-2"
+                            data-test="model-back-to-select"
+                            @click="customModel = false"
+                        >
+                            返回下拉选择
+                        </button>
+                    </template>
+                    <p
+                        v-if="modelOptions.length > 0"
+                        class="text-xs text-muted-foreground"
+                    >
+                        已从厂商拉到
+                        {{
+                            modelOptions.length
+                        }}
+                        个模型；先「测试连接」可刷新列表。
+                    </p>
+
+                    <!-- 模型预设：上下文 / 最大输出随模型一起保存；留空 = 沿用厂商默认 -->
+                    <div
+                        class="mt-1 flex flex-wrap items-center gap-1.5 text-xs"
+                    >
+                        <span class="text-muted-foreground">上下文</span>
+                        <Input
+                            id="model-context"
+                            v-model="formContextWindow"
+                            data-test="model-context"
+                            inputmode="numeric"
+                            placeholder="留空 = 厂商默认"
+                            class="h-7 w-28 px-2 text-xs"
+                        />
+                        <span class="text-muted-foreground">最大输出</span>
+                        <Input
+                            id="model-output"
+                            v-model="formMaxOutput"
+                            data-test="model-output"
+                            inputmode="numeric"
+                            placeholder="留空 = 厂商默认"
+                            class="h-7 w-28 px-2 text-xs"
+                        />
+                        <span class="ml-1 text-muted-foreground">预设：</span>
+                        <button
+                            v-for="(preset, index) in MODEL_PRESETS"
+                            :key="preset.label"
+                            type="button"
+                            class="rounded border border-border px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+                            :data-test="`model-preset-${index}`"
+                            :title="`上下文 ${preset.context} · 输出 ${preset.output}`"
+                            @click="applyPreset(preset)"
+                        >
+                            {{ preset.label }}
+                        </button>
+                    </div>
+                </div>
+                <div class="grid content-start gap-1.5 sm:col-span-2">
+                    <Label for="model-key">
+                        API Key
+                        <span
+                            v-if="isEditing"
+                            class="font-normal text-muted-foreground"
+                            >（留空不更换）</span
+                        >
+                    </Label>
+                    <Input
+                        id="model-key"
+                        v-model="formApiKey"
+                        data-test="model-key"
+                        type="password"
+                        autocomplete="off"
+                        :placeholder="
+                            isEditing
+                                ? '留空则保持原 key'
+                                : '粘贴厂商控制台的 API Key'
+                        "
+                    />
+                </div>
+            </div>
+
+            <div v-if="requiresBaseUrl" class="grid gap-1.5">
+                <Label for="model-base-url">Base URL（OpenAI 兼容）</Label>
+                <Input
+                    id="model-base-url"
+                    v-model="formBaseUrl"
+                    data-test="model-base-url"
+                    placeholder="https://your-relay.example.com/v1"
+                    maxlength="512"
+                />
+                <p class="text-xs text-muted-foreground">
+                    仅支持 https、443 端口；不能指向内网或本机地址。
+                </p>
+            </div>
+
+            <label v-if="!isEditing" class="flex items-center gap-2 text-sm">
+                <input
+                    v-model="formDefault"
+                    data-test="model-default"
+                    type="checkbox"
+                    class="size-4 rounded border-input accent-primary"
+                />
+                <span>设为默认模型（首个凭据会自动成为默认）</span>
+            </label>
+
+            <div
+                v-if="probeError"
+                class="rounded-md border border-destructive/40 bg-destructive/5 px-2.5 py-2 text-xs text-destructive"
+                data-test="model-probe-error"
+            >
+                {{ probeError }}
+            </div>
+            <div
+                v-else-if="probeResult"
+                class="rounded-md border border-border bg-muted px-2.5 py-2 text-xs"
+                :class="probeResult.ok ? 'text-foreground' : 'text-destructive'"
+                data-test="model-probe-result"
+            >
+                <template v-if="probeResult.ok">
+                    连接成功（{{ probeResult.latency_ms }}ms），拉到
+                    {{ probeResult.models.length }} 个模型。
+                </template>
+                <template v-else
+                    >连接失败：{{ probeResult.error ?? "未知错误" }}</template
+                >
+            </div>
+
+            <p
+                class="rounded-md bg-muted px-2.5 py-2 text-xs text-muted-foreground"
+            >
+                「测试连接」会真实请求厂商的
+                <code>/models</code>；保存本身<strong>不做</strong>联网校验。
+                任务调用时若 key
+                无效，会直接失败并提示厂商错误，不会自动改用平台模型。
+            </p>
+
+            <div class="flex flex-wrap gap-2">
+                <Button
+                    type="submit"
+                    size="sm"
+                    :disabled="submitting"
+                    data-test="model-submit"
+                >
+                    {{
+                        submitting ? "保存中…" : isEditing ? "保存修改" : "保存"
+                    }}
+                </Button>
+                <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    :disabled="probeBusy"
+                    data-test="model-probe"
+                    @click="probeForm"
+                >
+                    <Wifi />
+                    {{ probeBusy ? "测试中…" : "测试连接" }}
+                </Button>
+                <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    data-test="model-cancel"
+                    @click="closeForm"
+                >
+                    取消
+                </Button>
+            </div>
+        </form>
+
+        <p v-if="loading" class="text-sm text-muted-foreground">加载中…</p>
+
+        <EmptyState
+            v-else-if="isEmpty && !error"
+            data-test="models-empty"
+            title="还没有接入自己的模型"
+            description="添加一把 API Key 后，建任务时就能选择它；不添加则一切照旧使用平台默认模型。"
         />
-        <span class="text-xs text-muted-foreground" data-test="model-count">
-          共 {{ credentials.length }} 把
-        </span>
-      </div>
 
-      <ul class="divide-y divide-border rounded-lg border border-border" data-test="models-list">
-        <li
-          v-for="credential in filteredCredentials"
-          :key="credential.credential_id"
-          class="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-sm"
-          :data-test="`model-row-${credential.credential_id}`"
-      >
-        <div class="min-w-0 flex-1">
-          <div class="flex flex-wrap items-center gap-1.5">
-            <Cpu class="size-3.5 text-muted-foreground" />
-            <span class="font-medium">{{ credential.name }}</span>
-            <Badge v-if="credential.is_default" variant="default">默认</Badge>
-            <Badge :variant="statusOf(credential).variant">{{ statusOf(credential).label }}</Badge>
-          </div>
-          <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <span class="font-medium text-foreground">{{ credential.provider_label }}</span>
-            <span>{{ credential.model }}</span>
-            <code class="rounded bg-muted px-1 py-0.5">{{ credential.masked_key }}</code>
-          </div>
-          <div
-            v-if="credential.provider === 'custom'"
-            class="mt-0.5 truncate text-xs text-muted-foreground"
-          >
-            {{ credential.base_url }}
-          </div>
-          <p v-if="credential.last_error" class="mt-0.5 text-xs text-warning">
-            {{ credential.last_error }}
-          </p>
-        </div>
+        <template v-else>
+            <div class="mb-3 flex flex-wrap items-center gap-2">
+                <Input
+                    v-model="search"
+                    data-test="model-search"
+                    class="sm:max-w-xs"
+                    placeholder="搜索名称 / 厂商 / 模型"
+                    aria-label="搜索模型凭据"
+                />
+                <span
+                    class="text-xs text-muted-foreground"
+                    data-test="model-count"
+                >
+                    共 {{ credentials.length }} 把
+                </span>
+            </div>
 
-        <div class="flex shrink-0 flex-wrap items-center gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            :disabled="testingId === credential.credential_id"
-            :data-test="`model-test-${credential.credential_id}`"
-            @click="probeSaved(credential)"
-          >
-            <Wifi />
-            {{ testingId === credential.credential_id ? "测试中…" : "测试" }}
-          </Button>
-          <Button
-            v-if="!credential.is_default"
-            variant="ghost"
-            size="sm"
-            :disabled="busyId === credential.credential_id"
-            :data-test="`model-set-default-${credential.credential_id}`"
-            @click="setDefault(credential)"
-          >
-            <Star />
-            设为默认
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            :data-test="`model-edit-${credential.credential_id}`"
-            @click="openEdit(credential)"
-          >
-            <Pencil />
-            编辑
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            :disabled="busyId === credential.credential_id"
-            :data-test="
-              confirmDeleteId === credential.credential_id
-                ? `model-confirm-delete-${credential.credential_id}`
-                : `model-delete-${credential.credential_id}`
-            "
-            @click="removeCredential(credential)"
-          >
-            <Trash2 />
-            {{ confirmDeleteId === credential.credential_id ? "确认删除？" : "删除" }}
-          </Button>
-        </div>
-      </li>
-      </ul>
+            <ul
+                class="divide-y divide-border rounded-lg border border-border"
+                data-test="models-list"
+            >
+                <li
+                    v-for="credential in filteredCredentials"
+                    :key="credential.credential_id"
+                    class="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-sm"
+                    :data-test="`model-row-${credential.credential_id}`"
+                >
+                    <div class="min-w-0 flex-1">
+                        <div class="flex flex-wrap items-center gap-1.5">
+                            <Cpu class="size-3.5 text-muted-foreground" />
+                            <span class="font-medium">{{
+                                credential.name
+                            }}</span>
+                            <Badge
+                                v-if="credential.is_default"
+                                variant="default"
+                                >默认</Badge
+                            >
+                            <Badge :variant="statusOf(credential).variant">{{
+                                statusOf(credential).label
+                            }}</Badge>
+                        </div>
+                        <div
+                            class="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground"
+                        >
+                            <span class="font-medium text-foreground">{{
+                                credential.provider_label
+                            }}</span>
+                            <span>{{ credential.model }}</span>
+                            <code class="rounded bg-muted px-1 py-0.5">{{
+                                credential.masked_key
+                            }}</code>
+                        </div>
+                        <div
+                            v-if="credential.provider === 'custom'"
+                            class="mt-0.5 truncate text-xs text-muted-foreground"
+                        >
+                            {{ credential.base_url }}
+                        </div>
+                        <p
+                            v-if="credential.last_error"
+                            class="mt-0.5 text-xs text-warning"
+                        >
+                            {{ credential.last_error }}
+                        </p>
+                    </div>
 
-      <p
-        v-if="filteredCredentials.length === 0"
-        data-test="models-no-match"
-        class="mt-3 text-sm text-muted-foreground"
-      >
-        没有匹配「{{ search.trim() }}」的凭据。
-      </p>
-    </template>
+                    <div class="flex shrink-0 flex-wrap items-center gap-1">
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            :disabled="testingId === credential.credential_id"
+                            :data-test="`model-test-${credential.credential_id}`"
+                            @click="probeSaved(credential)"
+                        >
+                            <Wifi />
+                            {{
+                                testingId === credential.credential_id
+                                    ? "测试中…"
+                                    : "测试"
+                            }}
+                        </Button>
+                        <Button
+                            v-if="!credential.is_default"
+                            variant="ghost"
+                            size="sm"
+                            :disabled="busyId === credential.credential_id"
+                            :data-test="`model-set-default-${credential.credential_id}`"
+                            @click="setDefault(credential)"
+                        >
+                            <Star />
+                            设为默认
+                        </Button>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            :data-test="`model-edit-${credential.credential_id}`"
+                            @click="openEdit(credential)"
+                        >
+                            <Pencil />
+                            编辑
+                        </Button>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            :disabled="busyId === credential.credential_id"
+                            :data-test="
+                                confirmDeleteId === credential.credential_id
+                                    ? `model-confirm-delete-${credential.credential_id}`
+                                    : `model-delete-${credential.credential_id}`
+                            "
+                            @click="removeCredential(credential)"
+                        >
+                            <Trash2 />
+                            {{
+                                confirmDeleteId === credential.credential_id
+                                    ? "确认删除？"
+                                    : "删除"
+                            }}
+                        </Button>
+                    </div>
+                </li>
+            </ul>
 
-    <p v-if="!isEmpty" class="mt-3 text-xs text-muted-foreground">
-      删除凭据不会影响历史任务：任务里保存了当时使用的模型快照。
-    </p>
-  </section>
+            <p
+                v-if="filteredCredentials.length === 0"
+                data-test="models-no-match"
+                class="mt-3 text-sm text-muted-foreground"
+            >
+                没有匹配「{{ search.trim() }}」的凭据。
+            </p>
+        </template>
+
+        <p v-if="!isEmpty" class="mt-3 text-xs text-muted-foreground">
+            删除凭据不会影响历史任务：任务里保存了当时使用的模型快照。
+        </p>
+    </section>
 </template>

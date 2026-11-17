@@ -35,6 +35,21 @@ ProviderKey = Literal[
     "custom",
 ]
 
+#: 容量字段的取值上界。不是产品限制，而是防止把「1M」误填成 1000000000
+#: 之后请求体里出现荒唐的 max_tokens。
+MAX_CONTEXT_WINDOW = 10_000_000
+MAX_OUTPUT_TOKENS = 1_000_000
+
+
+def _clean_optional_int(value: Any) -> Any:
+    """空串按「未填」处理：前端清空输入框时拿到的是 `""` 而不是 None。"""
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        return int(stripped)
+    return value
+
 
 class LLMCredentialCreate(BaseModel):
     """新增一把自带凭据。"""
@@ -48,6 +63,18 @@ class LLMCredentialCreate(BaseModel):
     base_url: str | None = Field(
         default=None, max_length=512, description="仅 custom 需要；预置厂商由服务端决定"
     )
+    context_window: int | None = Field(
+        default=None,
+        ge=256,
+        le=MAX_CONTEXT_WINDOW,
+        description="模型上下文窗口（token）。只用于展示与校验，不参与请求",
+    )
+    max_output_tokens: int | None = Field(
+        default=None,
+        ge=1,
+        le=MAX_OUTPUT_TOKENS,
+        description="单次输出上限（token）。非空时作为 max_tokens 真正下发给厂商",
+    )
     is_default: bool = Field(default=False, description="是否设为默认；首条会自动成为默认")
 
     @field_validator("name", "model", mode="before")
@@ -56,6 +83,21 @@ class LLMCredentialCreate(BaseModel):
         if isinstance(value, str):
             return value.strip()
         return value
+
+    @field_validator("context_window", "max_output_tokens", mode="before")
+    @classmethod
+    def _blank_as_none(cls, value: Any) -> Any:
+        return _clean_optional_int(value)
+
+    @model_validator(mode="after")
+    def _output_fits_context(self) -> LLMCredentialCreate:
+        if (
+            self.context_window is not None
+            and self.max_output_tokens is not None
+            and self.max_output_tokens > self.context_window
+        ):
+            raise ValueError("最大输出不能大于上下文窗口")
+        return self
 
     @field_validator("api_key", mode="before")
     @classmethod
@@ -86,6 +128,12 @@ class LLMCredentialUpdate(BaseModel):
     model: str | None = Field(default=None, min_length=1, max_length=160)
     api_key: str | None = Field(default=None, min_length=8, max_length=512)
     base_url: str | None = Field(default=None, max_length=512)
+    context_window: int | None = Field(
+        default=None, ge=256, le=MAX_CONTEXT_WINDOW, description="传 null 表示清除"
+    )
+    max_output_tokens: int | None = Field(
+        default=None, ge=1, le=MAX_OUTPUT_TOKENS, description="传 null 表示清除"
+    )
     is_default: bool | None = None
     status: Literal["active", "disabled"] | None = None
 
@@ -95,6 +143,11 @@ class LLMCredentialUpdate(BaseModel):
         if isinstance(value, str):
             return value.strip()
         return value
+
+    @field_validator("context_window", "max_output_tokens", mode="before")
+    @classmethod
+    def _blank_as_none(cls, value: Any) -> Any:
+        return _clean_optional_int(value)
 
     @field_validator("api_key", mode="before")
     @classmethod
@@ -118,6 +171,8 @@ class LLMCredentialOut(BaseModel):
     provider_label: str
     model: str
     base_url: str
+    context_window: int | None = None
+    max_output_tokens: int | None = None
     masked_key: str = Field(description="脱敏回显，如 `sk-…abcd`")
     key_version: int
     is_default: bool

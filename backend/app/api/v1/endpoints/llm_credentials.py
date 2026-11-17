@@ -57,6 +57,8 @@ def _to_out(record: LLMCredential) -> LLMCredentialOut:
         provider_label=get_provider_spec(record.provider).label,
         model=record.model,
         base_url=record.base_url,
+        context_window=record.context_window,
+        max_output_tokens=record.max_output_tokens,
         masked_key=record.api_key_hint,
         key_version=record.key_version,
         is_default=record.is_default,

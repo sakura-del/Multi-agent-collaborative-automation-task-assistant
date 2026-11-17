@@ -160,6 +160,8 @@ class LLMCredentialService:
             provider=payload.provider,
             base_url=base_url,
             model=payload.model,
+            context_window=payload.context_window,
+            max_output_tokens=payload.max_output_tokens,
             api_key_ciphertext=cipher.encrypt(payload.api_key, user_id=user_id),
             api_key_hint=mask_secret(payload.api_key),
             key_fingerprint=cipher.fingerprint(payload.api_key),
@@ -205,8 +207,21 @@ class LLMCredentialService:
             record.name = data["name"]
         if "model" in data and data["model"] is not None:
             record.model = data["model"]
+        # 容量字段允许显式传 null 清除声明（`exclude_unset` 能区分「没传」与「传 null」）
+        if "context_window" in data:
+            record.context_window = data["context_window"]
+        if "max_output_tokens" in data:
+            record.max_output_tokens = data["max_output_tokens"]
         if "status" in data and data["status"] is not None:
             record.status = data["status"]
+
+        # 跨字段校验必须放在合并之后：只改 max_output 时也要与库里已有的上下文比较
+        if (
+            record.context_window is not None
+            and record.max_output_tokens is not None
+            and record.max_output_tokens > record.context_window
+        ):
+            raise ValidationException("最大输出不能大于上下文窗口")
 
         if data.get("api_key"):
             record.api_key_ciphertext = self.cipher.encrypt(data["api_key"], user_id=user_id)

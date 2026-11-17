@@ -339,6 +339,10 @@ class ModelSelectionSnapshot(BaseModel):
     provider: str
     model: str
     base_url: str | None = None
+    context_window: int | None = None
+    """创建任务时的上下文窗口声明（token）；None = 当时未填写。"""
+    max_output_tokens: int | None = None
+    """创建任务时的单次输出上限（token）；None = 当时沿用厂商默认。"""
     is_byok: bool = True
 
 

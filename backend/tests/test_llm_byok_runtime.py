@@ -140,6 +140,8 @@ async def _make_credential(
     api_key: str = USER_KEY,
     model: str = "test-model",
     provider: str = "custom",
+    context_window: int | None = None,
+    max_output_tokens: int | None = None,
 ) -> Any:
     service = LLMCredentialService(cipher=CredentialCipher.from_settings())
     return await service.create(
@@ -151,6 +153,8 @@ async def _make_credential(
             model=model,
             api_key=api_key,
             base_url=base_url,
+            context_window=context_window,
+            max_output_tokens=max_output_tokens,
         ),
     )
 
@@ -257,6 +261,62 @@ class TestResolve:
         third = await resolver.resolve(db_session, user.id, record.id)
         assert third is not first
         assert third.model == first.model
+
+    async def test_max_output_tokens_sent_as_max_tokens(
+        self, db_session: Any, fake_openai: FakeOpenAI, allow_local_endpoints: None
+    ) -> None:
+        """用户声明的「最大输出」必须真正下发：chat 不传 max_tokens 时用声明的默认值。"""
+        user = await _make_user(db_session, "byok_max_tokens")
+        record = await _make_credential(
+            db_session,
+            user,
+            base_url=fake_openai.base_url,
+            context_window=1_000_000,
+            max_output_tokens=128_000,
+        )
+
+        client = await _resolver().resolve(db_session, user.id, record.id)
+        await client.chat([Message(role=MessageRole.USER, content="hi")])
+
+        assert fake_openai.requests[0]["body"]["max_tokens"] == 128_000
+
+    async def test_no_max_output_means_no_max_tokens(
+        self, db_session: Any, fake_openai: FakeOpenAI, allow_local_endpoints: None
+    ) -> None:
+        """没声明就不发 max_tokens：输出上限沿用厂商默认，平台不擅自截断。"""
+        user = await _make_user(db_session, "byok_no_max_tokens")
+        record = await _make_credential(db_session, user, base_url=fake_openai.base_url)
+
+        client = await _resolver().resolve(db_session, user.id, record.id)
+        await client.chat([Message(role=MessageRole.USER, content="hi")])
+
+        assert "max_tokens" not in fake_openai.requests[0]["body"]
+
+    async def test_cache_rebuilds_when_max_output_changes(
+        self, db_session: Any, fake_openai: FakeOpenAI, allow_local_endpoints: None
+    ) -> None:
+        """容量进了缓存键：改完 max_output 立即生效，不吃 5 分钟缓存的旧值。"""
+        user = await _make_user(db_session, "byok_cache_limits")
+        record = await _make_credential(
+            db_session, user, base_url=fake_openai.base_url, max_output_tokens=8_192
+        )
+        resolver = _resolver()
+
+        first = await resolver.resolve(db_session, user.id, record.id)
+        again = await resolver.resolve(db_session, user.id, record.id)
+        assert first is again
+
+        service = LLMCredentialService(cipher=CredentialCipher.from_settings())
+        await service.update(
+            db_session,
+            user.id,
+            record.id,
+            LLMCredentialUpdate(max_output_tokens=32_768),
+        )
+        rebuilt = await resolver.resolve(db_session, user.id, record.id)
+        assert rebuilt is not first
+        await rebuilt.chat([Message(role=MessageRole.USER, content="hi")])
+        assert fake_openai.requests[0]["body"]["max_tokens"] == 32_768
 
     async def test_custom_host_resolving_to_private_is_rejected(
         self,

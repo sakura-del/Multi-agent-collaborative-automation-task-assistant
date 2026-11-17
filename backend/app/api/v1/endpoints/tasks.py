@@ -250,6 +250,8 @@ async def create_task(
             "provider": credential.provider,
             "model": credential.model,
             "base_url": credential.base_url,
+            "context_window": credential.context_window,
+            "max_output_tokens": credential.max_output_tokens,
             "is_byok": True,
         }
 

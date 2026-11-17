@@ -164,6 +164,10 @@ export interface ModelSelectionSnapshot {
   provider: string;
   model: string;
   base_url: string | null;
+  /** 创建任务时的上下文窗口声明；null = 当时未填写 */
+  context_window?: number | null;
+  /** 创建任务时的单次输出上限；null = 沿用厂商默认 */
+  max_output_tokens?: number | null;
   is_byok: boolean;
 }
 
@@ -850,6 +854,10 @@ export interface LLMCredentialInfo {
   provider_label: string;
   model: string;
   base_url: string;
+  /** 上下文窗口（token）；null = 未声明，界面显示「未设置」 */
+  context_window: number | null;
+  /** 单次输出上限（token）；null = 不传 max_tokens，沿用厂商默认 */
+  max_output_tokens: number | null;
   /** 如 `sk-…abcd` */
   masked_key: string;
   /** 换 key 时 +1（前端不需要用，但可用于排查） */
@@ -870,6 +878,10 @@ export interface LLMCredentialCreate {
   /** 明文只进不出：提交后任何响应都不再包含它 */
   api_key: string;
   base_url?: string | null;
+  /** 上下文窗口（token）；不填则声明未知 */
+  context_window?: number | null;
+  /** 单次输出上限（token）；不填则沿用厂商默认 */
+  max_output_tokens?: number | null;
   is_default?: boolean;
 }
 
@@ -879,6 +891,9 @@ export interface LLMCredentialUpdate {
   /** 留空表示不更换 */
   api_key?: string;
   base_url?: string;
+  /** 传 null 表示清除该声明 */
+  context_window?: number | null;
+  max_output_tokens?: number | null;
   is_default?: boolean;
   status?: "active" | "disabled";
 }

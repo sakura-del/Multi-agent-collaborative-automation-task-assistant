@@ -82,6 +82,16 @@ class LLMCredential(Base):
         comment="实际调用的端点：预置厂商由服务端写入，custom 由用户提供",
     )
     model: Mapped[str] = mapped_column(String(160), nullable=False, comment="模型名")
+    context_window: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="模型上下文窗口（token）；NULL = 用户未声明，界面显示「未设置」",
+    )
+    max_output_tokens: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="单次输出上限（token）；NULL = 不传 max_tokens，沿用厂商默认",
+    )
 
     # ===== 密钥（加密存储）=====
     api_key_ciphertext: Mapped[str] = mapped_column(

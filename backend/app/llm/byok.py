@@ -205,7 +205,15 @@ class CredentialLLMResolver:
         if record.status != "active":
             raise ForbiddenException("该模型凭据已停用，请在设置中启用或更换")
 
-        cache_key = (record.id, record.key_version, record.model, record.base_url)
+        # 容量也进缓存键：用户把「最大输出」从 8K 改成 32K 后必须立刻生效，
+        # 否则最长 5 分钟内还在用旧客户端（旧 max_tokens）。
+        cache_key = (
+            record.id,
+            record.key_version,
+            record.model,
+            record.base_url,
+            record.max_output_tokens,
+        )
         cached = self._cached(cache_key)
         if cached is not None:
             return cached
@@ -232,6 +240,8 @@ class CredentialLLMResolver:
             base_url=record.base_url,
             timeout=settings.llm.request_timeout,
             max_retries=settings.llm.max_retries,
+            # 用户声明的单次输出上限，真正下发给厂商（不填则沿用厂商默认）
+            default_max_tokens=record.max_output_tokens,
             **extra,
         )
 

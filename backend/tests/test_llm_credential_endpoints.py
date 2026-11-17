@@ -104,6 +104,8 @@ def _create(
     api_key: str = PLAINTEXT,
     base_url: str | None = None,
     is_default: bool = False,
+    context_window: int | None = None,
+    max_output_tokens: int | None = None,
 ) -> Any:
     payload: dict[str, Any] = {
         "name": name,
@@ -114,6 +116,10 @@ def _create(
     }
     if base_url is not None:
         payload["base_url"] = base_url
+    if context_window is not None:
+        payload["context_window"] = context_window
+    if max_output_tokens is not None:
+        payload["max_output_tokens"] = max_output_tokens
     return app.state.client.post("/api/v1/llm-credentials", headers=_headers(user), json=payload)
 
 
@@ -340,6 +346,118 @@ class TestGet:
             f"/api/v1/llm-credentials/{uuid.uuid4()}", headers=_headers(user)
         )
         assert resp.status_code == 404
+
+
+class TestTokenLimits:
+    """模型容量预设（2026-11-17）：上下文 / 最大输出随凭据保存并真正生效。"""
+
+    def test_create_persists_limits(self, credential_app: Any) -> None:
+        user = _make_user(credential_app.state.factory, "cred_limits_1")
+        resp = _create(
+            credential_app,
+            user,
+            context_window=1_000_000,
+            max_output_tokens=128_000,
+        )
+
+        assert resp.status_code == 201, resp.text
+        body = resp.json()
+        assert body["context_window"] == 1_000_000
+        assert body["max_output_tokens"] == 128_000
+        row = _rows(credential_app.state.factory)[0]
+        assert row.context_window == 1_000_000
+        assert row.max_output_tokens == 128_000
+
+    def test_create_without_limits_defaults_to_null(self, credential_app: Any) -> None:
+        user = _make_user(credential_app.state.factory, "cred_limits_2")
+        resp = _create(credential_app, user)
+
+        assert resp.status_code == 201, resp.text
+        body = resp.json()
+        assert body["context_window"] is None
+        assert body["max_output_tokens"] is None
+
+    def test_blank_string_is_treated_as_unset(self, credential_app: Any) -> None:
+        """前端清空输入框提交的是空串；按「未填」处理而不是 422。"""
+        user = _make_user(credential_app.state.factory, "cred_limits_3")
+        resp = credential_app.state.client.post(
+            "/api/v1/llm-credentials",
+            headers=_headers(user),
+            json={
+                "name": "空白容量",
+                "provider": "deepseek",
+                "model": "deepseek-chat",
+                "api_key": PLAINTEXT,
+                "context_window": "",
+                "max_output_tokens": "",
+            },
+        )
+
+        assert resp.status_code == 201, resp.text
+        body = resp.json()
+        assert body["context_window"] is None
+        assert body["max_output_tokens"] is None
+
+    def test_output_larger_than_context_rejected(self, credential_app: Any) -> None:
+        user = _make_user(credential_app.state.factory, "cred_limits_4")
+        resp = _create(
+            credential_app,
+            user,
+            context_window=128_000,
+            max_output_tokens=200_000,
+        )
+        assert resp.status_code == 422, resp.text
+
+    def test_zero_or_negative_rejected(self, credential_app: Any) -> None:
+        user = _make_user(credential_app.state.factory, "cred_limits_5")
+        resp = _create(credential_app, user, max_output_tokens=0)
+        assert resp.status_code == 422, resp.text
+        resp = _create(credential_app, user, context_window=-1)
+        assert resp.status_code == 422, resp.text
+
+    def test_update_can_set_and_clear_limits(self, credential_app: Any) -> None:
+        """显式传 null = 清除声明；没传 = 不动。前端「清空再保存」依赖这条。"""
+        user = _make_user(credential_app.state.factory, "cred_limits_6")
+        created = _create(
+            credential_app,
+            user,
+            context_window=200_000,
+            max_output_tokens=64_000,
+        ).json()
+        credential_id = created["credential_id"]
+
+        # 只改 max_output：context 保持
+        resp = credential_app.state.client.patch(
+            f"/api/v1/llm-credentials/{credential_id}",
+            headers=_headers(user),
+            json={"max_output_tokens": 32_768},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["context_window"] == 200_000
+        assert body["max_output_tokens"] == 32_768
+
+        # 显式传 null 清除
+        resp = credential_app.state.client.patch(
+            f"/api/v1/llm-credentials/{credential_id}",
+            headers=_headers(user),
+            json={"max_output_tokens": None},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["context_window"] == 200_000
+        assert body["max_output_tokens"] is None
+
+    def test_update_output_vs_saved_context_rejected(self, credential_app: Any) -> None:
+        """只改 max_output 时也要和库里已有的 context 比（跨字段校验在 service 层）。"""
+        user = _make_user(credential_app.state.factory, "cred_limits_7")
+        created = _create(credential_app, user, context_window=65_536).json()
+        resp = credential_app.state.client.patch(
+            f"/api/v1/llm-credentials/{created['credential_id']}",
+            headers=_headers(user),
+            json={"max_output_tokens": 128_000},
+        )
+        assert resp.status_code == 422, resp.text
 
 
 class TestUpdate:
