@@ -721,10 +721,7 @@ class TaskExecution:
             result = await session.execute(
                 select(Task).where(
                     Task.status.in_(
-                        [
-                            status.value
-                            for status in (*_RECOVERABLE_STATUSES, TaskStatus.PLANNING)
-                        ]
+                        [status.value for status in (*_RECOVERABLE_STATUSES, TaskStatus.PLANNING)]
                     )
                 )
             )
