@@ -77,3 +77,23 @@ class TestExposeHeaders:
 
         exposed = resp.headers.get("access-control-expose-headers", "").lower()
         assert "content-disposition" in exposed
+
+
+class TestPaginationTotalCount:
+    """分页总数走 `X-Total-Count` 头，跨域时必须显式暴露。
+
+    不暴露的话浏览器只给 6 个安全头，前端 `headers["x-total-count"]`
+    永远是 null —— 表现是「任务列表只有一页」，但后端其实是好的，
+    这种问题从代码上很难看出来。
+    """
+
+    def test_expose_headers_include_total_count(self) -> None:
+        assert "X-Total-Count" in settings.cors.expose_headers
+
+    def test_response_carries_expose_header(self, monkeypatch) -> None:
+        client = _client(monkeypatch, PATTERN)
+        # 用健康检查（不需要任务运行时）：expose_headers 是全局中间件配置，
+        # 任何跨域响应都会带上，不必为了验证它去搭完整 runtime。
+        resp = client.get("/api/v1/health", headers={"Origin": PAGES_ORIGIN})
+        exposed = resp.headers.get("access-control-expose-headers", "")
+        assert "X-Total-Count" in exposed

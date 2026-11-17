@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { ChevronRight, Plus, Search } from "lucide-vue-next";
 
@@ -10,7 +10,9 @@ import StatusBadge from "@/components/common/StatusBadge.vue";
 import TaskCreateForm from "@/components/tasks/TaskCreateForm.vue";
 import TaskStatusIcon from "@/components/tasks/TaskStatusIcon.vue";
 import { Button } from "@/components/ui/button";
+import { Pagination } from "@/components/ui/pagination";
 import { useTaskStore } from "@/stores/tasks";
+import type { TaskStatusGroup } from "@/api/tasks";
 import type { TaskCreate, TaskStatus, TaskSummary } from "@/api/types";
 import {
   formatDateTime,
@@ -46,17 +48,53 @@ const keyword = ref("");
 const filter = ref<"all" | "needs-me" | "active" | "done">("all");
 
 onMounted(() => {
-  void refresh();
+  void refresh(1);
 });
 
-async function refresh() {
+/** 视图筛选值 → 后端状态分组（写法不同：needs-me vs needs_me）。 */
+const GROUP_MAP: Record<"all" | "needs-me" | "active" | "done", TaskStatusGroup> = {
+  all: "all",
+  "needs-me": "needs_me",
+  active: "active",
+  done: "done",
+};
+
+/**
+ * 拉取某一页 + 同步统计。
+ *
+ * 筛选与搜索都走服务端：分页之后本地筛选只能筛当前 20 条，
+ * 「待我确认」会漏掉第 2 页之后的待办，搜索也搜不到。
+ */
+async function refresh(page = 1, query = keyword.value) {
   errorMessage.value = null;
   try {
-    await store.loadList();
+    await Promise.all([
+      store.loadList(page, { group: GROUP_MAP[filter.value], query }),
+      store.loadCounts(query),
+    ]);
   } catch (error) {
     errorMessage.value = (error as Error).message;
   }
 }
+
+// 切筛选：回到第 1 页并保留当前搜索词
+watch(filter, () => {
+  void refresh(1);
+});
+
+// 搜索防抖：每敲一个字都请求会在慢网下把结果打乱（后发先至）
+let searchTimer: ReturnType<typeof setTimeout> | undefined;
+watch(keyword, (value) => {
+  if (searchTimer) clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => {
+    void refresh(1, value);
+  }, 300);
+});
+onBeforeUnmount(() => {
+  if (searchTimer) clearTimeout(searchTimer);
+});
+
+const totalPages = computed(() => Math.max(1, Math.ceil(store.listTotal / store.PAGE_SIZE)));
 
 async function handleCreate(payload: TaskCreate) {
   submitting.value = true;
@@ -166,19 +204,12 @@ const timelineTasks = computed(() =>
 
 // ===== 汇总统计 =====
 
-const counts = computed(() => {
-  const items = store.items;
-  return {
-    needsMe: items.filter((item) => needsUserAction(item.status)).length,
-    active: items.filter((item) => isActive(item.status)).length,
-    done: items.filter((item) => item.status === "completed").length,
-    total: items.length,
-  };
-});
+/** 顶部四个数字来自服务端全量统计，不是当前页条数。 */
+const counts = computed(() => store.counts);
 
 const FILTERS = [
-  { value: "all", label: "全部", key: "total" },
-  { value: "needs-me", label: "待我确认", key: "needsMe" },
+  { value: "all", label: "全部", key: "all" },
+  { value: "needs-me", label: "待我确认", key: "needs_me" },
   { value: "active", label: "进行中", key: "active" },
   { value: "done", label: "已完成", key: "done" },
 ] as const;
@@ -254,9 +285,9 @@ const rows = computed(() =>
         <span
           :class="[
             'font-display text-3xl leading-none tabular-nums',
-            counts.needsMe > 0 ? 'text-warning' : 'text-muted-foreground',
+            counts.needs_me > 0 ? 'text-warning' : 'text-muted-foreground',
           ]"
-          >{{ counts.needsMe }}</span
+          >{{ counts.needs_me }}</span
         >
         <span class="text-xs text-muted-foreground">待我确认</span>
       </button>
@@ -279,7 +310,7 @@ const rows = computed(() =>
         <span class="text-xs text-muted-foreground">已完成</span>
       </button>
       <div data-test="stat-total" class="flex items-baseline gap-2 px-4 text-left">
-        <span class="font-display text-3xl leading-none tabular-nums">{{ counts.total }}</span>
+        <span class="font-display text-3xl leading-none tabular-nums">{{ counts.all }}</span>
         <span class="text-xs text-muted-foreground">全部任务</span>
       </div>
     </div>
@@ -294,15 +325,15 @@ const rows = computed(() =>
       @click="filter = filter === 'needs-me' ? 'all' : 'needs-me'"
     >
       <span class="min-w-10 font-display text-4xl leading-none text-primary tabular-nums">
-        {{ counts.needsMe }}
+        {{ counts.needs_me }}
       </span>
       <span class="min-w-0 flex-1">
         <span class="block text-sm font-semibold">
-          {{ counts.needsMe > 0 ? `有 ${counts.needsMe} 项任务等待你的判断` : "当前没有待处理任务" }}
+          {{ counts.needs_me > 0 ? `有 ${counts.needs_me} 项任务等待你的判断` : "当前没有待处理任务" }}
         </span>
         <span class="mt-1 block text-xs leading-5 text-muted-foreground">
           {{
-            counts.needsMe > 0
+            counts.needs_me > 0
               ? "确认规划或处理暂停原因后，任务才会继续推进。"
               : "可以从下方研究索引继续查看已有成果。"
           }}
@@ -314,7 +345,8 @@ const rows = computed(() =>
     </button>
 
     <!-- beUI 时间线：最近 8 个任务（左旧右新）。点击进详情；列表保留完整浏览与 E2E 契约。 -->
-    <div v-if="timelineTasks.length" class="mb-8 rounded-3xl border border-border bg-card p-2">
+    <div v-if="timelineTasks.length && store.listPage === 1"
+      class="mb-8 rounded-3xl border border-border bg-card p-2">
       <p class="px-4 pt-2 pb-1 text-xs text-muted-foreground">
         最近 {{ timelineTasks.length }} 个任务 · 点击卡片打开，拖拽 / 滚轮 / ←→ 浏览
       </p>
@@ -568,6 +600,22 @@ const rows = computed(() =>
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <!-- 分页：后端默认只回 20 条，没有它第 21 个任务永远看不到 -->
+    <div
+      v-if="store.listTotal > store.PAGE_SIZE"
+      class="mt-4 flex flex-wrap items-center justify-between gap-2"
+    >
+      <span class="text-xs text-muted-foreground" data-test="task-page-summary">
+        共 {{ store.listTotal }} 个任务 · 第 {{ store.listPage }} / {{ totalPages }} 页
+      </span>
+      <Pagination
+        :model-value="store.listPage"
+        :total-pages="totalPages"
+        aria-label="任务分页"
+        @update:model-value="refresh"
+      />
     </div>
   </section>
 </template>

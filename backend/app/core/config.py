@@ -496,7 +496,9 @@ class CORSConfig(BaseModel):
     allow_headers: list[str] = Field(default_factory=lambda: ["*"])
     #: 跨域时需要暴露给前端的响应头。`Content-Disposition` 不带上的话，
     #: 前端拿不到下载文件名（浏览器默认只暴露 6 个安全头）。
-    expose_headers: list[str] = Field(default_factory=lambda: ["Content-Disposition"])
+    expose_headers: list[str] = Field(
+        default_factory=lambda: ["Content-Disposition", "X-Total-Count"]
+    )
 
 
 class StorageConfig(BaseModel):

@@ -62,8 +62,15 @@ def open_app() -> Any:
     # ⚠️ 方法名必须与端点实际调用的**完全一致**（`grep 'execution\.' tasks.py` 核对），
     # 否则会在 401 之外的地方报 AttributeError，掩盖真正的鉴权断言。
     class _FakeExecution:
-        async def list_tasks(self, user_id, *, skip=0, limit=20, workspace_ids=()):  # type: ignore[no-untyped-def]
+        async def list_tasks(  # type: ignore[no-untyped-def]
+            self, user_id, *, skip=0, limit=20, workspace_ids=(), statuses=None, query=None
+        ):
             return []
+
+        async def count_tasks(  # type: ignore[no-untyped-def]
+            self, user_id, *, workspace_ids=(), statuses=None, query=None
+        ):
+            return 0
 
         async def get_snapshot(self, user_id, task_id, *, workspace_ids=()):  # type: ignore[no-untyped-def]
             from app.core.exceptions import NotFoundException

@@ -366,6 +366,96 @@ class TestCreateAndQuery:
         bob_items = client.get("/api/v1/tasks", headers=_auth(bob)).json()
         assert bob_items == []
 
+    def test_list_reports_total_and_paginates(self, api_env) -> None:
+        """分页契约：X-Total-Count 是过滤后的总数，两页不重不漏。
+
+        没有这个头前端算不出总页数，只能显示第一页——线上 86 个任务
+        会有 66 个永远看不到。
+        """
+        client, install_runtime = api_env
+        install_runtime()
+        token = _register_and_login(client, "pager")
+
+        created = [
+            _create(client, token, topic=f"分页任务 {index}").json()["task_id"]
+            for index in range(3)
+        ]
+        for task_id in created:
+            _wait_status(client, token, task_id, {TaskStatus.WAITING_APPROVAL.value})
+
+        first = client.get("/api/v1/tasks", headers=_auth(token), params={"limit": 2})
+        assert first.status_code == 200
+        assert first.headers["X-Total-Count"] == "3"
+        assert len(first.json()) == 2
+
+        second = client.get("/api/v1/tasks", headers=_auth(token), params={"limit": 2, "skip": 2})
+        assert second.headers["X-Total-Count"] == "3"
+        assert len(second.json()) == 1
+
+        seen = {row["task_id"] for row in first.json()} | {row["task_id"] for row in second.json()}
+        assert seen == set(created)
+
+    def test_counts_and_status_group_filter(self, api_env) -> None:
+        """计数与分组筛选必须同口径：点「待我确认 N」就该筛出 N 条。"""
+        client, install_runtime = api_env
+        install_runtime()
+        token = _register_and_login(client, "groupy")
+
+        created = []
+        for index in range(2):
+            task_id = _create(client, token, topic=f"分组任务 {index}").json()["task_id"]
+            _wait_status(client, token, task_id, {TaskStatus.WAITING_APPROVAL.value})
+            created.append(task_id)
+
+        counts = client.get("/api/v1/tasks/counts", headers=_auth(token))
+        assert counts.status_code == 200
+        body = counts.json()
+        assert body["all"] == 2
+        assert body["needs_me"] == 2
+        assert body["active"] == 0
+        assert body["done"] == 0
+
+        needs = client.get(
+            "/api/v1/tasks", headers=_auth(token), params={"status_group": "needs_me"}
+        )
+        assert needs.headers["X-Total-Count"] == "2"
+        assert {row["task_id"] for row in needs.json()} == set(created)
+
+        done = client.get("/api/v1/tasks", headers=_auth(token), params={"status_group": "done"})
+        assert done.json() == []
+        assert done.headers["X-Total-Count"] == "0"
+
+    def test_search_matches_title_and_escapes_wildcards(self, api_env) -> None:
+        """搜索按标题过滤；`%` / `_` 必须是字面量，不能变成通配符。
+
+        不转义的话搜 `%` 会命中全部任务，用户会以为搜索框坏了。
+        """
+        client, install_runtime = api_env
+        install_runtime()
+        token = _register_and_login(client, "searcher")
+
+        hit_id = _create(client, token, topic="证据核验方法综述").json()["task_id"]
+        _create(client, token, topic="另一个主题的综述研究")
+        _wait_status(client, token, hit_id, {TaskStatus.WAITING_APPROVAL.value})
+
+        hit = client.get("/api/v1/tasks", headers=_auth(token), params={"q": "证据核验"})
+        assert hit.headers["X-Total-Count"] == "1"
+        assert [row["task_id"] for row in hit.json()] == [hit_id]
+
+        wildcard = client.get("/api/v1/tasks", headers=_auth(token), params={"q": "%"})
+        assert wildcard.headers["X-Total-Count"] == "0"
+        assert wildcard.json() == []
+
+    def test_rejects_unknown_status_group(self, api_env) -> None:
+        client, install_runtime = api_env
+        install_runtime()
+        token = _register_and_login(client, "strict")
+
+        resp = client.get(
+            "/api/v1/tasks", headers=_auth(token), params={"status_group": "archived"}
+        )
+        assert resp.status_code == 422
+
 
 class TestApproval:
     def test_approval_moves_to_running_and_completes(self, api_env) -> None:

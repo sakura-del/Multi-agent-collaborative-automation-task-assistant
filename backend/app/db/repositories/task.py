@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, delete, or_, select, update
+from sqlalchemy import and_, delete, func, or_, select, update
 
 from app.db.models.task import Subtask, Task, TaskDag
 from app.db.repositories.base import BaseRepository
@@ -98,6 +98,80 @@ class TaskRepository(BaseRepository[Task]):
         )
         return result.scalar_one_or_none()
 
+    @staticmethod
+    def _like_pattern(text: str) -> str:
+        """把用户输入转成安全的 ILIKE 模式（转义 `%` `_` `\\`）。
+
+        不转义的话，搜 `100%` 会变成通配符、搜 `_` 会匹配任意单字符——
+        用户会觉得「搜什么都出东西」，实际是搜索坏了。
+        """
+        escaped = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        return f"%{escaped}%"
+
+    def _summary_conditions(
+        self,
+        user_id: UUID,
+        workspace_ids: Sequence[UUID],
+        statuses: Sequence[str] | None,
+        query: str | None,
+    ) -> Any:
+        """列表接口的过滤条件：可见性 + 状态分组 + 标题搜索。
+
+        列表、总数、分组计数**必须**共用这一个函数：任何一处漏掉状态或搜索，
+        分页就会出现「第 2 页混进不该出现的任务」或「总数比列表多」。
+        """
+        conditions: list[Any] = [self._visible_clause(user_id, workspace_ids)]
+        if statuses:
+            conditions.append(Task.status.in_(list(statuses)))
+        if query:
+            conditions.append(Task.title.ilike(self._like_pattern(query), escape="\\"))
+        return and_(*conditions)
+
+    async def count_summaries(
+        self,
+        user_id: UUID,
+        workspace_ids: Sequence[UUID] = (),
+        *,
+        statuses: Sequence[str] | None = None,
+        query: str | None = None,
+    ) -> int:
+        """可见任务总数（与 `list_summaries` 复用同一过滤条件）。
+
+        ## 为什么要单独一条 count
+
+        列表接口默认只回 20 条，前端算不出总页数。用 `len(rows)` 当总数会在
+        第 2 页之后开始骗人（永远是 20）。计数必须与列表**同源**：
+        同一 `_summary_conditions`，否则分页会出现「最后一页空白」或
+        「总数比实际少」。远程库每条 SQL ~380ms，只多一次往返，可接受。
+        """
+        stmt = (
+            select(func.count())
+            .select_from(Task)
+            .where(self._summary_conditions(user_id, workspace_ids, statuses, query))
+        )
+        return int((await self.db.execute(stmt)).scalar_one())
+
+    async def counts_by_status(
+        self,
+        user_id: UUID,
+        workspace_ids: Sequence[UUID] = (),
+        *,
+        query: str | None = None,
+    ) -> dict[str, int]:
+        """按状态分组的计数（一条 GROUP BY），供列表页顶部四个数字使用。
+
+        不能拿当前页 `len(items)` 顶替：分页后每页只有 20 条，用当前页统计
+        会让「全部任务」从 86 变成 20，比不做分页更误导。
+        """
+        stmt = (
+            select(Task.status, func.count())
+            .select_from(Task)
+            .where(self._summary_conditions(user_id, workspace_ids, None, query))
+            .group_by(Task.status)
+        )
+        rows = (await self.db.execute(stmt)).all()
+        return {str(row[0]): int(row[1]) for row in rows}
+
     async def list_summaries(
         self,
         user_id: UUID,
@@ -105,6 +179,8 @@ class TaskRepository(BaseRepository[Task]):
         *,
         skip: int = 0,
         limit: int = 20,
+        statuses: Sequence[str] | None = None,
+        query: str | None = None,
     ) -> Any:
         """**单条 SQL** 只取列表页需要的列（id/status/title/plan_version/时间戳）。
 
@@ -124,7 +200,7 @@ class TaskRepository(BaseRepository[Task]):
                 Task.created_at,
                 Task.updated_at,
             )
-            .where(self._visible_clause(user_id, workspace_ids))
+            .where(self._summary_conditions(user_id, workspace_ids, statuses, query))
             .order_by(Task.created_at.desc(), Task.id.desc())
             .offset(max(0, skip))
             .limit(safe_limit)

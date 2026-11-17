@@ -86,8 +86,15 @@ def env() -> Any:
 
     # 任务端点需要 execution；本文件只关心**门禁**，用空实现即可
     class _FakeExecution:
-        async def list_tasks(self, user_id, *, skip=0, limit=20, workspace_ids=()):  # type: ignore[no-untyped-def]
+        async def list_tasks(  # type: ignore[no-untyped-def]
+            self, user_id, *, skip=0, limit=20, workspace_ids=(), statuses=None, query=None
+        ):
             return []
+
+        async def count_tasks(  # type: ignore[no-untyped-def]
+            self, user_id, *, workspace_ids=(), statuses=None, query=None
+        ):
+            return 0
 
     application.dependency_overrides[tasks_endpoint.get_task_execution] = lambda: _FakeExecution()
     application.state.factory = factory

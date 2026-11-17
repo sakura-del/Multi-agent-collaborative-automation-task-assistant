@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from urllib.parse import quote
 from uuid import UUID
 
@@ -37,6 +37,7 @@ from app.orchestration.services.task_execution import TaskExecution
 from app.schemas.task import (
     PlanApproval,
     TaskControl,
+    TaskCountsOut,
     TaskCreate,
     TaskCreateOut,
     TaskEventPage,
@@ -45,6 +46,19 @@ from app.schemas.task import (
 from app.security.llm_credential_service import LLMCredentialService
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
+
+#: 列表页的状态分组。**必须与前端 `utils/task-status.ts` 的
+#: `needsUserAction` / `isActive` 完全一致**：两边定义漂移会让顶部数字
+#: 与筛出来的条数对不上（点「待我确认 3」却只列出 2 条）。
+StatusGroup = Literal["all", "needs_me", "active", "done"]
+
+_STATUS_GROUP_STATUSES: dict[str, tuple[str, ...] | None] = {
+    "all": None,
+    "needs_me": ("waiting_approval", "waiting_human"),
+    # active = 非终态且不需要用户操作（与前端 isActive 同义）
+    "active": ("created", "planning", "running", "reviewing", "paused", "retrying"),
+    "done": ("completed",),
+}
 
 
 def get_task_execution(request: Request) -> TaskExecution:
@@ -267,18 +281,79 @@ async def create_task(
     return TaskCreateOut(task_id=task_id, status=TaskStatus.PLANNING.value)
 
 
+@router.get("/counts", response_model=TaskCountsOut, summary="任务分组计数")
+async def task_counts(
+    execution: ExecutionDep,
+    current_user: ApiUserDep,
+    workspace_ids: WorkspaceIdsDep,
+    _scope: TasksReadScope,
+    q: Annotated[str | None, Query(max_length=100, description="标题关键词")] = None,
+) -> TaskCountsOut:
+    """四个分组计数（全部 / 待我确认 / 进行中 / 已完成）。
+
+    分页之后不能再用当前页 `len(items)` 当统计：每页只有 20 条，
+    「全部任务」会从真实总数变成 20。这里一条 GROUP BY 取全量计数。
+
+    注意 `all` **不等于**另外三个之和：失败与取消的任务计入 all，
+    但不属于任何操作分组（它们不需要用户处理，也不算完成）。
+    """
+    by_status = await execution.task_status_counts(
+        current_user.id, workspace_ids=workspace_ids, query=q
+    )
+
+    def total(group: str) -> int:
+        statuses = _STATUS_GROUP_STATUSES[group]
+        if statuses is None:
+            return sum(by_status.values())
+        return sum(by_status.get(status, 0) for status in statuses)
+
+    return TaskCountsOut(
+        all=total("all"),
+        needs_me=total("needs_me"),
+        active=total("active"),
+        done=total("done"),
+    )
+
+
 @router.get("", response_model=list[TaskSummaryOut], summary="列出当前用户任务")
 async def list_tasks(
     execution: ExecutionDep,
     current_user: ApiUserDep,
     workspace_ids: WorkspaceIdsDep,
     _scope: TasksReadScope,
+    response: Response,
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    status_group: Annotated[StatusGroup, Query(description="状态分组")] = "all",
+    q: Annotated[str | None, Query(max_length=100, description="标题关键词")] = None,
 ) -> list[TaskSummaryOut]:
-    """分页列出可见任务（个人任务 + 我所属工作区的任务，按创建时间倒序）。"""
+    """分页列出可见任务（个人任务 + 我所属工作区的任务，按创建时间倒序）。
+
+    总数走 `X-Total-Count` 响应头而不是塞进 body：body 保持数组，
+    老客户端（只读数组）不受影响；新前端用它算总页数。
+
+    ⚠️ 跨域时该头必须出现在 CORS `expose_headers` 里，否则浏览器
+    只暴露 6 个安全头，前端读到的永远是 null（表现为「只有 1 页」）。
+
+    ## 为什么筛选与搜索也走服务端
+
+    分页之后，前端本地筛选只能筛当前 20 条：用户点「待我确认」会漏掉
+    第 2 页之后的待办，搜索也搜不到。所以状态分组与关键词必须和
+    skip/limit 一起下推到 SQL，`X-Total-Count` 返回的是**过滤后**的总数。
+    """
+    statuses = _STATUS_GROUP_STATUSES[status_group]
+    response.headers["X-Total-Count"] = str(
+        await execution.count_tasks(
+            current_user.id, workspace_ids=workspace_ids, statuses=statuses, query=q
+        )
+    )
     snapshots = await execution.list_tasks(
-        current_user.id, skip=skip, limit=limit, workspace_ids=workspace_ids
+        current_user.id,
+        skip=skip,
+        limit=limit,
+        workspace_ids=workspace_ids,
+        statuses=statuses,
+        query=q,
     )
     return [
         TaskSummaryOut(

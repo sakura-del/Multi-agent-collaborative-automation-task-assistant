@@ -603,6 +603,37 @@ class TaskExecution:
                 raise NotFoundException("任务不存在")
             return await self._build_snapshot(session, task)
 
+    async def count_tasks(
+        self,
+        user_id: UUID,
+        *,
+        workspace_ids: Sequence[UUID] = (),
+        statuses: Sequence[str] | None = None,
+        query: str | None = None,
+    ) -> int:
+        """可见任务总数（HTTP 列表接口用于算总页数）。
+
+        口径必须与 `list_tasks` 完全一致：这是分页正确性的前提，
+        两边任何一处改可见性/过滤条件都会让页数与实际对不上。
+        """
+        async with self._session_factory() as session:
+            return await TaskRepository(session).count_summaries(
+                user_id, workspace_ids, statuses=statuses, query=query
+            )
+
+    async def task_status_counts(
+        self,
+        user_id: UUID,
+        *,
+        workspace_ids: Sequence[UUID] = (),
+        query: str | None = None,
+    ) -> dict[str, int]:
+        """按状态分组的计数（列表页顶部数字用）。"""
+        async with self._session_factory() as session:
+            return await TaskRepository(session).counts_by_status(
+                user_id, workspace_ids, query=query
+            )
+
     async def list_tasks(
         self,
         user_id: UUID,
@@ -610,6 +641,8 @@ class TaskExecution:
         skip: int = 0,
         limit: int = 20,
         workspace_ids: Sequence[UUID] = (),
+        statuses: Sequence[str] | None = None,
+        query: str | None = None,
     ) -> list[TaskListSummary]:
         """分页列出任务摘要（**单条 SQL**，HTTP 列表接口使用）。
 
@@ -624,7 +657,14 @@ class TaskExecution:
         """
         async with self._session_factory() as session:
             repo = TaskRepository(session)
-            rows = await repo.list_summaries(user_id, workspace_ids, skip=skip, limit=limit)
+            rows = await repo.list_summaries(
+                user_id,
+                workspace_ids,
+                skip=skip,
+                limit=limit,
+                statuses=statuses,
+                query=query,
+            )
             return [
                 TaskListSummary(
                     task_id=row.id,

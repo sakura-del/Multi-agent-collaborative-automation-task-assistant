@@ -3,6 +3,7 @@ import { defineStore } from "pinia";
 
 import { taskApi } from "@/api/tasks";
 import { createTaskEventSession, type TaskEventSession } from "@/services/task-events";
+import type { TaskCounts, TaskStatusGroup } from "@/api/tasks";
 import type {
   TaskControl,
   TaskCreate,
@@ -21,18 +22,55 @@ export const useTaskStore = defineStore("tasks", () => {
   const lastEventId = ref(0);
   const watching = ref(false);
   const listLoading = ref(false);
+  /** 服务端分页：每页条数与后端默认 limit 保持一致。 */
+  const PAGE_SIZE = 20;
+  const listTotal = ref(0);
+  const listPage = ref(1);
+  /** 当前生效的筛选与搜索（服务端侧，分页必须带上，否则会跨页串数据）。 */
+  const listGroup = ref<TaskStatusGroup>("all");
+  const listQuery = ref("");
+  const counts = ref<TaskCounts>({ all: 0, needs_me: 0, active: 0, done: 0 });
   const detailLoading = ref(false);
 
   let session: TaskEventSession | null = null;
   let watchedTaskId: string | null = null;
 
-  async function loadList(): Promise<void> {
+  /**
+   * 加载指定页（从 1 开始）。
+   *
+   * 默认第 1 页：创建任务、从详情返回等既有调用点都不传参，行为不变。
+   * 分页必须走服务端 skip/limit —— 后端默认只回 20 条，前端切片切不出
+   * 第 21 个任务。
+   */
+  async function loadList(
+    page = 1,
+    options?: { group?: TaskStatusGroup; query?: string },
+  ): Promise<void> {
     listLoading.value = true;
     try {
-      items.value = await taskApi.list();
+      const target = Math.max(1, Math.floor(page));
+      const group = options?.group ?? listGroup.value;
+      const query = (options?.query ?? listQuery.value).trim();
+      const result = await taskApi.list({
+        skip: (target - 1) * PAGE_SIZE,
+        limit: PAGE_SIZE,
+        status_group: group,
+        // 空串不发：后端把 q="" 也当过滤条件时会导致 SQL 里多一个 %% 匹配
+        q: query || undefined,
+      });
+      items.value = result.items;
+      listTotal.value = result.total;
+      listPage.value = target;
+      listGroup.value = group;
+      listQuery.value = query;
     } finally {
       listLoading.value = false;
     }
+  }
+
+  /** 分组计数（不受分页影响；带当前搜索词，保证数字与列表同口径）。 */
+  async function loadCounts(query = listQuery.value): Promise<void> {
+    counts.value = await taskApi.counts({ q: query.trim() || undefined });
   }
 
   async function create(payload: TaskCreate): Promise<TaskCreateOut> {
@@ -174,7 +212,14 @@ export const useTaskStore = defineStore("tasks", () => {
     watching,
     listLoading,
     detailLoading,
+    PAGE_SIZE,
+    listTotal,
+    listPage,
+    listGroup,
+    listQuery,
+    counts,
     loadList,
+    loadCounts,
     create,
     load,
     approve,

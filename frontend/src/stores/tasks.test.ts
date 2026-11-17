@@ -164,21 +164,34 @@ describe("task store", () => {
 
   it("loads the task list", async () => {
     const store = useTaskStore();
-    vi.mocked(taskApi.list).mockResolvedValue([
-      {
-        task_id: "task-1",
-        status: "completed",
-        title: "文献综述",
-        plan_version: 1,
-        revision: 9,
-        created_at: null,
-        updated_at: null,
-      },
-    ]);
+    vi.mocked(taskApi.list).mockResolvedValue({
+      items: [
+        {
+          task_id: "task-1",
+          status: "completed",
+          title: "文献综述",
+          plan_version: 1,
+          revision: 9,
+          created_at: null,
+          updated_at: null,
+        },
+      ],
+      total: 41,
+    });
 
-    await store.loadList();
+    await store.loadList(3);
 
+    // 分页参数必须真的发出去：第 3 页 = skip 40
+    expect(taskApi.list).toHaveBeenCalledWith({
+      skip: 40,
+      limit: 20,
+      status_group: "all",
+      q: undefined,
+    });
     expect(store.items).toHaveLength(1);
     expect(store.items[0].status).toBe("completed");
+    // 总数来自服务端，不是本页条数——否则「全部任务」会显示 1
+    expect(store.listTotal).toBe(41);
+    expect(store.listPage).toBe(3);
   });
 });

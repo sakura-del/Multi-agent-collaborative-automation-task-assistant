@@ -9,9 +9,48 @@ import type {
   WsTicket,
 } from "./types";
 
+/** 与后端 `/tasks?status_group=` 一一对应；语义见 utils/task-status.ts。 */
+export type TaskStatusGroup = "all" | "needs_me" | "active" | "done";
+
+export interface TaskCounts {
+  all: number;
+  needs_me: number;
+  active: number;
+  done: number;
+}
+
+export interface TaskListPage {
+  items: TaskSummary[];
+  /** 可见任务总数（来自 X-Total-Count）；后端没给时退化为本页条数。 */
+  total: number;
+}
+
 // 任务 API：对接后端 /api/v1/tasks/*（视图层一律通过 store 调用）
 export const taskApi = {
-  list: () => api.get<TaskSummary[]>("/tasks").then((response) => response.data),
+  /**
+   * 分页列出任务。
+   *
+   * 后端 body 仍是数组（老客户端不受影响），总数在 `X-Total-Count` 头里。
+   * 读不到头时（跨域未 expose / 旧版本后端）退化为本页条数——这样最坏
+   * 情况是「只有一页」，而不是 NaN 页把分页渲染成空白。
+   */
+  list: async (params?: {
+    skip?: number;
+    limit?: number;
+    status_group?: TaskStatusGroup;
+    q?: string;
+  }): Promise<TaskListPage> => {
+    const response = await api.get<TaskSummary[]>("/tasks", { params });
+    const header = Number.parseInt(String(response.headers["x-total-count"] ?? ""), 10);
+    return {
+      items: response.data,
+      total: Number.isFinite(header) ? header : response.data.length,
+    };
+  },
+
+  /** 分组计数（服务端全量）：分页后不能再用当前页条数当统计。 */
+  counts: (params?: { q?: string }) =>
+    api.get<TaskCounts>("/tasks/counts", { params }).then((response) => response.data),
 
   create: (payload: TaskCreate) =>
     api.post<TaskCreateOut>("/tasks", payload).then((response) => response.data),

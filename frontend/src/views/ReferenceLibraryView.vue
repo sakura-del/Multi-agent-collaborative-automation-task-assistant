@@ -37,6 +37,7 @@ import PageHeader from "@/components/common/PageHeader.vue";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Pagination } from "@/components/ui/pagination";
 import { Input } from "@/components/ui/input";
 import {
   clearLibrary,
@@ -79,12 +80,20 @@ onMounted(() => {
   void refresh();
 });
 
-async function refresh() {
+/** 每页条数：与任务列表一致。原来一次拉 200 条，第 201 条起永远看不到。 */
+const PAGE_SIZE = 20;
+const page = ref(1);
+const totalPages = computed(() =>
+  Math.max(1, Math.ceil((summary.value?.total ?? 0) / PAGE_SIZE)),
+);
+
+async function refresh(target = page.value) {
   loading.value = true;
   loadError.value = null;
+  const current = Math.max(1, Math.floor(target));
   // 列表与摘要分别处理失败：摘要挂了不该让列表消失（AGENTS §5 #23）
   const [listResult, summaryResult] = await Promise.allSettled([
-    listLibraryItems({ limit: 200 }),
+    listLibraryItems({ limit: PAGE_SIZE, offset: (current - 1) * PAGE_SIZE }),
     getLibrarySummary(),
   ]);
 
@@ -96,6 +105,7 @@ async function refresh() {
   if (summaryResult.status === "fulfilled") {
     summary.value = summaryResult.value;
   }
+  page.value = current;
   loading.value = false;
 }
 
@@ -117,7 +127,8 @@ async function confirmDelete(item: LibraryItemOut) {
   try {
     await deleteLibraryItem(item.item_id);
     successMessage.value = `已删除「${item.title || item.ref_id}」`;
-    await refresh();
+    // 删的是本页最后一条时回退一页，避免停在空白页
+    await refresh(items.value.length <= 1 && page.value > 1 ? page.value - 1 : page.value);
   } catch (error) {
     actionError.value = (error as Error).message || "删除失败";
   } finally {
@@ -401,5 +412,20 @@ async function saveEdit(item: LibraryItemOut) {
         </div>
       </Card>
     </ul>
+
+    <div
+      v-if="totalPages > 1"
+      class="mt-3 flex flex-wrap items-center justify-between gap-2"
+    >
+      <span class="text-xs text-muted-foreground" data-test="library-page-summary">
+        共 {{ summary?.total ?? 0 }} 条 · 第 {{ page }} / {{ totalPages }} 页
+      </span>
+      <Pagination
+        :model-value="page"
+        :total-pages="totalPages"
+        aria-label="引用库分页"
+        @update:model-value="refresh"
+      />
+    </div>
   </section>
 </template>

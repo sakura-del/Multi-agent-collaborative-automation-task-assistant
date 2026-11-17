@@ -147,6 +147,20 @@ class TaskSummaryOut(BaseModel):
     updated_at: datetime | None = None
 
 
+class TaskCountsOut(BaseModel):
+    """列表页分组计数（服务端全量，不是当前页统计）。
+
+    `all` 不等于三者之和：失败/取消计入 all，但不属于任何操作分组。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    all: int
+    needs_me: int
+    active: int
+    done: int
+
+
 class TaskEventPage(BaseModel):
     """任务事件回放响应。"""
 

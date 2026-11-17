@@ -57,7 +57,7 @@ function task(overrides: Partial<TaskSummary> = {}): TaskSummary {
   } as TaskSummary;
 }
 
-async function mountWith(tasks: TaskSummary[]) {
+async function mountWith(tasks: TaskSummary[], options?: { total?: number; page?: number }) {
   setActivePinia(createPinia());
   const router = makeRouter();
   await router.push("/tasks");
@@ -67,9 +67,20 @@ async function mountWith(tasks: TaskSummary[]) {
   // `loadList` 必须 stub 掉：组件 `onMounted` 会调它，真跑会尝试连后端
   // （ECONNREFUSED 后把 items 清空，空态用例因此看不到 empty-state）。
   const { useTaskStore } = await import("@/stores/tasks");
+  const { needsUserAction, isActive } = await import("@/utils/task-status");
   const store = useTaskStore();
   store.items = tasks;
+  store.listTotal = options?.total ?? tasks.length;
+  store.listPage = options?.page ?? 1;
+  // 统计现在来自服务端全量；测试直接注入等价结果，避免打网络
+  store.counts = {
+    all: tasks.length,
+    needs_me: tasks.filter((item) => needsUserAction(item.status)).length,
+    active: tasks.filter((item) => isActive(item.status)).length,
+    done: tasks.filter((item) => item.status === "completed").length,
+  };
   store.loadList = async () => {};
+  store.loadCounts = async () => {};
   store.listLoading = false;
 
   const wrapper = mount(TaskListView, {
@@ -287,5 +298,34 @@ describe("既有测试契约必须保留", () => {
     // 行本身**不能**是 role=button：否则同一行有两个 button 角色，
     // `getByRole` 会命中多个，E2E 报二义性（实测踩过）。
     expect(row.attributes("role")).not.toBe("button");
+  });
+});
+
+describe("服务端分页", () => {
+  it("总数超过一页时显示分页与真实总数", async () => {
+    const wrapper = await mountWith([task()], { total: 61 });
+
+    const summary = wrapper.find('[data-test="task-page-summary"]');
+    expect(summary.exists()).toBe(true);
+    // 必须是服务端总数，不能是当前页条数（1）
+    expect(summary.text()).toContain("61");
+    expect(summary.text()).toContain("第 1 / 4 页");
+  });
+
+  it("只有一页时不显示分页（避免 1/1 噪声）", async () => {
+    const wrapper = await mountWith([task()], { total: 1 });
+    expect(wrapper.find('[data-test="task-page-summary"]').exists()).toBe(false);
+  });
+
+  it("第 2 页时隐藏「最近任务」时间线（那里只该放全局最新）", async () => {
+    const wrapper = await mountWith(
+      [
+        task({ task_id: "old-1", created_at: "2026-01-01T00:00:00Z" }),
+        task({ task_id: "old-2", created_at: "2026-01-02T00:00:00Z" }),
+      ],
+      { total: 40, page: 2 },
+    );
+
+    expect(wrapper.find('[data-test="be-timeline"]').exists()).toBe(false);
   });
 });
