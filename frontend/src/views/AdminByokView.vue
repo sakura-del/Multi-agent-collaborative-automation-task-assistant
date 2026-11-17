@@ -24,7 +24,7 @@ import { RefreshCw, ShieldCheck } from "lucide-vue-next";
 import { getByokOverview } from "@/api/admin";
 import type { ByokOverview } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, StatCard } from "@/components/ui/card";
 import EmptyState from "@/components/common/EmptyState.vue";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import PageHeader from "@/components/common/PageHeader.vue";
@@ -162,56 +162,33 @@ onMounted(load);
     <template v-else-if="overview">
       <!-- 四个渗透率：每个数字都带分母，避免「0%」歧义 -->
       <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-        <div class="rounded-2xl border border-border bg-card px-3 py-2.5">
-          <p class="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-            BYOK 任务占比
-          </p>
-          <p class="mt-1 text-2xl font-semibold tabular-nums" data-test="byok-task-share">
-            {{ percent(overview.totals.byok_task_share) }}
-          </p>
-          <p class="mt-0.5 text-[11px] text-muted-foreground">
-            {{ overview.totals.byok_tasks }} / {{ overview.totals.tasks }} 个任务
-          </p>
-        </div>
+        <StatCard
+          label="BYOK 任务占比"
+          :value="percent(overview.totals.byok_task_share)"
+          value-testid="byok-task-share"
+          :hint="`${overview.totals.byok_tasks} / ${overview.totals.tasks} 个任务`"
+        />
 
-        <div class="rounded-2xl border border-border bg-card px-3 py-2.5">
-          <p class="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-            BYOK Token 占比
-          </p>
-          <p class="mt-1 text-2xl font-semibold tabular-nums" data-test="byok-token-share">
-            {{ percent(overview.totals.byok_token_share) }}
-          </p>
-          <p class="mt-0.5 text-[11px] text-muted-foreground">
-            {{ formatTokens(overview.totals.byok_tokens) }} /
-            {{ formatTokens(overview.totals.tokens) }} tokens
-          </p>
-        </div>
+        <StatCard
+          label="BYOK Token 占比"
+          :value="percent(overview.totals.byok_token_share)"
+          value-testid="byok-token-share"
+          :hint="`${formatTokens(overview.totals.byok_tokens)} / ${formatTokens(overview.totals.tokens)} tokens`"
+        />
 
-        <div class="rounded-2xl border border-border bg-card px-3 py-2.5">
-          <p class="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-            BYOK 用户渗透率
-          </p>
-          <p class="mt-1 text-2xl font-semibold tabular-nums" data-test="byok-user-penetration">
-            {{ percent(overview.users.byok_penetration) }}
-          </p>
-          <p class="mt-0.5 text-[11px] text-muted-foreground">
-            跑过 BYOK：{{ overview.users.byok_active }} / 活跃
-            {{ overview.users.active }} 人
-          </p>
-        </div>
+        <StatCard
+          label="BYOK 用户渗透率"
+          :value="percent(overview.users.byok_penetration)"
+          value-testid="byok-user-penetration"
+          :hint="`跑过 BYOK：${overview.users.byok_active} / 活跃 ${overview.users.active} 人`"
+        />
 
-        <div class="rounded-2xl border border-border bg-card px-3 py-2.5">
-          <p class="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-            有凭据用户占比
-          </p>
-          <p class="mt-1 text-2xl font-semibold tabular-nums" data-test="byok-credential-penetration">
-            {{ percent(overview.users.credential_penetration) }}
-          </p>
-          <p class="mt-0.5 text-[11px] text-muted-foreground">
-            有凭据：{{ overview.users.with_credentials }} / 活跃
-            {{ overview.users.active }} 人
-          </p>
-        </div>
+        <StatCard
+          label="有凭据用户占比"
+          :value="percent(overview.users.credential_penetration)"
+          value-testid="byok-credential-penetration"
+          :hint="`有凭据：${overview.users.with_credentials} / 活跃 ${overview.users.active} 人`"
+        />
       </div>
 
       <!-- 凭据健康：接入不等于可用，invalid 要能看见 -->
@@ -235,40 +212,42 @@ onMounted(load);
 
       <!-- 成本估算：用户自费 vs 平台承担（公开标价，不是结算账单） -->
       <div data-test="byok-cost" class="mt-3 grid gap-2 sm:grid-cols-3">
-        <div class="rounded-2xl border border-border bg-card px-3 py-2.5">
-          <p class="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-            用户自费成本（估算）
-          </p>
-          <p class="mt-1 text-xl font-semibold tabular-nums" data-test="byok-cost-byok">
-            {{ formatUsd(overview.cost.byok) }}
-          </p>
-          <p class="mt-0.5 text-[11px] text-muted-foreground">BYOK 任务的等值成本</p>
-        </div>
-        <div class="rounded-2xl border border-border bg-card px-3 py-2.5">
-          <p class="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-            平台承担成本（估算）
-          </p>
-          <p class="mt-1 text-xl font-semibold tabular-nums" data-test="byok-cost-platform">
-            {{ formatUsd(overview.cost.platform) }}
-          </p>
-          <p class="mt-0.5 text-[11px] text-muted-foreground">平台模型任务</p>
-        </div>
-        <div class="rounded-2xl border border-border bg-card px-3 py-2.5">
-          <p class="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-            合计
-          </p>
-          <p class="mt-1 text-xl font-semibold tabular-nums" data-test="byok-cost-total">
-            {{ formatUsd(overview.cost.total) }}
-          </p>
-          <p
-            v-if="overview.cost.unpriced_byok_tokens + overview.cost.unpriced_platform_tokens > 0"
-            class="mt-0.5 text-[11px] text-warning"
-          >
-            有 {{ formatTokens(overview.cost.unpriced_byok_tokens + overview.cost.unpriced_platform_tokens) }}
-            tokens 未收录单价
-          </p>
-          <p v-else class="mt-0.5 text-[11px] text-muted-foreground">USD · 公开标价估算</p>
-        </div>
+        <StatCard
+          label="用户自费成本（估算）"
+          size="md"
+          :value="formatUsd(overview.cost.byok)"
+          value-testid="byok-cost-byok"
+          hint="BYOK 任务的等值成本"
+        />
+        <StatCard
+          label="平台承担成本（估算）"
+          size="md"
+          :value="formatUsd(overview.cost.platform)"
+          value-testid="byok-cost-platform"
+          hint="平台模型任务"
+        />
+        <StatCard
+          label="合计"
+          size="md"
+          :value="formatUsd(overview.cost.total)"
+          value-testid="byok-cost-total"
+        >
+          <template #hint>
+            <p
+              v-if="overview.cost.unpriced_byok_tokens + overview.cost.unpriced_platform_tokens > 0"
+              class="mt-0.5 text-[11px] text-warning"
+            >
+              有
+              {{
+                formatTokens(
+                  overview.cost.unpriced_byok_tokens + overview.cost.unpriced_platform_tokens,
+                )
+              }}
+              tokens 未收录单价
+            </p>
+            <p v-else class="mt-0.5 text-[11px] text-muted-foreground">USD · 公开标价估算</p>
+          </template>
+        </StatCard>
       </div>
       <p class="mt-1 text-[11px] text-muted-foreground">
         按厂商公开标价估算，不含折扣、缓存命中与批处理优惠；平台任务按默认模型估算。

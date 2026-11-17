@@ -8,6 +8,7 @@ import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import PageHeader from "@/components/common/PageHeader.vue";
 import StatusBadge from "@/components/common/StatusBadge.vue";
 import { Badge, type BadgeVariants } from "@/components/ui/badge";
+import { StatCard } from "@/components/ui/card";
 import { getObservabilityOverview } from "@/api/observability";
 import type { ObservabilityOverview } from "@/api/types";
 import { formatDateTime } from "@/utils/task-status";
@@ -237,74 +238,60 @@ async function refresh() {
     <template v-else-if="overview">
       <!-- 概览：四项。成功率带分母，token 带口径说明 —— 孤零零的数字无法核对。 -->
       <div class="mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-        <div class="rounded-2xl border border-border bg-card px-3 py-2.5">
-          <p class="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-            任务总数
-          </p>
-          <p class="mt-1 text-2xl font-semibold tabular-nums" data-test="observability-total">
-            {{ overview.tasks.total }}
-          </p>
-        </div>
+        <StatCard
+          label="任务总数"
+          :value="overview.tasks.total"
+          value-testid="observability-total"
+        />
 
-        <div class="rounded-2xl border border-border bg-card px-3 py-2.5">
-          <p class="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-            成功率
-          </p>
-          <p
-            class="mt-1 text-2xl font-semibold tabular-nums"
-            data-test="observability-success-rate"
-          >
-            {{ successRateText }}
-          </p>
+        <StatCard
+          label="成功率"
+          :value="successRateText"
+          value-testid="observability-success-rate"
+        >
           <!-- 分母必须露出来：76.9% 是 20/26 还是 20/27，用户要能自己核对 -->
-          <p
-            class="mt-0.5 text-[11px] text-muted-foreground"
-            data-test="observability-success-denominator"
-          >
-            已完成 {{ successCount }} / {{ terminalCount }} 个终态任务
-          </p>
-        </div>
+          <template #hint>
+            <p
+              class="mt-0.5 text-[11px] text-muted-foreground"
+              data-test="observability-success-denominator"
+            >
+              已完成 {{ successCount }} / {{ terminalCount }} 个终态任务
+            </p>
+          </template>
+        </StatCard>
 
-        <div class="rounded-2xl border border-border bg-card px-3 py-2.5">
-          <p class="flex items-center gap-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-            <Coins :size="11" aria-hidden="true" /> 累计 token
-          </p>
-          <p
-            class="mt-1 text-2xl font-semibold tabular-nums"
-            data-test="observability-token-total"
-          >
-            {{ formatTokens(overview.tokens.total_used) }}
-          </p>
+        <StatCard :value="formatTokens(overview.tokens.total_used)" value-testid="observability-token-total">
+          <template #label>
+            <span class="flex items-center gap-1">
+              <Coins :size="11" aria-hidden="true" /> 累计 token
+            </span>
+          </template>
           <!-- 0 不等于「没消耗」：修复前的任务用量没落库。必须说清楚。 -->
-          <p
-            v-if="tokensMissingForHistory"
-            class="mt-0.5 flex items-start gap-1 text-[11px] text-warning"
-            data-test="observability-token-hint"
-          >
-            <TriangleAlert :size="11" class="mt-0.5 shrink-0" aria-hidden="true" />
-            <span>历史任务未记录用量，仅新任务开始统计</span>
-          </p>
-          <p
-            v-else-if="recordedTaskCount > 0"
-            class="mt-0.5 text-[11px] text-muted-foreground"
-            data-test="observability-token-hint"
-          >
-            {{ recordedTaskCount }} 个任务有用量记录
-          </p>
-        </div>
+          <template #hint>
+            <p
+              v-if="tokensMissingForHistory"
+              class="mt-0.5 flex items-start gap-1 text-[11px] text-warning"
+              data-test="observability-token-hint"
+            >
+              <TriangleAlert :size="11" class="mt-0.5 shrink-0" aria-hidden="true" />
+              <span>历史任务未记录用量，仅新任务开始统计</span>
+            </p>
+            <p
+              v-else-if="recordedTaskCount > 0"
+              class="mt-0.5 text-[11px] text-muted-foreground"
+              data-test="observability-token-hint"
+            >
+              {{ recordedTaskCount }} 个任务有用量记录
+            </p>
+          </template>
+        </StatCard>
 
-        <div class="rounded-2xl border border-border bg-card px-3 py-2.5">
-          <p class="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-            平均每任务 token
-          </p>
-          <p
-            class="mt-1 text-2xl font-semibold tabular-nums"
-            data-test="observability-token-avg"
-          >
-            {{ formatTokens(overview.tokens.avg_per_task) }}
-          </p>
-          <p class="mt-0.5 text-[11px] text-muted-foreground">仅统计有用量记录的任务</p>
-        </div>
+        <StatCard
+          label="平均每任务 token"
+          :value="formatTokens(overview.tokens.avg_per_task)"
+          value-testid="observability-token-avg"
+          hint="仅统计有用量记录的任务"
+        />
       </div>
 
       <!-- 状态分布：全量状态（含 waiting_approval），并显示合计供核对 -->
