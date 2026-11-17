@@ -4,6 +4,7 @@ import { X } from "lucide-vue-next";
 
 import StatusBadge from "@/components/common/StatusBadge.vue";
 import { Alert } from "@/components/ui/alert";
+import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import type { PlanNode, SubtaskSnapshot } from "@/api/types";
 import { formatDateTime } from "@/utils/task-status";
@@ -26,11 +27,7 @@ const outputKeys = computed(() => {
 </script>
 
 <template>
-  <aside
-    v-if="props.node"
-    class="flex min-w-72 flex-col gap-3 rounded-lg border border-border bg-card p-4"
-    data-test="node-detail"
-  >
+  <Card v-if="props.node" as="aside" class="min-w-72 gap-3 p-4" data-test="node-detail">
     <header class="flex items-start justify-between gap-2">
       <div class="min-w-0">
         <h2 class="text-sm font-semibold">{{ props.node.title }}</h2>
@@ -73,5 +70,5 @@ const outputKeys = computed(() => {
       </ul>
     </section>
     <p v-else class="text-sm text-muted-foreground">该节点暂无产出。</p>
-  </aside>
+  </Card>
 </template>

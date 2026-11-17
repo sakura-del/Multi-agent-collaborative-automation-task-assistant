@@ -6,6 +6,7 @@ import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import FilePicker from "@/components/common/FilePicker.vue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { useKnowledgeStore } from "@/stores/knowledge";
 import type { ChunkStrategy } from "@/api/types";
@@ -78,11 +79,7 @@ async function handleSubmit() {
 </script>
 
 <template>
-  <form
-    class="mb-4 flex flex-col gap-3 rounded-lg border border-border bg-card p-4"
-    data-test="document-upload"
-    @submit.prevent="handleSubmit"
-  >
+  <Card as="form" class="mb-4 gap-3 p-4" data-test="document-upload" @submit.prevent="handleSubmit">
     <div class="flex flex-wrap items-end gap-3">
       <div class="grid gap-1.5">
         <Label for="document-file">文件</Label>
@@ -142,5 +139,5 @@ async function handleSubmit() {
 
     <ErrorBanner :message="localError" testid="upload-error" />
     <ErrorBanner v-if="!localError" :message="store.error" testid="upload-error" />
-  </form>
+  </Card>
 </template>

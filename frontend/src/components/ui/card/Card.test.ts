@@ -125,4 +125,11 @@ describe("Card 结构", () => {
     expect(cls).toContain("rounded-3xl");
     expect(cls).not.toContain("rounded-2xl");
   });
+  it("as 决定根标签：列表里必须是 li，表单容器是 form", () => {
+    const item = mount(Card, { props: { as: "li" }, slots: { default: () => "条目" } });
+    expect(item.element.tagName).toBe("LI");
+
+    const form = mount(Card, { props: { as: "form" }, slots: { default: () => "表单" } });
+    expect(form.element.tagName).toBe("FORM");
+  });
 });

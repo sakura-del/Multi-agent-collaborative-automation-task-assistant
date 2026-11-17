@@ -7,6 +7,7 @@ import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
 import PageHeader from "@/components/common/PageHeader.vue";
 import { Alert } from "@/components/ui/alert";
+import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -173,11 +174,7 @@ function metaText(item: ImportedReferenceItem): string {
       description="粘贴 BibTeX 或 RIS 文本即可解析预览；支持从 Zotero / EndNote 直接导出。解析后可以保存到引用库，创建任务时选择「我的引用库」就会用这些文献。"
     />
 
-    <form
-      class="mb-3 flex flex-col gap-3 rounded-lg border border-border bg-card p-4"
-      data-test="import-form"
-      @submit.prevent="handleImport"
-    >
+    <Card as="form" class="mb-3 gap-3 p-4" data-test="import-form" @submit.prevent="handleImport">
       <div class="grid gap-1.5">
         <Label for="import-content">引用文本</Label>
         <textarea
@@ -213,7 +210,7 @@ function metaText(item: ImportedReferenceItem): string {
           <span>重新开始</span>
         </Button>
       </div>
-    </form>
+    </Card>
 
     <ErrorBanner :message="error" testid="import-error" />
 
@@ -223,10 +220,7 @@ function metaText(item: ImportedReferenceItem): string {
     </Alert>
 
     <!-- 保存到引用库：这是本页的真实出口（此前解析完什么也做不了） -->
-    <div
-      v-if="hasResult && !isEmpty"
-      class="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-3 py-2.5"
-    >
+    <Card v-if="hasResult && !isEmpty" class="mb-3 flex-row flex-wrap items-center gap-2 px-3 py-2.5">
       <Button data-test="import-save" :disabled="saving || savableCount === 0" @click="handleSave">
         <Loader2 v-if="saving" class="animate-spin" aria-hidden="true" />
         <Save v-else :size="15" aria-hidden="true" />
@@ -235,7 +229,7 @@ function metaText(item: ImportedReferenceItem): string {
       <span class="text-xs text-muted-foreground">
         保存后可在创建任务时选择「我的引用库」，任务将只用这些文献、不外呼检索。
       </span>
-    </div>
+    </Card>
 
     <ErrorBanner :message="saveError" testid="import-save-error" />
 

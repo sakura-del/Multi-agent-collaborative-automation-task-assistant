@@ -5,6 +5,7 @@ import { X } from "lucide-vue-next";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { listCitationStyles } from "@/api/citation-styles";
 import { listLLMCredentials } from "@/api/llm-credentials";
@@ -180,10 +181,7 @@ function handleSubmit() {
 </script>
 
 <template>
-  <form
-    class="flex max-w-3xl flex-col gap-4 rounded-lg border border-border bg-card p-4"
-    @submit.prevent="handleSubmit"
-  >
+  <Card as="form" class="max-w-3xl gap-4 p-4" @submit.prevent="handleSubmit">
     <div class="grid gap-1.5">
       <Label for="task-topic">主题</Label>
       <Input
@@ -405,5 +403,5 @@ function handleSubmit() {
         <span>{{ props.pending ? "创建中…" : "创建任务" }}</span>
       </Button>
     </div>
-  </form>
+  </Card>
 </template>

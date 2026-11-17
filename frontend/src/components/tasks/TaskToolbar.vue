@@ -10,6 +10,7 @@ import {
 } from "lucide-vue-next";
 
 import { Alert } from "@/components/ui/alert";
+import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import type { SubtaskStatus, TaskControl, TaskStatus } from "@/api/types";
@@ -149,11 +150,7 @@ function submitSupplyInput() {
       放弃
     </Button>
 
-    <div
-      v-if="supplyingInput"
-      class="basis-full rounded-lg border border-border bg-card p-3"
-      data-test="supply-input-modal"
-    >
+    <Card v-if="supplyingInput" class="basis-full p-3" data-test="supply-input-modal">
       <div class="grid gap-1.5">
         <Label for="supply-input">补充内容（必填）</Label>
         <textarea
@@ -181,6 +178,6 @@ function submitSupplyInput() {
           提交
         </Button>
       </div>
-    </div>
+    </Card>
   </div>
 </template>

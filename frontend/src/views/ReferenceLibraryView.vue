@@ -34,6 +34,7 @@ import { Loader2, Pencil, Trash2 } from "lucide-vue-next";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
 import PageHeader from "@/components/common/PageHeader.vue";
+import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -275,10 +276,12 @@ async function saveEdit(item: LibraryItemOut) {
     />
 
     <ul v-else class="space-y-2">
-      <li
+      <Card
         v-for="item in items"
         :key="item.item_id"
-        class="rounded-lg border border-border bg-card px-3 py-2.5"
+        as="li"
+        size="compact"
+        class="gap-0 px-3 py-2.5"
         :data-test="`library-row-${item.item_id}`"
       >
         <div class="flex items-start justify-between gap-3">
@@ -396,7 +399,7 @@ async function saveEdit(item: LibraryItemOut) {
             取消
           </button>
         </div>
-      </li>
+      </Card>
     </ul>
   </section>
 </template>

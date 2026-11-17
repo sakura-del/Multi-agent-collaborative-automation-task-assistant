@@ -7,6 +7,7 @@ import FilePicker from "@/components/common/FilePicker.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
 import PageHeader from "@/components/common/PageHeader.vue";
 import { Alert } from "@/components/ui/alert";
+import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -317,10 +318,12 @@ function placeholderLabel(item: TemplateOut["placeholders"][number]): string {
       </p>
 
       <ul class="space-y-2">
-        <li
+        <Card
           v-for="template in templates"
           :key="template.template_id"
-          class="rounded-lg border border-border bg-card px-3 py-2.5"
+          as="li"
+          size="compact"
+          class="gap-0 px-3 py-2.5"
           :data-test="`template-row-${template.template_id}`"
         >
           <div class="flex flex-wrap items-center justify-between gap-2">
@@ -404,7 +407,7 @@ function placeholderLabel(item: TemplateOut["placeholders"][number]): string {
               {{ Object.keys(template.style_map).length }} 个样式映射
             </span>
           </div>
-        </li>
+        </Card>
       </ul>
     </template>
   </section>

@@ -295,7 +295,7 @@ async function refresh() {
       </div>
 
       <!-- 状态分布：全量状态（含 waiting_approval），并显示合计供核对 -->
-      <section class="mb-4 rounded-2xl border border-border bg-card px-3 py-2.5">
+      <Card as="section" size="compact" class="mb-4 gap-0 px-3 py-2.5">
         <div class="mb-2 flex items-baseline justify-between gap-2">
           <h2 class="text-sm font-medium">状态分布</h2>
           <!-- 合计是「看板自洽」的可见证据：合计 ≠ 总数就说明漏了状态 -->
@@ -315,12 +315,13 @@ async function refresh() {
             暂无状态数据
           </span>
         </div>
-      </section>
+      </Card>
 
       <!-- 最近任务：标题是唯一能认出「哪次运行」的信息，UUID 只作辅助 -->
-      <section
+      <Card
         v-if="overview.recent.length"
-        class="overflow-hidden rounded-2xl border border-border bg-card"
+        as="section"
+        class="gap-0 overflow-hidden py-0"
       >
         <h2 class="border-b border-border px-3 py-2 text-sm font-medium">最近任务</h2>
         <ul class="divide-y divide-border">
@@ -359,7 +360,7 @@ async function refresh() {
             </button>
           </li>
         </ul>
-      </section>
+      </Card>
     </template>
   </section>
 </template>

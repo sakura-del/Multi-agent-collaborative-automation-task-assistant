@@ -26,10 +26,14 @@ import { CARD_SIZE_KEY } from "./card-context";
 
 export type CardVariant = "outlined" | "muted";
 export type CardSize = "default" | "compact";
+/** 语义标签：列表里的卡片必须是 li，否则 ul > div 是非法结构。 */
+export type CardTag = "div" | "li" | "section" | "article" | "aside" | "form";
 
 const props = withDefaults(
   defineProps<{
     class?: HTMLAttributes["class"];
+    /** 根元素标签；放在 ul/ol 里时传 li。 */
+    as?: CardTag;
     /** outlined：白底 + 发丝边框；muted：灰底、无边框（内嵌区块）。 */
     variant?: CardVariant;
     /** default：独立卡；compact：列表/并排卡。 */
@@ -39,7 +43,7 @@ const props = withDefaults(
     /** 选中视觉（主色 1px 环）；真实状态由内部控件承载。 */
     selected?: boolean;
   }>(),
-  { variant: "outlined", size: "default", interactive: false, selected: false },
+  { as: "div", variant: "outlined", size: "default", interactive: false, selected: false },
 );
 
 const VARIANT_CLASS: Record<CardVariant, string> = {
@@ -52,6 +56,7 @@ const ROOT_SIZE_CLASS: Record<CardSize, string> = {
   compact: "gap-4 py-4",
 };
 
+const tag = computed(() => props.as);
 const reduced = useReducedMotion();
 const root = ref<HTMLElement | null>(null);
 /** 按下后若指针拖出卡片，松手事件收不到，用 pointerleave 兜底复位。 */
@@ -90,7 +95,8 @@ function release() {
 </script>
 
 <template>
-  <div
+  <component
+    :is="tag"
     ref="root"
     data-slot="card"
     :data-selected="props.selected || undefined"
@@ -101,5 +107,5 @@ function release() {
     @pointerleave="release"
   >
     <slot />
-  </div>
+  </component>
 </template>
