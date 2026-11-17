@@ -91,7 +91,7 @@ test("我的模型：接入 / 脱敏 / 测试失败不伪装 / 二次确认删�
   }
 });
 
-test("侧栏：折叠成图标轨，快速导航可打开", async ({ page }) => {
+test("侧栏：折叠成图标轨，图标可切页", async ({ page }) => {
   await login(page);
 
   const sidebar = page.locator('[data-test="app-sidebar"]');
@@ -104,13 +104,10 @@ test("侧栏：折叠成图标轨，快速导航可打开", async ({ page }) => 
   const collapsed = await sidebar.boundingBox();
   expect(collapsed?.width ?? 0).toBeLessThan(expanded?.width ?? 0);
 
-  // 折叠态打开 ArcPicker：滚轮/拖拽的入口必须可达
-  await page.locator('[data-test="nav-picker-trigger"]').click();
-  await expect(page.locator('[data-test="nav-arc-picker"]')).toBeVisible();
-  await expect(
-    page.locator('[data-test="nav-arc-picker"] [data-slot="arc-picker-option"]').first(),
-  ).toBeVisible();
-  await page.keyboard.press("Escape");
+  // 折叠态图标仍是链接：直接点就能切页（快速导航已移除）
+  await expect(page.locator('[data-test="nav-picker-trigger"]')).toHaveCount(0);
+  await page.locator('[data-test="nav-knowledge"]').click();
+  await page.waitForURL("**/knowledge", { timeout: 10_000 });
 
   // Ctrl/Cmd+B 展开
   await page.keyboard.press("Control+b");

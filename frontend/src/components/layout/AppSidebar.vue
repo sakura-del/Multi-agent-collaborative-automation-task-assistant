@@ -4,13 +4,11 @@
  *
  * 结构：品牌头 + 菜单 + 用户尾；桌面 16rem ↔ 4.25rem 图标轨，
  * 嵌套菜单用 clip-path + stagger 展开；移动端变成带遮罩的 sheet。
- * 折叠态保留 ArcPicker 快速导航入口（滚轮切页）。
  */
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { AnimatePresence, Motion, useReducedMotion } from "motion-v";
 import {
   ChevronRight,
-  Compass,
   LogOut,
   PanelLeftClose,
   PanelLeftOpen,
@@ -32,8 +30,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   (event: "update:collapsed", value: boolean): void;
   (event: "update:mobileOpen", value: boolean): void;
-  (event: "navigate", name: string): void;
-  (event: "open-picker"): void;
   (event: "logout"): void;
 }>();
 
@@ -154,17 +150,6 @@ const width = computed(() => (props.collapsed ? "4.25rem" : "16rem"));
       <button
         v-if="!props.collapsed"
         type="button"
-        data-test="nav-picker-trigger"
-        aria-label="快速导航"
-        title="快速导航"
-        class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-        @click="emit('open-picker')"
-      >
-        <Compass :size="15" aria-hidden="true" />
-      </button>
-      <button
-        v-if="!props.collapsed"
-        type="button"
         data-test="nav-collapse"
         aria-label="收起侧栏"
         title="收起侧栏"
@@ -273,7 +258,7 @@ const width = computed(() => (props.collapsed ? "4.25rem" : "16rem"));
       </div>
     </nav>
 
-    <!-- 折叠态：展开 + 快速导航 -->
+    <!-- 折叠态：展开 -->
     <div v-if="props.collapsed" class="flex flex-col items-center gap-1 border-t border-border py-2">
       <button
         type="button"
@@ -284,16 +269,6 @@ const width = computed(() => (props.collapsed ? "4.25rem" : "16rem"));
         @click="emit('update:collapsed', false)"
       >
         <PanelLeftOpen :size="16" aria-hidden="true" />
-      </button>
-      <button
-        type="button"
-        data-test="nav-picker-trigger"
-        aria-label="快速导航"
-        title="快速导航"
-        class="inline-flex size-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-        @click="emit('open-picker')"
-      >
-        <Compass :size="16" aria-hidden="true" />
       </button>
     </div>
 

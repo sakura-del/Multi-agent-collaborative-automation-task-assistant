@@ -16,13 +16,11 @@ import {
   PanelLeftOpen,
   Settings2,
   Users,
-  X,
 } from "lucide-vue-next";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import AppSidebar from "@/components/layout/AppSidebar.vue";
-import ArcPicker from "@/components/motion/ArcPicker.vue";
 import { Button } from "@/components/ui/button";
 import { useAuthStore } from "@/stores/auth";
 
@@ -44,16 +42,14 @@ const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
 
-// ===== 侧栏折叠 + 折叠后的 ArcPicker 导航 =====
+// ===== 侧栏折叠 =====
 
 const COLLAPSE_KEY = "vp:nav-collapsed";
 const navCollapsed = ref(localStorage.getItem(COLLAPSE_KEY) === "1");
-const pickerOpen = ref(false);
 const mobileOpen = ref(false);
 
 watch(navCollapsed, (value) => {
   localStorage.setItem(COLLAPSE_KEY, value ? "1" : "0");
-  if (!value) pickerOpen.value = false;
 });
 
 const GROUP_ICONS: Record<string, typeof ListChecks> = {
@@ -72,18 +68,7 @@ const sidebarGroups = computed(() =>
     items: visibleItems(group.items),
   })),
 );
-const pickerOptions = computed(() =>
-  [...leafItems.value, ...sidebarGroups.value.flatMap((group) => group.items)].map((item) => ({
-    value: item.name,
-    label: item.label,
-  })),
-);
 const currentNav = computed(() => String(route.name ?? "tasks"));
-
-function goFromPicker(name: string) {
-  if (name === currentNav.value) return;
-  void router.push({ name });
-}
 
 function toggleCollapse() {
   navCollapsed.value = !navCollapsed.value;
@@ -91,7 +76,6 @@ function toggleCollapse() {
 
 function onGlobalKeydown(event: KeyboardEvent) {
   if (event.key === "Escape") {
-    pickerOpen.value = false;
     mobileOpen.value = false;
   }
   // Ctrl/Cmd+B：桌面折叠侧栏，移动端开关 sheet
@@ -175,8 +159,6 @@ function handleLogout() {
       :email="auth.user?.email ?? ''"
       @update:collapsed="navCollapsed = $event"
       @update:mobile-open="mobileOpen = $event"
-      @navigate="goFromPicker"
-      @open-picker="pickerOpen = true"
       @logout="handleLogout"
     />
 
@@ -196,42 +178,5 @@ function handleLogout() {
       <RouterView />
     </main>
 
-    <!-- 折叠态的快速导航：ArcPicker 滚轮切页 -->
-    <template v-if="navCollapsed && pickerOpen">
-      <div class="fixed inset-0 z-40" aria-hidden="true" @click="pickerOpen = false" />
-      <div
-        data-test="nav-arc-picker"
-        role="dialog"
-        aria-modal="true"
-        aria-label="快速导航"
-        class="fixed top-1/2 left-[5rem] z-50 w-72 -translate-y-1/2 rounded-3xl border border-border bg-card p-4 shadow-raised"
-      >
-        <div class="mb-2 flex items-center justify-between">
-          <p class="text-xs font-medium tracking-wide text-muted-foreground uppercase">快速导航</p>
-          <button
-            type="button"
-            aria-label="关闭快速导航"
-            class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            @click="pickerOpen = false"
-          >
-            <X :size="14" aria-hidden="true" />
-          </button>
-        </div>
-        <ArcPicker
-          :options="pickerOptions"
-          :model-value="currentNav"
-          side="right"
-          :radius="240"
-          :item-height="44"
-          :visible-count="7"
-          label-class="text-lg font-medium"
-          aria-label="快速导航"
-          @update:model-value="goFromPicker"
-        />
-        <p class="mt-2 text-center text-[11px] text-muted-foreground">
-          滚轮 / 拖拽 / ↑↓ 切换页面
-        </p>
-      </div>
-    </template>
   </div>
 </template>
