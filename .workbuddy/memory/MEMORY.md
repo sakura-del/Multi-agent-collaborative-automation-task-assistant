@@ -22,3 +22,19 @@
 - push：选片测试（`mode=full` 触发全量）+ lint + migration + smoke + **e2e**（Playwright，仅 model-settings）。
 - nightly：全量 + 覆盖率 ≥80%。
 - E2E 用一次性注册账号；`SECRETS__ENCRYPTION_KEY` 是测试专用固定值。
+
+## UI 规范（2026-11-17 定稿）
+
+- 圆角：Card 默认 **16px**（`rounded-2xl`）；页面级大卡用 `class="rounded-3xl"`（24px）
+  覆盖；密集小块 16px；控件 10px。
+- Card 间距模型：**根管 `py` + `gap`，部件各自管 `px`**（`CardHeader/Content/Footer`
+  从 `CARD_SIZE_KEY` 注入的 size 取 `px-5` / `px-4`）。省略部件不会塌边。
+- `Card` 的 props：`variant(outlined|muted)`、`size(default|compact)`、
+  `interactive`、`selected`；`CardTitle as` 控制语义层级。
+- `interactive` 用手指驱动的 `scale 0.985`，**不要改成 `whileTap`**——
+  会给卡片塞 `tabIndex=0`，在真实控件前多一个无名 tab 停靠点。
+- 整卡热区用 `CARD_TARGET_CLASS`（`after:absolute after:inset-0`）铺到唯一控件上；
+  卡内其它按钮需 `relative z-10`。
+- KPI 小块统一用 `StatCard`（label/value/hint，hint 与 label 支持插槽）。
+- 动效常量统一从 `src/lib/ease.ts` 取（PRESS/SWAP/PANEL/LAYOUT/MOUSE/GLIDE +
+  MORPH/TIMELINE_GLIDE）。不要在组件里另写字面量。
