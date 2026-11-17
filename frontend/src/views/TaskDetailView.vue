@@ -60,6 +60,16 @@ const resultAvailable = computed(() => Boolean(store.snapshot?.review_report));
 /** 当前状态是否需要用户行动（决定头部是否出现提示）。 */
 const needsAction = computed(() => needsUserAction(store.snapshot?.status ?? "created"));
 
+/**
+ * 是否允许「重新规划」。
+ *
+ * 与后端 `_control_replan` 的白名单一一对应：状态不在其中时后端会 422，
+ * 按钮就不该出现（而不是让用户点了才报错）。执行中/已完成的任务重规划
+ * 会把已经跑完的节点全部作废，属于误操作。
+ */
+const REPLANNABLE_STATUSES = new Set(["waiting_approval", "waiting_human", "failed"]);
+const canReplan = computed(() => REPLANNABLE_STATUSES.has(store.snapshot?.status ?? ""));
+
 function selectTab(tab: TabKey) {
   if (tab === "result" && !resultAvailable.value) {
     return;
@@ -118,7 +128,9 @@ async function handleRegenerate() {
   pending.value = true;
   errorMessage.value = null;
   try {
-    await store.control(props.taskId, { command: "retry_node", node_id: "n1" });
+    // 必须是 replan 而不是 retry_node n1：规划失败时任务还没有任何子任务，
+    // 按节点重跑只会 404（生产实测 2026-11-17），用户唯一能点的动作是坏的。
+    await store.control(props.taskId, { command: "replan" });
     await refresh();
   } catch (error) {
     errorMessage.value = (error as Error).message;
@@ -285,12 +297,12 @@ onBeforeUnmount(() => {
           }}
         </span>
         <button
-          v-if="activeTab !== 'plan' && store.snapshot?.status === 'waiting_approval'"
+          v-if="activeTab !== 'plan' && canReplan"
           type="button"
           class="text-xs text-warning underline underline-offset-2"
           @click="selectTab('plan')"
         >
-          去确认规划 →
+          {{ store.snapshot?.status === "waiting_approval" ? "去确认规划" : "去重新规划" }} →
         </button>
       </div>
       <!-- 后端给的原因原文：不翻译，方便贴给管理员排查 -->
@@ -348,6 +360,7 @@ onBeforeUnmount(() => {
         :plan="store.snapshot?.plan ?? null"
         :pending="pending"
         :blocked="store.snapshot?.status === 'waiting_human' && !store.snapshot?.plan"
+        :can-replan="canReplan"
         :error="errorMessage"
         :conflict="conflictMessage"
         @approve="handleApprove"

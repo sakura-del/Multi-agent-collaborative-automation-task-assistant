@@ -405,7 +405,7 @@ async def control_task(
     current_user: ApiUserDep,
     _scope: TasksWriteScope,
 ) -> TaskSnapshot:
-    """pause / resume / cancel / retry_node / supply_input。"""
+    """pause / resume / cancel / retry_node / supply_input / replan。"""
     return await execution.control(current_user.id, task_id, payload.to_contract())
 
 

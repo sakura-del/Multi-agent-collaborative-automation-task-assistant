@@ -23,7 +23,7 @@ from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import ValidationError as PydanticValidationError
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 
 from app.core.config import get_settings
 from app.core.exceptions import (
@@ -518,13 +518,16 @@ class TaskExecution:
         task_id: UUID,
         request: TaskControlRequest,
     ) -> TaskSnapshot:
-        """人工控制：pause / resume / cancel / retry_node / supply_input。"""
+        """人工控制：pause / resume / cancel / retry_node / supply_input / replan。"""
         retrack = False
         cancel_after_commit = False
         #: 取消是终态 → 需要结算配额
         settle_after_commit = False
         #: 从「已结算」状态继续执行（转人工后重试/补输入）→ 需要重新预扣
         prereserve_after_commit = False
+        #: 重新规划：提交后要启动 `_plan`（不是 `_execute`），版本号从旧值往上走
+        replan_after_commit = False
+        replan_base_version: int | None = None
         events: list[TaskEvent] = []
         async with self._session_factory() as session:
             repo = TaskRepository(session)
@@ -557,6 +560,10 @@ class TaskExecution:
                 )
                 retrack = TaskStatus(task.status) is TaskStatus.RUNNING
                 prereserve_after_commit = retrack
+            elif command is TaskCommand.REPLAN:
+                replan_base_version = task.plan_version or 0
+                events.append(await self._control_replan(session, repo, task, status))
+                replan_after_commit = True
             else:  # pragma: no cover - 枚举已穷尽
                 raise ValidationException(f"不支持的任务命令: {command}")
 
@@ -575,6 +582,15 @@ class TaskExecution:
         if prereserve_after_commit:
             # 从「已结算」状态继续跑：必须重新预扣剩余额度
             await self._prereserve_quota(user_id, task_id)
+        if replan_after_commit:
+            # 上一轮规划的协程可能还在收尾（写 waiting_human 后要结算配额），
+            # 用 after_current 排在它后面，否则 track 会因「已在跟踪」被静默丢弃，
+            # 任务就永远停在 PLANNING。
+            self.container.track(
+                task_id,
+                self._plan(task_id, base_version=replan_base_version),
+                after_current=True,
+            )
         if retrack and not self.container.is_tracking(task_id):
             self.container.track(task_id, self._execute(task_id))
         logger.info("task_control", task_id=str(task_id), command=request.command.value)
@@ -695,11 +711,21 @@ class TaskExecution:
             return [EventRepository.to_event(log) for log in logs]
 
     async def recover(self) -> None:
-        """重启恢复：只重新调度执行中任务，已完成/终态任务不动。"""
+        """重启恢复：重新调度规划中/执行中任务，已完成/终态任务不动。
+
+        PLANNING 也要恢复：规划是一次几十秒的 LLM 调用，正好撞上重启的概率不低，
+        而「重新规划」也会把任务放回 PLANNING。此前这类任务重启后永远停在
+        规划中，既没有协程在跑，前端也没有可点的动作。
+        """
         async with self._session_factory() as session:
             result = await session.execute(
                 select(Task).where(
-                    Task.status.in_([status.value for status in _RECOVERABLE_STATUSES])
+                    Task.status.in_(
+                        [
+                            status.value
+                            for status in (*_RECOVERABLE_STATUSES, TaskStatus.PLANNING)
+                        ]
+                    )
                 )
             )
             tasks = list(result.scalars().all())
@@ -708,7 +734,13 @@ class TaskExecution:
             if self.container.is_tracking(task.id):
                 continue
             logger.info("task_recovered", task_id=str(task.id), status=task.status)
-            self.container.track(task.id, self._execute(task.id))
+            if task.status == TaskStatus.PLANNING.value:
+                self.container.track(
+                    task.id,
+                    self._plan(task.id, base_version=task.plan_version or 0),
+                )
+            else:
+                self.container.track(task.id, self._execute(task.id))
 
     # ===== 后台流程：规划 =====
 
@@ -770,12 +802,16 @@ class TaskExecution:
             model=client.model,
         )
 
-    async def _plan(self, task_id: UUID) -> None:
+    async def _plan(self, task_id: UUID, *, base_version: int | None = None) -> None:
         """后台规划：生成 TaskPlan + DAG，失败时进行一次 schema 修复。
 
         上游模型端点可能瞬时 5xx/超时（Plan 5 Task 8 实跑遇到 503），
         因此规划调用带**有限次退避重试**；配置类错误（401/400）不重试，
         直接转人工，避免无意义等待。
+
+        `base_version` 非空表示这是「重新规划」（`replan`）：规划器永远输出
+        version=1，直接落库会让新规划沿用旧版本号，前端拿着过期的 revision
+        也能确认它。这里把它抬到旧版本 +1，版本号才继续单调。
         """
         try:
             async with self._session_factory() as session:
@@ -803,6 +839,9 @@ class TaskExecution:
                     task_id=task_id,
                     stage="planning",
                 )
+
+            if base_version is not None and plan.version <= base_version:
+                plan = plan.model_copy(update={"version": base_version + 1})
 
             async with self._session_factory() as session:
                 repo = TaskRepository(session)
@@ -1618,6 +1657,50 @@ class TaskExecution:
             status=TaskStatus.RUNNING.value,
             subtask_id=subtask.id,
             payload={"node_id": node_id},
+        )
+
+    async def _control_replan(
+        self,
+        session: Any,
+        repo: TaskRepository,
+        task: Task,
+        status: TaskStatus,
+    ) -> TaskEvent:
+        """退回规划阶段并丢弃旧规划/DAG（`replan` 命令）。
+
+        ## 为什么必须单独一条命令（2026-11-17 生产实测）
+
+        规划失败时任务还没有 DAG，也没有任何子任务；前端「重新生成」发的是
+        `retry_node n1`，后端 `_control_retry_node` 查不到 subtask 直接 404 ——
+        用户唯一能做的动作是坏的，任务永远卡在 waiting_human。
+
+        `replan` 不依赖任何节点：清空（可能残缺的）旧规划与子任务，转回
+        PLANNING，由后台重新走一遍规划。凭据在这里**重新解析**，所以用户
+        在「我的模型」里换掉超时的模型后，点一下就能真正重试。
+        """
+        if status not in {
+            TaskStatus.WAITING_APPROVAL,
+            TaskStatus.WAITING_HUMAN,
+            TaskStatus.FAILED,
+        }:
+            raise ValidationException(
+                "仅等待确认/等待人工/失败状态允许重新规划",
+                details={"status": status.value},
+            )
+        previous_version = task.plan_version or 0
+        # 旧规划与旧子任务必须一起清：只清 plan 会留下上一版 DAG 的节点，
+        # 新规划成功前用户点开执行页看到的是过期状态。
+        task.plan = None
+        await session.execute(delete(Subtask).where(Subtask.task_id == task.id))
+        if status is TaskStatus.FAILED:
+            task.completed_at = None
+        await repo.transition(task, {status}, TaskStatus.PLANNING)
+        return await self._append_event(
+            session,
+            task.id,
+            event_type="plan_regenerate",
+            status=TaskStatus.PLANNING.value,
+            payload={"from": status.value, "previous_version": previous_version},
         )
 
     async def _control_supply_input(

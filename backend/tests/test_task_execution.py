@@ -264,6 +264,83 @@ class TestSubmitAndPlan:
             await container.close()
             await engine.dispose()
 
+    async def test_replan_recovers_from_planning_failure(self, tmp_path: Path) -> None:
+        """规划失败后 `replan` 能真正重新规划。
+
+        回归（2026-11-17 生产实测）：规划失败时没有任何子任务，前端原先发
+        `retry_node n1` 只能 404，用户唯一能做的动作是坏的。
+        """
+        engine, factory = await _setup_engine(tmp_path)
+        planner = _DeterministicPlanner(invalid=True)
+        execution, container = _make_execution(factory, planner)
+        user_id = uuid.uuid4()
+        try:
+            task_id = await execution.submit(user_id, _request())
+            failed = await _wait_for_status(
+                execution, user_id, task_id, {TaskStatus.WAITING_HUMAN.value}
+            )
+            assert failed.plan is None
+            assert failed.subtasks == []
+
+            from app.orchestration.contracts import TaskCommand, TaskControlRequest
+
+            # 用户处理好上游模型后再点「重新规划」：这里让规划器恢复成功
+            planner._invalid = False
+            snapshot = await execution.control(
+                user_id, task_id, TaskControlRequest(command=TaskCommand.REPLAN)
+            )
+            assert snapshot.status == TaskStatus.PLANNING.value
+            assert snapshot.plan is None
+            assert snapshot.subtasks == []
+
+            ready = await _wait_for_status(
+                execution, user_id, task_id, {TaskStatus.WAITING_APPROVAL.value}
+            )
+            assert ready.plan is not None
+            assert ready.plan_version == 1
+            assert len(ready.subtasks) == 5
+        finally:
+            await container.close()
+            await engine.dispose()
+
+    async def test_replan_from_waiting_approval_bumps_version(self, tmp_path: Path) -> None:
+        """已有规划时重规划：旧 DAG 作废，版本号单调递增。"""
+        engine, factory = await _setup_engine(tmp_path)
+        planner = _DeterministicPlanner()
+        execution, container = _make_execution(factory, planner)
+        user_id = uuid.uuid4()
+        try:
+            task_id = await execution.submit(user_id, _request())
+            waiting = await _wait_for_status(
+                execution, user_id, task_id, {TaskStatus.WAITING_APPROVAL.value}
+            )
+            assert waiting.plan_version == 1
+
+            from app.orchestration.contracts import TaskCommand, TaskControlRequest
+
+            snapshot = await execution.control(
+                user_id, task_id, TaskControlRequest(command=TaskCommand.REPLAN)
+            )
+            assert snapshot.status == TaskStatus.PLANNING.value
+            # 旧规划与旧子任务不能留到新规划生成之前
+            assert snapshot.plan is None
+            assert snapshot.subtasks == []
+
+            ready = await _wait_for_status(
+                execution, user_id, task_id, {TaskStatus.WAITING_APPROVAL.value}
+            )
+            assert ready.plan_version == 2
+            assert ready.plan is not None
+            assert ready.plan.version == 2
+            assert len(ready.subtasks) == 5
+
+            # 新版本号才能确认：旧 revision 已失效
+            with pytest.raises(ValidationException):
+                await execution.approve_plan(user_id, task_id, 1)
+        finally:
+            await container.close()
+            await engine.dispose()
+
 
 @pytest.mark.asyncio
 class TestApprovalAndExecution:

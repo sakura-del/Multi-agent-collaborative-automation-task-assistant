@@ -64,4 +64,25 @@ describe("PlanPanel", () => {
 
     expect(wrapper.emitted("regenerate")).toEqual([[]]);
   });
+
+  // 回归（2026-11-17 生产）：规划失败时没有任何节点，页面只给了一句
+  // 「点重新生成」却没有按钮，用户无路可走。
+  it("offers 重新规划 in the blocked empty state", async () => {
+    const wrapper = mount(PlanPanel, { props: { plan: null, blocked: true } });
+
+    expect(wrapper.text()).toContain("规划没有生成");
+    const button = wrapper.find('[data-test="plan-regenerate"]');
+    expect(button.exists()).toBe(true);
+    expect(button.text()).toContain("重新规划");
+
+    await button.trigger("click");
+    expect(wrapper.emitted("regenerate")).toEqual([[]]);
+  });
+
+  it("hides regenerate when the status forbids replanning", () => {
+    const wrapper = mount(PlanPanel, { props: { plan: PLAN, canReplan: false } });
+
+    expect(wrapper.find('[data-test="plan-regenerate"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="plan-approve"]').exists()).toBe(true);
+  });
 });

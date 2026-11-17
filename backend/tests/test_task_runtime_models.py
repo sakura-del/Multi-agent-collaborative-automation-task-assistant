@@ -120,6 +120,7 @@ def test_contract_enums_and_node_validation() -> None:
     assert TaskStatus.WAITING_APPROVAL == "waiting_approval"
     assert TaskStatus.CANCELLED == "cancelled"
     assert TaskCommand.RETRY_NODE == "retry_node"
+    assert TaskCommand.REPLAN == "replan"
 
     with pytest.raises(ValidationError):
         PlanNode(id="N1-bad", type="search", title="非法节点 ID")

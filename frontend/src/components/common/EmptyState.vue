@@ -38,5 +38,9 @@ const props = withDefaults(
     <p v-if="props.description" class="max-w-md text-sm text-muted-foreground">
       {{ props.description }}
     </p>
+    <!-- 空态必须给出可执行动作（例如「重新规划」），否则用户只能看着提示发呆 -->
+    <div v-if="$slots.default" class="mt-2">
+      <slot />
+    </div>
   </div>
 </template>

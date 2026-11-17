@@ -9,6 +9,9 @@ import type { TaskPlan } from "@/api/types";
 // 规划确认面板：只提供"重新生成"与"确认规划"两个命令（不可编辑规划内容）
 // 样式走 shadcn-vue / Nova 规范（AGENTS.md §6.5）。
 //
+// 「重新生成」发的是 `replan`（退回规划阶段），不是节点重跑：规划失败时
+// 任务还没有任何子任务，`retry_node` 只会 404。
+//
 // ⚠️ 测试契约（不要改）：data-test="plan-panel" / "plan-conflict" / "plan-error" /
 // "plan-regenerate" / "plan-approve"。
 const props = withDefaults(
@@ -19,8 +22,10 @@ const props = withDefaults(
     conflict?: string | null;
     /** 规划被阻断（转人工且没有 plan）：空态要说「没生成」，不是「还没开始」。 */
     blocked?: boolean;
+    /** 当前状态是否允许重新规划（与后端白名单一致）；false 时连按钮都不出现。 */
+    canReplan?: boolean;
   }>(),
-  { pending: false, error: null, conflict: null, blocked: false }
+  { pending: false, error: null, conflict: null, blocked: false, canReplan: true }
 );
 
 const emit = defineEmits<{ approve: [version: number]; regenerate: [] }>();
@@ -43,6 +48,7 @@ const emit = defineEmits<{ approve: [version: number]; regenerate: [] }>();
         </div>
         <div class="flex flex-wrap gap-2">
           <Button
+            v-if="props.canReplan"
             variant="outline"
             data-test="plan-regenerate"
             type="button"
@@ -96,9 +102,22 @@ const emit = defineEmits<{ approve: [version: number]; regenerate: [] }>();
       :title="props.blocked ? '规划没有生成' : '暂无规划'"
       :description="
         props.blocked
-          ? '任务在规划阶段停下，具体原因见页面顶部提示。处理后再点「重新生成」。'
+          ? '任务在规划阶段停下，具体原因见页面顶部提示。处理后再点「重新规划」。'
           : '任务进入规划阶段后，这里会展示研究问题、检索式与任务 DAG。'
       "
-    />
+    >
+      <!-- 没有规划时唯一能做的事：让后端重新走一遍规划（规划失败时没有任何
+           子任务，节点重跑一定 404）。 -->
+      <Button
+        v-if="props.canReplan"
+        variant="outline"
+        data-test="plan-regenerate"
+        type="button"
+        :disabled="props.pending"
+        @click="emit('regenerate')"
+      >
+        {{ props.blocked ? "重新规划" : "重新生成" }}
+      </Button>
+    </EmptyState>
   </section>
 </template>

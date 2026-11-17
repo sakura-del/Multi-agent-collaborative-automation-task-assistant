@@ -43,6 +43,12 @@ class TaskCommand(StrEnum):
     CANCEL = "cancel"
     RETRY_NODE = "retry_node"
     SUPPLY_INPUT = "supply_input"
+    REPLAN = "replan"
+    """退回规划阶段重新生成规划（规划失败、或想换一版规划时用）。
+
+    与 `retry_node` 的区别：`retry_node` 要求子任务已存在，所以**规划失败
+    （还没有 DAG）时它只能 404**；`replan` 不依赖任何节点，是「重新规划」的唯一入口。
+    """
 
 
 class Evidence(BaseModel):

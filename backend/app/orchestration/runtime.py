@@ -256,16 +256,46 @@ class RuntimeContainer:
         """替换 Agent 工厂（退出验收/实验注入确定性执行与校验器）。"""
         self._agent_factory = factory
 
-    def track(self, task_id: UUID, coroutine: Coroutine[Any, Any, None]) -> None:
-        """登记并启动后台协程；同一任务已有运行中的协程时不重复启动。"""
+    def track(
+        self,
+        task_id: UUID,
+        coroutine: Coroutine[Any, Any, None],
+        *,
+        after_current: bool = False,
+    ) -> None:
+        """登记并启动后台协程；同一任务已有运行中的协程时不重复启动。
+
+        `after_current=True` 时不拒绝，而是把新协程排在当前协程结束后执行。
+        用途：`replan` 可能在上一轮规划的收尾阶段（写 waiting_human 后还要
+        结算配额）触发，直接 track 会被这里静默丢弃，任务永远停在 PLANNING。
+        """
         existing = self._tasks.get(task_id)
         if existing is not None and not existing.done():
-            logger.warning("runtime_task_already_tracked", task_id=str(task_id))
-            return
+            if not after_current:
+                logger.warning("runtime_task_already_tracked", task_id=str(task_id))
+                # 没人 await 的协程对象要显式关闭，否则 GC 时报 never awaited
+                coroutine.close()
+                return
+            coroutine = self._after(existing, coroutine)
 
         task: asyncio.Task[None] = asyncio.create_task(coroutine, name=f"task-{task_id}")
         self._tasks[task_id] = task
-        task.add_done_callback(lambda _finished: self._tasks.pop(task_id, None))
+        task.add_done_callback(lambda finished: self._forget(task_id, finished))
+
+    @staticmethod
+    async def _after(previous: asyncio.Task[None], coroutine: Coroutine[Any, Any, None]) -> None:
+        """等前一个协程彻底结束后再跑下一个（含异常/取消）。"""
+        await asyncio.gather(previous, return_exceptions=True)
+        await coroutine
+
+    def _forget(self, task_id: UUID, finished: asyncio.Task[None]) -> None:
+        """只清理自己登记的那个任务。
+
+        `after_current` 下会存在「旧协程完成时新协程已在跟踪」的瞬间，
+        无条件 pop 会把新协程从表里抹掉（`is_tracking` 变 false，cancel 失效）。
+        """
+        if self._tasks.get(task_id) is finished:
+            self._tasks.pop(task_id, None)
 
     async def cancel(self, task_id: UUID) -> None:
         """取消指定任务的后台协程（暂停/取消任务时使用）。"""

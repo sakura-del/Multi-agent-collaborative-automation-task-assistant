@@ -56,7 +56,17 @@ export type SubtaskStatus =
   | "terminated"
   | "cancelled";
 
-export type TaskCommand = "pause" | "resume" | "cancel" | "retry_node" | "supply_input";
+/**
+ * 人工控制命令。
+ * `replan`：退回规划阶段重新生成规划 —— 规划失败时没有节点，`retry_node` 用不了。
+ */
+export type TaskCommand =
+  | "pause"
+  | "resume"
+  | "cancel"
+  | "retry_node"
+  | "supply_input"
+  | "replan";
 
 export type PlanNodeType = "search" | "extract" | "write" | "validate" | "review";
 
