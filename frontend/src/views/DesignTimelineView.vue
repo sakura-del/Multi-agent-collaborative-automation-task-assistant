@@ -9,9 +9,11 @@
  * 路由：`/design/timeline`（public，可直接打开）。
  * 确认后再把 token 提升为全局，并按方案逐页迁移。
  */
+import { ref } from "vue";
 import { ArrowLeft } from "lucide-vue-next";
 
 import BeTimeline, { type BeTimelineEvent } from "@/components/motion/BeTimeline.vue";
+import { Alert } from "@/components/ui/alert";
 
 type DemoStatus = "running" | "completed" | "needs-review" | "failed";
 
@@ -96,6 +98,23 @@ const TASKS: DemoTask[] = [
     meta: "已核验 12/18 条证据",
   },
 ];
+
+const ALERTS = [
+  { variant: "info", title: "正在保存", description: "更改会自动保存，无需手动提交。" },
+  { variant: "success", title: "已保存", description: "你的更改已保存到云端。" },
+  {
+    variant: "warning",
+    title: "接近存储上限",
+    description: "空间即将用尽，上传新文献前请先清理旧文件。",
+  },
+  {
+    variant: "destructive",
+    title: "保存失败",
+    description: "网络中断，更改尚未保存。请重试。",
+  },
+] as const;
+
+const alertVersion = ref(0);
 
 const STATUS_LABEL: Record<DemoStatus, string> = {
   running: "运行中",
@@ -239,6 +258,33 @@ function onSelect(id: string) {
         <span class="inline-flex items-center gap-1.5 rounded-full bg-[#EEF0F3] px-2.5 py-1 text-xs font-medium text-[#4B4E56]">
           已完成
         </span>
+      </section>
+
+      <section class="mt-10">
+        <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <p class="text-xs text-muted-foreground">动画警报（beUI Animated Alert）</p>
+            <p class="mt-1 text-sm text-muted-foreground">
+              淡入 + 上移 6px；关闭有退出动画；warning/destructive 用 alert 角色。
+            </p>
+          </div>
+          <button
+            type="button"
+            class="rounded-md border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+            @click="alertVersion += 1"
+          >
+            重新展示
+          </button>
+        </div>
+        <div class="grid gap-2">
+          <Alert
+            v-for="item in ALERTS"
+            :key="`${item.variant}-${alertVersion}`"
+            :variant="item.variant"
+            :title="item.title"
+            :description="item.description"
+          />
+        </div>
       </section>
 
       <section class="mt-8">

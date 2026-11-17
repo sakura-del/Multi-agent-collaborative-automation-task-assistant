@@ -1,23 +1,22 @@
 import { cva, type VariantProps } from "class-variance-authority";
 
 /**
- * 提示条变体（shadcn-vue 风格 `Alert`）。
+ * 提示条变体（beUI Animated Alert 风格）。
  *
- * 替代各页面自研的 `.banner` / `ErrorBanner`——统一错误与成功提示的视觉。
+ * 与旧版的差异：去掉边框，改为低透明度语义底色 + 同色文字；
+ * 动画与关闭按钮在 `Alert.vue` 里统一实现，所有调用方自动获得。
  */
 export const alertVariants = cva(
-  [
-    "relative w-full rounded-lg border px-3 py-2.5 text-sm",
-    "[&>svg]:size-4 [&>svg]:shrink-0",
-  ],
+  "relative w-full rounded-xl p-4 text-sm transition-colors duration-200",
   {
     variants: {
       variant: {
-        default: "bg-background text-foreground border-border",
-        destructive: "border-destructive/40 bg-destructive/8 text-destructive",
-        success: "border-success/40 bg-success/8 text-success",
-        warning: "border-warning/40 bg-warning/10 text-warning",
-        muted: "border-border bg-muted text-muted-foreground",
+        default: "bg-muted/70 text-foreground",
+        info: "bg-primary/5 text-primary",
+        success: "bg-success/5 text-success",
+        warning: "bg-warning/8 text-warning",
+        destructive: "bg-destructive/5 text-destructive",
+        muted: "bg-muted text-muted-foreground",
       },
     },
     defaultVariants: { variant: "default" },

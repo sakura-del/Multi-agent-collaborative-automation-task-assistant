@@ -1,7 +1,5 @@
 <script setup lang="ts">
 import type { HTMLAttributes } from "vue";
-import { CircleAlert } from "lucide-vue-next";
-
 import { cn } from "@/lib/utils";
 import { Alert } from "@/components/ui/alert";
 
@@ -26,13 +24,15 @@ const props = withDefaults(
 </script>
 
 <template>
+  <!-- key=message：用户关掉旧错误后，新错误必须重新弹出（不能继承 dismissed 状态） -->
   <Alert
     v-if="props.message"
+    :key="props.message"
     variant="destructive"
+    :icon="true"
     :data-test="props.testid"
     :class="cn('mb-3', props.class)"
   >
-    <CircleAlert />
     <span>{{ props.message }}</span>
   </Alert>
 </template>
