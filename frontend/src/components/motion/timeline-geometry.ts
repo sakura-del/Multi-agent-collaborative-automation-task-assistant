@@ -5,7 +5,9 @@
  * 不用为验证几何而挂载整个组件。
  */
 
-export const GLIDE_SPRING = { stiffness: 120, damping: 24, mass: 1 };
+import { SPRING_TIMELINE_GLIDE } from "@/lib/ease";
+
+export const GLIDE_SPRING = SPRING_TIMELINE_GLIDE;
 export const FLICK_MOMENTUM = 0.3;
 export const MAX_FLICK_EVENTS = 4;
 export const DRAG_THRESHOLD = 4;

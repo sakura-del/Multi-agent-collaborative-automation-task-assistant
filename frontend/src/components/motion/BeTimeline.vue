@@ -128,7 +128,6 @@ function glideTo(index: number, velocity = 0) {
     return;
   }
   controls = animate(scroll, index, {
-    type: "spring",
     ...GLIDE_SPRING,
     velocity,
     restDelta: 0.001,

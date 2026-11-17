@@ -15,6 +15,8 @@ import {
   X,
 } from "lucide-vue-next";
 
+import { SPRING_MORPH } from "@/lib/ease";
+
 import type { SidebarNavGroup, SidebarNavItem } from "./sidebar-types";
 
 const props = defineProps<{
@@ -34,7 +36,6 @@ const emit = defineEmits<{
 }>();
 
 const reduced = useReducedMotion();
-const SPRING_MORPH = { type: "spring" as const, stiffness: 380, damping: 35, mass: 0.75 };
 
 const openGroup = ref<string | null>(null);
 

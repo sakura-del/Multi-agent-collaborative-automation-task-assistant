@@ -61,7 +61,7 @@ const emit = defineEmits<{ approve: [version: number]; regenerate: [] }>();
       </header>
 
       <div class="grid gap-3 md:grid-cols-3">
-        <Card class="p-3">
+        <Card class="gap-1.5 p-3">
           <h3 class="mb-1.5 text-sm font-medium">研究问题</h3>
           <ol class="list-decimal space-y-1 pl-4 text-sm text-muted-foreground">
             <li v-for="question in props.plan.research_questions" :key="question">
@@ -69,13 +69,13 @@ const emit = defineEmits<{ approve: [version: number]; regenerate: [] }>();
             </li>
           </ol>
         </Card>
-        <Card class="p-3">
+        <Card class="gap-1.5 p-3">
           <h3 class="mb-1.5 text-sm font-medium">检索式</h3>
           <ul class="list-disc space-y-1 pl-4 text-sm text-muted-foreground">
             <li v-for="query in props.plan.search_queries" :key="query">{{ query }}</li>
           </ul>
         </Card>
-        <Card class="p-3">
+        <Card class="gap-1.5 p-3">
           <h3 class="mb-1.5 text-sm font-medium">验收标准</h3>
           <ul class="list-disc space-y-1 pl-4 text-sm text-muted-foreground">
             <li v-for="item in props.plan.acceptance_criteria" :key="item">{{ item }}</li>

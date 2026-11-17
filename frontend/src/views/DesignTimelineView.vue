@@ -14,6 +14,15 @@ import { ArrowLeft } from "lucide-vue-next";
 
 import BeTimeline, { type BeTimelineEvent } from "@/components/motion/BeTimeline.vue";
 import { Alert } from "@/components/ui/alert";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 
 type DemoStatus = "running" | "completed" | "needs-review" | "failed";
 
@@ -115,6 +124,8 @@ const ALERTS = [
 ] as const;
 
 const alertVersion = ref(0);
+/** 演示 selected 视觉：点击卡片切换。 */
+const cardSelected = ref(true);
 
 const STATUS_LABEL: Record<DemoStatus, string> = {
   running: "运行中",
@@ -284,6 +295,72 @@ function onSelect(id: string) {
             :title="item.title"
             :description="item.description"
           />
+        </div>
+      </section>
+
+      <section class="mt-10">
+        <p class="mb-2 text-xs text-muted-foreground">
+          卡片（beUI Motion Card 结构：部件自管水平内边距、可选交互态）
+        </p>
+        <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          <Card>
+            <CardHeader>
+              <CardTitle as="h3">默认卡片</CardTitle>
+              <CardDescription>标题 + 描述双行网格，操作自动占右上角。</CardDescription>
+              <CardAction>
+                <span
+                  class="rounded-md bg-accent px-1.5 py-0.5 text-[10px] font-medium text-accent-foreground"
+                >
+                  新
+                </span>
+              </CardAction>
+            </CardHeader>
+            <CardContent class="text-muted-foreground">
+              根容器只管垂直间距，每个部件自己管左右内边距——少放一个部件也不会破坏边缘。
+            </CardContent>
+            <CardFooter class="justify-end">
+              <button
+                type="button"
+                class="rounded-md border border-border px-2.5 py-1 text-xs font-medium"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                class="rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground"
+              >
+                确认
+              </button>
+            </CardFooter>
+          </Card>
+
+          <Card
+            variant="muted"
+            size="compact"
+            interactive
+            :selected="cardSelected"
+            data-test="design-card-interactive"
+            @click="cardSelected = !cardSelected"
+          >
+            <CardHeader>
+              <CardTitle as="h3">可选卡片</CardTitle>
+              <CardDescription>点击切换选中：主色 1px 环 + 按下缩放 0.985。</CardDescription>
+            </CardHeader>
+            <CardContent class="text-muted-foreground">
+              {{ cardSelected ? "已选中" : "未选中" }} · 按压缩放由 pointer 事件手工驱动，
+              卡片本身不获取焦点。
+            </CardContent>
+          </Card>
+
+          <Card variant="muted" size="compact">
+            <CardHeader>
+              <CardTitle as="h3">紧凑灰底</CardTitle>
+              <CardDescription>用于卡片内的次级区块，不再手写 bg-muted。</CardDescription>
+            </CardHeader>
+            <CardContent class="text-muted-foreground">
+              compact 档：水平 16px、垂直 16px，适合并排与列表。
+            </CardContent>
+          </Card>
         </div>
       </section>
 
