@@ -186,6 +186,7 @@ const drag = {
   startX: 0,
   startScroll: 0,
   moved: false,
+  captured: false,
   lastX: 0,
   lastTime: 0,
   velocity: 0,
@@ -208,14 +209,22 @@ function onPointerDown(event: PointerEvent) {
   drag.lastTime = performance.now();
   drag.velocity = 0;
   drag.moved = false;
-  (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+  drag.captured = false;
+  // 注意：**不要**在这里 setPointerCapture。指针一被舞台捕获，浏览器会把
+  // 随后的 click 也派发给舞台，卡片上的按钮永远收不到点击（点击不跳转的根因）。
+  // 只有确认是拖拽、越过阈值后才捕获。
 }
 
 function onPointerMove(event: PointerEvent) {
   if (drag.pointerId !== event.pointerId) return;
   const deltaX = event.clientX - drag.startX;
   if (!drag.moved && Math.abs(deltaX) < DRAG_THRESHOLD) return;
-  drag.moved = true;
+  if (!drag.moved) {
+    drag.moved = true;
+    // 越过阈值才捕获，避免把点击吞掉
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+    drag.captured = true;
+  }
 
   const now = performance.now();
   const dt = now - drag.lastTime;
@@ -242,6 +251,10 @@ function settle(velocity = 0) {
 function onPointerUp(event: PointerEvent) {
   if (drag.pointerId !== event.pointerId) return;
   drag.pointerId = -1;
+  if (drag.captured) {
+    (event.currentTarget as HTMLElement).releasePointerCapture(event.pointerId);
+    drag.captured = false;
+  }
   if (!drag.moved) return;
   settle(drag.velocity);
 }
