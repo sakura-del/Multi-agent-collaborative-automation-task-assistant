@@ -331,7 +331,8 @@ class TestSubmitAndPlan:
             )
             assert ready.plan_version == 2
             assert ready.plan is not None
-            assert ready.plan.version == 2
+            # TaskSnapshot.plan 是 dict（JSON 形态），版本号在 plan["version"]
+            assert ready.plan["version"] == 2
             assert len(ready.subtasks) == 5
 
             # 新版本号才能确认：旧 revision 已失效
