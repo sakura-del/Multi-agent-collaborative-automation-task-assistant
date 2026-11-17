@@ -38,3 +38,5 @@
 - KPI 小块统一用 `StatCard`（label/value/hint，hint 与 label 支持插槽）。
 - 动效常量统一从 `src/lib/ease.ts` 取（PRESS/SWAP/PANEL/LAYOUT/MOUSE/GLIDE +
   MORPH/TIMELINE_GLIDE）。不要在组件里另写字面量。
+- `Card` 支持 `as`：放进 `ul/ol` 用 `li`，表单容器用 `form`，节点详情用 `aside`；
+  默认 `div`。不要用 `div` 包裹列表项（非法结构）。
