@@ -90,3 +90,29 @@ test("我的模型：接入 / 脱敏 / 测试失败不伪装 / 二次确认删�
     await cleanup(request);
   }
 });
+
+test("侧栏：折叠成图标轨，快速导航可打开", async ({ page }) => {
+  await login(page);
+
+  const sidebar = page.locator('[data-test="app-sidebar"]');
+  await expect(sidebar).toBeVisible();
+  const expanded = await sidebar.boundingBox();
+
+  await page.locator('[data-test="nav-collapse"]').click();
+  await expect(page.locator('[data-test="nav-expand"]')).toBeVisible();
+  await page.waitForTimeout(700);
+  const collapsed = await sidebar.boundingBox();
+  expect(collapsed?.width ?? 0).toBeLessThan(expanded?.width ?? 0);
+
+  // 折叠态打开 ArcPicker：滚轮/拖拽的入口必须可达
+  await page.locator('[data-test="nav-picker-trigger"]').click();
+  await expect(page.locator('[data-test="nav-arc-picker"]')).toBeVisible();
+  await expect(
+    page.locator('[data-test="nav-arc-picker"] [data-slot="arc-picker-option"]').first(),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  // Ctrl/Cmd+B 展开
+  await page.keyboard.press("Control+b");
+  await expect(page.locator('[data-test="nav-collapse"]')).toBeVisible({ timeout: 5_000 });
+});
