@@ -137,7 +137,9 @@ class LLMConfig(BaseModel):
 
     default_provider: str = "openai"
     default_model: str = "gpt-4o-mini"
-    request_timeout: int = 30
+    # 单次 LLM 请求超时（秒）。规划 prompt 大、输出长，实测 27B 级模型
+    # 30s 会直接 "Request timed out."；90s 能覆盖慢模型又不至于无限占用 worker。
+    request_timeout: int = 90
     max_retries: int = 3
     cost_budget: LLMCostBudget = LLMCostBudget()
     fallback_chain: list[LLMFallbackItem] = Field(default_factory=list)

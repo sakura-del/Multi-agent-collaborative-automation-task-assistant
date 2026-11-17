@@ -97,7 +97,14 @@ onMounted(async () => {
 
   // 自带模型列表：失败就只剩「平台默认」，同样不阻塞建任务
   try {
-    credentials.value = await listLLMCredentials();
+    const list = await listLLMCredentials();
+    credentials.value = list;
+    // 用户把某把凭据标成「默认」，建任务就该用它：否则会静默走平台模型，
+    // 平台密钥缺失时任务直接卡在规划阶段（实测「Missing credentials」）。
+    if (!selectedCredential.value) {
+      const preferred = list.find((item) => item.is_default && item.status === "active");
+      if (preferred) selectedCredential.value = preferred.credential_id;
+    }
   } catch {
     credentials.value = [];
   }

@@ -17,8 +17,10 @@ const props = withDefaults(
     pending?: boolean;
     error?: string | null;
     conflict?: string | null;
+    /** 规划被阻断（转人工且没有 plan）：空态要说「没生成」，不是「还没开始」。 */
+    blocked?: boolean;
   }>(),
-  { pending: false, error: null, conflict: null }
+  { pending: false, error: null, conflict: null, blocked: false }
 );
 
 const emit = defineEmits<{ approve: [version: number]; regenerate: [] }>();
@@ -91,8 +93,12 @@ const emit = defineEmits<{ approve: [version: number]; regenerate: [] }>();
 
     <EmptyState
       v-else
-      title="暂无规划"
-      description="任务进入规划阶段后，这里会展示研究问题、检索式与任务 DAG。"
+      :title="props.blocked ? '规划没有生成' : '暂无规划'"
+      :description="
+        props.blocked
+          ? '任务在规划阶段停下，具体原因见页面顶部提示。处理后再点「重新生成」。'
+          : '任务进入规划阶段后，这里会展示研究问题、检索式与任务 DAG。'
+      "
     />
   </section>
 </template>

@@ -18,6 +18,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useTaskStore } from "@/stores/tasks";
 import type { PlanNode, SubtaskStatus, TaskControl, TaskEvent } from "@/api/types";
 import { formatDateTime, needsUserAction } from "@/utils/task-status";
+import { adviceForWaitingReason, latestWaitingReason } from "@/utils/waiting-reason";
 
 // 任务详情：Tab 由路由 query 驱动（刷新不丢），规划确认与 DAG 联查。
 //
@@ -146,6 +147,17 @@ watch(
   }
 );
 
+// ===== 需要人工介入时的原因 =====
+
+/**
+ * 最近一次「转人工」的原因 + 下一步建议。
+ *
+ * 后端把失败原因放在 `task_waiting_human` 事件的 payload.reason 里，
+ * 页面上此前只显示「任务已暂停，等你介入」——用户不知道要做什么。
+ */
+const waitingReason = computed(() => latestWaitingReason(store.events));
+const waitingAdvice = computed(() => adviceForWaitingReason(waitingReason.value));
+
 // ===== 执行事件时间线（beUI 风格）=====
 
 const TIMELINE_EVENTS = 12;
@@ -262,23 +274,40 @@ onBeforeUnmount(() => {
     <div
       v-if="needsAction"
       data-test="action-hint"
-      class="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-warning/30 bg-warning/8 px-3 py-2 text-sm"
+      class="mb-4 flex flex-col gap-1 rounded-lg border border-warning/30 bg-warning/8 px-3 py-2 text-sm"
     >
-      <span class="font-medium text-warning">
-        {{
-          store.snapshot?.status === "waiting_approval"
-            ? "规划已生成，等你确认后开始执行"
-            : "任务已暂停，等你介入"
-        }}
-      </span>
-      <button
-        v-if="activeTab !== 'plan' && store.snapshot?.status === 'waiting_approval'"
-        type="button"
-        class="text-xs text-warning underline underline-offset-2"
-        @click="selectTab('plan')"
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="font-medium text-warning">
+          {{
+            store.snapshot?.status === "waiting_approval"
+              ? "规划已生成，等你确认后开始执行"
+              : "任务已暂停，等你介入"
+          }}
+        </span>
+        <button
+          v-if="activeTab !== 'plan' && store.snapshot?.status === 'waiting_approval'"
+          type="button"
+          class="text-xs text-warning underline underline-offset-2"
+          @click="selectTab('plan')"
+        >
+          去确认规划 →
+        </button>
+      </div>
+      <!-- 后端给的原因原文：不翻译，方便贴给管理员排查 -->
+      <p
+        v-if="waitingReason"
+        data-test="waiting-reason"
+        class="font-mono text-xs leading-5 break-words text-warning/90"
       >
-        去确认规划 →
-      </button>
+        {{ waitingReason }}
+      </p>
+      <p
+        v-if="waitingAdvice"
+        data-test="waiting-advice"
+        class="text-xs leading-5 text-muted-foreground"
+      >
+        {{ waitingAdvice }}
+      </p>
     </div>
 
     <ErrorBanner :message="errorMessage" />
@@ -318,6 +347,7 @@ onBeforeUnmount(() => {
       <PlanPanel
         :plan="store.snapshot?.plan ?? null"
         :pending="pending"
+        :blocked="store.snapshot?.status === 'waiting_human' && !store.snapshot?.plan"
         :error="errorMessage"
         :conflict="conflictMessage"
         @approve="handleApprove"

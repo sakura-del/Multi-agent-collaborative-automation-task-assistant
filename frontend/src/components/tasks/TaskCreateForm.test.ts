@@ -404,3 +404,81 @@ describe("TaskCreateForm 引用库文献源", () => {
     expect("llm_credential_id" in payload).toBe(false);
   });
 });
+
+/**
+ * 默认模型选择（2026-11-17 线上故障）。
+ *
+ * 用户在「我的模型」里把某把凭据标成默认，建任务时却仍走平台默认模型；
+ * 平台密钥缺失时任务直接卡在规划阶段（Missing credentials），
+ * 用户只看到「任务已暂停，等你介入」。这里锁住：有默认凭据就选它。
+ */
+describe("TaskCreateForm 默认模型", () => {
+  const baseCredential = {
+    credential_id: "cred-default",
+    name: "Qwen",
+    provider: "custom",
+    provider_label: "自定义",
+    model: "qwen3.8-27b",
+    base_url: "https://model.example.com/v1",
+    masked_key: "sk-…abcd",
+    key_version: 1,
+    is_default: false,
+    status: "active",
+    capabilities: {},
+    last_verified_at: null,
+  };
+
+  function mockApis(credentials: unknown[]) {
+    vi.mocked(api.get).mockImplementation((url: string) => {
+      if (url === "/citation-styles") {
+        return Promise.resolve({
+          data: { styles: [apiStyleRow()], default_style_id: "gbt7714-2025-numeric" },
+        });
+      }
+      if (url === "/reference-library/summary") {
+        return Promise.resolve({ data: { total: 0, usable_as_source: 0 } });
+      }
+      if (url === "/llm-credentials") {
+        return Promise.resolve({ data: credentials });
+      }
+      return Promise.reject(new Error(`unexpected url ${url}`));
+    });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("默认选中用户标记为默认的可用凭据", async () => {
+    mockApis([
+      { ...baseCredential, credential_id: "cred-other", is_default: false },
+      { ...baseCredential, is_default: true },
+    ]);
+
+    const wrapper = mountForm();
+    await flushPromises();
+
+    const select = wrapper.get('[data-test="model-select"]').element as HTMLSelectElement;
+    expect(select.value).toBe("cred-default");
+  });
+
+  it("默认凭据不可用时退回平台默认（不选中必失败的凭据）", async () => {
+    mockApis([{ ...baseCredential, is_default: true, status: "invalid" }]);
+
+    const wrapper = mountForm();
+    await flushPromises();
+
+    const select = wrapper.get('[data-test="model-select"]').element as HTMLSelectElement;
+    expect(select.value).toBe("");
+  });
+
+  it("没有默认凭据时保持平台默认", async () => {
+    mockApis([{ ...baseCredential, is_default: false }]);
+
+    const wrapper = mountForm();
+    await flushPromises();
+
+    const select = wrapper.get('[data-test="model-select"]').element as HTMLSelectElement;
+    expect(select.value).toBe("");
+  });
+});
