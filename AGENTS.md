@@ -3,8 +3,8 @@
 > 本文件是**给 AI 编码助手看的交接文档**。新会话开始时请先读完本文件再动手。
 > 最后更新：2026-11-11（上线后：M3 嵌入 + Pages Git 集成 + 安全排查与 #9 修复）
 >
-> **新会话请先读** → [docs/runbooks/2026-11-11-handoff.md](docs/runbooks/2026-11-11-handoff.md)
-> （紧凑版：现状 / 未完成项 / 硬约束 / 命令与坑）。本文件查约定与历史坑，handoff 查「现在该干什么」。
+> **新会话请先读** → [docs/runbooks/2026-11-17-handoff.md](docs/runbooks/2026-11-17-handoff.md)
+> （当前待办 = 仓库转 public 前的安全扫描清单；本轮 = 模型容量预设 + 显式选模型，已全绿）。本文件查约定与历史坑，handoff 查「现在该干什么」。
 > 安全排查结论见 [docs/security/2026-11-11-security-audit.md](docs/security/2026-11-11-security-audit.md)。
 > 历史基线见 [2026-10-28-handoff.md](docs/runbooks/2026-10-28-handoff.md)。
 
