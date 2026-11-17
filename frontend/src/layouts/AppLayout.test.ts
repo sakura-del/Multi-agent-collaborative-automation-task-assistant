@@ -55,59 +55,48 @@ describe("AppLayout 侧栏", () => {
     expect(wrapper.find(".app-nav__links").exists()).toBe(true);
   });
 
-  it("十一个导航目的地一个都不能少", async () => {
+  it("导航目的地齐全：两个叶子 + 三个可展开分组", async () => {
     const wrapper = await mountLayout();
-    const labels = wrapper.findAll(".app-nav__links a").map((a) => a.text());
+    // 叶子项直接渲染
+    expect(wrapper.get('[data-test="nav-tasks"]').text()).toContain("任务");
+    expect(wrapper.get('[data-test="nav-knowledge"]').text()).toContain("知识库");
 
-    for (const expected of [
-      "任务",
-      "知识库",
-      "引用样式",
-      "Word 模板",
-      "导入文献",
-      // 设计变更（2026-10-26 引用库计划）：导入的文献需要地方可查可删
-      "引用库",
-      "团队",
-      "用量",
-      // Issue #15 BYOK：用户自带模型凭据的入口
-      "我的模型",
-      "API Key",
-      "我的套餐",
-    ]) {
-      expect(labels).toContain(expected);
+    // 分组默认收起；展开后子项才进入 DOM（morph 菜单）
+    for (const [group, children] of [
+      ["素材", ["引用样式", "Word 模板", "导入文献", "引用库"]],
+      ["协作", ["团队", "用量"]],
+      ["设置", ["我的模型", "API Key", "我的套餐"]],
+    ] as const) {
+      const groupButton = wrapper.get(`[data-test="nav-group-${group}"] button`);
+      expect(groupButton.text()).toContain(group);
+      await groupButton.trigger("click");
+      await flushPromises();
+      const text = wrapper.get(`[data-test="nav-group-${group}"]`).text();
+      for (const child of children) expect(text).toContain(child);
     }
-    expect(labels).toHaveLength(11);
   });
 
-  it("按使用频率分组：工作台 → 素材 → 协作 → 设置", async () => {
+  it("分组顺序：素材 → 协作 → 设置，设置排最后", async () => {
     const wrapper = await mountLayout();
     const groups = wrapper.findAll(".app-nav__links > div");
-    expect(groups).toHaveLength(4);
+    expect(groups).toHaveLength(3);
+    expect(groups[0].text()).toContain("素材");
+    expect(groups[1].text()).toContain("协作");
+    expect(groups[2].text()).toContain("设置");
 
-    // 第一组无标题（省掉视觉噪音），其余三组有微缩大写标签
-    expect(groups[0].find("p").exists()).toBe(false);
-    expect(groups[1].text()).toContain("素材");
-    expect(groups[2].text()).toContain("协作");
-    expect(groups[3].text()).toContain("设置");
-  });
-
-  it("设置组排在最末（配一次就不动，不该占日常视线）", async () => {
-    const wrapper = await mountLayout();
-    const groups = wrapper.findAll(".app-nav__links > div");
-    const last = groups[groups.length - 1];
-    expect(last.text()).toContain("我的模型");
-    expect(last.text()).toContain("API Key");
-    expect(last.text()).toContain("我的套餐");
+    await wrapper.get('[data-test="nav-group-设置"] button').trigger("click");
+    await flushPromises();
+    const last = wrapper.get('[data-test="nav-group-设置"]').text();
+    expect(last).toContain("我的模型");
+    expect(last).toContain("API Key");
+    expect(last).toContain("我的套餐");
   });
 
   it("当前路由项标记为当前页（aria-current）", async () => {
     const wrapper = await mountLayout();
-    // 用 `aria-current="page"` 而不是 `router-link-active` 类断言：
-    // 类名是版式实现细节（active-class 由模板给出），
-    // 而 aria-current 是 RouterLink 的语义输出，既稳定又是无障碍要求。
-    const current = wrapper.findAll('.app-nav__links a[aria-current="page"]');
+    const current = wrapper.findAll('.app-nav__links [aria-current="page"]');
     expect(current.length).toBe(1);
-    expect(current[0].text()).toBe("任务");
+    expect(current[0].text()).toContain("任务");
   });
 
   it("显示当前用户名与登出按钮", async () => {
