@@ -177,11 +177,17 @@ describe("AppLayout 侧栏折叠", () => {
 
     await wrapper.get('[data-test="nav-collapse"]').trigger("click");
     await flushPromises();
-    expect(wrapper.find('[data-test="nav-expand"]').exists()).toBe(true);
+    const expand = wrapper.get('[data-test="nav-expand"]');
+    // 展开入口与品牌图标融合，不再占底部一整行
+    expect(expand.element.closest('[data-test="nav-brand"]')).not.toBeNull();
 
     // 快速导航已移除：折叠态不应再有选择器入口
     expect(wrapper.find('[data-test="nav-picker-trigger"]').exists()).toBe(false);
     expect(wrapper.find('[data-test="nav-arc-picker"]').exists()).toBe(false);
+
+    // 折叠态底部只有头像：登出按钮不能留在 68px 窄轨里（会溢出成半截图标）
+    expect(wrapper.find('[data-test="nav-avatar"]').exists()).toBe(true);
+    expect(wrapper.find('button[aria-label="退出登录"]').exists()).toBe(false);
 
     // 折叠态图标仍是链接，点击可直接切页
     await wrapper.get('[data-test="nav-knowledge"]').trigger("click");

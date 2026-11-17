@@ -135,9 +135,30 @@ const width = computed(() => (props.collapsed ? "4.25rem" : "16rem"));
     :data-state="props.collapsed ? 'collapsed' : 'expanded'"
     data-test="app-sidebar"
   >
-    <!-- 品牌头 -->
-    <div class="flex min-h-16 items-center gap-2.5 px-3">
-      <img src="/logo.svg" alt="" aria-hidden="true" class="size-8 shrink-0" />
+    <!-- 品牌头：折叠态 logo 即展开按钮（悬停浮现展开图标，仿 ChatGPT / Gemini） -->
+    <div data-test="nav-brand" class="flex min-h-16 items-center gap-2.5 px-3">
+      <button
+        v-if="props.collapsed"
+        type="button"
+        data-test="nav-expand"
+        aria-label="展开侧栏"
+        title="展开侧栏"
+        class="group/brand relative size-8 shrink-0 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        @click="emit('update:collapsed', false)"
+      >
+        <img
+          src="/logo.svg"
+          alt=""
+          aria-hidden="true"
+          class="size-8 transition-opacity duration-150 group-hover/brand:opacity-0 group-focus-visible/brand:opacity-0"
+        />
+        <span
+          class="absolute inset-0 grid place-items-center rounded-lg text-muted-foreground opacity-0 transition-opacity duration-150 group-hover/brand:bg-muted group-hover/brand:opacity-100 group-focus-visible/brand:bg-muted group-focus-visible/brand:opacity-100"
+        >
+          <PanelLeftOpen :size="16" aria-hidden="true" />
+        </span>
+      </button>
+      <img v-else src="/logo.svg" alt="" aria-hidden="true" class="size-8 shrink-0" />
       <div
         class="min-w-0 flex-1 overflow-hidden transition-opacity duration-200"
         :class="props.collapsed ? 'pointer-events-none opacity-0' : 'opacity-100'"
@@ -258,36 +279,38 @@ const width = computed(() => (props.collapsed ? "4.25rem" : "16rem"));
       </div>
     </nav>
 
-    <!-- 折叠态：展开 -->
-    <div v-if="props.collapsed" class="flex flex-col items-center gap-1 border-t border-border py-2">
+    <!-- 用户尾：折叠态只留头像（与图标列同一中线），避免登出按钮被挤出侧栏 -->
+    <div
+      class="flex items-center gap-2 border-t border-border py-3"
+      :class="props.collapsed ? 'px-3' : 'px-2'"
+    >
       <button
+        v-if="props.collapsed"
         type="button"
-        data-test="nav-expand"
-        aria-label="展开侧栏"
-        title="展开侧栏"
-        class="inline-flex size-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        data-test="nav-avatar"
+        :aria-label="`${props.username} · 展开侧栏`"
+        :title="`${props.username} · 展开侧栏`"
+        class="grid size-8 shrink-0 place-items-center rounded-full bg-foreground font-display text-xs text-background outline-none transition-transform hover:scale-105 focus-visible:ring-2 focus-visible:ring-ring"
         @click="emit('update:collapsed', false)"
       >
-        <PanelLeftOpen :size="16" aria-hidden="true" />
+        {{ props.username.slice(0, 1) || "V" }}
       </button>
-    </div>
-
-    <!-- 用户尾 -->
-    <div class="flex items-center gap-2 border-t border-border px-2 py-3">
       <span
+        v-else
         class="grid size-8 shrink-0 place-items-center rounded-full bg-foreground font-display text-xs text-background"
         aria-hidden="true"
       >
         {{ props.username.slice(0, 1) || "V" }}
       </span>
       <div
-        class="min-w-0 flex-1 overflow-hidden transition-all duration-200"
-        :class="props.collapsed ? 'pointer-events-none max-w-0 opacity-0' : 'max-w-full opacity-100'"
+        v-if="!props.collapsed"
+        class="min-w-0 flex-1 overflow-hidden"
       >
         <p class="truncate text-xs font-medium" :title="props.email">{{ props.username }}</p>
         <p class="truncate text-[10px] text-muted-foreground" :title="props.email">{{ props.email }}</p>
       </div>
       <button
+        v-if="!props.collapsed"
         type="button"
         aria-label="退出登录"
         title="退出登录"
