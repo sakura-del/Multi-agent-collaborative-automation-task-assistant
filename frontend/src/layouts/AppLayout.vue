@@ -6,16 +6,22 @@ import {
   CreditCard,
   FileInput,
   FileText,
+  Compass,
   Gauge,
   KeyRound,
   Library,
   ListChecks,
   LogOut,
   Palette,
+  PanelLeftClose,
+  PanelLeftOpen,
   Users,
+  X,
 } from "lucide-vue-next";
-import { useRouter } from "vue-router";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 
+import ArcPicker from "@/components/motion/ArcPicker.vue";
 import { Button } from "@/components/ui/button";
 import { useAuthStore } from "@/stores/auth";
 
@@ -35,6 +41,42 @@ import { useAuthStore } from "@/stores/auth";
 // `e2e/phase1-pages.spec.ts` 的 resetScroll 依赖它把导航的横向滚动归位。
 const auth = useAuthStore();
 const router = useRouter();
+const route = useRoute();
+
+// ===== 侧栏折叠 + 折叠后的 ArcPicker 导航 =====
+
+const COLLAPSE_KEY = "vp:nav-collapsed";
+const navCollapsed = ref(localStorage.getItem(COLLAPSE_KEY) === "1");
+const pickerOpen = ref(false);
+
+watch(navCollapsed, (value) => {
+  localStorage.setItem(COLLAPSE_KEY, value ? "1" : "0");
+  if (!value) pickerOpen.value = false;
+});
+
+const navItems = computed(() => NAV_GROUPS.flatMap((group) => visibleItems(group.items)));
+const pickerOptions = computed(() =>
+  navItems.value.map((item) => ({ value: item.name, label: item.label })),
+);
+const currentNav = computed(() => String(route.name ?? "tasks"));
+
+function goFromPicker(name: string) {
+  if (name === currentNav.value) return;
+  void router.push({ name });
+}
+
+function toggleCollapse() {
+  navCollapsed.value = !navCollapsed.value;
+}
+
+function onGlobalKeydown(event: KeyboardEvent) {
+  if (event.key === "Escape" && pickerOpen.value) {
+    pickerOpen.value = false;
+  }
+}
+
+onMounted(() => window.addEventListener("keydown", onGlobalKeydown));
+onBeforeUnmount(() => window.removeEventListener("keydown", onGlobalKeydown));
 
 type NavItem = {
   name: string;
@@ -92,20 +134,34 @@ function handleLogout() {
 </script>
 
 <template>
-  <div class="grid min-h-dvh grid-cols-1 bg-background md:grid-cols-[14.5rem_1fr]">
+  <div
+    class="grid min-h-dvh grid-cols-1 bg-background"
+    :class="navCollapsed ? 'md:grid-cols-[4.5rem_1fr]' : 'md:grid-cols-[14.5rem_1fr]'"
+  >
     <!-- 侧栏（窄屏折成单行横向滚动导航） -->
     <aside
-      class="flex flex-col gap-6 border-b border-border bg-card px-3 py-4 max-md:gap-2 md:border-b-0 md:border-r md:py-6"
+      class="flex-col gap-6 border-b border-border bg-card px-3 py-4 max-md:gap-2 md:border-b-0 md:border-r md:py-6"
+      :class="navCollapsed ? 'max-md:flex md:hidden' : 'flex'"
     >
       <!-- 品牌：引用书标 + 中英文两级字标，强调「证据驱动的学术写作」。 -->
       <div class="hidden items-center gap-2.5 px-2 md:flex">
         <img src="/logo.svg" alt="" aria-hidden="true" class="size-8 shrink-0" />
-        <span class="min-w-0">
+        <span class="min-w-0 flex-1">
           <span class="block truncate text-sm font-semibold tracking-tight">VeriPaper</span>
           <span class="mt-0.5 block text-[8px] tracking-[0.16em] text-muted-foreground">
             EVIDENCE-LED WRITING
           </span>
         </span>
+        <button
+          type="button"
+          data-test="nav-collapse"
+          aria-label="收起侧栏"
+          title="收起侧栏"
+          class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          @click="toggleCollapse"
+        >
+          <PanelLeftClose :size="15" aria-hidden="true" />
+        </button>
       </div>
 
       <nav
@@ -170,6 +226,84 @@ function handleLogout() {
         </Button>
       </div>
     </aside>
+
+    <!-- 折叠后的窄轨（仅桌面）：展开 + 快速导航入口 -->
+    <aside
+      v-if="navCollapsed"
+      class="hidden flex-col items-center gap-3 border-r border-border bg-card px-2 py-6 md:flex"
+    >
+      <img src="/logo.svg" alt="" aria-hidden="true" class="size-8 shrink-0" />
+      <button
+        type="button"
+        data-test="nav-expand"
+        aria-label="展开侧栏"
+        title="展开侧栏"
+        class="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        @click="toggleCollapse"
+      >
+        <PanelLeftOpen :size="16" aria-hidden="true" />
+      </button>
+      <button
+        type="button"
+        data-test="nav-picker-trigger"
+        :aria-expanded="pickerOpen"
+        aria-label="打开快速导航"
+        title="快速导航"
+        class="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        :class="pickerOpen && 'bg-accent text-accent-foreground'"
+        @click="pickerOpen = !pickerOpen"
+      >
+        <Compass :size="16" aria-hidden="true" />
+      </button>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        class="mt-auto"
+        aria-label="退出登录"
+        title="退出登录"
+        @click="handleLogout"
+      >
+        <LogOut :size="15" />
+      </Button>
+    </aside>
+
+    <!-- 快速导航面板：滚轮 / 拖拽 / 方向键切换页面 -->
+    <template v-if="navCollapsed && pickerOpen">
+      <div class="fixed inset-0 z-40" aria-hidden="true" @click="pickerOpen = false" />
+      <div
+        data-test="nav-arc-picker"
+        role="dialog"
+        aria-modal="true"
+        aria-label="快速导航"
+        class="fixed top-1/2 left-20 z-50 w-72 -translate-y-1/2 rounded-3xl border border-border bg-card p-4 shadow-raised"
+      >
+        <div class="mb-2 flex items-center justify-between">
+          <p class="text-xs font-medium tracking-wide text-muted-foreground uppercase">快速导航</p>
+          <button
+            type="button"
+            aria-label="关闭快速导航"
+            class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            @click="pickerOpen = false"
+          >
+            <X :size="14" aria-hidden="true" />
+          </button>
+        </div>
+        <ArcPicker
+          :options="pickerOptions"
+          :model-value="currentNav"
+          side="right"
+          :radius="240"
+          :item-height="44"
+          :visible-count="7"
+          label-class="text-lg font-medium"
+          aria-label="快速导航"
+          @update:model-value="goFromPicker"
+        />
+        <p class="mt-2 text-center text-[11px] text-muted-foreground">
+          滚轮 / 拖拽 / ↑↓ 切换页面
+        </p>
+      </div>
+    </template>
 
     <main class="min-w-0 px-4 py-5 md:px-8 md:py-7 lg:px-10">
       <div class="mx-auto w-full max-w-[1600px]">

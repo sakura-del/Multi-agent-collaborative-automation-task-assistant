@@ -169,5 +169,36 @@ describe("登录页产品身份", () => {
   });
 });
 
+
+describe("AppLayout 侧栏折叠与快速导航", () => {
+  it("折叠后出现窄轨，ArcPicker 选页会跳转", async () => {
+    localStorage.clear();
+    setActivePinia(createPinia());
+    const router = buildRouter();
+    await router.push("/tasks");
+    await router.isReady();
+
+    const wrapper = mount(AppLayout, {
+      global: { plugins: [router], stubs: { RouterView: true } },
+    });
+    await flushPromises();
+
+    await wrapper.get('[data-test="nav-collapse"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.find('[data-test="nav-expand"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="nav-picker-trigger"]').exists()).toBe(true);
+
+    await wrapper.get('[data-test="nav-picker-trigger"]').trigger("click");
+    await flushPromises();
+    const panel = wrapper.get('[data-test="nav-arc-picker"]');
+    expect(panel.attributes("role")).toBe("dialog");
+    expect(panel.findAll('[data-slot="arc-picker-option"]').length).toBeGreaterThan(3);
+
+    await panel.get('[data-value="knowledge"]').trigger("click");
+    await flushPromises();
+    expect(router.currentRoute.value.name).toBe("knowledge");
+  });
+});
+
 // 避免未使用告警（vi 在 watch 版断言时会用到）
 void vi;
