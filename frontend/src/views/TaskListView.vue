@@ -315,6 +315,9 @@ const rows = computed(() =>
 
     <!-- beUI 时间线：最近 8 个任务（左旧右新）。点击进详情；列表保留完整浏览与 E2E 契约。 -->
     <div v-if="timelineTasks.length" class="mb-8 rounded-3xl border border-border bg-card p-2">
+      <p class="px-4 pt-2 pb-1 text-xs text-muted-foreground">
+        最近 {{ timelineTasks.length }} 个任务 · 点击卡片打开，拖拽 / 滚轮 / ←→ 浏览
+      </p>
       <BeTimeline
         :events="
           timelineTasks.map((task) => ({
@@ -326,7 +329,7 @@ const rows = computed(() =>
         :height="400"
         :item-width="320"
         aria-label="最近任务时间线"
-        @change="openTask"
+        @activate="openTask"
       >
         <template #media="{ event }">
           <div

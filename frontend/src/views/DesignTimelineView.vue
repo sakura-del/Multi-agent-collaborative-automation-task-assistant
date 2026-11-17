@@ -9,7 +9,6 @@
  * 路由：`/design/timeline`（public，可直接打开）。
  * 确认后再把 token 提升为全局，并按方案逐页迁移。
  */
-import { computed } from "vue";
 import { ArrowLeft } from "lucide-vue-next";
 
 import BeTimeline, { type BeTimelineEvent } from "@/components/motion/BeTimeline.vue";
@@ -105,8 +104,6 @@ const STATUS_LABEL: Record<DemoStatus, string> = {
   failed: "失败",
 };
 
-const focusedId = computed(() => TASKS[0]?.id ?? "");
-
 function mediaTone(status: DemoStatus): string {
   if (status === "running") return "bg-[#E9EEFF] text-[#2447D6]";
   if (status === "needs-review") return "bg-[#FBF3E4] text-[#8A5A0B]";
@@ -164,7 +161,7 @@ function onSelect(id: string) {
           :height="560"
           :item-width="340"
           aria-label="研究任务时间线演示"
-          @change="onSelect"
+          @activate="onSelect"
         >
           <template #media="{ event }">
             <div
@@ -194,8 +191,7 @@ function onSelect(id: string) {
           </template>
         </BeTimeline>
         <p class="px-4 pb-2 text-xs text-muted-foreground">
-          聚焦任务：{{ focusedId === TASKS[0]?.id ? "跟随拖拽更新" : "跟随拖拽更新" }} ·
-          键盘 ←/→ 也可切换
+          拖拽 / 滚轮 / ←→ 只浏览；点击卡片才打开
         </p>
       </div>
 

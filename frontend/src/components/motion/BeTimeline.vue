@@ -68,7 +68,10 @@ const props = withDefaults(
 );
 
 const emit = defineEmits<{
+  /** 焦点卡变化（拖拽/滚轮/方向键/点击都会触发），**不应当引发跳转**。 */
   (event: "change", id: string): void;
+  /** 用户明确激活（点击卡片、Enter/Space），业务方在这里做跳转/定位。 */
+  (event: "activate", id: string): void;
 }>();
 
 defineSlots<{
@@ -140,7 +143,7 @@ function focusButton(index: number) {
   });
 }
 
-function select(index: number, focus = false) {
+function focusCard(index: number, moveFocus = false) {
   const next = clamp(index, 0, props.events.length - 1);
   activeIndex.value = next;
   glideTo(next);
@@ -148,24 +151,33 @@ function select(index: number, focus = false) {
   if (event) {
     emit("change", event.id);
   }
-  if (focus) {
+  if (moveFocus) {
     focusButton(next);
+  }
+}
+
+/** 点击卡片 / Enter / Space：先聚焦，再通知业务方激活。 */
+function activate(index: number) {
+  focusCard(index);
+  const event = props.events[clamp(index, 0, props.events.length - 1)];
+  if (event) {
+    emit("activate", event.id);
   }
 }
 
 function onCardKeydown(event: KeyboardEvent, index: number) {
   if (event.key === "ArrowRight") {
     event.preventDefault();
-    select(index + 1, true);
+    focusCard(index + 1, true);
   } else if (event.key === "ArrowLeft") {
     event.preventDefault();
-    select(index - 1, true);
+    focusCard(index - 1, true);
   } else if (event.key === "Home") {
     event.preventDefault();
-    select(0, true);
+    focusCard(0, true);
   } else if (event.key === "End") {
     event.preventDefault();
-    select(props.events.length - 1, true);
+    focusCard(props.events.length - 1, true);
   }
 }
 
@@ -371,7 +383,7 @@ const hintId = `be-timeline-hint-${Math.random().toString(36).slice(2, 9)}`;
         :event="event"
         :date-label="dateLabel(event.date)"
         :active="index === activeIndex"
-        @select="select($event)"
+        @select="activate($event)"
         @keydown="onCardKeydown"
       >
         <template #media>

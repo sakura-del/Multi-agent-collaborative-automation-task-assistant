@@ -353,7 +353,7 @@ onBeforeUnmount(() => {
           :item-width="300"
           :initial-index="timelineEvents.length - 1"
           aria-label="执行事件时间线"
-          @change="scrollToLogEvent"
+          @activate="scrollToLogEvent"
         >
           <template #media="{ event }">
             <div

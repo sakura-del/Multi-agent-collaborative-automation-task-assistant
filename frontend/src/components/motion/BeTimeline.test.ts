@@ -50,7 +50,7 @@ describe("BeTimeline", () => {
     expect(first.get("button").attributes("tabindex")).toBe("0");
   });
 
-  it("点击卡片切换聚焦并上报事件 id", async () => {
+  it("点击卡片才上报 activate（业务方据此跳转）", async () => {
     const wrapper = mount(BeTimeline, {
       props: { events: EVENTS, height: 400, itemWidth: 300 },
     });
@@ -58,13 +58,13 @@ describe("BeTimeline", () => {
     await wrapper.get("[data-test='be-timeline-card-c'] button").trigger("click");
     await flushPromises();
 
-    const emittedC = wrapper.emitted("change");
-    expect(emittedC?.[emittedC.length - 1]).toEqual(["c"]);
+    const activated = wrapper.emitted("activate");
+    expect(activated?.[activated.length - 1]).toEqual(["c"]);
     const third = wrapper.get("[data-test='be-timeline-card-c']");
     expect(third.attributes("data-active")).toBeDefined();
   });
 
-  it("方向键在聚焦卡上可用", async () => {
+  it("方向键只移动焦点，不触发 activate（不能浏览即跳转）", async () => {
     const wrapper = mount(BeTimeline, {
       props: { events: EVENTS, height: 400, itemWidth: 300 },
     });
@@ -76,6 +76,7 @@ describe("BeTimeline", () => {
 
     const emittedB = wrapper.emitted("change");
     expect(emittedB?.[emittedB.length - 1]).toEqual(["b"]);
+    expect(wrapper.emitted("activate")).toBeUndefined();
 
     await wrapper
       .get("[data-test='be-timeline-card-b'] button")
@@ -84,6 +85,20 @@ describe("BeTimeline", () => {
 
     const emittedA = wrapper.emitted("change");
     expect(emittedA?.[emittedA.length - 1]).toEqual(["a"]);
+    expect(wrapper.emitted("activate")).toBeUndefined();
+  });
+
+  it("滚轮浏览只改变焦点，不触发 activate", async () => {
+    const wrapper = mount(BeTimeline, {
+      props: { events: EVENTS, height: 400, itemWidth: 300 },
+    });
+
+    await wrapper.get("[data-test='be-timeline']").trigger("wheel", { deltaX: 300 });
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    await flushPromises();
+
+    expect(wrapper.emitted("change")?.length).toBeGreaterThan(0);
+    expect(wrapper.emitted("activate")).toBeUndefined();
   });
 
   it("卡片内容通过 slot 注入", () => {
@@ -122,15 +137,15 @@ describe("BeTimeline", () => {
     expect(wrapper.findAll("[data-test^='be-timeline-card-']").length).toBe(0);
   });
 
-  it("click 只上报一次 change", async () => {
+  it("click 只上报一次 activate", async () => {
     const wrapper = mount(BeTimeline, {
       props: { events: EVENTS, height: 400, itemWidth: 300 },
     });
 
     await wrapper.get("[data-test='be-timeline-card-b'] button").trigger("click");
     await flushPromises();
-    expect(wrapper.emitted("change")?.length).toBe(1);
-    expect(wrapper.emitted("change")?.[0]).toEqual(["b"]);
+    expect(wrapper.emitted("activate")?.length).toBe(1);
+    expect(wrapper.emitted("activate")?.[0]).toEqual(["b"]);
   });
   it("initialIndex 直接聚焦指定卡（详情页默认最新一条）", () => {
     const wrapper = mount(BeTimeline, {
@@ -155,7 +170,7 @@ describe("BeTimeline", () => {
 
     await wrapper.get("[data-test='be-timeline-card-e'] button").trigger("click");
     await flushPromises();
-    const emitted = wrapper.emitted("change");
+    const emitted = wrapper.emitted("activate");
     expect(emitted?.[emitted.length - 1]).toEqual(["e"]);
   });
 });
