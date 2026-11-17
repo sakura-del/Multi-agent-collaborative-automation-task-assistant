@@ -93,10 +93,8 @@ STORAGE__PRESIGN_EXPIRES_SECONDS=900
 
 CORS__ALLOW_ORIGIN_REGEX=^https://([a-z0-9-]+\.)?multi-agent-assistant\.pages\.dev$
 
-# 历史遗留：迁移源库 DSN（`migrate-from-supabase.sh` 读它）。源库已删除，这些值已失效
-SUPABASE_PG_HOST=aws-0-ap-southeast-1.pooler.supabase.com
-SUPABASE_PG_USER=postgres.<ref>
-SUPABASE_PG_PASSWORD=<pwd>
+# 注意：`SUPABASE_PG_*`（迁移源库 DSN，`migrate-from-supabase.sh` 读它）已于 2026-11-17 从 .env 移除
+# （源库租户已不存在，脚本本就跑不通）。历史键名见 §4；不要重新加回。
 ```
 
 > ⚠️ **不要在 `.env` 的值里写正则括号而用 `source .env` 读**：`CORS__ALLOW_ORIGIN_REGEX=^https://(...)$`
@@ -105,8 +103,19 @@ SUPABASE_PG_PASSWORD=<pwd>
 
 ## 4. 数据迁移（Supabase → ECS）—— 已于 2026-11-11 完成，源库 2026-11-12 已下线
 
-> **本节为历史记录。** Supabase 项目已删除，`migrate-from-supabase.sh` 现在跑不通（源库不存在），
-> `.env` 里的 `SUPABASE_PG_*` 也已成废值。留档目的：知道当初怎么迁的、迁完对过哪些数。
+> **本节为历史记录。** Supabase 项目已删除（2026-11-17 实测：pooler 返回
+> `tenant/user postgres.<ref> not found`），`migrate-from-supabase.sh` 现在跑不通（源库不存在），
+> `.env` 里的 5 个 `SUPABASE_PG_*` 也**已于 2026-11-17 删除**（备份在
+> `/opt/veripaper/backup/env-20261117-090727.bak`，600；键数 52→47）。
+> 留档目的：知道当初怎么迁的、迁完对过哪些数。历史键名如下（**不要再写回 .env**）：
+>
+> ```
+> SUPABASE_PG_HOST=aws-0-ap-southeast-1.pooler.supabase.com
+> SUPABASE_PG_PORT=5432          # session pooler，6543 的 transaction pooler 不适合 pg_dump
+> SUPABASE_PG_DB=postgres
+> SUPABASE_PG_USER=postgres.<project-ref>
+> SUPABASE_PG_PASSWORD=<密码>
+> ```
 
 ```bash
 bash deploy/ecs/migrate-from-supabase.sh          # 完整：dump → 恢复 → 校验
