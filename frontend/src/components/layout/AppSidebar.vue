@@ -67,8 +67,7 @@ function toggleGroup(group: SidebarNavGroup) {
   openGroup.value = openGroup.value === group.label ? null : group.label;
 }
 
-function navigate(name: string) {
-  emit("navigate", name);
+function closeMobileIfOpen() {
   if (props.mobileOpen) emit("update:mobileOpen", false);
 }
 
@@ -178,12 +177,11 @@ const width = computed(() => (props.collapsed ? "4.25rem" : "16rem"));
 
     <!-- 菜单 -->
     <nav class="app-nav__links flex min-w-0 flex-1 flex-col gap-1 overflow-x-hidden overflow-y-auto px-2 py-2" aria-label="主导航">
-      <button
+      <RouterLink
         v-for="item in props.leaves"
         :key="item.name"
-        type="button"
+        :to="{ name: item.name }"
         :data-test="`nav-${item.name}`"
-        :aria-current="props.current === item.name ? 'page' : undefined"
         :title="props.collapsed ? item.label : undefined"
         class="relative flex min-h-9 w-full items-center gap-2.5 overflow-hidden rounded-xl px-3 text-left text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring"
         :class="
@@ -191,7 +189,7 @@ const width = computed(() => (props.collapsed ? "4.25rem" : "16rem"));
             ? 'bg-accent text-accent-foreground'
             : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
         "
-        @click="navigate(item.name)"
+        @click="closeMobileIfOpen"
       >
         <component :is="item.icon" :size="16" aria-hidden="true" class="shrink-0" />
         <span
@@ -199,7 +197,7 @@ const width = computed(() => (props.collapsed ? "4.25rem" : "16rem"));
           :class="props.collapsed ? 'pointer-events-none max-w-0 opacity-0' : 'max-w-full opacity-100'"
           >{{ item.label }}</span
         >
-      </button>
+      </RouterLink>
 
       <div
         v-for="group in props.groups"
@@ -255,21 +253,20 @@ const width = computed(() => (props.collapsed ? "4.25rem" : "16rem"));
               :exit="{ opacity: 0, y: -6 }"
               :transition="{ duration: 0.18, delay: reduced ? 0 : index * 0.035 }"
             >
-              <button
-                type="button"
+              <RouterLink
+                :to="{ name: item.name }"
                 :data-test="`nav-${item.name}`"
-                :aria-current="props.current === item.name ? 'page' : undefined"
                 class="flex min-h-8 w-full items-center gap-2 overflow-hidden rounded-lg px-2 text-left text-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring"
                 :class="
                   props.current === item.name
                     ? 'bg-muted/70 font-medium text-foreground'
                     : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
                 "
-                @click="navigate(item.name)"
+                @click="closeMobileIfOpen"
               >
                 <component :is="item.icon" :size="13" aria-hidden="true" class="shrink-0" />
                 <span class="truncate">{{ item.label }}</span>
-              </button>
+              </RouterLink>
             </Motion>
           </Motion>
         </AnimatePresence>
@@ -380,40 +377,40 @@ const width = computed(() => (props.collapsed ? "4.25rem" : "16rem"));
           </div>
 
           <nav class="app-nav__links flex flex-1 flex-col gap-1 overflow-y-auto px-3 py-2" aria-label="移动端导航">
-            <button
+            <RouterLink
               v-for="item in props.leaves"
               :key="item.name"
-              type="button"
+              :to="{ name: item.name }"
               class="flex min-h-10 items-center gap-2.5 rounded-xl px-3 text-left text-sm font-medium"
               :class="
                 props.current === item.name
                   ? 'bg-accent text-accent-foreground'
                   : 'text-muted-foreground hover:bg-muted/60'
               "
-              @click="navigate(item.name)"
+              @click="closeMobileIfOpen"
             >
               <component :is="item.icon" :size="16" aria-hidden="true" />
               {{ item.label }}
-            </button>
+            </RouterLink>
             <div v-for="group in props.groups" :key="group.label" class="mt-2">
               <p class="px-3 pb-1 text-[10px] font-medium tracking-wider text-muted-foreground uppercase">
                 {{ group.label }}
               </p>
-              <button
+              <RouterLink
                 v-for="item in group.items"
                 :key="item.name"
-                type="button"
+                :to="{ name: item.name }"
                 class="flex min-h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-xs"
                 :class="
                   props.current === item.name
                     ? 'bg-muted/70 font-medium text-foreground'
                     : 'text-muted-foreground hover:bg-muted/60'
                 "
-                @click="navigate(item.name)"
+                @click="closeMobileIfOpen"
               >
                 <component :is="item.icon" :size="13" aria-hidden="true" />
                 {{ item.label }}
-              </button>
+              </RouterLink>
             </div>
           </nav>
 

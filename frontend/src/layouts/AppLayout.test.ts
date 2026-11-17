@@ -58,7 +58,10 @@ describe("AppLayout 侧栏", () => {
   it("导航目的地齐全：两个叶子 + 三个可展开分组", async () => {
     const wrapper = await mountLayout();
     // 叶子项直接渲染
-    expect(wrapper.get('[data-test="nav-tasks"]').text()).toContain("任务");
+    // E2E 登录后按 role=link 等「任务」，叶子项必须是 <a>，不能是按钮
+    const tasksLink = wrapper.get('[data-test="nav-tasks"]');
+    expect(tasksLink.element.tagName).toBe("A");
+    expect(tasksLink.text()).toContain("任务");
     expect(wrapper.get('[data-test="nav-knowledge"]').text()).toContain("知识库");
 
     // 分组默认收起；展开后子项才进入 DOM（morph 菜单）
