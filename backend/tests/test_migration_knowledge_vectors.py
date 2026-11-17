@@ -18,7 +18,6 @@ from types import ModuleType
 from typing import Any
 
 import pytest
-
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 
