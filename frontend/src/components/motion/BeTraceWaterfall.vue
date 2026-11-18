@@ -13,9 +13,9 @@
  * 失败 = rose + repeating-linear-gradient；数据 tabular-nums；
  * startMs 相对首个节点开始时刻；时长 <1s 显示 ms。
  */
-import { computed, ref } from "vue";
-import { motion } from "motion-v";
-import { Brain, CircleAlert, Search, Wrench, Clock3 } from "lucide-vue-next";
+import { computed, onBeforeUnmount, ref } from "vue";
+import { motion, useReducedMotion } from "motion-v";
+import { Brain, CircleAlert, Pause, Play, Search, Wrench, Clock3 } from "lucide-vue-next";
 
 export interface TraceSpan {
   id: string;
@@ -79,6 +79,66 @@ const totalDurationMs = computed(() => {
 });
 const totalTokensHint = computed(
   () => `${props.spans.length} spans · ${formatDuration(totalDurationMs.value)}`
+);
+
+// ===== 播放头（beUI Replay 语义：40ms tick、拖拽 range、越过前 span 变暗）=====
+const reducedMotion = useReducedMotion();
+const playing = ref(false);
+/** 播放头位置（相对 run 起点的 ms）；0 = 未播放 */
+const playheadMs = ref(0);
+let timer: number | null = null;
+const PLAYBACK_MS = 2000; // 全程 2s 播完（原实现按真实时长，这里压缩到可感知）
+
+function stopPlayback() {
+  playing.value = false;
+  if (timer !== null) {
+    window.clearInterval(timer);
+    timer = null;
+  }
+}
+
+function replay() {
+  stopPlayback();
+  playheadMs.value = 0;
+  if (reducedMotion.value) {
+    // 直达末帧：不播生长动画
+    playheadMs.value = totalDurationMs.value;
+    return;
+  }
+  playing.value = true;
+  const startedAt = performance.now();
+  timer = window.setInterval(() => {
+    const elapsed = performance.now() - startedAt;
+    playheadMs.value = Math.min(
+      totalDurationMs.value,
+      (elapsed / PLAYBACK_MS) * totalDurationMs.value,
+    );
+    if (playheadMs.value >= totalDurationMs.value) stopPlayback();
+  }, 40);
+}
+
+function onScrub(event: Event) {
+  stopPlayback();
+  playheadMs.value = Number((event.target as HTMLInputElement).value);
+}
+
+onBeforeUnmount(stopPlayback);
+
+/** span 是否已被播放头越过（越过前的 span 变暗，beUI 语义） */
+function aheadOfPlayhead(span: TraceSpan): boolean {
+  return playing.value && span.startMs > playheadMs.value;
+}
+
+/** 播放时的生长比例：未开始 0；进行中按进度；已结束 1 */
+function spanScale(span: TraceSpan): number {
+  if (!playing.value) return 1;
+  if (span.startMs > playheadMs.value) return 0;
+  const elapsed = playheadMs.value - span.startMs;
+  return Math.min(1, elapsed / Math.max(1, span.durationMs));
+}
+
+const playheadRatio = computed(() =>
+  Math.min(1, playheadMs.value / totalDurationMs.value),
 );
 
 function formatDuration(ms: number): string {
@@ -152,9 +212,35 @@ function spanIcon(kind: string) {
       </span>
     </div>
 
+    <!-- 播放工具栏：X / 总时长 + Replay / Pause + 拖拽 scrub -->
+    <div class="flex items-center gap-2 border-b border-border px-4 py-2">
+      <span class="font-mono text-[10px] tabular-nums text-muted-foreground">
+        {{ formatDuration(Math.min(playheadMs, totalDurationMs)) }} / {{ formatDuration(totalDurationMs) }}
+      </span>
+      <input
+        type="range"
+        class="h-1.5 flex-1 cursor-col-resize accent-primary"
+        :max="totalDurationMs"
+        :value="Math.min(playheadMs, totalDurationMs)"
+        step="50"
+        aria-label="拖拽播放头"
+        @input="onScrub"
+      />
+      <button
+        type="button"
+        data-test="trace-replay"
+        class="inline-flex size-7 items-center justify-center rounded-lg border border-border text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        :aria-label="playing ? '暂停回放' : '回放'"
+        @click="playing ? stopPlayback() : replay()"
+      >
+        <Pause v-if="playing" class="size-3.5" />
+        <Play v-else class="size-3.5" />
+      </button>
+    </div>
+
     <!-- 瀑布主体：左名称 / 右时间轴 -->
     <div class="overflow-x-auto px-4 py-3">
-      <div class="min-w-[576px]">
+      <div class="relative min-w-[576px]">
         <!-- 时间轴刻度 -->
         <div class="grid grid-cols-[14rem_minmax(0,1fr)] items-center gap-3 pb-1">
           <span class="text-[10px] uppercase tracking-wide text-muted-foreground">Node</span>
@@ -186,14 +272,14 @@ function spanIcon(kind: string) {
           <div class="relative h-6">
             <!-- 轨道 -->
             <div class="absolute inset-x-0 top-1/2 h-3 -translate-y-1/2 rounded-full bg-muted/40" />
-            <!-- span 条（motion 生长动效，0.15s EASE_OUT）-->
+            <!-- span 条：播放时 scaleX 按 playhead 生长（0.15s EASE_OUT）；越前变暗 -->
             <motion.div
               class="absolute top-1/2 h-3 -translate-y-1/2 rounded-full"
-              :class="[spanClass(span), isDimmed(span) ? 'opacity-30' : '']"
+              :class="[spanClass(span), isDimmed(span) || aheadOfPlayhead(span) ? 'opacity-30' : '']"
               :style="spanStyle(span)"
               :initial="{ scaleX: 0 }"
-              :animate="{ scaleX: 1 }"
-              :transition="{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }"
+              :animate="{ scaleX: spanScale(span) }"
+              :transition="{ duration: playing ? 0.15 : 0.15, ease: [0.16, 1, 0.3, 1] }"
               style="transform-origin: left center"
             />
             <span
@@ -205,6 +291,14 @@ function spanIcon(kind: string) {
           </div>
         </div>
         <p v-if="!spans.length" class="py-4 text-sm text-muted-foreground">暂无执行数据。</p>
+        <!-- 播放头竖线（播放中显示；拖拽/停止后隐藏，beUI 语义）。
+             left = 14.75rem + P × (100% - 14.75rem)：对齐时间轴列。 -->
+        <div
+          v-if="playing"
+          class="pointer-events-none absolute top-0 bottom-0 w-px bg-foreground/50"
+          :style="{ left: `calc(14.75rem + ${playheadRatio} * (100% - 14.75rem))` }"
+          aria-hidden="true"
+        />
       </div>
     </div>
   </section>

@@ -47,7 +47,7 @@ const props = withDefaults(
   }
 );
 
-const emit = defineEmits<{ approve: [version: number]; regenerate: [] }>();
+const emit = defineEmits<{ approve: [version: number]; regenerate: []; retry: [stepId: string] }>();
 </script>
 
 <template>
@@ -129,6 +129,7 @@ const emit = defineEmits<{ approve: [version: number]; regenerate: [] }>();
           :revision="props.plan.version"
           :pending="props.pending"
           :show-actions="false"
+          @retry="emit('retry', $event)"
         />
         <details class="mt-1">
           <summary class="cursor-pointer text-xs text-muted-foreground">查看经典 DAG 视图</summary>

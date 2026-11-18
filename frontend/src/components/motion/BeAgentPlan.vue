@@ -17,7 +17,7 @@
  * 数据由宿主持有（受控视图，与 beUI 同哲学）：本项目的 plan 来自后端（只读），
  * draft 拖拽/重命名不做；生命周期动作通过事件上抛（approve / regenerate）。
  */
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { motion } from "motion-v";
 import {
   Bot,
@@ -70,7 +70,15 @@ const props = withDefaults(
   }
 );
 
-const emit = defineEmits<{ approve: []; regenerate: [] }>();
+const emit = defineEmits<{ approve: []; regenerate: []; retry: [stepId: string] }>();
+
+// ===== 行展开（beUI：仅 running/failed 展开活动区；AnimatePresence y-3→0 0.18s）=====
+const expandedId = ref<string | null>(null);
+
+function toggleStep(step: AgentPlanStep) {
+  if (step.status !== "failed" && step.status !== "running") return;
+  expandedId.value = expandedId.value === step.id ? null : step.id;
+}
 
 const EASE_OUT: [number, number, number, number] = [0.16, 1, 0.3, 1];
 
@@ -181,7 +189,19 @@ function stepDotClass(status: AgentStepStatus): string {
           class="absolute left-[9px] top-7 bottom-0 w-px bg-border"
           aria-hidden="true"
         />
-        <div class="flex items-start gap-2.5 py-1.5">
+        <!-- running/failed 行可点击展开活动区（beUI AgentDisclosure 语义） -->
+        <component
+          :is="step.status === 'failed' || step.status === 'running' ? 'button' : 'div'"
+          :type="step.status === 'failed' || step.status === 'running' ? 'button' : undefined"
+          class="flex w-full items-start gap-2.5 rounded-md py-1.5 text-left"
+          :class="
+            step.status === 'failed' || step.status === 'running'
+              ? 'cursor-pointer transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+              : ''
+          "
+          :aria-expanded="expandedId === step.id ? 'true' : 'false'"
+          @click="toggleStep(step)"
+        >
           <span
             class="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full text-[10px] font-medium"
             :class="stepDotClass(step.status)"
@@ -211,15 +231,43 @@ function stepDotClass(status: AgentStepStatus): string {
               >
                 {{ formatDuration(step.durationMs) }}
               </span>
+              <ChevronDown
+                v-if="step.status === 'failed' || step.status === 'running'"
+                class="ml-auto size-3.5 shrink-0 text-muted-foreground transition-transform"
+                :class="expandedId === step.id ? 'rotate-0' : '-rotate-90'"
+              />
             </div>
             <p
-              v-if="step.error"
-              class="mt-1 text-[11px] leading-4 text-destructive"
+              v-if="step.error && expandedId !== step.id"
+              class="mt-1 truncate text-[11px] leading-4 text-destructive"
             >
               {{ step.error }}
             </p>
           </div>
-        </div>
+        </component>
+        <!-- 活动区：展开时显示完整错误 + Retry（y:-3→0，0.18s） -->
+        <motion.div
+          v-if="expandedId === step.id && (step.status === 'failed' || step.status === 'running')"
+          :initial="{ opacity: 0, y: -3 }"
+          :animate="{ opacity: 1, y: 0 }"
+          :exit="{ opacity: 0 }"
+          :transition="{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }"
+          class="ml-7 mt-1 flex items-start justify-between gap-2 rounded-md bg-muted/40 px-2.5 py-2"
+        >
+          <p class="min-w-0 break-words text-[11px] leading-4 text-destructive">
+            {{ step.error || "节点仍在执行中…" }}
+          </p>
+          <button
+            v-if="step.status === 'failed'"
+            type="button"
+            data-test="agent-plan-retry"
+            class="inline-flex h-7 shrink-0 items-center gap-1 rounded-lg border border-border px-2 text-[11px] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            @click.stop="emit('retry', step.id)"
+          >
+            <RefreshCw class="size-3" />
+            重试节点
+          </button>
+        </motion.div>
       </li>
       <li v-if="!steps.length" class="py-3 text-sm text-muted-foreground">No steps yet.</li>
     </ol>

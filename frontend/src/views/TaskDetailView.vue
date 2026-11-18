@@ -177,6 +177,13 @@ const traceSpans = computed<TraceSpan[]>(() => {
   });
 });
 
+/** Agent Plan 行内「重试节点」：走 retry_node 命令（与执行页工具栏同路径） */
+async function handleRetryStep(stepId: string) {
+  selectedNodeId.value = stepId;
+  await handleControl({ command: "retry_node", node_id: stepId });
+  void refresh();
+}
+
 function selectTab(tab: TabKey) {
   if (tab === "result" && !resultAvailable.value) {
     return;
@@ -473,6 +480,7 @@ onBeforeUnmount(() => {
         :can-approve="canApprove"
         :steps="planSteps"
         :plan-status="agentPlanStatus"
+        @retry="handleRetryStep"
         :error="errorMessage"
         :conflict="conflictMessage"
         @approve="handleApprove"
@@ -497,7 +505,12 @@ onBeforeUnmount(() => {
         :run-name="traceRunName"
         :spans="traceSpans"
       />
-      <NodeDetail :node="selectedNode" :subtask="selectedSubtask" @close="selectedNodeId = null" />
+      <NodeDetail
+        :node="selectedNode"
+        :subtask="selectedSubtask"
+        :siblings="store.snapshot?.subtasks ?? []"
+        @close="selectedNodeId = null"
+      />
     </div>
 
     <div v-else-if="activeTab === 'logs'" class="space-y-4">
