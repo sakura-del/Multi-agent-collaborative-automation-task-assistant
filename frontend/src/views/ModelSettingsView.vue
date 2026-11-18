@@ -74,11 +74,18 @@ async function loadRouting() {
 }
 
 const routingMeterCategories = computed(() =>
-    ROUTABLE_NODE_TYPES.map((node) => ({
-        id: node.value,
-        label: node.label,
-        model: routeDraft.value[node.value] || "",
-    })),
+    ROUTABLE_NODE_TYPES.map((node) => {
+        const credentialId = routeDraft.value[node.value] || "";
+        const credential = credentials.value.find(
+            (item) => item.credential_id === credentialId,
+        );
+        return {
+            id: node.value,
+            label: node.label,
+            // 展示模型名而不是凭据 ID（ID 只用于提交）
+            model: credential ? `${credential.name} · ${credential.model}` : "",
+        };
+    }),
 );
 
 async function saveRouting() {
