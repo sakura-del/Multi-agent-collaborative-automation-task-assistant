@@ -299,6 +299,38 @@ docker compose up -d backend
 | 2 | **组件源代码可控** | 用**复制源码到仓库**的模式（shadcn 风格），组件代码进 `src/components/ui/`，可随时改，不做黑盒 npm 依赖 |
 | 3 | **统一设计语言** | 只用本节定义的 tokens 与组件；不写一次性颜色/间距/字号；不引入第二套设计体系 |
 | 4 | **严格限制重复依赖** | 同一能力只允许一个库（见 §6.5.2）；新增依赖前先确认现有库能否满足；**禁止**同时引入两个图标库/两个动画库/两个状态库 |
+| 5 | **UI 设计先查 beUI（2026-11-18 用户指令，优先级最高）** | 所有新 UI（页面/组件/交互/动效）**必须先**到 beUI（<https://asharca.github.io/ui/>）找对应设计；找不到才降级到其他平台（Vue 生态成熟实现）；最后才是自己设计。详见 §6.5.1.1 |
+
+### 6.5.1.1 beUI 优先规则（§6.5.1 铁律 5 的展开）
+
+**beUI**（<https://asharca.github.io/ui/>，作者 arsharca，MIT）：React 19 + Next.js +
+Motion（Framer Motion）+ Tailwind 4，经 shadcn CLI 分发。**511 个 Web 组件**（Motion 交互组件
+~80 / Blocks 组合模块 ~108 / AI Agent 组件 ~28 / 图表 ~17）+ 73 个 React Native 组件。
+
+## 技术事实（不要搞错）
+
+beUI 是 **React 生态组件库，本项目是 Vue 3 —— 组件源码无法直接安装**。
+shadcn CLI 的 `@beui/*` 分发同样面向 React。因此「用 beUI」指的是**用它的设计**，
+不是引入 React 运行时（那是 §6.5.2 明令禁止的）。
+
+## 三级查找顺序（新 UI 一律按此执行）
+
+| 优先级 | 来源 | 落地方式 |
+| --- | --- | --- |
+| **① beUI 有对应设计** | 在 <https://asharca.github.io/ui/> 的 Motion 组件 / Blocks / AI Agents / Charts 里找 | **照搬它的交互模式与视觉规格**（动效参数、状态机、布局、CSS tokens——组件页的 Manual 标签可直接读 React 源码作参考），用本项目锁定的 **shadcn-vue + motion-v + Tailwind tokens** 复刻实现 |
+| **② beUI 没有，Vue 生态有成熟实现** | shadcn-vue 官方组件、Aceternity、originui 等开源 Vue/Tailwind 组件 | 直接用/复制源码（仍须遵守 §6.5.2 的栈锁定与 §6.5.3 tokens） |
+| **③ 都没有** | 自己设计 | 必须遵守 §6.5.3 Nova tokens；交互模式仍应先回 beUI 找同类组件作参照 |
+
+## 使用要点
+
+- beUI 组件页均提供源码（Manual 标签页），**先读源码再复刻**：重点提取动效时序（Motion
+  的 spring/时长参数）、状态切换逻辑与响应式断点，而不是像素级照抄；
+- beUI 的 **AI Agents 分类**（Agent Plan / Agent Team / Trace Waterfall / Context Meter /
+  Voice Orb 等）与本产品的 Agent 编排场景高度相关，做编排类 UI 时**必查**；
+- 复刻进项目的新组件放 `src/components/ui/`（基础）或按页面就近放置（组合件），
+  与既有组件同等待遇（可改、可测）；
+- beUI 的主题 tokens 与本项目 Nova 预设（§6.5.3）不同——**Nova 优先**：颜色/间距用
+  本项目 tokens，只借鉴 beUI 的结构与动效。
 
 ### 6.5.2 技术栈（**已锁定，不得擅自替换**）
 
