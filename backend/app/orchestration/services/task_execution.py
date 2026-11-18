@@ -796,13 +796,16 @@ class TaskExecution:
         if task is None:
             return
         credential_id = getattr(task, "llm_credential_id", None)
+        # 平台任务（无凭据）也允许有用户路由（Issue #22 延伸）：
+        # 主模型走平台默认，但 extract 等节点可路由到用户的本地/免费凭据。
+        client: Any | None = None
+        user_routes: dict[str, Any] = {}
         if credential_id is None:
             # 凭据被删除时外键 SET NULL，但快照还在。**不能**因此静默回落到平台模型：
             # 用户以为在用自己的 key，实际花的是平台的钱。直接失败并说明原因。
             snapshot = getattr(task, "model_snapshot", None)
             if isinstance(snapshot, dict) and snapshot.get("is_byok"):
                 raise LLMException("任务指定的模型凭据已被删除，无法继续；请新建任务或改用平台模型")
-            return
 
         from app.core.exceptions import AppException
         from app.llm.byok import get_credential_resolver
@@ -810,13 +813,13 @@ class TaskExecution:
 
         try:
             async with self._session_factory() as session:
-                client = await get_credential_resolver().resolve(
-                    session, task.user_id, credential_id
-                )
+                if credential_id is not None:
+                    client = await get_credential_resolver().resolve(
+                        session, task.user_id, credential_id
+                    )
                 # 用户级节点路由（Issue #22 延伸）：「我的模型」页配置的
                 # (node_type → 凭据) 逐条解析为客户端；解析失败的路由**跳过并
                 # 留痕**而不是整体失败——路由是省钱优化，不该卡死任务主链路。
-                user_routes: dict[str, Any] = {}
                 for route in await self._load_user_routes(session, task.user_id):
                     try:
                         user_routes[route["node_type"]] = await get_credential_resolver().resolve(
@@ -832,7 +835,8 @@ class TaskExecution:
         except AppException as exc:
             raise LLMException(f"任务指定的模型凭据不可用：{exc.message}") from exc
 
-        bind_llm_client(client)
+        if client is not None:
+            bind_llm_client(client)
         bind_user_routes(user_routes)
         if user_routes:
             logger.info(
@@ -844,8 +848,8 @@ class TaskExecution:
             "task_llm_bound",
             task_id=str(task.id),
             credential_id=str(credential_id),
-            provider=client.provider,
-            model=client.model,
+            provider=client.provider if client else "platform",
+            model=client.model if client else "(platform default)",
         )
 
     async def _plan(self, task_id: UUID, *, base_version: int | None = None) -> None:
