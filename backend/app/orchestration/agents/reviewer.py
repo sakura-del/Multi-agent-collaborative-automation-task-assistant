@@ -401,19 +401,25 @@ class ReviewerAgent(BaseAgent):
             )
             for local_no, item in pairs:
                 url = str(item.source_url) if getattr(item, "source_url", None) else ""
-                if url and url not in citations:
+                # 登记键不能只认 URL：知识库 chunk 证据往往没有 URL（离线任务尤其如此），
+                # 用 doc_id:chunk_id 兜底——否则这些证据的局部编号拿不到全局映射，
+                # 正文 [E#] 重写不生效（Issue #17 三次实测：[E1]~[E16] vs 8 条）。
+                key = (
+                    url or f"doc:{item.doc_id}:chunk:{item.chunk_id}" or f"text:{item.excerpt[:40]}"
+                )
+                if key and key not in citations:
                     # 首次出现：登记并分配全局编号
-                    citations[url] = {
+                    citations[key] = {
                         "title": item.excerpt[:60],
-                        "source_url": url,
+                        "source_url": url or None,
                         "doc_id": str(item.doc_id) if item.doc_id else None,
                         "chunk_id": str(item.chunk_id) if item.chunk_id else None,
                     }
-                    url_to_global[url] = len(citations)
+                    url_to_global[key] = len(citations)
                 # 同一文献的多个 chunk 共享 URL——**每个**局部编号都要映射到
-                # 全局号，否则这些 chunk 的 [E#] 重写不生效（Issue #17 二次实测）
-                if url:
-                    local_to_global[(node_id, local_no)] = url_to_global[url]
+                # 全局号，否则这些 chunk 的 [E#] 重写不生效
+                if key:
+                    local_to_global[(node_id, local_no)] = url_to_global[key]
             # search 节点的 artifacts 带完整文献元数据（title/authors/DOI）
             for artifact in result.artifacts:
                 url = str(artifact.get("source_url") or "")
