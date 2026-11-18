@@ -148,3 +148,45 @@ async def test_failure_does_not_leak_slot(monkeypatch: pytest.MonkeyPatch) -> No
         healthy.chat([Message(role="user", content="still works")]), timeout=3.0
     )
     assert result.content == "ok"
+
+
+class TestPerGroupLimits:
+    """路由感知并发（Issue #22）：不同并发组各自限流，互不挤占。
+
+    本地 vLLM 可 4 并发、共享免费池只能 1——单一全局闸只能取最小值。
+    """
+
+    @pytest.mark.asyncio
+    async def test_groups_have_independent_semaphores(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        throttle.reset_for_tests()
+
+        def fake_get_settings() -> Any:
+            return SimpleNamespace(
+                llm=SimpleNamespace(
+                    max_concurrency=1,
+                    routing_targets={"local": {"max_concurrency": 3}},
+                )
+            )
+
+        monkeypatch.setattr("app.core.config.get_settings", fake_get_settings)
+
+        entered: list[str] = []
+
+        async def hold(group: str, seconds: float = 0.05) -> None:
+            async with throttle.llm_slot(group=group):
+                entered.append(group)
+                await asyncio.sleep(seconds)
+
+        # 默认组上限 1：两个并发只能顺序进入；local 组上限 3：可以并发
+        start = asyncio.get_running_loop().time()
+        await asyncio.gather(hold("default"), hold("default"))
+        serial_time = asyncio.get_running_loop().time() - start
+        assert serial_time >= 0.09, f"默认组未串行: {serial_time:.3f}s"
+
+        start = asyncio.get_running_loop().time()
+        await asyncio.gather(hold("local"), hold("local"))
+        parallel_time = asyncio.get_running_loop().time() - start
+        assert parallel_time < 0.09, f"local 组未并发: {parallel_time:.3f}s"
+        throttle.reset_for_tests()

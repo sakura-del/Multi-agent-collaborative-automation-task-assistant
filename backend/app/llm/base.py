@@ -22,9 +22,11 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from app.core.logging import get_logger
+from app.core.metrics import inc_counter
 from app.llm.models import LLMResponse, Message, ToolSchema
 from app.llm.router import current_node_type, get_model_router
 from app.llm.throttle import llm_slot
+from app.llm.usage_ledger import record_usage
 
 logger = get_logger(__name__)
 
@@ -61,6 +63,8 @@ class BaseLLM(ABC):
         self.max_retries = max_retries
         self.default_temperature = default_temperature
         self.default_max_tokens = default_max_tokens
+        # 并发组（Issue #22 路由感知并发）：路由目标是独立组，默认组为 "default"
+        self.concurrency_group = "default"
         # 延迟初始化：客户端在首次调用时才创建
         self._client: Any = None
         self._initialized = False
@@ -145,7 +149,11 @@ class BaseLLM(ABC):
             try:
                 # 全局闸门：跨任务/跨实例共享的进程级并发上限（见 app/llm/throttle.py）。
                 # 只包住单次原始调用——重试间隔不占槽，避免排队的请求被无效请求堵住。
-                async with llm_slot(provider=self.provider, model=self.model):
+                async with llm_slot(
+                    provider=self.provider,
+                    model=self.model,
+                    group=self.concurrency_group,
+                ):
                     response = await self._raw_chat(
                         messages,
                         tools=tools,
@@ -167,6 +175,31 @@ class BaseLLM(ABC):
                     finish_reason=response.finish_reason,
                     has_tool_calls=bool(response.tool_calls),
                 )
+                # 任务级账本（Issue #16）：规划/校验/复盘/重试/路由调用统一入账
+                record_usage(response.usage)
+                # 前缀缓存可观测（Issue #22）：按模型拆 hit / miss / 未返回
+                model_label = response.model or self.model
+                usage = response.usage
+                if usage.cache_hit_tokens or usage.cache_miss_tokens:
+                    inc_counter(
+                        "maa_llm_tokens",
+                        amount=usage.cache_hit_tokens,
+                        model=model_label,
+                        cache="hit",
+                    )
+                    inc_counter(
+                        "maa_llm_tokens",
+                        amount=usage.cache_miss_tokens,
+                        model=model_label,
+                        cache="miss",
+                    )
+                else:
+                    inc_counter(
+                        "maa_llm_tokens",
+                        amount=usage.prompt_tokens,
+                        model=model_label,
+                        cache="none",
+                    )
                 # 截断留痕：finish_reason=length 说明输出被 max_tokens 砍断，
                 # 会导致 JSON 解析失败/校验不通过，必须显式可观测（Issue #22）
                 if response.finish_reason == "length":

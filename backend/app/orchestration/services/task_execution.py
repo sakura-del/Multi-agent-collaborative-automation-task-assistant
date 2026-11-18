@@ -40,6 +40,7 @@ from app.db.repositories.task import TaskRepository
 from app.knowledge.services.citation_validator import CitationValidator, ReferenceCheckMode
 from app.knowledge.services.context_builder import LiteratureContextBuilder
 from app.knowledge.services.screening_service import ScreeningService, source_of
+from app.llm.usage_ledger import UsageLedger, use_usage_ledger
 from app.orchestration.agents.planner import PlannerAgent
 from app.orchestration.agents.validator import ValidatorAgent
 from app.orchestration.contracts import (
@@ -997,6 +998,11 @@ class TaskExecution:
     # ===== 后台流程：执行 =====
 
     async def _execute(self, task_id: UUID) -> None:
+        """后台执行入口：绑定任务级用量账本（Issue #16）。"""
+        with use_usage_ledger() as ledger:
+            await self._execute_with_ledger(task_id, ledger)
+
+    async def _execute_with_ledger(self, task_id: UUID, ledger: UsageLedger) -> None:
         """后台执行：调度未完成节点 → 复盘 → 完成；支持重启后续跑。"""
         try:
             (
@@ -1042,12 +1048,14 @@ class TaskExecution:
             # 先记账再判断成败：转人工 / 失败路径同样要按已用额度结算，
             # 若放在成功分支里就会漏记（「跑了 30k 然后转人工」被当成 0 用量全额退款）。
             node_results = getattr(result, "node_results", {}) or {}
-            usage = sum_actual_usage(node_results)
+            # 用量取自任务账本（Issue #16）：覆盖规划/校验/重试/路由调用，
+            # 不再依赖节点结果里的 usage（旧口径实测漏计 60%+）。
+            usage = ledger.take()
             await self.add_used_tokens(
                 task_id,
-                usage.total,
-                prompt_tokens=usage.prompt,
-                completion_tokens=usage.completion,
+                usage.total_tokens,
+                prompt_tokens=usage.prompt_tokens,
+                completion_tokens=usage.completion_tokens,
             )
             # 可观测性：节点维度能回答「卡在哪个环节」，成功率只说成/败
             self._record_node_metrics(node_results, _dag_node_types(dag))
@@ -1058,6 +1066,16 @@ class TaskExecution:
 
             await self._start_reviewing(task_id, result)
             await self._finish_reviewing(task_id, result, dag.topological_order())
+            # 复盘段结算（Issue #16）：review 调用发生在上面的记账之后，
+            # 必须再取一次增量补记，否则复盘用量永久丢失。
+            review_usage = ledger.take()
+            if review_usage.total_tokens > 0:
+                await self.add_used_tokens(
+                    task_id,
+                    review_usage.total_tokens,
+                    prompt_tokens=review_usage.prompt_tokens,
+                    completion_tokens=review_usage.completion_tokens,
+                )
         except asyncio.CancelledError:
             logger.info("task_execution_cancelled", task_id=str(task_id))
             raise

@@ -103,6 +103,8 @@ class ModelRouter:
         )
         # 保留配置里的 provider 标签（仅用于日志/观测，不影响协议）
         client.provider = provider
+        # 独立并发组：本地 vLLM 与共享池的并发能力不同（Issue #22）
+        client.concurrency_group = name
         return client
 
     def resolve(self, node_type: str) -> Any:
