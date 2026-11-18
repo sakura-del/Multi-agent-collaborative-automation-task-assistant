@@ -981,7 +981,11 @@ function statusOf(credential: LLMCredentialInfo): {
                     class="h-9 rounded-md border border-border bg-background px-2 text-sm"
                 >
                     <option value="">跟随任务勾选的模型</option>
-                    <option v-for="cred in credentials" :key="cred.id" :value="cred.id">
+                    <option
+                        v-for="cred in credentials"
+                        :key="cred.credential_id"
+                        :value="cred.credential_id"
+                    >
                         {{ cred.name }}（{{ cred.model }}）
                     </option>
                 </select>
