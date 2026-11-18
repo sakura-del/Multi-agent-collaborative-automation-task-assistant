@@ -97,13 +97,21 @@ def apply_model_profile(payload: dict[str, Any], model: str) -> None:
 
     当前只处理「思考开关」：`qwen3.8-27b-uncensored-fp8` 等模型思考默认开启，
     不关会把 `max_tokens` 烧光、正文为空（实测 2000 token 全被 reasoning 吃掉）。
-    调用方已显式传 `chat_template_kwargs` 时不覆盖（尊重调用者意图）。
+
+    ⚠️ 必须放进 `extra_body`，不能顶格：openai SDK 的 `create()` 是显式签名，
+    顶层 `chat_template_kwargs` 会直接抛 `unexpected keyword argument`
+    （2026-11-18 生产实测，用户报告「顶格写法无效」同源）。
+    调用方已显式配置时用 `setdefault` 保留其意图。
     """
     profile = profile_for(model)
     if not profile.disable_thinking:
         return
-    template_kwargs = payload.get("chat_template_kwargs")
+    extra_body = payload.get("extra_body")
+    if not isinstance(extra_body, dict):
+        extra_body = {}
+    template_kwargs = extra_body.get("chat_template_kwargs")
     if not isinstance(template_kwargs, dict):
         template_kwargs = {}
     template_kwargs.setdefault("enable_thinking", False)
-    payload["chat_template_kwargs"] = template_kwargs
+    extra_body["chat_template_kwargs"] = template_kwargs
+    payload["extra_body"] = extra_body

@@ -34,17 +34,19 @@ class TestProfileLookup:
 
 
 class TestApplyProfile:
-    def test_thinking_disabled_for_local_qwen(self) -> None:
+    def test_thinking_disabled_via_extra_body(self) -> None:
+        # openai SDK 拒绝顶层 chat_template_kwargs，必须走 extra_body
         payload: dict = {}
         apply_model_profile(payload, "qwen3.8-27b-uncensored-fp8")
-        assert payload["chat_template_kwargs"]["enable_thinking"] is False
+        assert "chat_template_kwargs" not in payload
+        assert payload["extra_body"]["chat_template_kwargs"]["enable_thinking"] is False
 
     def test_caller_override_wins(self) -> None:
-        payload = {"chat_template_kwargs": {"enable_thinking": True}}
+        payload = {"extra_body": {"chat_template_kwargs": {"enable_thinking": True}}}
         apply_model_profile(payload, "qwen3.8-27b-uncensored-fp8")
-        assert payload["chat_template_kwargs"]["enable_thinking"] is True
+        assert payload["extra_body"]["chat_template_kwargs"]["enable_thinking"] is True
 
     def test_no_injection_for_normal_models(self) -> None:
         payload: dict = {}
         apply_model_profile(payload, "deepseek-flash")
-        assert "chat_template_kwargs" not in payload
+        assert "extra_body" not in payload
