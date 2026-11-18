@@ -27,6 +27,7 @@ from app.core.exceptions import HumanActionRequiredError
 from app.core.logging import get_logger
 from app.knowledge.services.citation_validator import ContentRole
 from app.knowledge.services.reference_verifier import candidates_from_artifacts
+from app.llm.router import node_type_scope
 from app.orchestration.agents.planner import PlannerAgent, PlannerPlanInvalidError
 from app.orchestration.base_agent import BaseAgent
 from app.orchestration.contracts import (
@@ -204,7 +205,9 @@ class LiteratureReviewWorkflow:
             raise HumanActionRequiredError("任务缺少可规划的需求描述")
 
         try:
-            plan = await self._request_plan(task, requirement, repair)
+            # 节点级模型路由（混合处理）：规划按 "planner" 选路
+            with node_type_scope("planner"):
+                plan = await self._request_plan(task, requirement, repair)
             self.validate_plan_contract(plan)
         except (
             PlannerPlanInvalidError,
@@ -525,18 +528,20 @@ class LiteratureReviewWorkflow:
             if self._executor is None:
                 raise HumanActionRequiredError("缺少执行 Agent")
             evidence = [Evidence.model_validate(item) for item in prepared_node["evidence"]]
-            result = await self._executor.execute_result(
-                node_id=plan_node.id,
-                title=plan_node.title,
-                description=prepared_node["description"],
-                evidence=evidence,
-                evidence_text=prepared_node["evidence_context"],
-                dependency_outputs=self._rebased_dependency_outputs(
-                    dependency_outputs or {}, evidence
-                ),
-                validation_feedback=validation_feedback,
-                trace_id=self._trace_id(task),
-            )
+            # 节点级模型路由（混合处理）：声明当前节点类型，供 LLM 层选路
+            with node_type_scope(plan_node.type):
+                result = await self._executor.execute_result(
+                    node_id=plan_node.id,
+                    title=plan_node.title,
+                    description=prepared_node["description"],
+                    evidence=evidence,
+                    evidence_text=prepared_node["evidence_context"],
+                    dependency_outputs=self._rebased_dependency_outputs(
+                        dependency_outputs or {}, evidence
+                    ),
+                    validation_feedback=validation_feedback,
+                    trace_id=self._trace_id(task),
+                )
             # Issue #7：标注节点类型，供复盘区分作者正文与机械汇总
             result.node_type = plan_node.type
             return result
@@ -650,7 +655,9 @@ class LiteratureReviewWorkflow:
             request["reference_verifications"] = [
                 verification.model_dump(mode="json") for verification in verifications
             ]
-        payload = await self._validator.execute(request)
+        # 节点级模型路由（混合处理）：校验节点按 "validate" 选路
+        with node_type_scope("validate"):
+            payload = await self._validator.execute(request)
         if isinstance(payload, ValidationReport):
             return payload
         known_fields = set(ValidationReport.model_fields)

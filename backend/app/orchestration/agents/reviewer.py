@@ -521,6 +521,35 @@ class ReviewerAgent(BaseAgent):
             reindexed.append({"index": position, **rest})
         return reindexed
 
+    @staticmethod
+    def _trim_review_items(items: list[Any], *, per_item: int, total: int) -> list[dict[str, Any]]:
+        """裁剪复盘输入：单项截断 + 总量预算（Issue #22）。
+
+        节点结果全量拼接会把 review prompt 顶到 4.8 万 tokens；复盘只需要
+        结论级信息，超出预算的条目降级为占位说明，避免无意义的长输入成本。
+        """
+        trimmed: list[dict[str, Any]] = []
+        used = 0
+        for item in items:
+            payload = item.model_dump(mode="json") if hasattr(item, "model_dump") else dict(item)
+            for key in ("content", "result"):
+                value = payload.get(key)
+                if isinstance(value, str) and len(value) > per_item:
+                    payload[key] = value[:per_item] + "…（已截断）"
+            size = len(json.dumps(payload, ensure_ascii=False))
+            if used + size > total:
+                trimmed.append(
+                    {
+                        "node_id": str(payload.get("node_id") or ""),
+                        "truncated": True,
+                        "note": "复盘输入超预算，该条仅保留占位（正文见任务产物）",
+                    }
+                )
+                continue
+            used += size
+            trimmed.append(payload)
+        return trimmed
+
     async def _polish_literature_review(
         self,
         topic: str,
@@ -536,13 +565,18 @@ class ReviewerAgent(BaseAgent):
         if llm is None:  # 无 LLM 时直接跳过润色（调用方已做确定性组装）
             return {}
 
+        # 输入裁剪（Issue #22）：节点结果全量拼接实测 47,954 tokens，
+        # 单项截断 + 总量预算把复盘输入压到可控范围（正文已在 final_output 里，
+        # 复盘只需要结论级信息）。
         prompt = render_reviewer_prompt(
             topic=topic,
             results_json=json.dumps(
-                [item.model_dump(mode="json") for item in results], ensure_ascii=False
+                self._trim_review_items(results, per_item=1200, total=24000),
+                ensure_ascii=False,
             ),
             validations_json=json.dumps(
-                [item.model_dump(mode="json") for item in validations], ensure_ascii=False
+                self._trim_review_items(validations, per_item=500, total=6000),
+                ensure_ascii=False,
             ),
             event_stats_json=json.dumps(event_stats, ensure_ascii=False),
         )
@@ -550,19 +584,22 @@ class ReviewerAgent(BaseAgent):
         system_text, user_text = split_prompt(prompt)
         try:
             from app.core.config import get_settings
+            from app.llm.router import node_type_scope
 
-            response = await llm.chat(
-                [
-                    Message(
-                        role=MessageRole.SYSTEM,
-                        content=system_text or "你是文献综述复盘专家，只输出 JSON。",
-                    ),
-                    Message(role=MessageRole.USER, content=user_text or prompt),
-                ],
-                temperature=0.2,
-                # 输出上限（Issue #22）：摘要+局限性 JSON，防止长篇复述
-                max_tokens=get_settings().llm.max_tokens_reviewer,
-            )
+            # 节点级模型路由（混合处理）：复盘按 "review" 选路
+            with node_type_scope("review"):
+                response = await llm.chat(
+                    [
+                        Message(
+                            role=MessageRole.SYSTEM,
+                            content=system_text or "你是文献综述复盘专家，只输出 JSON。",
+                        ),
+                        Message(role=MessageRole.USER, content=user_text or prompt),
+                    ],
+                    temperature=0.2,
+                    # 输出上限（Issue #22）：摘要+局限性 JSON，防止长篇复述
+                    max_tokens=get_settings().llm.max_tokens_reviewer,
+                )
             payload = json.loads(response.content or "{}")
         except Exception as exc:
             logger.warning("reviewer_polish_failed", error=str(exc))

@@ -23,6 +23,7 @@ from typing import Any
 
 from app.core.logging import get_logger
 from app.llm.models import LLMResponse, Message, ToolSchema
+from app.llm.router import current_node_type, get_model_router
 from app.llm.throttle import llm_slot
 
 logger = get_logger(__name__)
@@ -112,6 +113,26 @@ class BaseLLM(ABC):
 
         上层 Agent 应调用此方法，而非 _raw_chat。
         """
+        # 节点级模型路由（混合处理）：命中配置时委派给目标客户端。
+        # 目标客户端再次进入时 target is self，不会递归（见 app/llm/router.py）。
+        node_type = current_node_type()
+        if node_type:
+            routed = get_model_router().resolve(node_type)
+            if routed is not None and routed is not self:
+                logger.info(
+                    "llm_routed",
+                    node_type=node_type,
+                    target_model=getattr(routed, "model", ""),
+                    target_provider=getattr(routed, "provider", ""),
+                )
+                return await routed.chat(
+                    messages,
+                    tools=tools,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    **kwargs,
+                )
+
         # 确保客户端已初始化（延迟创建）
         self._ensure_client()
 

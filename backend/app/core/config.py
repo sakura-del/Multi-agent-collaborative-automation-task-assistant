@@ -161,6 +161,15 @@ class LLMConfig(BaseModel):
     retry_backoff_base: float = Field(default=3.0, gt=0.0)
     retry_backoff_factor: float = Field(default=2.0, gt=1.0)
     retry_backoff_cap: float = Field(default=60.0, gt=0.0)
+    # ===== 节点级模型路由（混合处理，不单靠一个 API）=====
+    # node_routing：节点类型（planner/search/extract/write/validate/review）→ 目标名；
+    # 未命中的节点使用任务选择的模型（默认行为，向后兼容）。
+    # routing_targets：目标名 → {provider, model, base_url, api_key, request_timeout, max_retries}。
+    # .env 用 JSON 字符串配置，避免嵌套键解析歧义：
+    #   LLM__NODE_ROUTING={"extract":"local","validate":"local","review":"local"}
+    #   LLM__ROUTING_TARGETS={"local":{"provider":"custom","model":"...","base_url":"...","api_key":"..."}}
+    node_routing: dict[str, str] = Field(default_factory=dict)
+    routing_targets: dict[str, dict[str, Any]] = Field(default_factory=dict)
     cost_budget: LLMCostBudget = LLMCostBudget()
     fallback_chain: list[LLMFallbackItem] = Field(default_factory=list)
 

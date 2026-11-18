@@ -16,6 +16,7 @@ from typing import Any
 from openai import AsyncOpenAI
 
 from app.llm.base import BaseLLM
+from app.llm.model_profiles import apply_model_profile
 from app.llm.models import LLMResponse, Message, MessageRole, ToolCall, Usage
 
 
@@ -167,6 +168,9 @@ class OpenAIAdapter(BaseLLM):
             payload["tools"] = [self._tool_to_dict(t) for t in tools]
         # 透传额外参数（如 top_p、stop 等），避免接口扩展时频繁改签名
         payload.update(kwargs)
+        # 模型能力画像：思考默认开启且会吃光 max_tokens 的模型（如本地
+        # qwen3.8-27b），必须在请求级显式关闭（见 app/llm/model_profiles.py）
+        apply_model_profile(payload, self.model)
 
         response = await client.chat.completions.create(**payload)
         return self._parse_response(response)
