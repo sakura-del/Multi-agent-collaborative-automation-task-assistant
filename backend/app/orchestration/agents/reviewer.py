@@ -401,18 +401,19 @@ class ReviewerAgent(BaseAgent):
             )
             for local_no, item in pairs:
                 url = str(item.source_url) if getattr(item, "source_url", None) else ""
-                _register_evidence(
-                    url,
-                    {
+                if url and url not in citations:
+                    # 首次出现：登记并分配全局编号
+                    citations[url] = {
                         "title": item.excerpt[:60],
                         "source_url": url,
                         "doc_id": str(item.doc_id) if item.doc_id else None,
                         "chunk_id": str(item.chunk_id) if item.chunk_id else None,
-                    },
-                )
-                global_no = url_to_global.get(url)
-                if url and global_no is not None:
-                    local_to_global[(node_id, local_no)] = global_no
+                    }
+                    url_to_global[url] = len(citations)
+                # 同一文献的多个 chunk 共享 URL——**每个**局部编号都要映射到
+                # 全局号，否则这些 chunk 的 [E#] 重写不生效（Issue #17 二次实测）
+                if url:
+                    local_to_global[(node_id, local_no)] = url_to_global[url]
             # search 节点的 artifacts 带完整文献元数据（title/authors/DOI）
             for artifact in result.artifacts:
                 url = str(artifact.get("source_url") or "")
