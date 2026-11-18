@@ -373,7 +373,8 @@ class ReviewerAgent(BaseAgent):
         topic = str(input_data.get("topic") or "文献综述")
         event_stats = dict(input_data.get("event_stats") or {})
 
-        # Issue #17 诊断（临时）：实证复盘收到的证据形状
+        # 证据形状留痕（Issue #17）：search 节点 ev=0（走 artifacts）、
+        # write 节点的 chunk 证据 URL 可能为空——这是排查「编号脱节」的关键观测点
         logger.info(
             "reviewer_results_shape",
             shapes=[
