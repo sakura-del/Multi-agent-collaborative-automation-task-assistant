@@ -57,6 +57,10 @@ llm:
   default_model: "workbuddy-ai/deepseek-v4.1-flash"
   request_timeout: 30
   max_retries: 3
+  # 全局 LLM 并发上限（进程级）。任务内 DAG 并发 + N 个任务并发叠加后，
+  # 上游瞬时请求数 = 任务数 × 最多 5。这里是唯一的总闸，跨任务/跨实例生效。
+  # 免费/低配额 key：环境变量 LLM__MAX_CONCURRENCY=1 完全串行（慢但不会 429）。
+  max_concurrency: 3
   # 分级使用策略（阶段0任务4）
   cost_budget:
     daily_token_limit: 1000000

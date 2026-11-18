@@ -141,6 +141,11 @@ class LLMConfig(BaseModel):
     # 30s 会直接 "Request timed out."；90s 能覆盖慢模型又不至于无限占用 worker。
     request_timeout: int = 90
     max_retries: int = 3
+    # 全局 LLM 调用并发上限（进程级，跨任务/跨实例共享；见 app/llm/throttle.py）。
+    # 任务调度器本身按 DAG 并行（单任务最多 5 个节点），N 个任务并发时
+    # 上游瞬时请求数 = N × 5 —— 必须由这一层兜住，否则任何 key 都会被打爆。
+    # 免费/低配额 key 建议经环境变量 LLM__MAX_CONCURRENCY=1 完全串行。
+    max_concurrency: int = Field(default=3, ge=1)
     cost_budget: LLMCostBudget = LLMCostBudget()
     fallback_chain: list[LLMFallbackItem] = Field(default_factory=list)
 

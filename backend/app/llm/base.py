@@ -22,6 +22,7 @@ from typing import Any
 
 from app.core.logging import get_logger
 from app.llm.models import LLMResponse, Message, ToolSchema
+from app.llm.throttle import llm_slot
 
 logger = get_logger(__name__)
 
@@ -120,13 +121,16 @@ class BaseLLM(ABC):
         # 手动重试循环：便于区分可恢复与不可恢复异常
         for attempt in range(1, self.max_retries + 1):
             try:
-                response = await self._raw_chat(
-                    messages,
-                    tools=tools,
-                    temperature=temp,
-                    max_tokens=tokens,
-                    **kwargs,
-                )
+                # 全局闸门：跨任务/跨实例共享的进程级并发上限（见 app/llm/throttle.py）。
+                # 只包住单次原始调用——重试间隔不占槽，避免排队的请求被无效请求堵住。
+                async with llm_slot(provider=self.provider, model=self.model):
+                    response = await self._raw_chat(
+                        messages,
+                        tools=tools,
+                        temperature=temp,
+                        max_tokens=tokens,
+                        **kwargs,
+                    )
                 # 记录用量与调用元信息，供成本追踪
                 logger.info(
                     "llm_chat_ok",
