@@ -530,7 +530,7 @@ class ReviewerAgent(BaseAgent):
     ) -> dict[str, Any]:
         """可选 LLM 润色：失败时静默回退到确定性组装。"""
         # 方法内导入：避免 agents 包与 workflows 包互相导入
-        from app.orchestration.workflows.prompts import render_reviewer_prompt
+        from app.orchestration.workflows.prompts import render_reviewer_prompt, split_prompt
 
         llm = self.llm
         if llm is None:  # 无 LLM 时直接跳过润色（调用方已做确定性组装）
@@ -546,6 +546,8 @@ class ReviewerAgent(BaseAgent):
             ),
             event_stats_json=json.dumps(event_stats, ensure_ascii=False),
         )
+        # 静态规则进 system：跨任务共享复盘缓存前缀（Issue #22）
+        system_text, user_text = split_prompt(prompt)
         try:
             from app.core.config import get_settings
 
@@ -553,9 +555,9 @@ class ReviewerAgent(BaseAgent):
                 [
                     Message(
                         role=MessageRole.SYSTEM,
-                        content="你是文献综述复盘专家，只输出 JSON。",
+                        content=system_text or "你是文献综述复盘专家，只输出 JSON。",
                     ),
-                    Message(role=MessageRole.USER, content=prompt),
+                    Message(role=MessageRole.USER, content=user_text or prompt),
                 ],
                 temperature=0.2,
                 # 输出上限（Issue #22）：摘要+局限性 JSON，防止长篇复述

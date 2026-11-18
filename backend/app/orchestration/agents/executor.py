@@ -129,7 +129,7 @@ class ExecutorAgent(BaseAgent):
         else:
             # 方法内导入：workflows 包 __init__ 反向依赖 agents，避免导入环
             from app.core.config import get_settings
-            from app.orchestration.workflows.prompts import render_executor_prompt
+            from app.orchestration.workflows.prompts import render_executor_prompt, split_prompt
 
             prompt = render_executor_prompt(
                 title=title,
@@ -140,13 +140,15 @@ class ExecutorAgent(BaseAgent):
                     f"\n修订要求：{validation_feedback}" if validation_feedback else ""
                 ),
             )
+            # 静态规则进 system：7 个节点共享同一缓存前缀（Issue #22，实测必需）
+            system_text, user_text = split_prompt(prompt)
             response = await self.llm.chat(
                 [
                     Message(
                         role=MessageRole.SYSTEM,
-                        content="你是文献综述执行 Agent，只输出正文内容。",
+                        content=system_text or "你是文献综述执行 Agent，只输出正文内容。",
                     ),
-                    Message(role=MessageRole.USER, content=prompt),
+                    Message(role=MessageRole.USER, content=user_text or prompt),
                 ],
                 temperature=0.2,
                 # 输出上限（Issue #22）：模板已限字数，这里做硬兜底

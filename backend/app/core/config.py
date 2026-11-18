@@ -150,10 +150,10 @@ class LLMConfig(BaseModel):
     # 目的：遏制「模型自由发挥」的输出成本（实测单节点峰值 4.2k tokens）。
     # ⚠️ 部分推理型/融合模型会把思考 token 计入 max_tokens（qiniu conatus 实测
     # max_tokens=20 时 content 全被 reasoning 吃掉），因此下限不可压太狠。
-    max_tokens_planner: int = Field(default=2200, ge=256)
-    max_tokens_executor: int = Field(default=2000, ge=300)
-    max_tokens_validator: int = Field(default=1000, ge=256)
-    max_tokens_reviewer: int = Field(default=1400, ge=256)
+    max_tokens_planner: int = Field(default=3600, ge=256)
+    max_tokens_executor: int = Field(default=2600, ge=300)
+    max_tokens_validator: int = Field(default=1600, ge=256)
+    max_tokens_reviewer: int = Field(default=1800, ge=256)
     # ===== 重试退避（Issue #22 / 低并发共享池兼容）=====
     # 共享免费池（并发≈1、RPM 极低）的 429 只能靠退避穿过：
     # 等待 = min(base × factor^(n-1), cap)，且厂商 Retry-After 优先。

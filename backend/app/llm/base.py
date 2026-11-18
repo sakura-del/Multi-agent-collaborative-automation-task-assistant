@@ -146,6 +146,16 @@ class BaseLLM(ABC):
                     finish_reason=response.finish_reason,
                     has_tool_calls=bool(response.tool_calls),
                 )
+                # 截断留痕：finish_reason=length 说明输出被 max_tokens 砍断，
+                # 会导致 JSON 解析失败/校验不通过，必须显式可观测（Issue #22）
+                if response.finish_reason == "length":
+                    logger.warning(
+                        "llm_chat_truncated",
+                        provider=self.provider,
+                        model=response.model or self.model,
+                        max_tokens=tokens,
+                        completion_tokens=response.usage.completion_tokens,
+                    )
                 return response
             except Exception as exc:
                 last_exc = exc

@@ -16,6 +16,7 @@ from app.orchestration.workflows.prompts import (
     render_executor_prompt,
     render_planner_prompt,
     render_reviewer_prompt,
+    split_prompt,
 )
 
 # 模板中静态块与动态块的分隔标记（三份模板统一使用 `---` 分隔）
@@ -98,3 +99,33 @@ class TestReviewerPromptPrefix:
         )
         assert "唯一主题-QWERTY" not in _static_part(rendered)
         assert "摘要 150-300 字" in _static_part(rendered)
+
+
+class TestSplitPrompt:
+    """split_prompt 把静态规则送入 system message（缓存锚点）。
+
+    生产实测（任务 3ff878f5）：静态规则留在 user 开头时，7 个节点间 cache_hit=0；
+    必须作为 system 才能被 DeepSeek 前缀缓存复用。
+    """
+
+    def test_split_returns_static_as_system(self) -> None:
+        rendered = render_executor_prompt(title="T", description="D", evidence_text="[E1] X")
+        system_text, user_text = split_prompt(rendered)
+        assert system_text.startswith("你是文献综述执行 Agent")
+        assert "T" not in system_text and "[E1] X" not in system_text
+        assert "子任务标题" in user_text
+        assert "[E1] X" in user_text
+
+    def test_split_system_is_identical_across_nodes(self) -> None:
+        a_sys, _ = split_prompt(
+            render_executor_prompt(title="A", description="da", evidence_text="[E1] x")
+        )
+        b_sys, _ = split_prompt(
+            render_executor_prompt(title="B", description="db", evidence_text="[E2] y")
+        )
+        assert a_sys == b_sys, "system 前缀不一致，缓存无法复用"
+
+    def test_split_without_separator_falls_back(self) -> None:
+        system_text, user_text = split_prompt("没有分隔符的旧模板内容")
+        assert system_text == ""
+        assert user_text == "没有分隔符的旧模板内容"
