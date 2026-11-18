@@ -123,6 +123,12 @@ class ExecutionResult(BaseModel):
     node_id: str
     content: str
     evidence: list[Evidence] = Field(default_factory=list)
+    #: 与 ``evidence`` 一一对应的**节点局部**引用编号（Issue #17）。
+    #:
+    #: executor 只保留被正文引用的证据，但正文里的 [E#] 是局部编号——
+    #: 复盘要把它重写成全局编号，就必须知道每条证据在节点证据池里的原编号。
+    #: 空列表 = 历史负载（复盘退化为按列表顺序编号）。
+    cited_indices: list[int] = Field(default_factory=list)
     artifacts: list[dict[str, Any]] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     duration_ms: int = Field(ge=0)

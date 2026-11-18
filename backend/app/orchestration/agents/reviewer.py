@@ -92,6 +92,40 @@ def _verification_line(summary: Mapping[str, Any]) -> str:
     )
 
 
+def _renumber_citations(
+    content: str,
+    node_id: str,
+    local_to_global: dict[tuple[str, int], int],
+) -> str:
+    """把节点正文的局部 [E#] 重写成全局编号（Issue #17）。
+
+    ## 为什么必须重写
+
+    每个节点的证据池各自从 [E1] 编号，正文拼接后 [E18] 可能与参考文献
+    第 18 条毫无关系——结果页「引用可追溯性 100」与「暂无/对不上参考文献」
+    同屏出现，就是这里的编号语义断裂。
+
+    ## 映射怎么建
+
+    executor 现在随 ExecutionResult 返回 `cited_indices`（正文引用的
+    节点证据池原编号，与 `evidence` 一一对应）。第一次遇到某个 URL 时
+    分配全局编号；同一节点再次引用同一 URL 保持一致。
+
+    历史负载没有 `cited_indices`：退化按 evidence 列表顺序当局部编号。
+    正文引用了映射里不存在的编号（跨节点幻觉，正常流程会被校验拦下）
+    时保留原编号——诚实优于静默篡改。
+    """
+    mapping = {n: g for (nid, n), g in local_to_global.items() if nid == node_id}
+    if not mapping:
+        return content
+
+    def _replace(match: re.Match[str]) -> str:
+        number = int(match.group(1))
+        return f"[E{mapping.get(number, number)}]"
+
+    return re.sub(r"\[E(\d+)\]", _replace, content)
+
+
 def _contributes_to_body(result: Any) -> bool:
     """该节点内容是否应进入复盘正文（Issue #7）。
 
@@ -341,30 +375,63 @@ class ReviewerAgent(BaseAgent):
 
         body_parts: list[str] = []
         citations: dict[str, dict[str, Any]] = {}
+        #: (node_id, 局部编号) → 全局编号（Issue #17）。
+        #: 各节点的 [E#] 是**节点局部编号**，正文拼接后 [E18] 在 bibliography 里
+        #: 可能不存在——必须把正文引用重写成全局编号，才能与参考文献一一对应。
+        local_to_global: dict[tuple[str, int], int] = {}
+        url_to_global: dict[str, int] = {}
+
+        def _register_evidence(url: str, entry: dict[str, Any]) -> None:
+            # 首次登记即分配全局编号（dict 插入序 = 全局序）；重复 URL 保持一致
+            if url and url not in citations:
+                citations[url] = entry
+                url_to_global[url] = len(citations)
+
         for result in results:
             content = (result.content or "").strip()
-            if content and _contributes_to_body(result):
-                body_parts.append(content)
-            for item in result.evidence:
-                url = str(item.source_url) if item.source_url else ""
-                if url and url not in citations:
-                    citations[url] = {
+            node_id = str(result.node_id)
+
+            # ① 先登记本节点证据 → 建立局部编号 → 全局编号映射
+            evidence_items = list(result.evidence)
+            cited_numbers = [int(n) for n in (result.cited_indices or [])]
+            pairs = (
+                list(zip(cited_numbers, evidence_items, strict=False))
+                if cited_numbers
+                else list(enumerate(evidence_items, start=1))
+            )
+            for local_no, item in pairs:
+                url = str(item.source_url) if getattr(item, "source_url", None) else ""
+                _register_evidence(
+                    url,
+                    {
                         "title": item.excerpt[:60],
                         "source_url": url,
                         "doc_id": str(item.doc_id) if item.doc_id else None,
                         "chunk_id": str(item.chunk_id) if item.chunk_id else None,
-                    }
+                    },
+                )
+                global_no = url_to_global.get(url)
+                if url and global_no is not None:
+                    local_to_global[(node_id, local_no)] = global_no
+            # search 节点的 artifacts 带完整文献元数据（title/authors/DOI）
             for artifact in result.artifacts:
                 url = str(artifact.get("source_url") or "")
                 if url and url not in citations:
-                    citations[url] = {
-                        "title": str(artifact.get("title") or artifact.get("source_id") or ""),
-                        "source_url": url,
-                        "source_id": artifact.get("source_id"),
-                    }
+                    _register_evidence(
+                        url,
+                        {
+                            "title": str(artifact.get("title") or artifact.get("source_id") or ""),
+                            "source_url": url,
+                            "source_id": artifact.get("source_id"),
+                        },
+                    )
                 if url:
                     # Issue #4：补齐 CSL 渲染所需的元数据（作者/年份/语言/DOI/类型）
                     _enrich_reference_entry(citations[url], artifact)
+
+            # ② 再重写正文：局部 [E#] → 全局 [E#]（映射缺号保留原编号，诚实优于篡改）
+            if content and _contributes_to_body(result):
+                body_parts.append(_renumber_citations(content, node_id, local_to_global))
 
         bibliography = [
             {"index": index, **entry} for index, entry in enumerate(citations.values(), start=1)

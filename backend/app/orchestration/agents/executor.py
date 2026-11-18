@@ -191,6 +191,7 @@ class ExecutorAgent(BaseAgent):
             node_id=node_id,
             content=content,
             evidence=[item for index, item in enumerate(evidence_list, start=1) if index in cited],
+            cited_indices=sorted(cited),
             artifacts=[],
             warnings=warnings,
             duration_ms=int((time.perf_counter() - start) * 1000),
