@@ -474,8 +474,14 @@ class TaskExecution:
             task = await self._lock_owned(session, repo, user_id, task_id)
 
             if task.status != TaskStatus.WAITING_APPROVAL.value:
+                # waiting_human 有两种来源，直接说清该怎么办（Issue #23 现场排查耗时）
+                hint = (
+                    "规划已确认过，请到执行页重试失败节点；若规划未生成，请重新规划"
+                    if task.status == TaskStatus.WAITING_HUMAN.value
+                    else "只有等待确认状态才能确认规划"
+                )
                 raise ValidationException(
-                    "任务当前不在等待确认状态",
+                    f"任务当前不在等待确认状态：{hint}",
                     details={"status": task.status},
                 )
             if task.plan_version != revision:

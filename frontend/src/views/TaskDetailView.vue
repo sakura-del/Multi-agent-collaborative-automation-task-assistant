@@ -17,7 +17,11 @@ import TaskToolbar from "@/components/tasks/TaskToolbar.vue";
 import { useAuthStore } from "@/stores/auth";
 import { useTaskStore } from "@/stores/tasks";
 import type { PlanNode, SubtaskStatus, TaskControl, TaskEvent } from "@/api/types";
-import { formatDateTime, needsUserAction } from "@/utils/task-status";
+import {
+  canApprovePlan,
+  formatDateTime,
+  needsUserAction,
+} from "@/utils/task-status";
 import { adviceForWaitingReason, latestWaitingReason } from "@/utils/waiting-reason";
 
 // 任务详情：Tab 由路由 query 驱动（刷新不丢），规划确认与 DAG 联查。
@@ -69,6 +73,16 @@ const needsAction = computed(() => needsUserAction(store.snapshot?.status ?? "cr
  */
 const REPLANNABLE_STATUSES = new Set(["waiting_approval", "waiting_human", "failed"]);
 const canReplan = computed(() => REPLANNABLE_STATUSES.has(store.snapshot?.status ?? ""));
+
+/**
+ * 是否允许「确认规划」：与后端 `approve_plan` 一致，只有 waiting_approval。
+ *
+ * 执行失败转 waiting_human 后旧规划仍在快照里，面板照常渲染——
+ * 若不禁用按钮，用户点击只会拿到 422（Issue #23 实测）。
+ */
+const canApprove = computed(() =>
+  canApprovePlan((store.snapshot?.status ?? "") as Parameters<typeof canApprovePlan>[0]),
+);
 
 function selectTab(tab: TabKey) {
   if (tab === "result" && !resultAvailable.value) {
@@ -361,6 +375,7 @@ onBeforeUnmount(() => {
         :pending="pending"
         :blocked="store.snapshot?.status === 'waiting_human' && !store.snapshot?.plan"
         :can-replan="canReplan"
+        :can-approve="canApprove"
         :error="errorMessage"
         :conflict="conflictMessage"
         @approve="handleApprove"

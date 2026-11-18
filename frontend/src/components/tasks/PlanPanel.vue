@@ -24,8 +24,22 @@ const props = withDefaults(
     blocked?: boolean;
     /** 当前状态是否允许重新规划（与后端白名单一致）；false 时连按钮都不出现。 */
     canReplan?: boolean;
+    /**
+     * 当前状态是否允许确认规划（只有 waiting_approval）。
+     *
+     * false 时按钮不渲染并给出原因：`waiting_human` 下旧规划仍在快照里，
+     * 若照常渲染，用户点了只会拿到 422（Issue #23）。
+     */
+    canApprove?: boolean;
   }>(),
-  { pending: false, error: null, conflict: null, blocked: false, canReplan: true }
+  {
+    pending: false,
+    error: null,
+    conflict: null,
+    blocked: false,
+    canReplan: true,
+    canApprove: true,
+  }
 );
 
 const emit = defineEmits<{ approve: [version: number]; regenerate: [] }>();
@@ -58,6 +72,7 @@ const emit = defineEmits<{ approve: [version: number]; regenerate: [] }>();
             重新生成
           </Button>
           <Button
+            v-if="props.canApprove"
             data-test="plan-approve"
             type="button"
             :disabled="props.pending"
@@ -67,6 +82,15 @@ const emit = defineEmits<{ approve: [version: number]; regenerate: [] }>();
           </Button>
         </div>
       </header>
+
+      <!-- 只有 waiting_approval 能确认；其它状态给出真实原因，而不是让用户点了报错 -->
+      <p
+        v-if="!props.canApprove"
+        class="text-sm text-muted-foreground"
+        data-test="plan-approve-hint"
+      >
+        该规划已确认，任务已暂停在执行阶段；请到「执行」页重试失败的节点，或点上方「重新生成」换一版规划。
+      </p>
 
       <div class="grid gap-3 md:grid-cols-3">
         <Card class="gap-1.5 p-3">
