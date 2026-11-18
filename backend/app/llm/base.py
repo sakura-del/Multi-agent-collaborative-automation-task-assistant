@@ -224,7 +224,9 @@ class BaseLLM(ABC):
                 # 判断是否可重试：超时/限流类异常可重试，其余直接抛出。
                 # 超时类用更小的重试预算（timeout_retries）：对「确定性超时」
                 # 连等 3×90s 只会拉长人工等待（Issue #18 实测 4.5 分钟无效重试）。
-                retry_cap = self.timeout_retries if self._is_timeout(exc) else self.max_retries
+                # timeout_retries 语义与 max_retries 对齐（= 总尝试次数）：
+                # 它是「额外重试次数」，总尝试 = 1 + timeout_retries。
+                retry_cap = self.timeout_retries + 1 if self._is_timeout(exc) else self.max_retries
                 if not self._is_retryable(exc) or attempt >= retry_cap:
                     logger.error(
                         "llm_chat_failed",
