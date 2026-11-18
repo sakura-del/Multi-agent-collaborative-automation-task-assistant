@@ -108,7 +108,16 @@ class ModelRouter:
         return client
 
     def resolve(self, node_type: str) -> Any:
-        """返回该节点类型应使用的客户端；None = 使用任务默认模型。"""
+        """返回该节点类型应使用的客户端；None = 使用任务默认模型。
+
+        优先级：**用户级路由**（`scope.get_user_routes`，用户在「我的模型」页
+        配置，凭据是用户自己的）> 平台 env 路由（`LLM__NODE_ROUTING`）。
+        """
+        from app.llm.scope import get_user_routes
+
+        user_routes = get_user_routes()
+        if user_routes and node_type in user_routes:
+            return user_routes[node_type]
         name = self._routing.get(node_type)
         if not name:
             return None

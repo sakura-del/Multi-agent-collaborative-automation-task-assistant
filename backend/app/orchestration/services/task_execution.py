@@ -771,6 +771,19 @@ class TaskExecution:
         snapshot = getattr(task, "model_snapshot", None)
         return isinstance(snapshot, dict) and bool(snapshot.get("is_byok"))
 
+    async def _load_user_routes(self, session: Any, user_id: UUID) -> list[dict[str, Any]]:
+        """读用户在「我的模型」页配置的节点路由（Issue #22 延伸）。"""
+        from sqlalchemy import select
+
+        from app.db.models.llm_credential import LLMNodeRouting
+
+        result = await session.execute(
+            select(LLMNodeRouting.node_type, LLMNodeRouting.credential_id).where(
+                LLMNodeRouting.user_id == user_id
+            )
+        )
+        return [{"node_type": row.node_type, "credential_id": row.credential_id} for row in result]
+
     async def _bind_task_llm(self, task: Any | None) -> None:
         """把当前后台协程的 LLM 固定到任务指定的凭据（Issue #15 BYOK）。
 
@@ -793,17 +806,40 @@ class TaskExecution:
 
         from app.core.exceptions import AppException
         from app.llm.byok import get_credential_resolver
-        from app.llm.scope import bind_llm_client
+        from app.llm.scope import bind_llm_client, bind_user_routes
 
         try:
             async with self._session_factory() as session:
                 client = await get_credential_resolver().resolve(
                     session, task.user_id, credential_id
                 )
+                # 用户级节点路由（Issue #22 延伸）：「我的模型」页配置的
+                # (node_type → 凭据) 逐条解析为客户端；解析失败的路由**跳过并
+                # 留痕**而不是整体失败——路由是省钱优化，不该卡死任务主链路。
+                user_routes: dict[str, Any] = {}
+                for route in await self._load_user_routes(session, task.user_id):
+                    try:
+                        user_routes[route["node_type"]] = await get_credential_resolver().resolve(
+                            session, task.user_id, route["credential_id"]
+                        )
+                    except AppException as route_exc:
+                        logger.warning(
+                            "user_route_resolve_failed",
+                            task_id=str(task.id),
+                            node_type=route["node_type"],
+                            error=str(route_exc.message),
+                        )
         except AppException as exc:
             raise LLMException(f"任务指定的模型凭据不可用：{exc.message}") from exc
 
         bind_llm_client(client)
+        bind_user_routes(user_routes)
+        if user_routes:
+            logger.info(
+                "user_routes_bound",
+                task_id=str(task.id),
+                routes={k: v.model for k, v in user_routes.items()},
+            )
         logger.info(
             "task_llm_bound",
             task_id=str(task.id),

@@ -34,7 +34,7 @@ from app.db.models.citation_style import CitationStyle
 from app.db.models.email_token import EmailToken
 from app.db.models.feedback import HumanFeedback
 from app.db.models.knowledge import DocChunk, KnowledgeDoc, VectorIndex
-from app.db.models.llm_credential import LLMCredential
+from app.db.models.llm_credential import LLMCredential, LLMNodeRouting
 from app.db.models.log import ExecutionLog, FailureCase, ValidationResult
 from app.db.models.reference_library import ReferenceLibraryItem
 from app.db.models.revoked_token import RevokedRefreshToken
@@ -60,6 +60,7 @@ __all__ = [
     "HumanFeedback",
     "KnowledgeDoc",
     "LLMCredential",
+    "LLMNodeRouting",
     "Plan",
     "ReferenceLibraryItem",
     "RevokedRefreshToken",

@@ -59,3 +59,20 @@ def bind_llm_client(client: Any) -> None:
     否则同一个请求后续的数据库/事件逻辑可能误用用户模型。
     """
     _current_client.set(client)
+
+
+# ===== 用户级节点路由（Issue #22 延伸：混合路由用户化）=====
+
+#: 当前任务的用户级路由：node_type → 已解析的客户端。
+#: 由 `_bind_task_llm` 在绑定主客户端时一并组装（同一 ContextVar 生命周期）。
+_user_routes: ContextVar[dict[str, Any] | None] = ContextVar("veripaper_user_routes", default=None)
+
+
+def bind_user_routes(routes: dict[str, Any]) -> None:
+    """绑定当前任务的用户级节点路由（与 bind_llm_client 同生命周期）。"""
+    _user_routes.set(routes or None)
+
+
+def get_user_routes() -> dict[str, Any] | None:
+    """取当前任务的用户级路由；未配置返回 None。"""
+    return _user_routes.get()

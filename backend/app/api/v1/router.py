@@ -17,6 +17,7 @@ from app.api.v1.endpoints import (
     citation_styles,
     health,
     llm_credentials,
+    llm_routing,
     observability,
     reference_library,
     references,
@@ -43,6 +44,7 @@ api_router.include_router(ws.router)
 api_router.include_router(knowledge_router)
 api_router.include_router(citation_styles.router)
 api_router.include_router(templates.router)
+api_router.include_router(llm_routing.router)
 api_router.include_router(references.router)
 # 引用库（2026-10-26）：导入的 BibTeX/RIS 存下来，可作为任务文献源
 api_router.include_router(reference_library.router)

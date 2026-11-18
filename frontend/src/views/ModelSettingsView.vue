@@ -1,4 +1,9 @@
 <script setup lang="ts">
+import {
+  ROUTABLE_NODE_TYPES,
+  listNodeRouting,
+  updateNodeRouting,
+} from "@/api/llm-routing";
 import { computed, onMounted, ref } from "vue";
 import { Check, Cpu, Pencil, Plus, Star, Trash2, Wifi } from "lucide-vue-next";
 
@@ -45,6 +50,45 @@ import type {
  * `model-search` / `model-count` / `models-no-match`。
  */
 const credentials = ref<LLMCredentialInfo[]>([]);
+
+const routeDraft = ref<Record<string, string>>({});
+const routeSaving = ref(false);
+const routeMessage = ref<string | null>(null);
+
+async function loadRouting() {
+  try {
+    const routes = await listNodeRouting();
+    const draft: Record<string, string> = {};
+    for (const item of ROUTABLE_NODE_TYPES) {
+      draft[item.value] = "";
+    }
+    for (const route of routes) {
+      draft[route.node_type] = route.credential_id;
+    }
+    routeDraft.value = draft;
+  } catch {
+    // 路由加载失败不阻塞凭据页：静默保持「全部跟随任务勾选」
+    routeDraft.value = {};
+  }
+}
+
+async function saveRouting() {
+  routeSaving.value = true;
+  routeMessage.value = null;
+  try {
+    const routes = Object.entries(routeDraft.value)
+      .filter(([, credentialId]) => credentialId !== "")
+      .map(([nodeType, credentialId]) => ({ node_type: nodeType, credential_id: credentialId }));
+    const saved = await updateNodeRouting(routes);
+    routeMessage.value = saved.length
+      ? `已保存 ${saved.length} 条节点路由；未配置的节点继续使用任务勾选的模型。`
+      : "已清空全部节点路由；所有节点继续使用任务勾选的模型。";
+  } catch (error) {
+    routeMessage.value = (error as Error).message || "节点路由保存失败";
+  } finally {
+    routeSaving.value = false;
+  }
+}
 const providers = ref<LLMProviderOption[]>([]);
 const loading = ref(false);
 const error = ref<string | null>(null);
@@ -178,6 +222,7 @@ async function refresh() {
     loading.value = true;
     error.value = null;
     // 两个接口独立失败：厂商目录挂了不该让「已保存的凭据」也消失
+    void loadRouting();
     const [listResult, providerResult] = await Promise.allSettled([
         listLLMCredentials(),
         listLLMProviders(),
@@ -887,5 +932,60 @@ function statusOf(credential: LLMCredentialInfo): {
         <p v-if="!isEmpty" class="mt-3 text-xs text-muted-foreground">
             删除凭据不会影响历史任务：任务里保存了当时使用的模型快照。
         </p>
+    </section>
+
+    <!-- ===== 节点级模型路由（混合路由用户化，Issue #22 延伸）===== -->
+    <section
+        data-test="node-routing"
+        class="mt-6 rounded-xl border border-border bg-card p-5"
+    >
+        <div class="flex flex-wrap items-start justify-between gap-2">
+            <div>
+                <h2 class="text-base font-semibold tracking-tight">节点级模型路由</h2>
+                <p class="mt-1 text-xs leading-5 text-muted-foreground">
+                    给不同阶段指定不同的模型（如：证据抽取与校验走本地免费模型，规划与写作走云端强模型）。
+                    不配置的节点继续使用任务勾选的那一个模型。
+                </p>
+            </div>
+            <Button
+                data-test="routing-save"
+                type="button"
+                variant="outline"
+                size="sm"
+                :disabled="routeSaving"
+                @click="saveRouting"
+            >
+                {{ routeSaving ? "保存中…" : "保存路由" }}
+            </Button>
+        </div>
+        <p
+            v-if="routeMessage"
+            data-test="routing-message"
+            class="mt-2 text-xs text-muted-foreground"
+        >
+            {{ routeMessage }}
+        </p>
+        <div class="mt-4 grid gap-3 md:grid-cols-2">
+            <label
+                v-for="node in ROUTABLE_NODE_TYPES"
+                :key="node.value"
+                class="flex flex-col gap-1"
+                :data-test="`routing-${node.value}`"
+            >
+                <span class="text-xs font-medium text-foreground">
+                    {{ node.label }}
+                    <span class="ml-1 font-normal text-muted-foreground">· {{ node.hint }}</span>
+                </span>
+                <select
+                    v-model="routeDraft[node.value]"
+                    class="h-9 rounded-md border border-border bg-background px-2 text-sm"
+                >
+                    <option value="">跟随任务勾选的模型</option>
+                    <option v-for="cred in credentials" :key="cred.id" :value="cred.id">
+                        {{ cred.name }}（{{ cred.model }}）
+                    </option>
+                </select>
+            </label>
+        </div>
     </section>
 </template>
