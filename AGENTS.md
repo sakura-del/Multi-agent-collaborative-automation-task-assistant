@@ -349,6 +349,22 @@ shadcn CLI 的 `@beui/*` 分发同样面向 React。因此「用 beUI」指的�
 | 通知 | **vue-sonner** | 统一 toast；禁止 `alert()` / 自研 toast |
 | 测试 | Vitest + @vue/test-utils + Playwright | 既有，不变 |
 
+### 已交付的 beUI 复刻（2026-11-18，前端 Pages 已上线）
+
+| 复刻组件 | 文件 | 落点 | beUI 规格 |
+| --- | --- | --- | --- |
+| Agent Plan | `src/components/motion/BeAgentPlan.vue` | 任务详情·规划 Tab（「执行计划」卡片，DAG 降级为折叠详情） | Bot 徽章/状态徽章/分段进度条/竖连线步骤/类型工具徽章/mono 时长/EASE_OUT/reduced-motion |
+| Trace Waterfall | `src/components/motion/BeTraceWaterfall.vue` | 任务详情·执行 Tab（`data-test="trace-waterfall"`） | Header 统计/类型过滤 dimmed/条形按占比定位/失败斜条纹/时间刻度 |
+| Context Meter | `src/components/motion/BeContextMeter.vue` | 我的模型·路由卡片 | 分段覆盖率条（6 段调色板）/大号百分比/分类列表 |
+| Prompt Input | `src/components/motion/BePromptInput.vue` | 导入文献页（attrs 落 textarea，保持 `import-content` E2E 契约） | 自动增高/focus ring/字数统计/Ctrl⌘Enter |
+
+约定：
+
+- 新 beUI 复刻一律放 `src/components/motion/Be*.vue`，规格注释头部写明 beUI 来源页与常量；
+- E2E 的 `data-test` 契约（plan-approve / plan-regenerate / import-content / import-submit /
+  task-dag）**不可破坏**；
+- 动效统一 motion-v + EASE_OUT `[0.16, 1, 0.3, 1]`，全部尊重 reduced-motion。
+
 **为什么不是用户最初列的库**：`shadcn/ui`、`react-resizable-panels`、`dnd-kit`、`Zustand` 均为
 React 专属，无法在 Vue 项目安装。上表是**逐项对应的 Vue 生态等价物**，设计理念一致
 （源码可控、无头组件、原子样式）。**不要**为了「照抄清单」而强行引入 React 运行时。
