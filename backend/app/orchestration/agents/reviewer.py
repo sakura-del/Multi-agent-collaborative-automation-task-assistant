@@ -373,6 +373,20 @@ class ReviewerAgent(BaseAgent):
         topic = str(input_data.get("topic") or "文献综述")
         event_stats = dict(input_data.get("event_stats") or {})
 
+        # Issue #17 诊断（临时）：实证复盘收到的证据形状
+        logger.info(
+            "reviewer_results_shape",
+            shapes=[
+                {
+                    "node_id": r.node_id,
+                    "ev": len(r.evidence),
+                    "ci": len(r.cited_indices or []),
+                    "urls": [str(getattr(i, "source_url", None) or "")[:40] for i in r.evidence[:3]],
+                }
+                for r in results
+            ],
+        )
+
         body_parts: list[str] = []
         citations: dict[str, dict[str, Any]] = {}
         #: (node_id, 局部编号) → 全局编号（Issue #17）。
