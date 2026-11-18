@@ -1,5 +1,4 @@
 import api from "./client";
-import type { LLMCredentialInfo } from "./types";
 
 // 节点级模型路由（Issue #22 延伸：混合路由的用户级配置）。
 //
@@ -44,9 +43,3 @@ export async function updateNodeRouting(
   return response.data.routes;
 }
 
-/** 路由条目展示文本 */
-export function routeSummary(route: NodeRouteItem, credentials: LLMCredentialInfo[]): string {
-  const cred = credentials.find((item) => item.id === route.credential_id);
-  const name = cred ? cred.name : route.credential_name;
-  return `${name}（${route.model}）`;
-}
