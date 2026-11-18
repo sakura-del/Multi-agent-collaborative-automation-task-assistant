@@ -181,7 +181,9 @@ watch(
  * 后端把失败原因放在 `task_waiting_human` 事件的 payload.reason 里，
  * 页面上此前只显示「任务已暂停，等你介入」——用户不知道要做什么。
  */
-const waitingReason = computed(() => latestWaitingReason(store.events));
+const waitingReason = computed(() =>
+  latestWaitingReason(store.events, store.snapshot?.status ?? ""),
+);
 const waitingAdvice = computed(() => adviceForWaitingReason(waitingReason.value));
 
 // ===== 执行事件时间线（beUI 风格）=====
