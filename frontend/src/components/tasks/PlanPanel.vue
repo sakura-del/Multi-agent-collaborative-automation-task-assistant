@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BeAgentPlan from "@/components/motion/BeAgentPlan.vue";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
 import TaskDag from "@/components/tasks/TaskDag.vue";
@@ -31,6 +32,10 @@ const props = withDefaults(
      * 若照常渲染，用户点了只会拿到 422（Issue #23）。
      */
     canApprove?: boolean;
+    /** 节点步骤（beUI Agent Plan 形态，TaskDetailView 组装）；空 = 不渲染卡片 */
+    steps?: import("@/components/motion/BeAgentPlan.vue").AgentPlanStep[];
+    /** 规划面板级状态徽章 */
+    planStatus?: "ready" | "running" | "completed" | "failed" | "draft";
   }>(),
   {
     pending: false,
@@ -116,8 +121,21 @@ const emit = defineEmits<{ approve: [version: number]; regenerate: [] }>();
       </div>
 
       <section class="flex flex-col gap-2">
-        <h3 class="text-sm font-medium">任务 DAG（只读）</h3>
-        <TaskDag :nodes="props.plan.nodes" />
+        <h3 class="text-sm font-medium">执行计划（beUI Agent Plan）</h3>
+        <BeAgentPlan
+          :title="props.plan.topic"
+          :steps="props.steps ?? []"
+          :plan-status="props.planStatus ?? 'ready'"
+          :revision="props.plan.version"
+          :pending="props.pending"
+          :show-actions="false"
+        />
+        <details class="mt-1">
+          <summary class="cursor-pointer text-xs text-muted-foreground">查看经典 DAG 视图</summary>
+          <div class="mt-2">
+            <TaskDag :nodes="props.plan.nodes" />
+          </div>
+        </details>
       </section>
     </template>
 

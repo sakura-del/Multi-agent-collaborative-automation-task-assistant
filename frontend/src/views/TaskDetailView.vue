@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import BeTraceWaterfall, { type TraceSpan } from "@/components/motion/BeTraceWaterfall.vue";
+import BeAgentPlan, { type AgentPlanStep } from "@/components/motion/BeAgentPlan.vue";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ListFilter, MessageSquare, X } from "lucide-vue-next";
@@ -83,6 +85,97 @@ const canReplan = computed(() => REPLANNABLE_STATUSES.has(store.snapshot?.status
 const canApprove = computed(() =>
   canApprovePlan((store.snapshot?.status ?? "") as Parameters<typeof canApprovePlan>[0]),
 );
+
+/** beUI Agent Plan 形态：plan.nodes × 子任务状态 → 步骤列表（Issue #22 延伸） */
+const planSteps = computed<AgentPlanStep[]>(() => {
+  const subtasks = store.snapshot?.subtasks ?? [];
+  const byNode = new Map(subtasks.map((item) => [item.node_id, item]));
+  return (store.snapshot?.plan?.nodes ?? []).map((node) => {
+    const subtask = byNode.get(node.id);
+    let status: AgentPlanStep["status"] = "pending";
+    let durationMs: number | undefined;
+    let error: string | undefined;
+    if (subtask) {
+      status =
+        subtask.status === "completed"
+          ? "completed"
+          : subtask.status === "failed" || subtask.status === "waiting_human"
+            ? "failed"
+            : subtask.status === "running" || subtask.status === "validating"
+              ? "running"
+              : "pending";
+      if (subtask.started_at && subtask.completed_at) {
+        durationMs = Math.max(
+          0,
+          new Date(subtask.completed_at).getTime() - new Date(subtask.started_at).getTime(),
+        );
+      }
+      error = subtask.error ?? undefined;
+    } else if (store.snapshot?.status === "running") {
+      status = node.dependencies.every((dep) => byNode.get(dep)?.status === "completed")
+        ? "running"
+        : "pending";
+    }
+    return {
+      id: node.id,
+      title: node.title,
+      kind: node.type,
+      status,
+      durationMs,
+      error,
+    };
+  });
+});
+
+/** 任务级规划徽章状态 */
+const agentPlanStatus = computed<AgentPlanStep["status"] extends never ? never : "ready" | "running" | "completed" | "failed" | "draft">(() => {
+  const status = store.snapshot?.status ?? "";
+  if (status === "waiting_approval") return "ready";
+  if (status === "running" || status === "reviewing" || status === "planning") return "running";
+  if (status === "completed") return "completed";
+  if (status === "failed" || status === "waiting_human") return "failed";
+  return "draft";
+});
+
+/** beUI Trace Waterfall：子任务 started/completed → span 列表（Issue #22 延伸） */
+const traceRunName = computed(
+  () => `trace_${(store.snapshot?.task_id ?? "").slice(0, 8)}`,
+);
+
+const traceSpans = computed<TraceSpan[]>(() => {
+  const subtasks = (store.snapshot?.subtasks ?? []).filter(
+    (item) => item.started_at !== null,
+  );
+  if (!subtasks.length) return [];
+  const startBase = Math.min(
+    ...subtasks.map((item) => new Date(item.started_at as string).getTime()),
+  );
+  const kindByNode = new Map(
+    (store.snapshot?.plan?.nodes ?? []).map((node) => [node.id, node.type]),
+  );
+  const now = Date.now();
+  return subtasks.map((item) => {
+    const startMs = new Date(item.started_at as string).getTime() - startBase;
+    const endMs = item.completed_at
+      ? new Date(item.completed_at).getTime()
+      : now;
+    const kind = kindByNode.get(item.node_id) ?? "extract";
+    return {
+      id: item.node_id,
+      name: item.title,
+      kind: kind === "search" ? "search" : kind === "validate" ? "validate" : "extract",
+      startMs: Math.max(0, startMs),
+      durationMs: Math.max(250, endMs - new Date(item.started_at as string).getTime()),
+      status:
+        item.status === "completed"
+          ? "completed"
+          : item.status === "failed"
+            ? "failed"
+            : "running",
+      error: item.error ?? undefined,
+    } satisfies TraceSpan;
+  });
+});
 
 function selectTab(tab: TabKey) {
   if (tab === "result" && !resultAvailable.value) {
@@ -378,6 +471,8 @@ onBeforeUnmount(() => {
         :blocked="store.snapshot?.status === 'waiting_human' && !store.snapshot?.plan"
         :can-replan="canReplan"
         :can-approve="canApprove"
+        :steps="planSteps"
+        :plan-status="agentPlanStatus"
         :error="errorMessage"
         :conflict="conflictMessage"
         @approve="handleApprove"
@@ -397,6 +492,11 @@ onBeforeUnmount(() => {
         @select="selectedNodeId = $event"
       />
       <p v-else class="text-sm text-muted-foreground">暂无规划，无法展示 DAG。</p>
+      <BeTraceWaterfall
+        v-if="traceSpans.length"
+        :run-name="traceRunName"
+        :spans="traceSpans"
+      />
       <NodeDetail :node="selectedNode" :subtask="selectedSubtask" @close="selectedNodeId = null" />
     </div>
 

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BeContextMeter from "@/components/motion/BeContextMeter.vue";
 import {
   ROUTABLE_NODE_TYPES,
   listNodeRouting,
@@ -71,6 +72,14 @@ async function loadRouting() {
     routeDraft.value = {};
   }
 }
+
+const routingMeterCategories = computed(() =>
+    ROUTABLE_NODE_TYPES.map((node) => ({
+        id: node.value,
+        label: node.label,
+        model: routeDraft.value[node.value] || "",
+    })),
+);
 
 async function saveRouting() {
   routeSaving.value = true;
@@ -958,7 +967,13 @@ function statusOf(credential: LLMCredentialInfo): {
                 {{ routeSaving ? "保存中…" : "保存路由" }}
             </Button>
         </div>
-        <p
+        <BeContextMeter
+            class="mt-4"
+            :capacity="ROUTABLE_NODE_TYPES.length"
+            :categories="routingMeterCategories"
+            model="节点路由覆盖率"
+        />
+                <p
             v-if="routeMessage"
             data-test="routing-message"
             class="mt-2 text-xs text-muted-foreground"
