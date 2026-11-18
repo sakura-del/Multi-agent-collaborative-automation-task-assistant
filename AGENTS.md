@@ -365,6 +365,21 @@ shadcn CLI 的 `@beui/*` 分发同样面向 React。因此「用 beUI」指的�
   task-dag）**不可破坏**；
 - 动效统一 motion-v + EASE_OUT `[0.16, 1, 0.3, 1]`，全部尊重 reduced-motion。
 
+### beUI 增强（2026-11-18 晚，commit `1ca9c870`）
+
+- **Trace Waterfall 播放头**：Replay/Pause + 40ms tick（2s 全程）+ range scrub +
+  span scaleX 生长 + 越前 span 变暗 + 竖线（left 对齐时间轴列：
+  `calc(14.75rem + P × (100% − 14.75rem))`）；reduced-motion 直达末帧；
+- **Agent Plan 行展开**：running/failed 行可点击（`<component :is>` 动态标签）展开
+  活动区——完整错误 + 「重试节点」（`emit retry` → TaskDetailView `retry_node` 命令，
+  与执行页工具栏同路径）；ChevronDown 旋转；错误折叠态单行截断；
+- **NodeDetail 重做为 span 详情面板**（beUI Trace Waterfall 详情侧栏规格）：
+  Timing 条（兄弟窗口占比）+ started/completed/duration tabular-nums +
+  错误 destructive 卡 + Attributes 列表（span id/kind/依赖/重试/output keys）；
+  新增 `siblings` prop；`data-test="node-detail"` 不变。
+  **遗留**：beUI 详情面板含 Model/Token/Cost 区块——本项目 subtask 快照尚无
+  per-node token 字段，接入后补齐（需后端把 token 用量写进 subtask output）。
+
 **为什么不是用户最初列的库**：`shadcn/ui`、`react-resizable-panels`、`dnd-kit`、`Zustand` 均为
 React 专属，无法在 Vue 项目安装。上表是**逐项对应的 Vue 生态等价物**，设计理念一致
 （源码可控、无头组件、原子样式）。**不要**为了「照抄清单」而强行引入 React 运行时。
