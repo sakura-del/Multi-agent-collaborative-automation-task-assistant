@@ -341,6 +341,10 @@ class ValidatorAgent(BaseAgent):
 
         from app.core.config import get_settings
 
+        # 校验是「大 prompt + JSON 长输出」的典型场景，90s 全局超时实测不够
+        # （Issue #18：n2 一次 90s、n5 连续 3 次 90s 全靠人工救）；
+        # per-request 覆盖为专用值，0=跟随全局 request_timeout。
+        validation_timeout = get_settings().llm.call_timeout_validation
         response = await self.llm.chat(
             [
                 # 静态口径进 system：跨节点复用同一缓存前缀（Issue #22）
@@ -353,6 +357,7 @@ class ValidatorAgent(BaseAgent):
             temperature=0.2,
             # 输出上限（Issue #22）：已限 issues/suggestions 条数与字数，1200 足够
             max_tokens=get_settings().llm.max_tokens_validator,
+            timeout=validation_timeout or None,
         )
 
         import json

@@ -56,6 +56,12 @@ llm:
   default_provider: "openai"
   default_model: "workbuddy-ai/deepseek-v4.1-flash"
   request_timeout: 30
+  # 校验/复盘专用调用超时（秒，0=跟随 request_timeout）
+  call_timeout_validation: 180
+  # 校验超时退避预算（次）：预算内不转人工
+  validation_timeout_retries: 2
+  # 超时类错误的 LLM 内部重试上限
+  timeout_retries: 1
   max_retries: 3
   # 全局 LLM 并发上限（进程级）。任务内 DAG 并发 + N 个任务并发叠加后，
   # 上游瞬时请求数 = 任务数 × 最多 5。这里是唯一的总闸，跨任务/跨实例生效。

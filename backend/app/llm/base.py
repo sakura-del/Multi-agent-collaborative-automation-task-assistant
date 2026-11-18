@@ -65,6 +65,14 @@ class BaseLLM(ABC):
         self.default_max_tokens = default_max_tokens
         # 并发组（Issue #22 路由感知并发）：路由目标是独立组，默认组为 "default"
         self.concurrency_group = "default"
+        # 超时类错误的内部重试上限（Issue #18）：90s×3 的确定性等待毫无意义；
+        # 429/5xx 仍走 max_retries。配置损坏/读取失败时保守取 1。
+        try:
+            from app.core.config import get_settings
+
+            self.timeout_retries = max(1, int(get_settings().llm.timeout_retries))
+        except Exception:  # pragma: no cover - 防御性兜底
+            self.timeout_retries = 1
         # 延迟初始化：客户端在首次调用时才创建
         self._client: Any = None
         self._initialized = False
@@ -213,8 +221,11 @@ class BaseLLM(ABC):
                 return response
             except Exception as exc:
                 last_exc = exc
-                # 判断是否可重试：超时/限流类异常可重试，其余直接抛出
-                if not self._is_retryable(exc) or attempt >= self.max_retries:
+                # 判断是否可重试：超时/限流类异常可重试，其余直接抛出。
+                # 超时类用更小的重试预算（timeout_retries）：对「确定性超时」
+                # 连等 3×90s 只会拉长人工等待（Issue #18 实测 4.5 分钟无效重试）。
+                retry_cap = self.timeout_retries if self._is_timeout(exc) else self.max_retries
+                if not self._is_retryable(exc) or attempt >= retry_cap:
                     logger.error(
                         "llm_chat_failed",
                         provider=self.provider,
@@ -321,6 +332,14 @@ class BaseLLM(ABC):
             return float(raw) if raw is not None else None
         except (TypeError, ValueError):
             return None
+
+    @staticmethod
+    def _is_timeout(exc: Exception) -> bool:
+        """是否为「超时类」异常（决定内部重试预算，见 timeout_retries）。"""
+        name = type(exc).__name__.lower()
+        if "timeout" in name:
+            return True
+        return "timed out" in str(exc).lower()
 
     @staticmethod
     def _is_retryable(exc: Exception) -> bool:

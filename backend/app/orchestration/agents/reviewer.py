@@ -599,6 +599,8 @@ class ReviewerAgent(BaseAgent):
                     temperature=0.2,
                     # 输出上限（Issue #22）：摘要+局限性 JSON，防止长篇复述
                     max_tokens=get_settings().llm.max_tokens_reviewer,
+                    # 复盘同样是长输入 + JSON 输出，走专用超时（Issue #18）
+                    timeout=get_settings().llm.call_timeout_validation or None,
                 )
             payload = json.loads(response.content or "{}")
         except Exception as exc:

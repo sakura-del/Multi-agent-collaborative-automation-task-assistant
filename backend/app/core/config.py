@@ -141,6 +141,16 @@ class LLMConfig(BaseModel):
     # 30s 会直接 "Request timed out."；90s 能覆盖慢模型又不至于无限占用 worker。
     request_timeout: int = 90
     max_retries: int = 3
+    # 校验/复盘专用调用超时（Issue #18）：这两类节点 prompt 大 + JSON 长输出，
+    # 90s 全局值实测不够；0 = 跟随 request_timeout。
+    # per-request 覆盖：openai SDK 的 create(timeout=...) 支持。
+    call_timeout_validation: int = Field(default=180, ge=0)
+    # 校验超时的**外层退避预算**（Issue #18）：超时不消耗 regeneration、不转人工，
+    # 按固定退避重试；预算用尽才转人工。
+    validation_timeout_retries: int = Field(default=2, ge=0)
+    # LLM 层对「超时类错误」的内部重试上限（Issue #18）：90s×3 的确定性等待
+    # 没有意义，超时类降到 1 次重试；429/5xx 仍走 max_retries。
+    timeout_retries: int = Field(default=1, ge=0)
     # 全局 LLM 调用并发上限（进程级，跨任务/跨实例共享；见 app/llm/throttle.py）。
     # 任务调度器本身按 DAG 并行（单任务最多 5 个节点），N 个任务并发时
     # 上游瞬时请求数 = N × 5 —— 必须由这一层兜住，否则任何 key 都会被打爆。
