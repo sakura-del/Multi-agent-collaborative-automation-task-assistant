@@ -152,7 +152,7 @@ class LLMConfig(BaseModel):
     # max_tokens=20 时 content 全被 reasoning 吃掉），因此下限不可压太狠。
     max_tokens_planner: int = Field(default=3600, ge=256)
     max_tokens_executor: int = Field(default=2600, ge=300)
-    max_tokens_validator: int = Field(default=1600, ge=256)
+    max_tokens_validator: int = Field(default=1200, ge=256)
     max_tokens_reviewer: int = Field(default=1800, ge=256)
     # ===== 重试退避（Issue #22 / 低并发共享池兼容）=====
     # 共享免费池（并发≈1、RPM 极低）的 429 只能靠退避穿过：

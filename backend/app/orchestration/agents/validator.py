@@ -32,26 +32,26 @@ from app.tools.literature.models import ReferenceVerification
 
 logger = get_logger(__name__)
 
-_CHECK_PROMPT = """请校验以下执行结果的逻辑一致性与事实准确性。
-
-子任务标题：{title}
-执行结果：{result}
-
-判定标准（请严格按此口径，不要因为内容"覆盖面广"就判为不匹配）：
+_CHECK_SYSTEM = """你是质量校验专家，只输出 JSON。以下为固定判定口径与输出约束，必须严格遵守：
 - logic_consistent：结论之间不矛盾、不含无效推理；
 - factual_accurate：**只**判断是否存在无明显事实错误或与自身陈述冲突之处；
 - 若本节点是"检索/抽取"类节点，其职责就是如实罗列语料中的多篇文献，
   条目涉及不同主题是正常的，**不属于**"与子任务主题不匹配"，不要据此扣分；
-- 只有当内容与子任务标题明显无关（例如子任务要求写综述却只输出目录）才判 false。
+- 只有当内容与子任务标题明显无关（例如子任务要求写综述却只输出目录）才判 false；
+- issues 最多 3 条、每条不超过 50 字；suggestions 最多 2 条、每条不超过 50 字；
+- 不要复述被校验内容的原文，不要输出 JSON 之外的任何解释或正文。
 
-请以 JSON 格式返回（仅输出 JSON）：
-{{
+输出 JSON schema：
+{
   "logic_consistent": true/false,
   "factual_accurate": true/false,
-  "issues": ["问题描述1", "问题描述2"],
-  "suggestions": ["改进建议1"]
-}}
-"""
+  "issues": ["问题描述（≤50 字）"],
+  "suggestions": ["改进建议（≤50 字）"]
+}"""
+
+_CHECK_PROMPT = """子任务标题：{title}
+执行结果：
+{result}"""
 
 # 默认校验规则：可按业务扩展
 _DEFAULT_RULES: dict[str, Any] = {
@@ -343,14 +343,15 @@ class ValidatorAgent(BaseAgent):
 
         response = await self.llm.chat(
             [
-                Message(role=MessageRole.SYSTEM, content="你是质量校验专家，只输出 JSON。"),
+                # 静态口径进 system：跨节点复用同一缓存前缀（Issue #22）
+                Message(role=MessageRole.SYSTEM, content=_CHECK_SYSTEM),
                 Message(
                     role=MessageRole.USER,
                     content=_CHECK_PROMPT.format(title=title, result=result),
                 ),
             ],
             temperature=0.2,
-            # 输出上限（Issue #22）：校验结论是短 JSON，避免长篇点评
+            # 输出上限（Issue #22）：已限 issues/suggestions 条数与字数，1200 足够
             max_tokens=get_settings().llm.max_tokens_validator,
         )
 

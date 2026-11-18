@@ -65,7 +65,7 @@ llm:
   # max_tokens，下限不可压太狠（qiniu conatus 实测预算不足时 content 为空）。
   max_tokens_planner: 3600
   max_tokens_executor: 2600
-  max_tokens_validator: 1600
+  max_tokens_validator: 1200
   max_tokens_reviewer: 1800
   # 重试退避（共享免费池兼容）：等待 = min(base × factor^(n-1), cap)，
   # 厂商 Retry-After 优先。耐心不够时设 LLM__MAX_RETRIES=6。
