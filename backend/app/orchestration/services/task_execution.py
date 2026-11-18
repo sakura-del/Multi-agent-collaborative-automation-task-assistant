@@ -242,6 +242,7 @@ class TaskExecution:
         *,
         prompt_tokens: int = 0,
         completion_tokens: int = 0,
+        cache_hit_tokens: int = 0,
     ) -> None:
         """累加任务实际消耗的 token（**增量**，不覆盖）。
 
@@ -251,6 +252,9 @@ class TaskExecution:
         输入/输出拆分同时累加（Issue #15 P2）：成本估算要按不同单价计价。
         老调用只传总量时拆分保持 0，导出会标记为「按占比估算」。
 
+        缓存命中 token 同样增量累加（Issue #22）：命中价通常只有未命中的
+        1/10~1/25，落库后成本报表才能算出「优化省了多少钱」。
+
         失败只记 warning：用量记账失败不该让正在执行的任务崩掉
         （最坏情况是少退额度——宁可少退也不多退）。
         """
@@ -259,6 +263,7 @@ class TaskExecution:
             return
         prompt_amount = max(0, int(prompt_tokens))
         completion_amount = max(0, int(completion_tokens))
+        cache_amount = max(0, int(cache_hit_tokens))
         try:
             async with self._session_factory() as session:
                 repo = TaskRepository(session)
@@ -266,6 +271,7 @@ class TaskExecution:
                 task.used_tokens = int(task.used_tokens or 0) + amount
                 task.prompt_tokens = int(task.prompt_tokens or 0) + prompt_amount
                 task.completion_tokens = int(task.completion_tokens or 0) + completion_amount
+                task.cache_hit_tokens = int(task.cache_hit_tokens or 0) + cache_amount
                 await session.commit()
         except LookupError:
             return
@@ -1056,6 +1062,7 @@ class TaskExecution:
                 usage.total_tokens,
                 prompt_tokens=usage.prompt_tokens,
                 completion_tokens=usage.completion_tokens,
+                cache_hit_tokens=usage.cache_hit_tokens,
             )
             # 可观测性：节点维度能回答「卡在哪个环节」，成功率只说成/败
             self._record_node_metrics(node_results, _dag_node_types(dag))
@@ -1075,6 +1082,7 @@ class TaskExecution:
                     review_usage.total_tokens,
                     prompt_tokens=review_usage.prompt_tokens,
                     completion_tokens=review_usage.completion_tokens,
+                    cache_hit_tokens=review_usage.cache_hit_tokens,
                 )
         except asyncio.CancelledError:
             logger.info("task_execution_cancelled", task_id=str(task_id))

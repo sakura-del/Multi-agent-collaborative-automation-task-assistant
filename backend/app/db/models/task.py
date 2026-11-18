@@ -24,6 +24,7 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     DateTime,
     ForeignKey,
@@ -134,6 +135,17 @@ class Task(Base):
     )
     completion_tokens: Mapped[int] = mapped_column(
         Integer, default=0, server_default="0", nullable=False, comment="输出 token（估算成本用）"
+    )
+    #: 输入侧前缀缓存命中 token（Issue #22 成本观测，2026-11-18）。
+    #:
+    #: 命中价通常只有未命中的 1/10~1/25，命中率是 prompt 结构优化效果的唯一硬指标；
+    #: 厂商未返回缓存字段时保持 0（语义为「未观测到」，不是「未命中」）。
+    cache_hit_tokens: Mapped[int] = mapped_column(
+        BigInteger,
+        default=0,
+        server_default="0",
+        nullable=False,
+        comment="输入侧前缀缓存命中 token（成本观测用）",
     )
     #: 配额是否已结算（**幂等保护**）。
     #:

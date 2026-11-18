@@ -76,9 +76,11 @@ async def overview(
                     "waiting_human": 0, "waiting_approval": 0, "running": 0, ...},
       "terminal_count": 0,
       "success_rate": 0.0,
-      "tokens": {"total_used": 0, "avg_per_task": 0, "recorded_task_count": 0},
+      "tokens": {"total_used": 0, "avg_per_task": 0, "recorded_task_count": 0,
+                     "cache_hit_tokens": 0, "cache_hit_rate": 0.0},
       "recent": [{"task_id": "...", "title": "...", "status": "...",
-                  "used_tokens": 0, "duration_seconds": 0, "created_at": "..."}]
+                  "used_tokens": 0, "cache_hit_tokens": 0,
+                  "duration_seconds": 0, "created_at": "..."}]
     }
     ```
 
@@ -102,13 +104,21 @@ async def overview(
         select(
             func.count().label("total"),
             func.coalesce(func.sum(Task.used_tokens), 0).label("tokens"),
+            func.coalesce(func.sum(Task.cache_hit_tokens), 0).label("cache_hits"),
+            func.coalesce(func.sum(Task.prompt_tokens), 0).label("prompt_tokens"),
             func.count().filter(Task.used_tokens > 0).label("recorded"),
         ).where(Task.user_id == current_user.id)
     )
     row = totals.one()
     total = int(row.total)
     total_tokens = int(row.tokens)
+    cache_hit_tokens = int(row.cache_hits)
+    prompt_tokens_total = int(row.prompt_tokens)
     recorded_task_count = int(row.recorded)
+    # 缓存命中率（Issue #22）：以「观测到的输入 token」为分母。
+    # 本地模型不返回缓存字段（prompt 记了、命中为 0），不会被误算成「全部未命中」——
+    # 分母取 prompt 总量，命中为 0 时命中率就是 0，语义正确。
+    cache_hit_rate = (cache_hit_tokens / prompt_tokens_total) if prompt_tokens_total else 0.0
 
     # 成功率的分母：只算**已进入终态**的任务（等待规划/执行中的不该拉低成功率）
     terminal = sum(counts.get(status, 0) for status in _TERMINAL_STATUSES)
@@ -126,6 +136,7 @@ async def overview(
             "title": task.title or "",
             "status": task.status,
             "used_tokens": int(task.used_tokens or 0),
+            "cache_hit_tokens": int(task.cache_hit_tokens or 0),
             "duration_seconds": _duration_seconds(task.created_at, task.updated_at),
             "created_at": task.created_at.isoformat() if task.created_at else None,
         }
@@ -150,6 +161,9 @@ async def overview(
             # 平均只在**有用量记录**的任务之间算：否则历史 0 会把均值拉成假的低值
             "avg_per_task": (total_tokens // recorded_task_count) if recorded_task_count else 0,
             "recorded_task_count": recorded_task_count,
+            # 前缀缓存（Issue #22）：命中 token 与命中率（分母 = 输入 token 总量）
+            "cache_hit_tokens": cache_hit_tokens,
+            "cache_hit_rate": round(cache_hit_rate, 4),
         },
         "recent": recent,
     }
