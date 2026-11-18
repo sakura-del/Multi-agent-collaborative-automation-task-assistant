@@ -19,6 +19,43 @@ from app.llm.base import BaseLLM
 from app.llm.models import LLMResponse, Message, MessageRole, ToolCall, Usage
 
 
+def _parse_cache_usage(raw_usage: Any) -> dict[str, int]:
+    """从厂商 usage 对象提取前缀缓存命中/未命中 token（容错，缺失即 null）。
+
+    兼容三种写法：
+    - DeepSeek：`prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`
+    - OpenAI：`prompt_tokens_details.cached_tokens`（命中数；未命中 = prompt - cached）
+    - 其他厂商：字段缺失 → 返回 0（语义为「未观测到」）
+
+    为什么必须埋这个点：前缀缓存是输入成本的主导变量（命中价可低至未命中的
+    1/25），不记录就无法验证 prompt 结构优化是否生效（见 Issue #22）。
+    """
+
+    def _as_int(value: Any) -> int:
+        try:
+            return max(0, int(value))
+        except (TypeError, ValueError):
+            return 0
+
+    def _get(obj: Any, key: str) -> Any:
+        if isinstance(obj, dict):
+            return obj.get(key)
+        return getattr(obj, key, None)
+
+    hit = _as_int(_get(raw_usage, "prompt_cache_hit_tokens"))
+    miss = _as_int(_get(raw_usage, "prompt_cache_miss_tokens"))
+
+    if hit == 0 and miss == 0:
+        details = _get(raw_usage, "prompt_tokens_details")
+        cached = _as_int(_get(details, "cached_tokens")) if details is not None else 0
+        if cached > 0:
+            prompt = _as_int(_get(raw_usage, "prompt_tokens"))
+            hit = cached
+            miss = max(0, prompt - cached)
+
+    return {"cache_hit_tokens": hit, "cache_miss_tokens": miss}
+
+
 class OpenAIAdapter(BaseLLM):
     """OpenAI 官方适配器，支持 GPT-4 / GPT-4o / GPT-4o-mini 等模型。
 
@@ -155,6 +192,7 @@ class OpenAIAdapter(BaseLLM):
             usage = Usage(
                 prompt_tokens=response.usage.prompt_tokens,
                 completion_tokens=response.usage.completion_tokens,
+                **_parse_cache_usage(response.usage),
             )
 
         return LLMResponse(

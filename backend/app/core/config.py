@@ -146,6 +146,21 @@ class LLMConfig(BaseModel):
     # 上游瞬时请求数 = N × 5 —— 必须由这一层兜住，否则任何 key 都会被打爆。
     # 免费/低配额 key 建议经环境变量 LLM__MAX_CONCURRENCY=1 完全串行。
     max_concurrency: int = Field(default=3, ge=1)
+    # ===== 输出上限（按节点类型，Issue #22）=====
+    # 目的：遏制「模型自由发挥」的输出成本（实测单节点峰值 4.2k tokens）。
+    # ⚠️ 部分推理型/融合模型会把思考 token 计入 max_tokens（qiniu conatus 实测
+    # max_tokens=20 时 content 全被 reasoning 吃掉），因此下限不可压太狠。
+    max_tokens_planner: int = Field(default=2200, ge=256)
+    max_tokens_executor: int = Field(default=2000, ge=300)
+    max_tokens_validator: int = Field(default=1000, ge=256)
+    max_tokens_reviewer: int = Field(default=1400, ge=256)
+    # ===== 重试退避（Issue #22 / 低并发共享池兼容）=====
+    # 共享免费池（并发≈1、RPM 极低）的 429 只能靠退避穿过：
+    # 等待 = min(base × factor^(n-1), cap)，且厂商 Retry-After 优先。
+    # 需要更长耐心时可设 LLM__MAX_RETRIES=6、LLM__RETRY_BACKOFF_CAP=60。
+    retry_backoff_base: float = Field(default=3.0, gt=0.0)
+    retry_backoff_factor: float = Field(default=2.0, gt=1.0)
+    retry_backoff_cap: float = Field(default=60.0, gt=0.0)
     cost_budget: LLMCostBudget = LLMCostBudget()
     fallback_chain: list[LLMFallbackItem] = Field(default_factory=list)
 

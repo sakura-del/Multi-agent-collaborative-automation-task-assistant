@@ -128,6 +128,7 @@ class ExecutorAgent(BaseAgent):
             content = f"[降级输出] {title}（无 LLM，未引用证据）"
         else:
             # 方法内导入：workflows 包 __init__ 反向依赖 agents，避免导入环
+            from app.core.config import get_settings
             from app.orchestration.workflows.prompts import render_executor_prompt
 
             prompt = render_executor_prompt(
@@ -148,8 +149,20 @@ class ExecutorAgent(BaseAgent):
                     Message(role=MessageRole.USER, content=prompt),
                 ],
                 temperature=0.2,
+                # 输出上限（Issue #22）：模板已限字数，这里做硬兜底
+                max_tokens=get_settings().llm.max_tokens_executor,
             )
             content = response.content or ""
+            if not content.strip():
+                # 融合/推理模型会把思考 token 计入 max_tokens（qiniu conatus 实测
+                # max_tokens=20 时 content 全被 reasoning 吃掉），预算不足时正文为空。
+                # 只留痕不抛错：交给校验层判定，避免误伤正常空输出场景。
+                logger.warning(
+                    "executor_empty_content",
+                    node_id=node_id,
+                    finish_reason=response.finish_reason,
+                    completion_tokens=response.usage.completion_tokens,
+                )
             prompt_tokens = response.usage.prompt_tokens
             completion_tokens = response.usage.completion_tokens
 
@@ -229,6 +242,8 @@ class ExecutorAgent(BaseAgent):
         if self.llm is None:
             return f"[降级输出] 已接收子任务：{title}", []
 
+        from app.core.config import get_settings
+
         response = await self.llm.chat(
             [
                 Message(
@@ -244,6 +259,8 @@ class ExecutorAgent(BaseAgent):
             ],
             tools=self._available_tools or None,
             temperature=0.4,
+            # 输出上限（Issue #22）：遏制自由发挥
+            max_tokens=get_settings().llm.max_tokens_executor,
         )
 
         # 提取工具调用记录（若有）

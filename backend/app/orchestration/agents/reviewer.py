@@ -547,6 +547,8 @@ class ReviewerAgent(BaseAgent):
             event_stats_json=json.dumps(event_stats, ensure_ascii=False),
         )
         try:
+            from app.core.config import get_settings
+
             response = await llm.chat(
                 [
                     Message(
@@ -556,6 +558,8 @@ class ReviewerAgent(BaseAgent):
                     Message(role=MessageRole.USER, content=prompt),
                 ],
                 temperature=0.2,
+                # 输出上限（Issue #22）：摘要+局限性 JSON，防止长篇复述
+                max_tokens=get_settings().llm.max_tokens_reviewer,
             )
             payload = json.loads(response.content or "{}")
         except Exception as exc:
@@ -649,6 +653,8 @@ class ReviewerAgent(BaseAgent):
 
         # 仅传入错误相关日志，减少 token 消耗（计算优化）
         error_logs = [e for e in logs if e.get("message_type") == "error"]
+        from app.core.config import get_settings
+
         response = await self.llm.chat(
             [
                 Message(role=MessageRole.SYSTEM, content="你是根因分析专家，只输出 JSON。"),
@@ -660,6 +666,7 @@ class ReviewerAgent(BaseAgent):
                 ),
             ],
             temperature=0.3,
+            max_tokens=get_settings().llm.max_tokens_reviewer,
         )
         try:
             return json.loads(response.content or "{}")

@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from typing import Any
@@ -139,6 +140,9 @@ class BaseLLM(ABC):
                     attempt=attempt,
                     prompt_tokens=response.usage.prompt_tokens,
                     completion_tokens=response.usage.completion_tokens,
+                    cache_hit_tokens=response.usage.cache_hit_tokens,
+                    cache_miss_tokens=response.usage.cache_miss_tokens,
+                    cache_hit_rate=round(response.usage.cache_hit_rate, 4),
                     finish_reason=response.finish_reason,
                     has_tool_calls=bool(response.tool_calls),
                 )
@@ -155,13 +159,19 @@ class BaseLLM(ABC):
                         error=str(exc),
                     )
                     raise
+                # 指数退避 + 尊重 Retry-After：共享免费池/低配额 key 的 429
+                # 只能靠退避穿过（实测「Too many concurrent requests」并发≈1），
+                # 立即重试等于连撞三次墙（2026-11-18 生产实证：1 秒内 3 连 429）。
+                delay = self._backoff_delay(attempt, exc)
                 logger.warning(
                     "llm_chat_retry",
                     provider=self.provider,
                     model=self.model,
                     attempt=attempt,
+                    sleep_seconds=round(delay, 2),
                     error=str(exc),
                 )
+                await asyncio.sleep(delay)
 
         # 理论不可达（循环内必 return 或 raise），保险起见
         assert last_exc is not None
@@ -210,6 +220,43 @@ class BaseLLM(ABC):
         )
 
     # ===== 辅助 =====
+
+    def _backoff_delay(self, attempt: int, exc: Exception) -> float:
+        """计算第 `attempt` 次失败后的退避秒数。
+
+        优先级：厂商 `Retry-After` 头 > 指数退避（base × factor^(n-1)），
+        统一受 `retry_backoff_cap` 封顶。共享免费池（并发≈1、RPM 极低）只能
+        靠退避穿过 429，配置见 `llm.retry_backoff_*`。
+        """
+        base, factor, cap = 3.0, 2.0, 60.0
+        try:
+            from app.core.config import get_settings
+
+            llm_cfg = get_settings().llm
+            base = float(llm_cfg.retry_backoff_base)
+            factor = float(llm_cfg.retry_backoff_factor)
+            cap = float(llm_cfg.retry_backoff_cap)
+        except Exception:  # pragma: no cover - 配置异常时用保守默认值
+            pass
+
+        delay = min(base * (factor ** (attempt - 1)), cap)
+        retry_after = self._retry_after_seconds(exc)
+        if retry_after is not None:
+            delay = min(max(delay, retry_after), cap)
+        return max(0.0, delay)
+
+    @staticmethod
+    def _retry_after_seconds(exc: Exception) -> float | None:
+        """从异常响应里取 Retry-After 头（秒）；取不到返回 None。"""
+        response = getattr(exc, "response", None)
+        headers = getattr(response, "headers", None) or getattr(exc, "headers", None)
+        if not headers:
+            return None
+        try:
+            raw = headers.get("retry-after") or headers.get("Retry-After")
+            return float(raw) if raw is not None else None
+        except (TypeError, ValueError):
+            return None
 
     @staticmethod
     def _is_retryable(exc: Exception) -> bool:

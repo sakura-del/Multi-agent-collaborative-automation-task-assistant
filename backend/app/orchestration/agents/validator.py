@@ -339,6 +339,8 @@ class ValidatorAgent(BaseAgent):
         if self.llm is None:
             return {"score": 80, "issues": [], "suggestions": []}
 
+        from app.core.config import get_settings
+
         response = await self.llm.chat(
             [
                 Message(role=MessageRole.SYSTEM, content="你是质量校验专家，只输出 JSON。"),
@@ -348,6 +350,8 @@ class ValidatorAgent(BaseAgent):
                 ),
             ],
             temperature=0.2,
+            # 输出上限（Issue #22）：校验结论是短 JSON，避免长篇点评
+            max_tokens=get_settings().llm.max_tokens_validator,
         )
 
         import json

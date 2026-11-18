@@ -61,6 +61,17 @@ llm:
   # 上游瞬时请求数 = 任务数 × 最多 5。这里是唯一的总闸，跨任务/跨实例生效。
   # 免费/低配额 key：环境变量 LLM__MAX_CONCURRENCY=1 完全串行（慢但不会 429）。
   max_concurrency: 3
+  # 输出上限（按节点类型，Issue #22）。注意融合/推理模型会把思考 token 计入
+  # max_tokens，下限不可压太狠（qiniu conatus 实测预算不足时 content 为空）。
+  max_tokens_planner: 2200
+  max_tokens_executor: 2000
+  max_tokens_validator: 1000
+  max_tokens_reviewer: 1400
+  # 重试退避（共享免费池兼容）：等待 = min(base × factor^(n-1), cap)，
+  # 厂商 Retry-After 优先。耐心不够时设 LLM__MAX_RETRIES=6。
+  retry_backoff_base: 3.0
+  retry_backoff_factor: 2.0
+  retry_backoff_cap: 60.0
   # 分级使用策略（阶段0任务4）
   cost_budget:
     daily_token_limit: 1000000

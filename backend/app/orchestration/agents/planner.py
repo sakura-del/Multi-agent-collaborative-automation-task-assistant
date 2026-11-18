@@ -177,6 +177,7 @@ class PlannerAgent(BaseAgent):
             return self._degraded_literature_plan(requirement)
 
         # 方法内导入：workflows 包 __init__ 反向依赖 planner，避免导入环
+        from app.core.config import get_settings
         from app.orchestration.workflows.prompts import render_planner_prompt
 
         prompt = render_planner_prompt(
@@ -192,6 +193,8 @@ class PlannerAgent(BaseAgent):
                 Message(role=MessageRole.USER, content=prompt),
             ],
             temperature=0.2,
+            # 输出上限（Issue #22）：规划 JSON 实测 3.5k tokens，压到配置上限内
+            max_tokens=get_settings().llm.max_tokens_planner,
         )
         content = response.content or ""
         payload = self._safe_parse_json(content)
