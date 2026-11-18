@@ -19,7 +19,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
+from sqlalchemy import delete as sa_delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_active_user
@@ -123,12 +123,12 @@ async def update_routing(
             )
         resolved.append((route.node_type, route.credential_id))
 
-    # 全量替换：先删后插（条数 ≤ 6，单事务）
-    existing = await db.execute(
-        select(LLMNodeRouting).where(LLMNodeRouting.user_id == current_user.id)
-    )
-    for row in existing.scalars().all():
-        await db.delete(row)
+    # 全量替换：先删后插（条数 ≤ 6，单事务）。
+    # ⚠️ 必须用**语句级 delete** 并在 add 之前 flush：SQLAlchemy 的 unit of work
+    # 默认先执行 insert 再执行 delete，同一 (user_id, node_type) 的 unique 键
+    # 会在 flush 时撞 UniqueViolationError（生产实测 500）。
+    await db.execute(sa_delete(LLMNodeRouting).where(LLMNodeRouting.user_id == current_user.id))
+    await db.flush()
     for node_type, credential_id in resolved:
         db.add(
             LLMNodeRouting(
