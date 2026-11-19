@@ -437,6 +437,32 @@ shadcn CLI 的 `@beui/*` 分发同样面向 React。因此「用 beUI」指的�
 端口；`RATE_LIMIT__ENABLED=false`（8 用例串行会撞 5 次/分钟登录限制）；
 Node 20 + `vite preview`；结束后 `down -v` 并删除含密钥的临时 env/override。
 
+### 会话附件与语音（Issue #8 P2，2026-11-19）
+
+- **附件模型**：`message.attachments` JSONB（迁移 `b8c9d0e1f2a3`），只存
+  `{kind: "document", document_id, title}` 引用 + 标题快照，不复制文件；
+  文档删除后历史消息仍保留可读标题。发送时校验文档归属（越权/不存在 400）。
+- **上下文注入**：`build_context` 把附件标题与 `document_id` 追加到对应用户消息，
+  **不注入正文**（正文检索走知识库工具，全文入上下文会打穿 token 预算）。
+- **能力策略**：`GET /conversations/capabilities` 返回 documents / images /
+  max_attachments / max_file_mb；`images` 由 `LLM__SUPPORTS_IMAGE`（默认 false）
+  决定，当前平台 Qwen 为纯文本 → 前端选择图片时给出明确原因，**不假装能理解**。
+  换视觉模型只需改环境变量，前端不用动。
+- **前端**：ChatShell 附件按钮 + 拖放遮罩 + 上传中状态 + 可移除 chips；
+  上传走知识库管线（PDF/DOCX/MD/TXT，≤30MB），上传中禁止发送；编辑重发/重试
+  保留原附件。语音用浏览器 Web Speech API（zh-CN，本机识别，不上传音频），
+  不支持时隐藏按钮。
+- **验收**：后端定向 18 passed；E2E 双视口 **10/10 passed**（新增「上传 →
+  发送请求带 document_id → 气泡展示附件」）；生产实测 capabilities、附件发送/
+  回读、越权 400 全部符合预期。
+
+### 磁盘维护（生产 47.253.81.6）
+
+2026-11-19 清理：`docker builder prune -af` 回收 **18.8GB**（containerd 里的
+构建缓存，均可重建），磁盘 82% → 36%；未动任何数据卷（postgres/uploads/
+artifacts）。**每次部署构建后建议顺手 prune**，否则每次 build 都会累积数 GB。
+不要用 `docker system prune -a --volumes`：会删掉 uploads/artifacts 卷。
+
 ### 6.5.2 技术栈（**已锁定，不得擅自替换**）
 
 | 能力 | 选型 | 说明 |
