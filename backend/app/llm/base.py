@@ -137,13 +137,18 @@ class BaseLLM(ABC):
                     target_model=getattr(routed, "model", ""),
                     target_provider=getattr(routed, "provider", ""),
                 )
-                return await routed.chat(
-                    messages,
-                    tools=tools,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    **kwargs,
-                )
+                # 屏蔽块内委派：目标内部（可能包着另一个 BaseLLM）不再二次路由，
+                # 否则 BYOKClient→adapter→router→BYOKClient 无限递归（生产实证）。
+                from app.llm.scope import suppress_routing
+
+                with suppress_routing():
+                    return await routed.chat(
+                        messages,
+                        tools=tools,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        **kwargs,
+                    )
 
         # 确保客户端已初始化（延迟创建）
         self._ensure_client()

@@ -6,7 +6,16 @@ const createTaskMock = vi.fn();
 const pushMock = vi.fn();
 
 vi.mock("@/api/tasks", () => ({
-  taskApi: { create: (...args: unknown[]) => createTaskMock(...args) },
+  taskApi: {
+    create: (...args: unknown[]) => createTaskMock(...args),
+    get: vi.fn().mockResolvedValue({ status: "planning" }),
+  },
+}));
+
+const classifyMock = vi.fn();
+
+vi.mock("@/api/intent", () => ({
+  classifyIntent: (...args: unknown[]) => classifyMock(...args),
 }));
 
 vi.mock("vue-router", () => ({
@@ -14,6 +23,15 @@ vi.mock("vue-router", () => ({
 }));
 
 import GlobalPromptEntry from "@/components/layout/GlobalPromptEntry.vue";
+
+beforeEach(() => {
+  classifyMock.mockReset().mockResolvedValue({
+    intent: "literature_review",
+    topic: "多智能体协作",
+    keywords: ["multi-agent", "software engineering"],
+    source: "llm",
+  });
+});
 
 describe("GlobalPromptEntry（Issue #8 P0 全局入口）", () => {
   beforeEach(() => {
@@ -54,8 +72,29 @@ describe("GlobalPromptEntry（Issue #8 P0 全局入口）", () => {
     await bePrompt.vm.$emit("update:modelValue", "帮我综述 RAG 质量评估方法");
     await bePrompt.vm.$emit("submit", "帮我综述 RAG 质量评估方法");
     await flushPromises();
-    expect(createTaskMock).toHaveBeenCalledWith({ topic: "帮我综述 RAG 质量评估方法" });
-    expect(pushMock).toHaveBeenCalledWith("/tasks/tid-1");
+    expect(createTaskMock).toHaveBeenCalledWith({
+      topic: "多智能体协作",
+      keywords: ["multi-agent", "software engineering"],
+    });
+    // P1-2：提交后不跳页（入口内任务条轮询状态）
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it("非综述意图：就地提示且不创建任务", async () => {
+    classifyMock.mockResolvedValue({
+      intent: "other",
+      topic: "随便聊聊",
+      keywords: [],
+      source: "llm",
+    });
+    const wrapper = mount(GlobalPromptEntry, { props: { collapsed: false } });
+    const bePrompt = wrapper.findComponent({ name: "BePromptInput" });
+    await bePrompt.vm.$emit("submit", "帮我写个购物清单");
+    await flushPromises();
+    expect(createTaskMock).not.toHaveBeenCalled();
+    expect(wrapper.find('[data-test="global-prompt-error"]').text()).toContain(
+      "只支持文献综述任务",
+    );
   });
 
   it("配额/后端错误：就地展示错误文案且不跳转", async () => {

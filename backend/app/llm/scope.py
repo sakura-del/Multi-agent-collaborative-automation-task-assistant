@@ -76,3 +76,31 @@ def bind_user_routes(routes: dict[str, Any]) -> None:
 def get_user_routes() -> dict[str, Any] | None:
     """取当前任务的用户级路由；未配置返回 None。"""
     return _user_routes.get()
+
+
+# ===== 路由屏蔽（防委派环，2026-11-19 RecursionError 修复）=====
+
+#: 路由委派期间置 True：委派目标的内部调用不再二次路由。
+#: 为什么需要：委派目标可能是包装类（BYOKClient），其内部持有 BaseLLM 实例——
+#: 该实例的 chat 同样处于 node_type scope 内，会再次命中路由并委派回同一个
+#: 包装类 → 无限递归（生产实证：extract 路由到七牛云后同一毫秒刷出几十条
+#: llm_routed，栈深耗尽 "maximum recursion depth exceeded"）。
+_routing_suppressed: ContextVar[bool] = ContextVar("veripaper_routing_suppressed", default=False)
+
+
+def suppress_routing() -> Any:
+    """返回一个上下文管理器：块内所有路由解析返回 None（只允许委派一层）。"""
+    return _suppress_flag(True)
+
+
+@contextmanager
+def _suppress_flag(value: bool) -> Iterator[None]:
+    token = _routing_suppressed.set(value)
+    try:
+        yield
+    finally:
+        _routing_suppressed.reset(token)
+
+
+def routing_suppressed() -> bool:
+    return _routing_suppressed.get()

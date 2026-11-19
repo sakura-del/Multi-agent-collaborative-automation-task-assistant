@@ -113,8 +113,11 @@ class ModelRouter:
         优先级：**用户级路由**（`scope.get_user_routes`，用户在「我的模型」页
         配置，凭据是用户自己的）> 平台 env 路由（`LLM__NODE_ROUTING`）。
         """
-        from app.llm.scope import get_user_routes
+        from app.llm.scope import get_user_routes, routing_suppressed
 
+        # 委派期间屏蔽：防止「目标包装类 → 内部 BaseLLM → 再路由」的无限递归
+        if routing_suppressed():
+            return None
         user_routes = get_user_routes()
         if user_routes and node_type in user_routes:
             return user_routes[node_type]
