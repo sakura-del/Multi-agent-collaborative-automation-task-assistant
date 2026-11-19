@@ -1,12 +1,12 @@
 # 项目长期约定
 
-## 测试在哪跑（2026-11-16 用户明确要求）
+## 测试在哪跑（2026-11-17 用户最高优先级明令，范围升级）
 
-- **所有后端测试只在 `10.0.10.2`（`ssh ylin-dev`）跑**。本机 Windows 内存不足；
-  美东生产机 `47.253.81.6` 内存也不足。**不要**在两者上跑 pytest。
-- 测试环境：`~/vp-test`（独立检出，`git fetch origin main && git reset --hard origin/main`），
-  入口 `~/vp-test/run-tests.sh <pytest args>`；venv 为 Python 3.12。
-- 本机只做 `black` / `ruff` / `mypy` 与前端 `npm run build`。
+- **一切测试只在 `10.0.10.2`（`ssh ylin-dev`）跑**。本机 Windows 内存不足；
+  美东生产机 `47.253.81.6` 内存也不足。**本机不准运行任何测试进程**：
+  pytest、前端 vitest、任何 nodejs/npm 测试都不行。
+  本机只做 `black` / `ruff` / `mypy` / `vue-tsc` 与前端 `npm run build`。
+  **再犯用户将直接删环境，没有第二次机会**（已写入 AGENTS.md §5 铁律 #0 与 §4.1）。
 - 浏览器验收由 GitHub CI 的 `e2e` 作业负责（隔离 Compose 栈，端口 48082）。
 
 ## BYOK（Issue #15）关键决策
