@@ -35,6 +35,19 @@ class TaskStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+#: 任务列表的状态分组（**必须与前端 `utils/task-status.ts` 完全一致**）。
+#:
+#: HTTP 列表端点与 Agent 工具共用这一份：两边各写一份会让
+#: 「待我确认 3」与筛出来的条数对不上（历史真实缺陷）。
+STATUS_GROUPS: dict[str, tuple[str, ...] | None] = {
+    "all": None,
+    "needs_me": ("waiting_approval", "waiting_human"),
+    # active = 非终态且不需要用户操作（与前端 isActive 同义）
+    "active": ("created", "planning", "running", "reviewing", "paused", "retrying"),
+    "done": ("completed",),
+}
+
+
 class TaskCommand(StrEnum):
     """人工控制命令。"""
 

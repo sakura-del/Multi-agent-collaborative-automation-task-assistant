@@ -10,6 +10,7 @@ from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
     admin_byok,
+    agent_tools,
     api_keys,
     auth,
     auth_lifecycle,
@@ -47,6 +48,7 @@ api_router.include_router(ws.router)
 api_router.include_router(knowledge_router)
 api_router.include_router(citation_styles.router)
 api_router.include_router(templates.router)
+api_router.include_router(agent_tools.router)
 api_router.include_router(conversations.router)
 api_router.include_router(intent.router)
 api_router.include_router(search.router)

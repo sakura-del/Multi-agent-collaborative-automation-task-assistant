@@ -27,13 +27,14 @@ from app.api.deps import (
     require_scope,
 )
 from app.billing.services.plan_service import PlanService
-from app.core.config import get_settings, settings
-from app.core.exceptions import ForbiddenException, ValidationException
+from app.core.config import get_settings
+from app.core.exceptions import ValidationException
 from app.core.quota import QuotaService
 from app.db.models.user import User
 from app.db.session import get_db
-from app.orchestration.contracts import TaskSnapshot, TaskStatus
+from app.orchestration.contracts import STATUS_GROUPS, TaskSnapshot, TaskStatus
 from app.orchestration.services.task_execution import TaskExecution
+from app.orchestration.services.task_submission import submit_review_task
 from app.schemas.task import (
     PlanApproval,
     TaskControl,
@@ -43,7 +44,6 @@ from app.schemas.task import (
     TaskEventPage,
     TaskSummaryOut,
 )
-from app.security.llm_credential_service import LLMCredentialService
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -52,13 +52,7 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 #: 与筛出来的条数对不上（点「待我确认 3」却只列出 2 条）。
 StatusGroup = Literal["all", "needs_me", "active", "done"]
 
-_STATUS_GROUP_STATUSES: dict[str, tuple[str, ...] | None] = {
-    "all": None,
-    "needs_me": ("waiting_approval", "waiting_human"),
-    # active = 非终态且不需要用户操作（与前端 isActive 同义）
-    "active": ("created", "planning", "running", "reviewing", "paused", "retrying"),
-    "done": ("completed",),
-}
+_STATUS_GROUP_STATUSES = STATUS_GROUPS
 
 
 def get_task_execution(request: Request) -> TaskExecution:
@@ -94,13 +88,6 @@ async def get_visible_workspace_ids(
         select(WorkspaceMember.workspace_id).where(WorkspaceMember.user_id == current_user.id)
     )
     return [row[0] for row in rows.all()]
-
-
-#: 单次文献综述任务的 token 预估（提交时先按此扣减，跑完再按实际用量校正）。
-#:
-#: 取值依据：一次综述约 5 类节点 × 若干子任务，历史实测中位数量级在 10 万 token 上下；
-#: 这里取整为 100k 作为**保守预估**——宁可先扣多了再退还，也不要先扣少了超支。
-ESTIMATED_TOKENS_PER_TASK = 100_000
 
 
 def build_quota_service() -> QuotaService | None:
@@ -235,51 +222,14 @@ async def create_task(
     - **篇数：默认免** —— 开关 `BILLING__BYOK_CONSUMES_REVIEW_QUOTA=true`
       时与平台模型一致（适合「服务仍由平台提供」的定价）。
     """
-    credential = None
-    model_snapshot: dict[str, Any] | None = None
-    if payload.llm_credential_id is not None:
-        # 越权/不存在统一 404（服务层保证），停用单独 403
-        credential = await LLMCredentialService().get(
-            db, current_user.id, payload.llm_credential_id
-        )
-        if credential.status != "active":
-            raise ForbiddenException("该模型凭据已停用，请先启用或更换")
-        model_snapshot = {
-            "credential_id": str(credential.id),
-            "name": credential.name,
-            "provider": credential.provider,
-            "model": credential.model,
-            "base_url": credential.base_url,
-            "context_window": credential.context_window,
-            "max_output_tokens": credential.max_output_tokens,
-            "is_byok": True,
-        }
-
-    contract = payload.to_contract()
-    # BYOK（Issue #15）：用户自己的 key，平台不再预扣 token。
-    # 篇数按开关决定：默认免（算力已由用户付费），`billing.byok_consumes_review_quota=true`
-    # 时与平台模型一致。
-    byok = payload.llm_credential_id is not None
-
-    # ① 篇数（数据库原子扣减；超限抛 PLAN_QUOTA_EXCEEDED）
-    if not byok or settings.billing.byok_consumes_review_quota:
-        await plan_service.check_and_consume_review(current_user.id)
-
-    # ② token 成本护栏（Redis；超限抛 TOKEN_BUDGET_EXCEEDED）
-    # BYOK 明确跳过：否则平台会为用户自费的 token 再收一次配额。
-    if quota is not None and not byok:
-        await quota.check_and_consume(current_user.id, tokens=ESTIMATED_TOKENS_PER_TASK)
-
-    # 不带凭据时保持原调用形状：编排层替身（测试/验收）无需感知 BYOK 参数
-    if payload.llm_credential_id is None:
-        task_id = await execution.submit(current_user.id, contract)
-    else:
-        task_id = await execution.submit(
-            current_user.id,
-            contract,
-            llm_credential_id=payload.llm_credential_id,
-            model_snapshot=model_snapshot,
-        )
+    task_id = await submit_review_task(
+        db=db,
+        user_id=current_user.id,
+        payload=payload,
+        execution=execution,
+        plan_service=plan_service,
+        quota=quota,
+    )
     return TaskCreateOut(task_id=task_id, status=TaskStatus.PLANNING.value)
 
 

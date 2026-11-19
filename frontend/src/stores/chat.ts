@@ -204,12 +204,32 @@ export const useChatStore = defineStore("chat", () => {
   }
 
   /** 切换分支：显示某个兄弟节点所在的路径 */
+  /**
+   * 沿指定节点向下走到最深叶子（分支切换的正确落点）。
+   *
+   * 为什么不能直接把 activeLeafId 设成点中的消息：分支按钮挂在**用户消息**上
+   * （同父兄弟是两条提问），而 `activePath` 是从叶节点回溯——若把叶设成用户
+   * 消息，那条分支的助手回答会被整段隐藏（生产实测 2026-11-19）。
+   * 统一向下取最后一个子节点，用户消息与助手消息两种入口都成立。
+   */
+  function deepestLeaf(nodeId: string): string {
+    let cursor = nodeId;
+    // 防御异常数据成环：上限远大于正常对话深度
+    for (let guard = 0; guard < 500; guard += 1) {
+      const children = childrenByParent.value.get(cursor) ?? [];
+      if (!children.length) return cursor;
+      cursor = children[children.length - 1]!.id;
+    }
+    return cursor;
+  }
+
   function switchBranch(messageId: string) {
-    activeLeafId.value = messageId;
+    const leaf = deepestLeaf(messageId);
+    activeLeafId.value = leaf;
     const conversationId = detail.value?.id;
     if (conversationId) {
       void conversationApi
-        .update(conversationId, { leaf_id: messageId })
+        .update(conversationId, { leaf_id: leaf })
         .catch(() => undefined);
     }
   }

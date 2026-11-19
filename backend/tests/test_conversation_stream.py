@@ -26,7 +26,7 @@ class TestSseFrame:
     def test_json_single_line(self) -> None:
         """内容里的换行不能把 data 拆成多行（SSE 协议要求单行）。"""
         frame = sse("delta", {"text": "第一行\n第二行"})
-        data_line = [line for line in frame.split("\n") if line.startswith("data: ")][0]
+        data_line = next(line for line in frame.split("\n") if line.startswith("data: "))
         payload = json.loads(data_line[len("data: ") :])
         assert payload["text"] == "第一行\n第二行"
         assert "\n" not in data_line
