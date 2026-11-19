@@ -394,6 +394,49 @@ shadcn CLI 的 `@beui/*` 分发同样面向 React。因此「用 beUI」指的�
 3. **时间戳 500**：手写迁移漏 `server_default=now()`；`Mapped[datetime|None]`
    默认推导成无时区 TIMESTAMP。**教训：手写迁移对照 Base 约定逐列核对**。
 
+### 会话 E2E 与 Agent 工具网关（Issue #8 P1，2026-11-19）
+
+**E2E**：`frontend/e2e/chat-kernel.spec.ts`（4 用例 × 2 视口）
+
+- 真实链路（`E2E_REAL_LLM=1` 才跑）：FAB → 输入 → Enter → SSE 200
+  （content-type 断言）→ 流式结束 → 助手正文非空 → 刷新后历史恢复；pageerror 为零；
+- SSE 桩状态机（不耗 token、零抖动）：多 delta 流式 + Markdown/KaTeX/Mermaid
+  节点断言；停止生成 → `已中断` 徽章且按钮消失；编辑重发 → 分支 `2/2` 切 `1/2`
+  后仍能看到旧分支的助手回答；
+- 稳定等待：只用 web-first 断言 + 显式超时，无「sleep 等结果」；登录辅助含限流
+  重试与移动端 `nav-mobile-trigger`（Pixel 5 侧栏默认折叠）；
+- **验收**：测试机 10.0.10.2 隔离栈（chromium + mobile-chrome）**8/8 passed**，
+  后端定向用例 **15 passed**。
+- **E2E 抓到的真缺陷**：编辑**首条**消息时 `parent_id=null` 表示「挂回根」，
+  后端把 null 当「未传」→ 接当前叶节点 → 两条分支串成一条链。修复：
+  后端用 `model_fields_set` 区分显式 null；前端 `null` 必须真实下发
+  （`parentId ? ... : {}` 这类真值判断会把 null 丢掉）。
+
+**工具网关**：`backend/app/tools/agent/`（12 个工具，全部复用既有 service 层）
+
+| 域 | 工具 |
+| --- | --- |
+| 任务 6 | `list_tasks` / `get_task` / `create_task` / `approve_task_plan` / `cancel_task` / `retry_task_node` |
+| 引用库 2 | `search_references` / `import_references` |
+| 知识库 2 | `search_knowledge` / `list_knowledge_documents` |
+| 配额 1 | `get_quota` |
+| 搜索 1 | `search_web`（与 `/api/v1/search/web` 同一 Tavily provider） |
+
+- 参数是 Pydantic 模型，目录里的 JSON Schema 由模型生成（与校验永不漂移）；
+- **写操作必须 `confirmed=true`**，否则 409 `TOOL_CONFIRMATION_REQUIRED` 且不执行；
+- 任务创建抽出 `services/task_submission.py::submit_review_task`，HTTP 与工具共用
+  「凭据 → 篇数 → token」门禁顺序；意图分类抽出 `services/intent_service.py`
+  （fail-open），`/tasks/classify-intent` 与 `/agent/route` 同一实现；
+- 端点：`GET /agent/tools`、`POST /agent/tools/{name}/invoke`、`POST /agent/route`
+  （**仅 JWT**：写工具没有 API Key scope 体系，先不开放给开放 API）；
+- 生产验收：目录 12 / 配额 / Tavily 6 条 / route 5 关键词 / 写确认 409 /
+  `create_task → get_task → cancel_task` 闭环（任务 `cancelled`）。
+
+**E2E 隔离栈要点**（不碰 `~/projects` 旧环境）：独立 compose project + 覆盖
+`container_name` 与**卷名**（compose 里是显式 `name: maa-*`，不覆盖会复用旧库）+
+端口；`RATE_LIMIT__ENABLED=false`（8 用例串行会撞 5 次/分钟登录限制）；
+Node 20 + `vite preview`；结束后 `down -v` 并删除含密钥的临时 env/override。
+
 ### 6.5.2 技术栈（**已锁定，不得擅自替换**）
 
 | 能力 | 选型 | 说明 |
