@@ -60,10 +60,12 @@ const router = useRouter();
 const store = useChatStore();
 
 const open = ref(props.variant === "full" || localStorage.getItem(OPEN_KEY) === "1");
+// ⚠️ 非 /chat 页**绝不采纳持久化的 full**（2026-11-19 线上布局事故）：
+// 全屏形态会 `flex h-full w-full` 作为布局 flex 子项参与排版，把主内容
+// 挤成一条竖线；而 full 只应由 `/chat` 路由通过 props 提供。
+const storedVariant = localStorage.getItem(VARIANT_KEY);
 const variant = ref<"floating" | "dock" | "full">(
-  props.variant === "full"
-    ? "full"
-    : ((localStorage.getItem(VARIANT_KEY) as "floating" | "dock") ?? props.variant)
+  props.variant === "full" ? "full" : storedVariant === "dock" ? "dock" : "floating"
 );
 const showList = ref(false);
 const draft = ref("");
@@ -219,7 +221,10 @@ function toggleVoice(): void {
   }
 }
 
-watch(variant, (value) => localStorage.setItem(VARIANT_KEY, value));
+watch(variant, (value) => {
+  // full 不落盘：它属于 `/chat` 路由，普通页从 localStorage 读到会挤坏布局
+  if (value !== "full") localStorage.setItem(VARIANT_KEY, value);
+});
 watch(open, (value) => localStorage.setItem(OPEN_KEY, value ? "1" : "0"));
 
 onMounted(async () => {
@@ -296,9 +301,10 @@ async function newConversation() {
   await store.create();
 }
 
-function goFullscreen() {
-  variant.value = "full";
-  void router.push("/chat");
+async function goFullscreen() {
+  // 不在这里预设 full：/chat 的新壳由 props.variant="full" 提供。
+  // 先设 full 再导航会让普通页闪一帧「w-full 挤占布局」。
+  await router.push("/chat");
 }
 
 function toDock() {
@@ -312,7 +318,11 @@ function toDock() {
 }
 
 const panelClass = computed(() => {
-  if (variant.value === "full") return "flex h-full w-full flex-col";
+  // ⚠️ 只有 full 需要 `relative` 作为拖放遮罩的定位基准；
+  // floating/dock 靠 `fixed` 自身就建立了定位上下文。
+  // 曾经无条件追加 `relative`：Tailwind 的 .relative 声明在 .fixed 之后，
+  // 直接把浮层变成布局内 flex 子项，把主内容挤成竖排（2026-11-19 线上事故）。
+  if (variant.value === "full") return "relative flex h-full w-full flex-col";
   if (variant.value === "dock")
     return "fixed right-0 top-0 z-40 flex h-svh w-[440px] flex-col border-l border-border bg-background shadow-xl";
   return "fixed bottom-4 right-4 z-40 flex h-[580px] w-[380px] flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl";
@@ -340,7 +350,7 @@ const panelClass = computed(() => {
   <!-- 面板 -->
   <section
     v-if="open"
-    :class="[panelClass, 'relative']"
+    :class="panelClass"
     data-test="chat-shell"
     @dragover.prevent="dragActive = true"
     @dragleave.prevent="dragActive = false"

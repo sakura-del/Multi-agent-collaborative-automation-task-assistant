@@ -456,6 +456,26 @@ Node 20 + `vite preview`；结束后 `down -v` 并删除含密钥的临时 env/o
   发送请求带 document_id → 气泡展示附件」）；生产实测 capabilities、附件发送/
   回读、越权 400 全部符合预期。
 
+### 聊天壳布局事故（2026-11-19，已修复）
+
+症状：点「停靠到右侧」放大聊天栏后，任务页正文被挤成一条竖线（截图事故）。
+
+两层根因：
+
+1. `panelClass` 之后又追加 `relative`：Tailwind 的 `.relative` 声明在 `.fixed`
+   之后，同一元素上两个 position 工具类时 **relative 生效** → 浮层变成布局内
+   flex 子项，直接挤压主内容；
+2. `vp:chat:variant` 把 `full` 也写入 localStorage，普通页初始化直接采纳，
+   `flex h-full w-full` 进一步抢占宽度。
+
+修复：position 工具类互斥（只有 full 形态用 `relative`）；`full` 不落盘，
+普通页只接受 dock/floating；全屏改为直接导航，不再先设 full。
+回归：E2E「持久化 full 形态不影响普通页布局」断言 `position=fixed`、
+壳宽 <500、主区宽 >300，并覆盖点「停靠」的实际路径。
+
+**教训：不要在同一个元素上叠加 fixed/absolute/relative 工具类——CSS 声明顺序
+决定胜者，与 class 书写顺序无关。**
+
 ### 磁盘维护（生产 47.253.81.6）
 
 2026-11-19 清理：`docker builder prune -af` 回收 **18.8GB**（containerd 里的

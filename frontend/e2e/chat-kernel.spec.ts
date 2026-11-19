@@ -247,6 +247,41 @@ test.describe("会话内核：流式状态机（SSE 桩）", () => {
     });
   }
 
+  test("持久化 full 形态不影响普通页布局（回归）", async ({ page }) => {
+    // 复现线上事故：访问过 /chat 后 localStorage 留下 full，回 /tasks 时
+    // 聊天壳变成 w-full 的 flex 子项，把任务页挤成竖排。
+    await page.addInitScript(() => {
+      localStorage.setItem("vp:chat:variant", "full");
+      localStorage.setItem("vp:chat:open", "1");
+    });
+
+    await login(page);
+    await page.goto("/tasks");
+
+    const shell = page.locator('[data-test="chat-shell"]');
+    await expect(shell).toBeVisible({ timeout: 30_000 });
+    // full 是 static/flex；floating/dock 必须是 fixed 浮层
+    await expect
+      .poll(async () => shell.evaluate((element) => getComputedStyle(element).position))
+      .toBe("fixed");
+    const box = await shell.boundingBox();
+    expect(box?.width ?? 0).toBeLessThan(500);
+
+    // 主内容区仍有正常宽度（没有被挤成一条竖线）
+    const mainBox = await page.locator("main").boundingBox();
+    expect(mainBox?.width ?? 0).toBeGreaterThan(300);
+
+    // 用户实际路径：点「停靠到右侧」放大 → 仍必须是 fixed 浮层，不挤占主内容
+    await page.locator('[data-test="chat-variant-toggle"]').click();
+    await expect
+      .poll(async () => shell.evaluate((element) => getComputedStyle(element).position))
+      .toBe("fixed");
+    const dockBox = await shell.boundingBox();
+    expect(dockBox?.width ?? 0).toBeLessThan(500);
+    const mainAfterDock = await page.locator("main").boundingBox();
+    expect(mainAfterDock?.width ?? 0).toBeGreaterThan(300);
+  });
+
   test("多 delta 流式 → 完成态；Markdown/KaTeX/Mermaid 均渲染", async ({ page }) => {
     await stubStream(page, {
       delayMs: 1_500,
