@@ -11,8 +11,8 @@
 
 from __future__ import annotations
 
-from app.tools.csl.importers import _parse_bibtex_authors
 from app.api.v1.endpoints.references import _name_to_text
+from app.tools.csl.importers import _parse_bibtex_authors
 
 
 class TestStandardInput:
