@@ -332,6 +332,21 @@ shadcn CLI 的 `@beui/*` 分发同样面向 React。因此「用 beUI」指的�
 - beUI 的主题 tokens 与本项目 Nova 预设（§6.5.3）不同——**Nova 优先**：颜色/间距用
   本项目 tokens，只借鉴 beUI 的结构与动效。
 
+### 全局 AI 入口（Issue #8 P0，2026-11-19，commit `9b800e16`）
+
+**一句话 → 自动综述**的对话式入口已上线：
+
+- `src/components/layout/GlobalPromptEntry.vue`：侧栏入口——展开态 BePromptInput
+  紧凑版（Enter 直提交）、折叠态 Sparkles 圆按钮（点击展开侧栏）；
+- 提交 → `taskApi.create({ topic, keywords: [句首 30 字] })`（后端契约 keywords
+  min_length=1）→ **平台默认模型**（Qwen 网关）跑规划 → 跳转任务详情页；
+- 付费墙复用既有套餐门禁（创建端点顺序：凭据 → 篇数月配额 → token 日预算）；
+  免费档每月 1 篇即「不付费的额度」；
+- 生产验收（2026-11-19 10:14）：「综述多智能体协作系统在软件工程中的研究进展」
+  一句话 → 78s 规划成功（v1 · 5 节点，研究问题/检索式/验收标准齐全）→
+  待确认规划（Agent Plan 卡片 Awaitng approval）；
+- P1 待办：意图分类（非综述意图的提示与路由）；任务创建后的流式状态回显到入口。
+
 ### 6.5.2 技术栈（**已锁定，不得擅自替换**）
 
 | 能力 | 选型 | 说明 |
