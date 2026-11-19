@@ -325,18 +325,25 @@ const panelClass = computed(() => {
   // 直接把浮层变成布局内 flex 子项，把主内容挤成竖排（2026-11-19 线上事故）。
   if (variant.value === "full") return "relative flex h-full w-full flex-col";
   if (variant.value === "dock")
-    return "fixed right-0 top-0 z-40 flex h-svh w-[440px] flex-col border-l border-border bg-background shadow-xl";
-  return "fixed bottom-4 right-4 z-40 flex h-[580px] w-[380px] flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl";
+    return "fixed right-0 top-0 z-[200] flex h-svh w-[440px] flex-col border-l border-border bg-background shadow-xl";
+  return "fixed bottom-4 right-4 z-[200] flex h-[580px] w-[380px] flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl";
 });
 </script>
 
 <template>
+  <!--
+    ⚠️ 全局浮层 Teleport 到 body：聊天入口不能被页面布局/层叠上下文困住。
+    移动端任务页的时间线（clip-path + 动态 z-index 卡片）曾把 FAB 盖住，
+    单纯提高 z-index 不足以跨出页面的堆叠上下文。
+    full 形态属于 /chat 页面内容，保持原位（disabled）。
+  -->
+  <Teleport to="body" :disabled="props.variant === 'full'">
   <!-- FAB（仅 floating 且未打开） -->
   <button
     v-if="props.variant !== 'full' && variant !== 'full' && !open"
     type="button"
     data-test="chat-fab"
-    class="fixed bottom-5 right-5 z-40 flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    class="fixed bottom-5 right-5 z-[200] flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     aria-label="打开会话"
     title="打开会话"
     @click="open = true"
@@ -643,4 +650,5 @@ const panelClass = computed(() => {
       </div>
     </div>
   </section>
+  </Teleport>
 </template>

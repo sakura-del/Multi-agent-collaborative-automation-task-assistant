@@ -189,9 +189,14 @@ class ConversationStreamer:
 
             use_tools = self._tools_enabled and self._tool_context is not None
             context = await build_context(session, message)
-            if use_tools:
-                # 插在系统提示之后，不覆盖原有定位
-                context.insert(1, LLMMessage(role=MessageRole.SYSTEM, content=TOOL_POLICY))
+            if use_tools and context:
+                # ⚠️ 必须**合并**进原系统提示，不能追加第二条 system：
+                # 平台网关（Qwen）只允许 system 出现在最前且不接受第二条，
+                # 否则 400「System message must be at the beginning」。
+                context[0] = LLMMessage(
+                    role=MessageRole.SYSTEM,
+                    content=f"{context[0].content or ''}{TOOL_POLICY}",
+                )
             tools = self._tool_schemas() if use_tools else None
 
             message.status = "streaming"

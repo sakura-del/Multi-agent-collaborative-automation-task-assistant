@@ -28,7 +28,8 @@ import { demoPassword, E2E_DEMO_ACCOUNT } from "./credentials";
 const API = "/api/v1";
 /** 会话标题取首条消息前 40 字（后端行为），用它做清理标记 */
 const MARKER = "[E2E-chat]";
-const STREAM_RE = /\/api\/v1\/conversations\/[^/]+\/messages\/[^/]+\/stream$/;
+// 允许 query（工具开启时是 /stream?tools=1）
+const STREAM_RE = /\/api\/v1\/conversations\/[^/]+\/messages\/[^/]+\/stream(?:\?|$)/;
 const FIXTURE = resolve(dirname(fileURLToPath(import.meta.url)), "fixtures/sample.txt");
 
 /** 登录（含限流重试：命中 429 时等待窗口恢复再提交）。 */
@@ -440,10 +441,12 @@ test.describe("会话内核：工具调用（真实模型）", () => {
     await send(page, `${MARKER} 请调用 get_quota 工具查询我的套餐剩余篇数，再告诉我结果`);
     await streamRequest;
 
-    await expect(page.locator('[data-test="chat-tool-step"]').first()).toBeVisible({
-      timeout: 120_000,
-    });
-    await expect(page.locator('[data-test="chat-tool-timeline"]')).toContainText("查询配额");
+    const timeline = page.locator('[data-test="chat-tool-timeline"]');
+    await expect(timeline).toBeVisible({ timeout: 120_000 });
+    await expect(timeline).toContainText("查询配额");
+    // 时间线默认折叠：点开后才能看到每一步（阅读体验与信息密度兼顾）
+    await timeline.locator("summary").click();
+    await expect(page.locator('[data-test="chat-tool-step"]').first()).toBeVisible();
     await waitStreamingSettled(page);
 
     const assistant = page.locator('[data-test="chat-body-assistant"]');
@@ -470,7 +473,7 @@ test.describe("会话内核：工具调用（真实模型）", () => {
 
     const approval = page.locator('[data-test="chat-tool-approval"]');
     await expect(approval).toBeVisible({ timeout: 150_000 });
-    await expect(approval).toContainText("创建综述任务");
+    await expect(approval).toContainText("创建文献综述任务");
 
     await page.locator('[data-test="chat-tool-approve"]').click();
     await expect(approval).toHaveCount(0, { timeout: 60_000 });
@@ -479,6 +482,9 @@ test.describe("会话内核：工具调用（真实模型）", () => {
       "已创建综述任务",
       { timeout: 60_000 }
     );
+    const timeline = page.locator('[data-test="chat-tool-timeline"]');
+    await expect(timeline).toBeVisible();
+    await timeline.locator("summary").click();
     await expect(page.locator('[data-test="chat-tool-step"]').first()).toBeVisible();
     await expect(page.locator('[data-test="chat-error"]')).toHaveCount(0);
   });
