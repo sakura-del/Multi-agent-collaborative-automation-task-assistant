@@ -4,6 +4,7 @@ import { computed, ref } from "vue";
 import {
   conversationApi,
   streamChatMessage,
+  type ChatAttachment,
   type ChatConversation,
   type ChatConversationDetail,
   type ChatMessage,
@@ -115,7 +116,11 @@ export const useChatStore = defineStore("chat", () => {
    * @param content 用户输入
    * @param parentId 从任意节点继续（编辑重发/分支）；缺省 = 当前分支末端
    */
-  async function send(content: string, parentId?: string | null) {
+  async function send(
+    content: string,
+    parentId?: string | null,
+    attachments?: ChatAttachment[],
+  ) {
     const conversationId = detail.value?.id;
     if (!conversationId) return;
     error.value = null;
@@ -126,7 +131,8 @@ export const useChatStore = defineStore("chat", () => {
       const pair = await conversationApi.sendMessage(
         conversationId,
         content,
-        effectiveParent
+        effectiveParent,
+        attachments
       );
       detail.value?.messages.push(pair.user_message, pair.assistant_message);
       if (detail.value) detail.value.message_count += 2;

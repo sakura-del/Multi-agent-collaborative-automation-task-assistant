@@ -1,4 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { demoPassword, E2E_DEMO_ACCOUNT } from "./credentials";
 
@@ -27,6 +29,7 @@ const API = "/api/v1";
 /** 会话标题取首条消息前 40 字（后端行为），用它做清理标记 */
 const MARKER = "[E2E-chat]";
 const STREAM_RE = /\/api\/v1\/conversations\/[^/]+\/messages\/[^/]+\/stream$/;
+const FIXTURE = resolve(dirname(fileURLToPath(import.meta.url)), "fixtures/sample.txt");
 
 /** 登录（含限流重试：命中 429 时等待窗口恢复再提交）。 */
 async function login(page: Page): Promise<void> {
@@ -301,6 +304,40 @@ test.describe("会话内核：流式状态机（SSE 桩）", () => {
     await expect(page.locator('[data-test="chat-stop"]')).toHaveCount(0);
     await expect(page.locator('[data-test="chat-streaming-cursor"]')).toHaveCount(0);
     await expect(page.locator('[data-test="chat-message-error"]')).toHaveCount(0);
+  });
+
+  test("文档附件：上传知识库 → 随消息发送并落库", async ({ page }) => {
+    await stubStream(page, { bodies: [sseBody(["收到附件，已准备好用它建综述。"]) ] });
+
+    await login(page);
+    await page.goto("/tasks");
+    await openChat(page);
+    await newConversation(page);
+
+    // 上传：走知识库管线（解析/分块/索引），完成后出现附件 chip
+    await page.locator('[data-test="chat-file-input"]').setInputFiles(FIXTURE);
+    const chip = page.locator('[data-test="chat-attachment-chip"]');
+    await expect(chip).toBeVisible({ timeout: 90_000 });
+    await expect(chip).toContainText("sample");
+
+    // 发送请求必须带上 document_id（后端据此校验归属并落 attachments JSON）
+    const requestPromise = page.waitForRequest(
+      (request) =>
+        request.method() === "POST" && request.url().includes("/messages"),
+      { timeout: 30_000 }
+    );
+    await send(page, `${MARKER} 用这篇文档建综述`);
+    const request = await requestPromise;
+    const body = request.postDataJSON() as {
+      attachments?: { document_id?: string; title?: string }[];
+    };
+    expect(body.attachments?.length).toBe(1);
+    expect(body.attachments?.[0]?.document_id).toMatch(/[0-9a-f-]{36}/);
+
+    await waitStreamingSettled(page);
+    // 用户气泡展示附件标题；助手正常完成
+    await expect(page.locator('[data-test="chat-attachments"]')).toContainText("sample");
+    await expect(page.locator('[data-test="chat-body-assistant"]')).toContainText("收到附件");
   });
 
   test("编辑重发产生分支 → 切换回上一分支看到原回答", async ({ page }) => {

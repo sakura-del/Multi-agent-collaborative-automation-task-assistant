@@ -16,14 +16,18 @@
  * 头部按钮：小窗 ⇄ dock ⇄ 全屏（全屏通过路由 `/chat` 实现，
  * 从小窗点「全屏」会导航过去并记住形态）。
  */
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import {
+  FileText,
   Loader2,
   Maximize2,
+  Mic,
+  MicOff,
   MessageSquare,
   Minimize2,
   PanelRight,
+  Paperclip,
   Plus,
   Square,
   Trash2,
@@ -33,7 +37,13 @@ import {
 import BePromptInput from "@/components/motion/BePromptInput.vue";
 import ChatMessageItem from "@/components/chat/ChatMessageItem.vue";
 import { useChatStore } from "@/stores/chat";
-import type { ChatMessage } from "@/api/conversations";
+import { knowledgeApi } from "@/api/knowledge";
+import { conversationApi } from "@/api/conversations";
+import type {
+  ChatAttachment,
+  ChatMessage,
+  ConversationCapabilities,
+} from "@/api/conversations";
 
 const props = withDefaults(
   defineProps<{
@@ -58,15 +68,175 @@ const variant = ref<"floating" | "dock" | "full">(
 const showList = ref(false);
 const draft = ref("");
 
+// ===== 附件（P2）：文档上传走知识库管线，消息只带引用 =====
+const DEFAULT_MAX_ATTACHMENTS = 5;
+const DEFAULT_MAX_FILE_MB = 30;
+const DOC_EXTENSIONS = [".pdf", ".docx", ".md", ".markdown", ".txt"];
+const IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp", ".gif"];
+//: 后端能力（图片是否可用由平台模型决定；未取到时不误报，按文档处理）
+const capabilities = ref<ConversationCapabilities | null>(null);
+const attachments = ref<ChatAttachment[]>([]);
+const uploadingCount = ref(0);
+const attachmentError = ref<string | null>(null);
+const fileInput = ref<HTMLInputElement | null>(null);
+const dragActive = ref(false);
+
+function isSupportedDocument(name: string): boolean {
+  const lower = name.toLowerCase();
+  return DOC_EXTENSIONS.some((extension) => lower.endsWith(extension));
+}
+
+async function addFiles(files: FileList | File[]): Promise<void> {
+  attachmentError.value = null;
+  for (const file of Array.from(files)) {
+    const maxAttachments = capabilities.value?.max_attachments ?? DEFAULT_MAX_ATTACHMENTS;
+    const maxFileMb = capabilities.value?.max_file_mb ?? DEFAULT_MAX_FILE_MB;
+    if (attachments.value.length + uploadingCount.value >= maxAttachments) {
+      attachmentError.value = `最多 ${maxAttachments} 个附件`;
+      break;
+    }
+    const lowerName = file.name.toLowerCase();
+    if (IMAGE_EXTENSIONS.some((extension) => lowerName.endsWith(extension))) {
+      // 图片：平台模型是否支持视觉由后端能力决定，不在这里假装能理解
+      attachmentError.value =
+        capabilities.value?.image_reason ??
+        "当前模型不支持图片输入；请改用文档附件（PDF/DOCX/MD/TXT）";
+      continue;
+    }
+    if (!isSupportedDocument(file.name)) {
+      attachmentError.value = `不支持的文件类型：${file.name}（支持 PDF/DOCX/MD/TXT）`;
+      continue;
+    }
+    if (file.size > maxFileMb * 1024 * 1024) {
+      attachmentError.value = `文件超过 ${maxFileMb}MB：${file.name}`;
+      continue;
+    }
+    uploadingCount.value += 1;
+    try {
+      // 上传即入库（解析/分块/索引由知识库服务完成），失败会带可读原因
+      const doc = await knowledgeApi.upload(
+        file,
+        file.name.replace(/\.[^.]+$/, "").slice(0, 200) || file.name,
+      );
+      attachments.value.push({
+        kind: "document",
+        document_id: doc.id,
+        title: doc.title,
+      });
+    } catch (err) {
+      attachmentError.value = (err as Error).message || `上传失败：${file.name}`;
+    } finally {
+      uploadingCount.value -= 1;
+    }
+  }
+  if (fileInput.value) fileInput.value.value = "";
+}
+
+function onFilePicked(event: Event): void {
+  const input = event.target as HTMLInputElement;
+  if (input.files?.length) void addFiles(input.files);
+}
+
+function onDrop(event: DragEvent): void {
+  dragActive.value = false;
+  if (event.dataTransfer?.files?.length) void addFiles(event.dataTransfer.files);
+}
+
+function removeAttachment(index: number): void {
+  attachments.value.splice(index, 1);
+}
+
+// ===== 语音输入（P2）：浏览器 Web Speech API，不上传音频 =====
+interface RecognitionResultLike {
+  readonly isFinal: boolean;
+  readonly 0: { transcript: string };
+}
+interface RecognitionEventLike {
+  readonly resultIndex: number;
+  readonly results: ArrayLike<RecognitionResultLike>;
+}
+interface RecognitionLike {
+  lang: string;
+  interimResults: boolean;
+  continuous: boolean;
+  start(): void;
+  stop(): void;
+  onresult: ((event: RecognitionEventLike) => void) | null;
+  onerror: ((event: { error?: string }) => void) | null;
+  onend: (() => void) | null;
+}
+type RecognitionCtor = new () => RecognitionLike;
+
+const voiceSupported = ref(false);
+const listening = ref(false);
+let recognition: RecognitionLike | null = null;
+
+function getRecognitionCtor(): RecognitionCtor | null {
+  const scope = window as unknown as {
+    SpeechRecognition?: RecognitionCtor;
+    webkitSpeechRecognition?: RecognitionCtor;
+  };
+  return scope.SpeechRecognition ?? scope.webkitSpeechRecognition ?? null;
+}
+
+function toggleVoice(): void {
+  if (listening.value) {
+    recognition?.stop();
+    return;
+  }
+  const Ctor = getRecognitionCtor();
+  if (!Ctor) return;
+  attachmentError.value = null;
+  const instance = new Ctor();
+  instance.lang = "zh-CN";
+  instance.interimResults = false;
+  instance.continuous = false;
+  instance.onresult = (event) => {
+    let transcript = "";
+    for (let index = event.resultIndex; index < event.results.length; index += 1) {
+      const result = event.results[index];
+      if (result?.isFinal) transcript += result[0]?.transcript ?? "";
+    }
+    if (transcript) draft.value = `${draft.value}${transcript}`.trim();
+  };
+  instance.onerror = (event) => {
+    attachmentError.value =
+      event.error === "not-allowed" ? "麦克风权限被拒绝" : "语音识别失败，请重试";
+    listening.value = false;
+  };
+  instance.onend = () => {
+    listening.value = false;
+    recognition = null;
+  };
+  recognition = instance;
+  listening.value = true;
+  try {
+    instance.start();
+  } catch {
+    listening.value = false;
+    recognition = null;
+    attachmentError.value = "语音识别启动失败";
+  }
+}
+
 watch(variant, (value) => localStorage.setItem(VARIANT_KEY, value));
 watch(open, (value) => localStorage.setItem(OPEN_KEY, value ? "1" : "0"));
 
 onMounted(async () => {
+  voiceSupported.value = getRecognitionCtor() !== null;
+  void conversationApi
+    .capabilities()
+    .then((value) => (capabilities.value = value))
+    .catch(() => undefined);
   await store.loadConversations();
   if (open.value) {
     const target = store.conversations[0]?.id;
     if (target && !store.detail) void store.open(target);
   }
+});
+
+onBeforeUnmount(() => {
+  recognition?.stop();
 });
 
 const streamingId = computed(() => store.streamingMessageId);
@@ -84,16 +254,23 @@ async function ensureConversation(): Promise<string | null> {
 async function submit(value: string) {
   const text = value.trim();
   if (!text || isStreaming.value) return;
+  if (uploadingCount.value > 0) {
+    attachmentError.value = "附件还在上传，请稍候再发送";
+    return;
+  }
   const conversationId = await ensureConversation();
   if (!conversationId) return;
+  const sending = attachments.value.slice();
   draft.value = "";
-  await store.send(text);
+  attachments.value = [];
+  attachmentError.value = null;
+  await store.send(text, undefined, sending);
 }
 
 function editResend(messageId: string, content: string) {
   const target = store.detail?.messages.find((m) => m.id === messageId);
   if (!target) return;
-  void store.send(content, target.parent_id);
+  void store.send(content, target.parent_id, target.attachments ?? []);
 }
 
 function retryAssistant(assistantId: string) {
@@ -102,7 +279,11 @@ function retryAssistant(assistantId: string) {
   const assistant = store.detail?.messages.find((m) => m.id === assistantId);
   const userMessage = store.detail?.messages.find((m) => m.id === assistant?.parent_id);
   if (!assistant || !userMessage) return;
-  void store.send(userMessage.content, userMessage.parent_id);
+  void store.send(
+    userMessage.content,
+    userMessage.parent_id,
+    userMessage.attachments ?? [],
+  );
 }
 
 async function openConversation(conversationId: string) {
@@ -157,7 +338,22 @@ const panelClass = computed(() => {
   </button>
 
   <!-- 面板 -->
-  <section v-if="open" :class="panelClass" data-test="chat-shell">
+  <section
+    v-if="open"
+    :class="[panelClass, 'relative']"
+    data-test="chat-shell"
+    @dragover.prevent="dragActive = true"
+    @dragleave.prevent="dragActive = false"
+    @drop.prevent="onDrop"
+  >
+    <!-- 拖放遮罩（P2）：松手即上传到知识库 -->
+    <div
+      v-if="dragActive"
+      data-test="chat-dropzone"
+      class="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-2xl border-2 border-dashed border-primary bg-background/90 text-sm font-medium text-primary"
+    >
+      松开上传到知识库
+    </div>
     <!-- 头部 -->
     <header
       class="flex items-center gap-1.5 border-b border-border px-3 py-2"
@@ -310,6 +506,85 @@ const panelClass = computed(() => {
 
     <!-- 输入区 -->
     <div class="border-t border-border p-2">
+      <!-- 已选附件 / 上传状态 / 错误（P2） -->
+      <div v-if="attachments.length || uploadingCount || attachmentError" class="mb-1.5 px-1">
+        <div v-if="attachments.length" class="flex flex-wrap gap-1">
+          <span
+            v-for="(attachment, index) in attachments"
+            :key="attachment.document_id"
+            data-test="chat-attachment-chip"
+            class="inline-flex max-w-full items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+            :title="attachment.title"
+          >
+            <FileText class="size-3 shrink-0" />
+            <span class="truncate">{{ attachment.title }}</span>
+            <button
+              type="button"
+              class="ml-0.5 text-muted-foreground hover:text-destructive"
+              :aria-label="`移除附件 ${attachment.title}`"
+              @click="removeAttachment(index)"
+            >
+              <X class="size-3" />
+            </button>
+          </span>
+          <span v-if="uploadingCount" class="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+            <Loader2 class="size-3 animate-spin" /> 上传中 {{ uploadingCount }}
+          </span>
+        </div>
+        <p
+          v-if="attachmentError"
+          data-test="chat-attachment-error"
+          class="mt-1 truncate text-[10px] text-destructive"
+          :title="attachmentError"
+        >
+          {{ attachmentError }}
+        </p>
+      </div>
+
+      <div class="mb-1 flex items-center gap-1 px-1">
+        <input
+          ref="fileInput"
+          data-test="chat-file-input"
+          type="file"
+          class="hidden"
+          multiple
+          accept=".pdf,.docx,.md,.markdown,.txt"
+          @change="onFilePicked"
+        />
+        <button
+          type="button"
+          data-test="chat-attach"
+          class="inline-flex items-center gap-1 rounded-lg border border-border px-1.5 py-1 text-[10px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+          :disabled="isStreaming || uploadingCount > 0"
+          title="上传文档到知识库（也可直接拖进窗口）"
+          @click="fileInput?.click()"
+        >
+          <Paperclip class="size-3" /> 附件
+        </button>
+        <button
+          v-if="voiceSupported"
+          type="button"
+          data-test="chat-voice"
+          class="inline-flex items-center gap-1 rounded-lg border px-1.5 py-1 text-[10px] transition-colors disabled:opacity-40"
+          :class="
+            listening
+              ? 'border-destructive text-destructive'
+              : 'border-border text-muted-foreground hover:text-foreground'
+          "
+          :disabled="isStreaming"
+          :aria-pressed="listening"
+          :title="listening ? '停止语音输入' : '语音输入（浏览器识别，不上传音频）'"
+          @click="toggleVoice"
+        >
+          <MicOff v-if="listening" class="size-3" />
+          <Mic v-else class="size-3" />
+          {{ listening ? "停止" : "语音" }}
+        </button>
+        <span class="text-[10px] text-muted-foreground">
+          {{ voiceSupported ? "语音仅本机识别" : "当前浏览器不支持语音" }}
+        </span>
+      </div>
+
       <BePromptInput
         v-model="draft"
         data-test="chat-input"

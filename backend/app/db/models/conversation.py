@@ -23,11 +23,17 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.types import JSON
 
 from app.db.base import Base
+
+#: PostgreSQL 用 JSONB，测试用 SQLite 退化为 JSON（与引用库同款跨方言写法）。
+_JSON_TYPE = JSON().with_variant(JSONB(), "postgresql")
 
 
 class Conversation(Base):
@@ -100,6 +106,11 @@ class Message(Base):
     )
     content: Mapped[str] = mapped_column(
         Text, nullable=False, default="", comment="Markdown 原文（流式期间逐步追加）"
+    )
+    #: 用户消息携带的附件（P2）：`[{"kind":"document","document_id":"...","title":"..."}]`。
+    #: 附件只是**引用**知识库文档，不复制文件——文档删除后历史消息仍保留标题快照。
+    attachments: Mapped[list[dict[str, Any]]] = mapped_column(
+        _JSON_TYPE, nullable=False, default=list, comment="附件引用列表（JSON）"
     )
     status: Mapped[str] = mapped_column(
         String(16),

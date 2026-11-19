@@ -104,10 +104,22 @@ async def build_context(session: Any, message: Message) -> list[LLMMessage]:
     for row in chain:
         if not row.content.strip():
             continue
+        content = row.content
+        # 附件注入（P2）：模型需要知道「这条消息带了哪些知识库文档」，
+        # 否则用户说「用这篇建综述」时它无从指认。只注入标题与 document_id
+        # （供后续工具调用使用），**不注入正文**——正文检索走知识库工具，
+        # 直接把全文塞进上下文会打穿 token 预算。
+        attachments = row.attachments or []
+        if row.role == "user" and attachments:
+            lines = "\n".join(
+                f"- {item.get('title', '未命名文档')}（document_id={item.get('document_id', '')}）"
+                for item in attachments
+            )
+            content = f"{content}\n\n[本条消息附带的知识库文档]\n{lines}"
         llm_messages.append(
             LLMMessage(
                 role=MessageRole.USER if row.role == "user" else MessageRole.ASSISTANT,
-                content=row.content,
+                content=content,
             )
         )
     return llm_messages

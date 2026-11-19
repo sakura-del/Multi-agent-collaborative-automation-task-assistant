@@ -6,7 +6,7 @@
  * Mermaid 在挂载后用动态 import 渲染（体积大，只有出现图表才加载）。
  */
 import { computed, nextTick, onMounted, ref, watch } from "vue";
-import { Check, ChevronLeft, ChevronRight, Copy, Pencil, RotateCcw } from "lucide-vue-next";
+import { Check, ChevronLeft, ChevronRight, Copy, FileText, Pencil, RotateCcw } from "lucide-vue-next";
 
 import type { ChatMessage } from "@/api/conversations";
 import { renderChatMarkdown, renderMermaidBlocks } from "@/utils/chat-markdown";
@@ -139,6 +139,24 @@ function submitEdit() {
 
       <!-- 渲染态 -->
       <template v-else>
+        <!-- 附件（P2）：用户消息携带的知识库文档；只展示标题快照 -->
+        <div
+          v-if="message.attachments?.length"
+          data-test="chat-attachments"
+          class="mb-1.5 flex flex-wrap gap-1"
+        >
+          <span
+            v-for="attachment in message.attachments"
+            :key="attachment.document_id"
+            data-test="chat-attachment"
+            class="inline-flex max-w-full items-center gap-1 rounded-md bg-background/20 px-1.5 py-0.5 text-[10px]"
+            :class="isUser ? 'text-primary-foreground' : 'bg-muted text-muted-foreground'"
+            :title="attachment.title"
+          >
+            <FileText class="size-3 shrink-0" />
+            <span class="truncate">{{ attachment.title }}</span>
+          </span>
+        </div>
         <div
           v-if="displayContent"
           :data-test="`chat-body-${message.role}`"

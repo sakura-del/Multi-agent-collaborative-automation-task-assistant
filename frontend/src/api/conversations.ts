@@ -9,6 +9,22 @@ import { resolveApiBase } from "@/config/endpoint";
 export type MessageRole = "user" | "assistant" | "system";
 export type MessageStatus = "pending" | "streaming" | "completed" | "interrupted" | "failed";
 
+/** 消息附件（P2）：知识库文档引用；文件真源在知识库，消息只存引用 + 标题快照 */
+export interface ChatAttachment {
+  kind: "document";
+  document_id: string;
+  title: string;
+}
+
+export interface ConversationCapabilities {
+  documents: boolean;
+  images: boolean;
+  image_reason: string | null;
+  max_attachments: number;
+  max_file_mb: number;
+  voice: string;
+}
+
 export interface ChatMessage {
   id: string;
   conversation_id: string;
@@ -21,6 +37,7 @@ export interface ChatMessage {
   completion_tokens: number;
   error: string | null;
   created_at: string;
+  attachments?: ChatAttachment[];
 }
 
 export interface ChatConversation {
@@ -69,14 +86,22 @@ export const conversationApi = {
   sendMessage: (
     conversationId: string,
     content: string,
-    parentId?: string | null
+    parentId?: string | null,
+    attachments?: ChatAttachment[]
   ) =>
     api
-      .post<MessagePair>(
-        `/conversations/${conversationId}/messages`,
+      .post<MessagePair>(`/conversations/${conversationId}/messages`, {
+        content,
         // undefined = 接当前分支末端；null = 明确挂回根（编辑首条消息）
-        parentId === undefined ? { content } : { content, parent_id: parentId }
-      )
+        ...(parentId === undefined ? {} : { parent_id: parentId }),
+        ...(attachments && attachments.length ? { attachments } : {}),
+      })
+      .then((response) => response.data),
+
+  /** 附件/语音能力（图片由平台模型能力决定，前端不猜） */
+  capabilities: () =>
+    api
+      .get<ConversationCapabilities>("/conversations/capabilities")
       .then((response) => response.data),
 
   /** 停止生成：协同取消（先 abort 连接即时反馈，再由服务端收敛状态） */

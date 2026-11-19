@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
@@ -35,7 +35,9 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_active_user
+from app.core.config import get_settings
 from app.db.models.conversation import Conversation, Message
+from app.db.models.knowledge import KnowledgeDoc
 from app.db.models.user import User
 from app.db.session import get_db
 from app.orchestration.services.conversation_stream import (
@@ -44,10 +46,12 @@ from app.orchestration.services.conversation_stream import (
     request_stop,
 )
 from app.schemas.conversation import (
+    ConversationCapabilitiesOut,
     ConversationCreate,
     ConversationDetailOut,
     ConversationOut,
     ConversationUpdate,
+    MessageAttachment,
     MessageCreateIn,
     MessageOut,
     MessagePairOut,
@@ -72,6 +76,7 @@ def _to_message_out(row: Message) -> MessageOut:
         completion_tokens=row.completion_tokens,
         error=row.error,
         created_at=row.created_at,
+        attachments=[MessageAttachment.model_validate(item) for item in (row.attachments or [])],
     )
 
 
@@ -129,6 +134,35 @@ async def list_conversations(
         query = query.where(Conversation.archived.is_(False))
     rows = (await db.execute(query)).scalars().all()
     return [_to_conversation_out(row) for row in rows]
+
+
+@router.get(
+    "/capabilities",
+    response_model=ConversationCapabilitiesOut,
+    summary="会话附件/语音能力（前端据此启用按钮）",
+)
+async def get_capabilities(current_user: CurrentUserDep) -> ConversationCapabilitiesOut:
+    """能力来自**平台模型配置**，不由前端猜。
+
+    图片：平台模型若为纯文本（当前 Qwen 就是），前端禁用图片按钮并说明原因；
+    换成视觉模型时只需 `LLM__SUPPORTS_IMAGE=true`，无需改前端。
+
+    文档：走知识库上传管线（pdf/docx/md/txt，≤30MB），始终可用。
+    """
+    del current_user  # 仅要求登录；能力与用户无关
+    llm = get_settings().llm
+    return ConversationCapabilitiesOut(
+        documents=True,
+        images=llm.supports_image,
+        image_reason=(
+            None
+            if llm.supports_image
+            else "当前平台模型不支持图片输入；切换视觉模型并设置 LLM__SUPPORTS_IMAGE=true 后开启"
+        ),
+        max_attachments=5,
+        max_file_mb=30,
+        voice="browser",
+    )
 
 
 @router.get(
@@ -231,12 +265,37 @@ async def create_message(
     else:
         parent_id = conversation.leaf_id or await latest_leaf(db, conversation.id)
 
+    # 附件：只收自己名下的知识库文档；不复制文件（引用 + 标题快照）
+    attachment_rows: list[dict[str, Any]] = []
+    if payload.attachments:
+        document_ids = [item.document_id for item in payload.attachments]
+        owned = set(
+            (
+                await db.execute(
+                    select(KnowledgeDoc.id).where(
+                        KnowledgeDoc.user_id == current_user.id,
+                        KnowledgeDoc.id.in_(document_ids),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        missing = [str(item) for item in document_ids if item not in owned]
+        if missing:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"附件不存在或不属于你：{', '.join(missing)}",
+            )
+        attachment_rows = [item.model_dump(mode="json") for item in payload.attachments]
+
     user_message = Message(
         conversation_id=conversation.id,
         parent_id=parent_id,
         role="user",
         content=payload.content.strip(),
         status="completed",
+        attachments=attachment_rows,
     )
     db.add(user_message)
     await db.flush()

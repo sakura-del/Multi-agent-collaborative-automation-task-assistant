@@ -28,6 +28,20 @@ class ConversationUpdate(BaseModel):
     )
 
 
+class MessageAttachment(BaseModel):
+    """消息附件：知识库文档引用（P2）。
+
+    只存引用与标题快照：文件真源在 `knowledge_doc`，删除文档不应让历史消息
+    变成「幽灵附件」——标题保留可读，`document_id` 查不到时由上层提示重新上传。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["document"] = "document"
+    document_id: uuid.UUID
+    title: str = Field(min_length=1, max_length=256)
+
+
 class MessageOut(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -42,6 +56,7 @@ class MessageOut(BaseModel):
     completion_tokens: int = 0
     error: str | None = None
     created_at: datetime
+    attachments: list[MessageAttachment] = Field(default_factory=list)
 
 
 class ConversationOut(BaseModel):
@@ -70,6 +85,9 @@ class MessageCreateIn(BaseModel):
     parent_id: uuid.UUID | None = Field(
         default=None, description="父消息；缺省 = 当前分支末端（leaf）"
     )
+    attachments: list[MessageAttachment] = Field(
+        default_factory=list, max_length=5, description="知识库文档附件（最多 5 个）"
+    )
 
 
 class MessagePairOut(BaseModel):
@@ -77,3 +95,16 @@ class MessagePairOut(BaseModel):
 
     user_message: MessageOut
     assistant_message: MessageOut
+
+
+class ConversationCapabilitiesOut(BaseModel):
+    """会话附件/语音能力（前端据此启用按钮，不靠猜）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    documents: bool = True
+    images: bool = False
+    image_reason: str | None = None
+    max_attachments: int = 5
+    max_file_mb: int = 30
+    voice: str = "browser"

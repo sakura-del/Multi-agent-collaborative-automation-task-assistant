@@ -156,6 +156,10 @@ class LLMConfig(BaseModel):
     # 上游瞬时请求数 = N × 5 —— 必须由这一层兜住，否则任何 key 都会被打爆。
     # 免费/低配额 key 建议经环境变量 LLM__MAX_CONCURRENCY=1 完全串行。
     max_concurrency: int = Field(default=3, ge=1)
+    #: 平台模型是否支持图片输入（P2）。默认 False——当前 Qwen 是纯文本；
+    #: 换视觉模型时设 `LLM__SUPPORTS_IMAGE=true`，会话能力端点与前端按钮
+    #: 自动放开，不需要改代码。
+    supports_image: bool = False
     # ===== 输出上限（按节点类型，Issue #22）=====
     # 目的：遏制「模型自由发挥」的输出成本（实测单节点峰值 4.2k tokens）。
     # ⚠️ 部分推理型/融合模型会把思考 token 计入 max_tokens（qiniu conatus 实测
