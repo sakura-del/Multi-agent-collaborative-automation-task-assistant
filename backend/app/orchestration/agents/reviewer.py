@@ -382,7 +382,9 @@ class ReviewerAgent(BaseAgent):
                     "node_id": r.node_id,
                     "ev": len(r.evidence),
                     "ci": len(r.cited_indices or []),
-                    "urls": [str(getattr(i, "source_url", None) or "")[:40] for i in r.evidence[:3]],
+                    "urls": [
+                        str(getattr(i, "source_url", None) or "")[:40] for i in r.evidence[:3]
+                    ],
                 }
                 for r in results
             ],
