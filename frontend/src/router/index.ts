@@ -7,6 +7,7 @@ import ApiKeyView from "@/views/ApiKeyView.vue";
 import PlanView from "@/views/PlanView.vue";
 import KnowledgeView from "@/views/KnowledgeView.vue";
 import LoginView from "@/views/LoginView.vue";
+import ChatView from "@/views/ChatView.vue";
 import ModelSettingsView from "@/views/ModelSettingsView.vue";
 import ObservabilityView from "@/views/ObservabilityView.vue";
 import PasswordResetView from "@/views/PasswordResetView.vue";
@@ -61,6 +62,8 @@ export const router = createRouter({
       children: [
         { path: "", redirect: { name: "tasks" } },
         { path: "tasks", name: "tasks", component: TaskListView },
+        // 会话全屏页（Issue #8 P0）：三形态之一，与小窗共用 store
+        { path: "chat", name: "chat", component: ChatView },
         {
           path: "tasks/:taskId",
           name: "task-detail",

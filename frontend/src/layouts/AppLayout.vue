@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ChatShell from "@/components/chat/ChatShell.vue";
 import {
   Activity,
   BookMarked,
@@ -178,5 +179,7 @@ function handleLogout() {
       <RouterView />
     </main>
 
+    <!-- 全局会话小窗（Issue #8 P0）：/chat 全屏页由页面自己渲染，避免双壳 -->
+    <ChatShell v-if="$route.name !== 'chat'" />
   </div>
 </template>
