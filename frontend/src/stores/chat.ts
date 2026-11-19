@@ -182,9 +182,24 @@ export const useChatStore = defineStore("chat", () => {
     void loadConversations();
   }
 
-  /** 停止生成：abort 连接即中断（服务端落库 interrupted） */
-  function stopStream() {
+  /**
+   * 停止生成：**双保险**。
+   *
+   * - abort 连接：UI 立刻停、不再收 delta；
+   * - 调 stop 端点：服务端生成循环挂在 LLM await 上感知不到断开（生产实测），
+   *   只有协同标志能让它在下一个 delta 内退出并把状态收敛为 interrupted。
+   */
+  async function stopStream() {
+    const conversationId = detail.value?.id;
+    const messageId = streamingMessageId.value;
     controller?.abort();
+    if (conversationId && messageId) {
+      try {
+        await conversationApi.requestStop(conversationId, messageId);
+      } catch {
+        // 停止失败不阻塞 UI：退出流时仍会按 abort 标记 interrupted
+      }
+    }
   }
 
   /** 切换分支：显示某个兄弟节点所在的路径 */

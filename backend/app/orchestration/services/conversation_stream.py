@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any
@@ -40,6 +41,46 @@ SYSTEM_PROMPT = (
 
 #: 单轮上下文回溯上限（沿 parent 链；更早的轮次不进上下文——P1 接会话摘要）
 MAX_CONTEXT_MESSAGES = 20
+
+#: 周期落库的 delta 计数（客户端断连/进程被杀时，已生成内容不丢）
+PARTIAL_FLUSH_EVERY = 20
+
+# ===== 协同停止（生产实测 2026-11-19：仅靠客户端 abort 感知不到断开）=====
+# 循环挂在 `async for delta` 上时没有 send，客户端断开不会立刻触发取消；
+# 必须由停止端点写入进程内标志，循环每次迭代检查后主动退出。
+_STOP_REQUESTS: dict[str, float] = {}
+_STOP_TTL_S = 300.0
+
+
+def request_stop(message_id: uuid.UUID | str) -> None:
+    """登记停止请求（TTL 5 分钟，防僵尸条目）。"""
+    _STOP_REQUESTS[str(message_id)] = time.monotonic()
+
+
+def _should_stop(message_id: uuid.UUID | str) -> bool:
+    key = str(message_id)
+    stamp = _STOP_REQUESTS.get(key)
+    if stamp is None:
+        return False
+    if time.monotonic() - stamp > _STOP_TTL_S:
+        _STOP_REQUESTS.pop(key, None)
+        return False
+    return True
+
+
+def _clear_stop(message_id: uuid.UUID | str) -> None:
+    _STOP_REQUESTS.pop(str(message_id), None)
+
+
+def _is_connection_error(exc: Exception) -> bool:
+    """连接类异常（客户端断开/取消）→ 记 interrupted 而不是 failed。"""
+    name = type(exc).__name__
+    return (
+        isinstance(exc, (BrokenPipeError, ConnectionError, GeneratorExit))
+        or "Broken" in name
+        or "Cancel" in name
+        or "Disconnect" in name
+    )
 
 
 def sse(event: str, data: dict[str, Any]) -> str:
@@ -103,13 +144,31 @@ class ConversationStreamer:
 
             buffer: list[str] = []
             try:
+                _clear_stop(message_id)
+                delta_count = 0
                 async for delta in self._llm.stream_chat(
                     context,
                     max_tokens=2000,
                 ):
                     if not delta:
                         continue
+                    if _should_stop(message_id):
+                        await self._finalize(
+                            message_id, "".join(buffer), "interrupted", "用户停止生成"
+                        )
+                        _clear_stop(message_id)
+                        logger.info(
+                            "conversation_message_stopped",
+                            conversation_id=str(conversation_id),
+                            message_id=str(message_id),
+                            chars=len("".join(buffer)),
+                        )
+                        yield sse("done", {"message_id": str(message_id), "interrupted": True})
+                        return
                     buffer.append(delta)
+                    delta_count += 1
+                    if delta_count % PARTIAL_FLUSH_EVERY == 0:
+                        await self._persist_partial(message_id, "".join(buffer))
                     yield sse("delta", {"text": delta})
                 text = "".join(buffer)
                 async with self._session_factory() as finish_session:
@@ -141,6 +200,18 @@ class ConversationStreamer:
                 raise
             except Exception as exc:
                 error_text = str(exc)[:500] or "生成失败"
+                if _should_stop(message_id) or _is_connection_error(exc):
+                    # 停止请求 / 客户端断开：保留已生成内容，记为 interrupted
+                    await self._finalize(message_id, "".join(buffer), "interrupted", None)
+                    _clear_stop(message_id)
+                    logger.info(
+                        "conversation_message_interrupted",
+                        conversation_id=str(conversation_id),
+                        message_id=str(message_id),
+                        chars=len("".join(buffer)),
+                    )
+                    yield sse("done", {"message_id": str(message_id), "interrupted": True})
+                    return
                 await self._finalize(message_id, "".join(buffer), "failed", error_text)
                 logger.error(
                     "conversation_message_failed",
@@ -149,6 +220,15 @@ class ConversationStreamer:
                     error=error_text,
                 )
                 yield sse("error", {"code": "llm_error", "message": error_text})
+
+    async def _persist_partial(self, message_id: uuid.UUID, text: str) -> None:
+        """周期落库：保持 streaming 状态，只更新已生成内容。"""
+        async with self._session_factory() as session:
+            row = await session.get(Message, message_id)
+            if row is None or row.status != "streaming":
+                return
+            row.content = text
+            await session.commit()
 
     async def _finalize(
         self, message_id: uuid.UUID, text: str, status: str, error: str | None

@@ -74,6 +74,10 @@ export const conversationApi = {
       })
       .then((response) => response.data),
 
+  /** 停止生成：协同取消（先 abort 连接即时反馈，再由服务端收敛状态） */
+  requestStop: (conversationId: string, messageId: string) =>
+    api.post(`/conversations/${conversationId}/messages/${messageId}/stop`).then((r) => r.data),
+
   /** SSE 地址（EventSource 不支持 Authorization 头 → 用 fetch + ReadableStream 自建） */
   streamUrl: (conversationId: string, messageId: string) =>
     `/conversations/${conversationId}/messages/${messageId}/stream`,

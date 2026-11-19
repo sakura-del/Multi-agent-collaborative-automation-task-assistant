@@ -26,7 +26,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -38,7 +38,11 @@ from app.api.deps import get_current_active_user
 from app.db.models.conversation import Conversation, Message
 from app.db.models.user import User
 from app.db.session import get_db
-from app.orchestration.services.conversation_stream import ConversationStreamer, latest_leaf
+from app.orchestration.services.conversation_stream import (
+    ConversationStreamer,
+    latest_leaf,
+    request_stop,
+)
 from app.schemas.conversation import (
     ConversationCreate,
     ConversationDetailOut,
@@ -147,6 +151,18 @@ async def get_conversation(
         .scalars()
         .all()
     )
+    # 僵尸收敛：进程重启/异常退出会留下永远 streaming 的消息——
+    # 读取时把超时的改成 interrupted（惰性修复，不做后台任务）
+    stale_before = datetime.now(UTC) - timedelta(minutes=5)
+    changed = False
+    for message in messages:
+        if message.status in ("pending", "streaming") and message.updated_at < stale_before:
+            message.status = "interrupted"
+            message.error = message.error or "生成中断（服务重启或连接丢失）"
+            changed = True
+    if changed:
+        await db.commit()
+
     base = _to_conversation_out(row)
     return ConversationDetailOut(
         **base.model_dump(), messages=[_to_message_out(m) for m in messages]
@@ -255,6 +271,33 @@ async def create_message(
         user_message=_to_message_out(user_message),
         assistant_message=_to_message_out(assistant_message),
     )
+
+
+@router.post(
+    "/{conversation_id}/messages/{message_id}/stop",
+    summary="停止生成（协同取消；生成循环下一个 delta 内退出并落库 interrupted）",
+)
+async def stop_message(
+    conversation_id: uuid.UUID,
+    message_id: uuid.UUID,
+    current_user: CurrentUserDep,
+    db: DbDep,
+) -> dict[str, str]:
+    """为什么需要它：客户端 abort 连接时，生成器挂在 LLM await 上感知不到断开
+    （生产实测：abort 后消息长时间停在 streaming）。停止请求写进程内标志，
+    循环每迭代检查一次；同时把 status 直接改 interrupted 兜底（循环已死的情形）。
+    """
+    await _owned(db, current_user.id, conversation_id)
+    row = await db.get(Message, message_id)
+    if row is None or row.conversation_id != conversation_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="消息不存在")
+    request_stop(message_id)
+    # 兜底：循环已经不在跑（进程重启等），直接收敛状态
+    if row.status in ("pending", "streaming"):
+        row.status = "interrupted"
+        row.error = "用户停止生成"
+        await db.commit()
+    return {"status": "stopping"}
 
 
 @router.get(
