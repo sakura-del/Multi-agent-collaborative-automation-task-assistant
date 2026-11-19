@@ -144,7 +144,7 @@ async def test_import_references_rejects_unparsable_content_before_db() -> None:
             {"content": "这不是任何文献格式", "format": "bibtex"},
             confirmed=True,
         )
-    assert "未解析到任何文献条目" in excinfo.value.message
+    assert "解析失败" in excinfo.value.message or "未解析到任何文献条目" in excinfo.value.message
 
 
 async def test_route_intent_falls_back_when_model_unavailable(

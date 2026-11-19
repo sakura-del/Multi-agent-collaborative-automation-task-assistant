@@ -272,7 +272,10 @@ async def import_references(ctx: ToolContext, args: ImportReferencesArgs) -> dic
     try:
         items = parse_ris(args.content) if fmt == "ris" else parse_bibtex(args.content)
     except Exception as exc:
-        raise ValidationException(f"{fmt.upper()} 解析失败：{exc}") from exc
+        message = exc.message if isinstance(exc, ValidationException) else str(exc)
+        # 统一成 TOOL_ARGUMENTS_INVALID：调用方（模型/前端）应按「参数问题」处理，
+        # 而不是把它当成服务端故障去重试。
+        raise ToolValidationException(f"{fmt.upper()} 解析失败：{message}") from exc
     if not items:
         raise ToolValidationException(
             f"未解析到任何文献条目；请检查内容格式是否为 {fmt.upper()}",
