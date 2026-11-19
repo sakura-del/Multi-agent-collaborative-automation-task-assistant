@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import ChatShell from "@/components/chat/ChatShell.vue";
+// 异步加载：聊天模块（marked 扩展/katex/mermaid）任何加载期异常
+// 都不得拖垮全站（2026-11-19 白屏事故的直接加固）
+const ChatShell = defineAsyncComponent(() => import("@/components/chat/ChatShell.vue"));
 import {
   Activity,
   BookMarked,
@@ -18,7 +20,7 @@ import {
   Settings2,
   Users,
 } from "lucide-vue-next";
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import AppSidebar from "@/components/layout/AppSidebar.vue";

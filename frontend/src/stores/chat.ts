@@ -126,6 +126,7 @@ export const useChatStore = defineStore("chat", () => {
         parentId ?? activeLeafId.value ?? undefined
       );
       detail.value?.messages.push(pair.user_message, pair.assistant_message);
+      if (detail.value) detail.value.message_count += 2;
       activeLeafId.value = pair.assistant_message.id;
       // 分支切换/新消息都回写服务端 leaf（下次打开会话停在这里）
       void conversationApi

@@ -231,6 +231,9 @@ class OpenAIAdapter(BaseLLM):
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
         payload.update(kwargs)
+        # ⚠️ 与 chat() 必须一致：漏掉这行会让「思考模型」把 max_tokens 全花在
+        # reasoning 上，content 返回空串（生产实测 2026-11-19：会话流式 0 字符）。
+        apply_model_profile(payload, self.model)
 
         stream = await client.chat.completions.create(**payload)
         async for chunk in stream:

@@ -102,13 +102,20 @@ interface MarkedToken {
   tokens?: MarkedToken[];
 }
 
-/** 独立 Marked 实例：不污染结果页使用的全局 marked 配置。 */
-const chatMarked = new Marked({
-  gfm: true,
-  breaks: true,
-});
+/**
+ * 独立 Marked 实例：不污染结果页使用的全局 marked 配置。
+ *
+ * ⚠️ **惰性初始化**（2026-11-19 生产事故）：模块加载期调用 `new Marked()` +
+ * `use()` 一旦抛错，整个 bundle 加载失败 → **全站白屏**（AppLayout 静态
+ * import 了聊天壳）。改为首次渲染时才建实例，异常也只影响单条消息。
+ */
+let chatMarkedInstance: Marked | null = null;
 
-chatMarked.use({
+function getChatMarked(): Marked {
+  if (chatMarkedInstance) return chatMarkedInstance;
+  const instance = new Marked();
+  instance.setOptions({ gfm: true, breaks: true });
+  instance.use({
   extensions: [
     {
       name: "katexBlock",
@@ -142,8 +149,11 @@ chatMarked.use({
         return renderKatex(token.text ?? "", false);
       },
     },
-  ],
-});
+    ],
+  });
+  chatMarkedInstance = instance;
+  return instance;
+}
 
 function renderKatex(expression: string, displayMode: boolean): string {
   try {
@@ -188,7 +198,13 @@ export function renderChatMarkdown(source: string | null | undefined): string {
     return `<pre class="md-fallback">${escapeHtml(text)}</pre>`;
   }
 
-  const rawHtml = chatMarked.parse(text, { async: false }) as string;
+  let rawHtml: string;
+  try {
+    rawHtml = getChatMarked().parse(text, { async: false }) as string;
+  } catch {
+    // 扩展配置异常时降级到基础渲染（宁可少公式，不可白屏/丢内容）
+    return renderMarkdown(text);
+  }
   const clean = DOMPurify.sanitize(rawHtml, {
     ALLOWED_TAGS: [...BASE_TAGS, ...KATEX_TAGS],
     ALLOWED_ATTR: ["href", "title", "class", "style", "viewBox", "d", "display", "aria-hidden"],
