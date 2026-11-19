@@ -871,6 +871,21 @@ export interface LLMCredentialInfo {
   updated_at: string;
 }
 
+/** 推理等级档位（label 展示 / value 下发给模型） */
+export interface ReasoningTier {
+  label: string;
+  value: string;
+}
+
+/** 模型能力声明（凭据级，参照 DeepSeek Harness 模型目录的设计） */
+export interface ModelCapabilities {
+  text: boolean;
+  /** 视觉模型才勾选；勾了才允许聊天里传图 */
+  image: boolean;
+  /** 空 = 不支持推理参数 */
+  reasoning_tiers: ReasoningTier[];
+}
+
 export interface LLMCredentialCreate {
   name: string;
   provider: LLMProviderKey;
@@ -883,6 +898,7 @@ export interface LLMCredentialCreate {
   /** 单次输出上限（token）；不填则沿用厂商默认 */
   max_output_tokens?: number | null;
   is_default?: boolean;
+  capabilities?: ModelCapabilities;
 }
 
 export interface LLMCredentialUpdate {
@@ -896,6 +912,8 @@ export interface LLMCredentialUpdate {
   max_output_tokens?: number | null;
   is_default?: boolean;
   status?: "active" | "disabled";
+  /** 整体替换能力声明；不传 = 不改 */
+  capabilities?: ModelCapabilities;
 }
 
 /** 测试连接：二选一——已保存凭据 id，或未保存的配置。 */

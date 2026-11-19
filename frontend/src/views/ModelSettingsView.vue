@@ -123,6 +123,15 @@ const formDefault = ref(false);
 /** 容量声明：保持字符串原样，提交时再解析（清空要能区分「未填」与 0）。 */
 const formContextWindow = ref("");
 const formMaxOutput = ref("");
+// 能力声明（参照 DeepSeek Harness 模型目录）：输入类型 + 推理等级档位
+const formSupportsText = ref(true);
+const formSupportsImage = ref(false);
+const formTiers = ref<{ label: string; value: string }[]>([]);
+
+function addTier() {
+    if (formTiers.value.length >= 4) return;
+    formTiers.value.push({ label: "", value: "" });
+}
 
 const busyId = ref<string | null>(null);
 const confirmDeleteId = ref<string | null>(null);
@@ -265,6 +274,9 @@ function resetForm() {
     formDefault.value = false;
     formContextWindow.value = "";
     formMaxOutput.value = "";
+    formSupportsText.value = true;
+    formSupportsImage.value = false;
+    formTiers.value = [];
     probeResult.value = null;
     probeError.value = null;
     modelOptions.value = [];
@@ -291,6 +303,19 @@ function openEdit(credential: LLMCredentialInfo) {
     formDefault.value = credential.is_default;
     formContextWindow.value = credential.context_window?.toString() ?? "";
     formMaxOutput.value = credential.max_output_tokens?.toString() ?? "";
+    const caps = (credential.capabilities ?? {}) as {
+        text?: boolean;
+        image?: boolean;
+        reasoning_tiers?: { label: string; value: string }[];
+    };
+    formSupportsText.value = caps.text !== false;
+    formSupportsImage.value = caps.image === true;
+    formTiers.value = Array.isArray(caps.reasoning_tiers)
+        ? caps.reasoning_tiers.map((tier) => ({
+              label: String(tier.label ?? ""),
+              value: String(tier.value ?? ""),
+          }))
+        : [];
     probeResult.value = null;
     probeError.value = null;
     modelOptions.value = [];
@@ -413,6 +438,21 @@ async function probeSaved(credential: LLMCredentialInfo) {
     }
 }
 
+/** 能力徽章文案：文本 · 图片 · N 档推理 */
+function capabilitiesLabel(credential: LLMCredentialInfo): string {
+    const caps = (credential.capabilities ?? {}) as {
+        text?: boolean;
+        image?: boolean;
+        reasoning_tiers?: unknown[];
+    };
+    const parts = [caps.text !== false ? "文本" : "", caps.image ? "图片" : ""].filter(
+        Boolean,
+    );
+    const tiers = Array.isArray(caps.reasoning_tiers) ? caps.reasoning_tiers.length : 0;
+    if (tiers) parts.push(`${tiers} 档推理`);
+    return parts.length ? parts.join(" · ") : "未声明能力";
+}
+
 async function submitForm() {
     const problem = validate();
     if (problem) {
@@ -425,6 +465,14 @@ async function submitForm() {
     // 空输入 = 清除声明（update 显式传 null，后端按「清除」处理）
     const contextWindow = parseTokens(formContextWindow.value);
     const maxOutput = parseTokens(formMaxOutput.value);
+    // 能力声明：只提交填写完整的档位（空 label/value 行视为未填）
+    const capabilities = {
+        text: formSupportsText.value,
+        image: formSupportsImage.value,
+        reasoning_tiers: formTiers.value
+            .map((tier) => ({ label: tier.label.trim(), value: tier.value.trim() }))
+            .filter((tier) => tier.label && tier.value),
+    };
     try {
         if (editingId.value) {
             await updateLLMCredential(editingId.value, {
@@ -432,6 +480,7 @@ async function submitForm() {
                 model: formModel.value.trim(),
                 context_window: contextWindow,
                 max_output_tokens: maxOutput,
+                capabilities,
                 ...(formApiKey.value.trim()
                     ? { api_key: formApiKey.value.trim() }
                     : {}),
@@ -448,6 +497,7 @@ async function submitForm() {
                 api_key: formApiKey.value.trim(),
                 context_window: contextWindow,
                 max_output_tokens: maxOutput,
+                capabilities,
                 ...(requiresBaseUrl.value
                     ? { base_url: formBaseUrl.value.trim() }
                     : {}),
@@ -689,6 +739,85 @@ function statusOf(credential: LLMCredentialInfo): {
                             {{ preset.label }}
                         </button>
                     </div>
+
+                    <!-- 能力声明（参照 DeepSeek Harness 模型目录）：输入类型 + 推理等级档位 -->
+                    <div class="mt-2.5 grid gap-3 sm:grid-cols-2">
+                        <div>
+                            <span class="text-xs text-muted-foreground">输入类型</span>
+                            <div class="mt-1 flex items-center gap-3 text-sm">
+                                <label class="flex items-center gap-1.5">
+                                    <input
+                                        v-model="formSupportsText"
+                                        data-test="model-cap-text"
+                                        type="checkbox"
+                                        class="size-4 rounded border-input accent-primary"
+                                    />
+                                    <span>文本</span>
+                                </label>
+                                <label class="flex items-center gap-1.5">
+                                    <input
+                                        v-model="formSupportsImage"
+                                        data-test="model-cap-image"
+                                        type="checkbox"
+                                        class="size-4 rounded border-input accent-primary"
+                                    />
+                                    <span>图片</span>
+                                </label>
+                            </div>
+                            <p class="mt-1 text-[10px] leading-4 text-muted-foreground">
+                                勾了「图片」才允许在会话中传图（需视觉模型）
+                            </p>
+                        </div>
+                        <div>
+                            <div class="flex items-center justify-between">
+                                <span class="text-xs text-muted-foreground">推理等级档位</span>
+                                <button
+                                    type="button"
+                                    data-test="model-tier-add"
+                                    class="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:border-primary hover:text-primary disabled:opacity-40"
+                                    :disabled="formTiers.length >= 4"
+                                    @click="addTier"
+                                >
+                                    + 添加档位
+                                </button>
+                            </div>
+                            <div
+                                v-for="(tier, index) in formTiers"
+                                :key="index"
+                                class="mt-1 flex items-center gap-1.5"
+                            >
+                                <Input
+                                    v-model="tier.label"
+                                    :data-test="`model-tier-label-${index}`"
+                                    placeholder="low"
+                                    class="h-7 w-20 px-2 text-xs"
+                                    maxlength="24"
+                                />
+                                <span class="text-xs text-muted-foreground">→</span>
+                                <Input
+                                    v-model="tier.value"
+                                    :data-test="`model-tier-value-${index}`"
+                                    placeholder="low"
+                                    class="h-7 flex-1 px-2 text-xs"
+                                    maxlength="64"
+                                />
+                                <button
+                                    type="button"
+                                    class="text-xs text-muted-foreground hover:text-destructive"
+                                    :aria-label="`删除档位 ${index + 1}`"
+                                    @click="formTiers.splice(index, 1)"
+                                >
+                                    ✕
+                                </button>
+                            </div>
+                            <p
+                                v-if="!formTiers.length"
+                                class="mt-1 text-[10px] leading-4 text-muted-foreground"
+                            >
+                                留空 = 不支持推理参数（会话中不展示思考档位）
+                            </p>
+                        </div>
+                    </div>
                 </div>
                 <div class="grid content-start gap-1.5 sm:col-span-2">
                     <Label for="model-key">
@@ -861,6 +990,12 @@ function statusOf(credential: LLMCredentialInfo): {
                                 credential.provider_label
                             }}</span>
                             <span>{{ credential.model }}</span>
+                            <span
+                                data-test="model-capabilities-badge"
+                                class="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                            >
+                                {{ capabilitiesLabel(credential) }}
+                            </span>
                             <code class="rounded bg-muted px-1 py-0.5">{{
                                 credential.masked_key
                             }}</code>
