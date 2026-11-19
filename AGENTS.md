@@ -347,6 +347,22 @@ shadcn CLI 的 `@beui/*` 分发同样面向 React。因此「用 beUI」指的�
   待确认规划（Agent Plan 卡片 Awaitng approval）；
 - P1 待办：意图分类（非综述意图的提示与路由）；任务创建后的流式状态回显到入口。
 
+### 联网搜索（2026-11-19 用户决策：Tavily 为默认方案）
+
+- **provider：Tavily**（`SEARCH__PROVIDER=tavily`，`basic` 深度 = 最低 credit 档，
+  `max_results=6`，snippet 截断 500 字控上下文）；
+- **端点**：`GET /api/v1/search/web?q=...`（强制 JWT——搜索按 credit 计费，
+  开放 Key 会被脚本刷爆）；401/429/5xx 分别给可读文案
+  （「搜不到」与「搜索服务挂了」必须可区分）；
+- **定位**：会话内核（P0）工具网关的「联网搜索」工具直接复用该 service；
+- **不启用 DeepSeek 搜索**：用户本地 harness（`127.0.0.1:3425`）生产不可达，
+  官方端点待评估；若后续搜索质量不足，提醒用户提供 DeepSeek 端点/key 后再切
+  （`SearchConfig.provider` 已留切换口子，新增 provider 只需实现
+  `search(query) -> list[WebSearchResult]`）；
+- 生产验收（2026-11-19 11:35）：`q=RAG evaluation benchmark 2025` →
+  6 条（GitHub MIRAGE / ACL Anthology 2025.findings-naacl / DEV 社区），
+  provider=tavily 正确回显。
+
 ### 6.5.2 技术栈（**已锁定，不得擅自替换**）
 
 | 能力 | 选型 | 说明 |
