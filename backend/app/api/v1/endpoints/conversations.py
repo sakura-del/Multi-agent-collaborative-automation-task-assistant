@@ -217,13 +217,17 @@ async def create_message(
     """写入用户消息 + assistant 占位；**不在这里调模型**（生成走 SSE 端点）。"""
     conversation = await _owned(db, current_user.id, conversation_id)
 
-    parent_id = payload.parent_id
-    if parent_id is not None:
-        parent = await db.get(Message, parent_id)
-        if parent is None or parent.conversation_id != conversation.id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="父消息不属于该会话"
-            )
+    # ⚠️ 必须区分「没传 parent_id」与「显式传 null」：
+    # 编辑**首条**消息要挂回根（parent_id=null），若把 null 当成缺省，
+    # 新分支会接到当前叶节点上，两条分支被串成一条链（E2E 实测 2026-11-19）。
+    if "parent_id" in payload.model_fields_set:
+        parent_id = payload.parent_id
+        if parent_id is not None:
+            parent = await db.get(Message, parent_id)
+            if parent is None or parent.conversation_id != conversation.id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail="父消息不属于该会话"
+                )
     else:
         parent_id = conversation.leaf_id or await latest_leaf(db, conversation.id)
 

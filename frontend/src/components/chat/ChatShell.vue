@@ -93,7 +93,7 @@ async function submit(value: string) {
 function editResend(messageId: string, content: string) {
   const target = store.detail?.messages.find((m) => m.id === messageId);
   if (!target) return;
-  void store.send(content, target.parent_id ?? undefined);
+  void store.send(content, target.parent_id);
 }
 
 function retryAssistant(assistantId: string) {
@@ -102,7 +102,7 @@ function retryAssistant(assistantId: string) {
   const assistant = store.detail?.messages.find((m) => m.id === assistantId);
   const userMessage = store.detail?.messages.find((m) => m.id === assistant?.parent_id);
   if (!assistant || !userMessage) return;
-  void store.send(userMessage.content, userMessage.parent_id ?? undefined);
+  void store.send(userMessage.content, userMessage.parent_id);
 }
 
 async function openConversation(conversationId: string) {

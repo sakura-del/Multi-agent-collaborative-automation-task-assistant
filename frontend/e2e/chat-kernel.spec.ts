@@ -36,9 +36,25 @@ async function login(page: Page): Promise<void> {
   await page.locator('form button[type="submit"]').click();
 
   const tasksLink = page.getByRole("link", { name: /任务/ });
+  const expandNav = page.locator('[data-test="nav-expand"]');
+  const mobileNav = page.locator('[data-test="nav-mobile-trigger"]');
+  let expanded = false;
   for (let attempt = 0; attempt < 8; attempt += 1) {
     if (await tasksLink.isVisible().catch(() => false)) {
       return;
+    }
+    // 移动视口（Pixel 5）侧栏默认折叠：任务链接不在 DOM 可见区，
+    // 必须先点「展开导航」。桌面端该按钮可能不存在，点击失败即忽略。
+    if (!expanded) {
+      const trigger = (await expandNav.isVisible().catch(() => false))
+        ? expandNav
+        : (await mobileNav.isVisible().catch(() => false))
+          ? mobileNav
+          : null;
+      if (trigger) {
+        await trigger.click().catch(() => undefined);
+        expanded = true;
+      }
     }
     const limited = await page
       .locator("text=请求过于频繁")
@@ -131,6 +147,10 @@ test.describe("会话内核：真实链路", () => {
   });
 
   test("FAB → 输入 → SSE → 完成 → 刷新后历史恢复", async ({ page }) => {
+    // 真实链路要调平台模型（有 429/延迟）。没有可用模型的测试环境
+    // （如本地隔离栈）默认跳过；需要时显式 E2E_REAL_LLM=1。
+    test.skip(!process.env.E2E_REAL_LLM, "需平台模型可用：设 E2E_REAL_LLM=1 开启");
+
     const pageErrors: string[] = [];
     page.on("pageerror", (error) => pageErrors.push(error.message));
 

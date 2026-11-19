@@ -115,15 +115,18 @@ export const useChatStore = defineStore("chat", () => {
    * @param content 用户输入
    * @param parentId 从任意节点继续（编辑重发/分支）；缺省 = 当前分支末端
    */
-  async function send(content: string, parentId?: string) {
+  async function send(content: string, parentId?: string | null) {
     const conversationId = detail.value?.id;
     if (!conversationId) return;
     error.value = null;
+    // undefined = 接当前分支末端；null = 明确挂回根（编辑首条消息的分支）
+    const effectiveParent =
+      parentId === undefined ? (activeLeafId.value ?? undefined) : parentId;
     try {
       const pair = await conversationApi.sendMessage(
         conversationId,
         content,
-        parentId ?? activeLeafId.value ?? undefined
+        effectiveParent
       );
       detail.value?.messages.push(pair.user_message, pair.assistant_message);
       if (detail.value) detail.value.message_count += 2;

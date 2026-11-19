@@ -66,12 +66,17 @@ export const conversationApi = {
 
   remove: (conversationId: string) => api.delete(`/conversations/${conversationId}`),
 
-  sendMessage: (conversationId: string, content: string, parentId?: string) =>
+  sendMessage: (
+    conversationId: string,
+    content: string,
+    parentId?: string | null
+  ) =>
     api
-      .post<MessagePair>(`/conversations/${conversationId}/messages`, {
-        content,
-        ...(parentId ? { parent_id: parentId } : {}),
-      })
+      .post<MessagePair>(
+        `/conversations/${conversationId}/messages`,
+        // undefined = 接当前分支末端；null = 明确挂回根（编辑首条消息）
+        parentId === undefined ? { content } : { content, parent_id: parentId }
+      )
       .then((response) => response.data),
 
   /** 停止生成：协同取消（先 abort 连接即时反馈，再由服务端收敛状态） */
