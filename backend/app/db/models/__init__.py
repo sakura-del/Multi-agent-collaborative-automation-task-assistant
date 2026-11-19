@@ -31,6 +31,7 @@ from app.db.models.annotation import TaskAnnotation
 from app.db.models.api_key import ApiKey
 from app.db.models.billing import Plan, Subscription, UsageCounter
 from app.db.models.citation_style import CitationStyle
+from app.db.models.conversation import Conversation, Message
 from app.db.models.email_token import EmailToken
 from app.db.models.feedback import HumanFeedback
 from app.db.models.knowledge import DocChunk, KnowledgeDoc, VectorIndex
@@ -53,6 +54,7 @@ __all__ = [
     "AgentInteraction",
     "ApiKey",
     "CitationStyle",
+    "Conversation",
     "DocChunk",
     "EmailToken",
     "ExecutionLog",
@@ -61,6 +63,7 @@ __all__ = [
     "KnowledgeDoc",
     "LLMCredential",
     "LLMNodeRouting",
+    "Message",
     "Plan",
     "ReferenceLibraryItem",
     "RevokedRefreshToken",

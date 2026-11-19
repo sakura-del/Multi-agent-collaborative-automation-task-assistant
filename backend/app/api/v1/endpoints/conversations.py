@@ -1,0 +1,287 @@
+"""会话内核端点（Issue #8 P0）。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `POST` | `/conversations` | 新建会话 |
+| `GET` | `/conversations` | 我的会话列表（默认不含归档） |
+| `GET` | `/conversations/{id}` | 详情：会话 + 全部消息（扁平，前端建树） |
+| `PATCH` | `/conversations/{id}` | 改名 / 归档 / 切换分支末端 |
+| `DELETE` | `/conversations/{id}` | 删除（消息级联） |
+| `POST` | `/conversations/{id}/messages` | 发送用户消息 → 生成 assistant 占位 |
+| `GET` | `/conversations/{id}/messages/{mid}/stream` | **SSE** 流式生成（delta/done/error） |
+
+## 停止生成的约定
+
+**没有** stop 端点：前端 abort 掉 SSE 连接即为停止——服务端
+`StreamingResponse` 的生成器会被 cancel，`CancelledError` 分支把已生成内容
+落库为 `interrupted`。加一个需要轮询协同的 stop 端点只会引入「停了但还在写」
+的竞态，不如让「连接即生成」这一个真相说了算。
+
+## 分支与树
+
+`POST /messages` 不传 `parent_id` 时接在当前分支末端（`conversation.leaf_id`，
+缺省取最新叶子）；传 `parent_id` = 从任意节点继续（编辑重发/分支）。
+"""
+
+from __future__ import annotations
+
+import uuid
+from datetime import UTC, datetime
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.deps import get_current_active_user
+from app.db.models.conversation import Conversation, Message
+from app.db.models.user import User
+from app.db.session import get_db
+from app.orchestration.services.conversation_stream import ConversationStreamer, latest_leaf
+from app.schemas.conversation import (
+    ConversationCreate,
+    ConversationDetailOut,
+    ConversationOut,
+    ConversationUpdate,
+    MessageCreateIn,
+    MessageOut,
+    MessagePairOut,
+)
+
+router = APIRouter(prefix="/conversations", tags=["conversations"])
+
+CurrentUserDep = Annotated[User, Depends(get_current_active_user)]
+DbDep = Annotated[AsyncSession, Depends(get_db)]
+
+
+def _to_message_out(row: Message) -> MessageOut:
+    return MessageOut(
+        id=row.id,
+        conversation_id=row.conversation_id,
+        parent_id=row.parent_id,
+        role=row.role,  # type: ignore[arg-type]
+        content=row.content,
+        status=row.status,  # type: ignore[arg-type]
+        model=row.model,
+        prompt_tokens=row.prompt_tokens,
+        completion_tokens=row.completion_tokens,
+        error=row.error,
+        created_at=row.created_at,
+    )
+
+
+def _to_conversation_out(row: Conversation) -> ConversationOut:
+    return ConversationOut(
+        id=row.id,
+        title=row.title,
+        archived=row.archived,
+        message_count=row.message_count,
+        leaf_id=row.leaf_id,
+        last_message_at=row.last_message_at,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+async def _owned(
+    session: AsyncSession, user_id: uuid.UUID, conversation_id: uuid.UUID
+) -> Conversation:
+    """owner-scoped 取会话；不存在/越权统一 404（不泄露存在性）。"""
+    row = await session.get(Conversation, conversation_id)
+    if row is None or row.user_id != user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会话不存在")
+    return row
+
+
+@router.post("", response_model=ConversationOut, status_code=201, summary="新建会话")
+async def create_conversation(
+    payload: ConversationCreate, current_user: CurrentUserDep, db: DbDep
+) -> ConversationOut:
+    row = Conversation(
+        user_id=current_user.id,
+        title=(payload.title or "新会话").strip() or "新会话",
+    )
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return _to_conversation_out(row)
+
+
+@router.get("", response_model=list[ConversationOut], summary="我的会话列表")
+async def list_conversations(
+    current_user: CurrentUserDep,
+    db: DbDep,
+    include_archived: bool = False,
+    limit: int = 50,
+) -> list[ConversationOut]:
+    query = (
+        select(Conversation)
+        .where(Conversation.user_id == current_user.id)
+        .order_by(Conversation.last_message_at.desc().nullslast(), Conversation.updated_at.desc())
+        .limit(max(1, min(limit, 200)))
+    )
+    if not include_archived:
+        query = query.where(Conversation.archived.is_(False))
+    rows = (await db.execute(query)).scalars().all()
+    return [_to_conversation_out(row) for row in rows]
+
+
+@router.get(
+    "/{conversation_id}",
+    response_model=ConversationDetailOut,
+    summary="会话详情（含消息树）",
+)
+async def get_conversation(
+    conversation_id: uuid.UUID, current_user: CurrentUserDep, db: DbDep
+) -> ConversationDetailOut:
+    row = await _owned(db, current_user.id, conversation_id)
+    messages = (
+        (
+            await db.execute(
+                select(Message)
+                .where(Message.conversation_id == row.id)
+                .order_by(Message.created_at)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    base = _to_conversation_out(row)
+    return ConversationDetailOut(
+        **base.model_dump(), messages=[_to_message_out(m) for m in messages]
+    )
+
+
+@router.patch("/{conversation_id}", response_model=ConversationOut, summary="改名/归档/切换分支")
+async def update_conversation(
+    conversation_id: uuid.UUID,
+    payload: ConversationUpdate,
+    current_user: CurrentUserDep,
+    db: DbDep,
+) -> ConversationOut:
+    row = await _owned(db, current_user.id, conversation_id)
+    if payload.title is not None:
+        row.title = payload.title.strip()
+    if payload.archived is not None:
+        row.archived = payload.archived
+    if payload.leaf_id is not None:
+        leaf = await db.get(Message, payload.leaf_id)
+        if leaf is None or leaf.conversation_id != row.id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="分支末端不属于该会话"
+            )
+        row.leaf_id = leaf.id
+    await db.commit()
+    await db.refresh(row)
+    return _to_conversation_out(row)
+
+
+@router.delete("/{conversation_id}", status_code=204, summary="删除会话")
+async def delete_conversation(
+    conversation_id: uuid.UUID, current_user: CurrentUserDep, db: DbDep
+) -> None:
+    row = await _owned(db, current_user.id, conversation_id)
+    await db.delete(row)
+    await db.commit()
+
+
+@router.post(
+    "/{conversation_id}/messages",
+    response_model=MessagePairOut,
+    status_code=201,
+    summary="发送消息（生成 assistant 占位，随后走 SSE）",
+)
+async def create_message(
+    conversation_id: uuid.UUID,
+    payload: MessageCreateIn,
+    current_user: CurrentUserDep,
+    db: DbDep,
+) -> MessagePairOut:
+    """写入用户消息 + assistant 占位；**不在这里调模型**（生成走 SSE 端点）。"""
+    conversation = await _owned(db, current_user.id, conversation_id)
+
+    parent_id = payload.parent_id
+    if parent_id is not None:
+        parent = await db.get(Message, parent_id)
+        if parent is None or parent.conversation_id != conversation.id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="父消息不属于该会话"
+            )
+    else:
+        parent_id = conversation.leaf_id or await latest_leaf(db, conversation.id)
+
+    user_message = Message(
+        conversation_id=conversation.id,
+        parent_id=parent_id,
+        role="user",
+        content=payload.content.strip(),
+        status="completed",
+    )
+    db.add(user_message)
+    await db.flush()
+
+    assistant_message = Message(
+        conversation_id=conversation.id,
+        parent_id=user_message.id,
+        role="assistant",
+        content="",
+        status="pending",
+    )
+    db.add(assistant_message)
+    await db.flush()
+
+    conversation.message_count = int(
+        (
+            await db.scalar(
+                select(func.count())
+                .select_from(Message)
+                .where(Message.conversation_id == conversation.id)
+            )
+        )
+        or 0
+    )
+    conversation.last_message_at = datetime.now(UTC)
+    # 首条用户消息做标题（截断 40 字，去换行）
+    if conversation.message_count <= 2:
+        conversation.title = payload.content.strip().replace("\n", " ")[:40] or "新会话"
+    # 新消息成为当前分支末端
+    conversation.leaf_id = assistant_message.id
+    await db.commit()
+    await db.refresh(user_message)
+    await db.refresh(assistant_message)
+
+    return MessagePairOut(
+        user_message=_to_message_out(user_message),
+        assistant_message=_to_message_out(assistant_message),
+    )
+
+
+@router.get(
+    "/{conversation_id}/messages/{message_id}/stream",
+    summary="SSE 流式生成 assistant 消息",
+)
+async def stream_message(
+    conversation_id: uuid.UUID,
+    message_id: uuid.UUID,
+    current_user: CurrentUserDep,
+    db: DbDep,
+) -> StreamingResponse:
+    """事件：`start` → `delta`* → `done` | `error`。客户端 abort 即中断（落库 interrupted）。"""
+    await _owned(db, current_user.id, conversation_id)
+
+    from app.db.session import AsyncSessionLocal
+    from app.llm.factory import get_llm_manager
+
+    llm = get_llm_manager().get_primary()
+    streamer = ConversationStreamer(AsyncSessionLocal, llm)
+    return StreamingResponse(
+        streamer.stream(conversation_id, message_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            # nginx 反代必须关缓冲，否则 delta 会攒成一坨（生产踩坑高发点）
+            "X-Accel-Buffering": "no",
+        },
+    )

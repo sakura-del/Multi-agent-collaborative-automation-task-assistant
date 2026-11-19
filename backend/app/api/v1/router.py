@@ -15,6 +15,7 @@ from app.api.v1.endpoints import (
     auth_lifecycle,
     billing,
     citation_styles,
+    conversations,
     health,
     intent,
     llm_credentials,
@@ -46,6 +47,7 @@ api_router.include_router(ws.router)
 api_router.include_router(knowledge_router)
 api_router.include_router(citation_styles.router)
 api_router.include_router(templates.router)
+api_router.include_router(conversations.router)
 api_router.include_router(intent.router)
 api_router.include_router(search.router)
 api_router.include_router(llm_routing.router)
