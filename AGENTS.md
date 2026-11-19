@@ -476,6 +476,45 @@ Node 20 + `vite preview`；结束后 `down -v` 并删除含密钥的临时 env/o
 **教训：不要在同一个元素上叠加 fixed/absolute/relative 工具类——CSS 声明顺序
 决定胜者，与 class 书写顺序无关。**
 
+### 会话工具调用（Issue #8 P3，2026-11-19）
+
+**契约**
+
+- `BaseLLM.stream_chat_events()`：流式事件（`delta` / `done` + `tool_calls`）。
+  默认实现降级为一次 `chat()`（语义不变、首 token 延迟变大）；OpenAI 适配器真流式，
+  按 `index` 聚合 `tool_calls` 分片——`id/name/arguments` 会跨多个 chunk 到达，
+  逐片处理会拿到残缺 JSON。
+- 工具循环最多 `MAX_TOOL_ROUNDS = 4` 轮：**只读工具自动执行**并把结果回灌
+  （`role=tool` + `tool_call_id`）；**写工具暂停**为 `waiting_approval`，
+  由 `POST /conversations/{cid}/messages/{mid}/tool-confirm` 决定执行或取消。
+  拒绝也要落库（`rejected`），否则刷新后确认卡会复活。
+- SSE 事件：`start`(tools) / `delta` / `tool_call`(write) / `tool_result`(ok,preview) /
+  `tool_approval`(arguments) / `done`(status) / `error`；`?tools=1` 才启用工具。
+- 持久化：`message.tool_calls` / `message.pending_tool` JSONB（迁移 `c9d0e1f2a3b4`）。
+  存在消息上而不是独立表——它是这一轮回答的「过程」，与内容同生命周期。
+- 前端：输入区「工具开/关」（`vp:chat:tools`）；气泡内「执行过程（N 步）」
+  **默认折叠**（点 summary 展开）；确认卡读 `pending_tool`。
+
+**网关硬约束（踩过）**：平台网关（Qwen）**只允许 system 出现在最前，且不接受
+第二条 system**。工具策略必须**并入** `context[0]` 正文，不能 `insert` 一条新
+system——否则开了工具整轮 400「System message must be at the beginning」。
+
+**移动端可用性（踩过）**：任务页时间线两侧卡片把布局宽度撑到 614px
+（Pixel 5 视口 393px），`position: fixed` 按布局宽度定位 → 聊天 FAB 落在可视区外，
+点击无反应。三道修法：`BeTimeline` 加 `overflow-x-clip`；时间线容器
+`pointer-events-none` + 卡片 `pointer-events-auto`；聊天浮层 `Teleport to body`
+（`full` 形态除外）并提到 `z-200`。**教训：固定定位元素「点不到」先量布局宽度，
+不要只加 z-index。**
+
+**验收**：后端定向 17 passed（工具循环 2 例：读工具续答 / 写工具不执行）；
+E2E 双视口 **16/16 passed**（真实链路、状态机、附件、工具读/写）。
+生产实测：`get_quota` 自动执行并落库 `ok`；写工具 `tool_call → tool_approval →
+done(waiting_approval)`；确认后创建任务并可取消；拒绝后轨迹为 `rejected`、
+正文「已取消该操作。」
+
+**上游抖动**：平台模型偶发 `Concurrency limit exceeded`，属共享密钥并发限流，
+重试即可（验收脚本已内置 15s×4 重试）。遇到它不要当代码缺陷排查。
+
 ### 磁盘维护（生产 47.253.81.6）
 
 2026-11-19 清理：`docker builder prune -af` 回收 **18.8GB**（containerd 里的
