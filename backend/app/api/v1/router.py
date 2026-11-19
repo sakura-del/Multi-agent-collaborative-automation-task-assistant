@@ -23,6 +23,7 @@ from app.api.v1.endpoints import (
     reference_library,
     references,
     screening,
+    search,
     task_ws,
     tasks,
     templates,
@@ -46,6 +47,7 @@ api_router.include_router(knowledge_router)
 api_router.include_router(citation_styles.router)
 api_router.include_router(templates.router)
 api_router.include_router(intent.router)
+api_router.include_router(search.router)
 api_router.include_router(llm_routing.router)
 api_router.include_router(references.router)
 # 引用库（2026-10-26）：导入的 BibTeX/RIS 存下来，可作为任务文献源

@@ -570,6 +570,29 @@ class StorageConfig(BaseModel):
 # ===== 顶层 Settings =====
 
 
+class SearchConfig(BaseModel):
+    """联网搜索配置（会话/Agent 场景，2026-11-19 用户决策）。
+
+    ## 为什么默认 Tavily
+
+    - 一把 key 即可用、返回结构化结果（url/title/content），无需自建索引；
+    - 用户提供的 Tavily 密钥已验证可用，先作为默认；DeepSeek 自带搜索
+      需要额外的公网端点（用户本地 harness 不可达），待需要时再评估切换。
+
+    provider 留口子：后续增加 deepseek / serper 等只需实现 provider 接口。
+    """
+
+    enabled: bool = True
+    provider: str = "tavily"
+    tavily_api_key: str | None = None
+    timeout_s: int = Field(default=20, ge=5, le=60)
+    max_results: int = Field(default=6, ge=1, le=10)
+    #: basic = 1 credit/次；advanced 更贵（用户要求「免费/低成本优先」）
+    search_depth: str = "basic"
+    #: 单条结果 content 截断（控制注入上下文体积）
+    snippet_chars: int = Field(default=500, ge=100, le=2000)
+
+
 class Settings(BaseSettings):
     """全局配置入口。
 
@@ -607,6 +630,7 @@ class Settings(BaseSettings):
     billing: BillingConfig = BillingConfig()
     rate_limit: RateLimitConfig = RateLimitConfig()
     quota: QuotaConfig = QuotaConfig()
+    search: SearchConfig = SearchConfig()
     cors: CORSConfig = CORSConfig()
     storage: StorageConfig = StorageConfig()
 
