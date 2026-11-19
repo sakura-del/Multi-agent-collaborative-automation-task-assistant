@@ -1,13 +1,15 @@
 import { defineStore } from "pinia";
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 
 import {
   conversationApi,
   streamChatMessage,
   type ChatAttachment,
+  type ChatPendingTool,
   type ChatConversation,
   type ChatConversationDetail,
   type ChatMessage,
+  type ChatToolCall,
 } from "@/api/conversations";
 
 /**
@@ -33,6 +35,13 @@ export const useChatStore = defineStore("chat", () => {
   const error = ref<string | null>(null);
 
   /** 正在流式生成的消息与累计文本 */
+  // ===== 工具（P3）：默认开启；关闭后回到纯聊天（更快、不调工具）=====
+  const TOOLS_KEY = "vp:chat:tools";
+  const toolsEnabled = ref(localStorage.getItem(TOOLS_KEY) !== "0");
+  watch(toolsEnabled, (value) => localStorage.setItem(TOOLS_KEY, value ? "1" : "0"));
+  /** 本轮正在执行的工具轨迹（流式结束后合并进 message.tool_calls） */
+  const streamingTools = ref<ChatToolCall[]>([]);
+
   const streamingMessageId = ref<string | null>(null);
   const streamingText = ref("");
   let controller: AbortController | null = null;
@@ -152,9 +161,14 @@ export const useChatStore = defineStore("chat", () => {
     if (!conversationId) return;
     streamingMessageId.value = assistantMessageId;
     streamingText.value = "";
+    streamingTools.value = [];
     controller = new AbortController();
     const message = detail.value?.messages.find((m) => m.id === assistantMessageId);
-    if (message) message.status = "streaming";
+    if (message) {
+      message.status = "streaming";
+      message.tool_calls = [];
+      message.pending_tool = null;
+    }
 
     await streamChatMessage(
       conversationId,
@@ -163,12 +177,47 @@ export const useChatStore = defineStore("chat", () => {
         onDelta: (text) => {
           streamingText.value += text;
         },
+        onToolCall: (data) => {
+          streamingTools.value.push({
+            id: data.id,
+            name: data.name,
+            summary: data.summary,
+            status: data.write ? "pending_approval" : "ok",
+            arguments: {},
+            result_preview: null,
+          });
+        },
+        onToolResult: (data) => {
+          const record = streamingTools.value.find((item) => item.id === data.id);
+          if (record) {
+            record.status = data.ok ? "ok" : "error";
+            record.result_preview = data.preview;
+          }
+        },
+        onToolApproval: (data) => {
+          const record = streamingTools.value.find((item) => item.id === data.id);
+          if (record) {
+            record.arguments = data.arguments;
+            record.status = "pending_approval";
+          }
+          const target = detail.value?.messages.find((m) => m.id === assistantMessageId);
+          if (target) {
+            target.status = "waiting_approval";
+            target.pending_tool = {
+              id: data.id,
+              name: data.name,
+              summary: data.summary,
+              arguments: data.arguments,
+            };
+          }
+        },
         onDone: () => undefined,
         onError: (data) => {
           error.value = data.message;
         },
       },
-      controller.signal
+      controller.signal,
+      toolsEnabled.value
     ).catch((err: unknown) => {
       // AbortError 是「用户点了停止」的正常路径，不报错
       const name = (err as Error)?.name;
@@ -181,6 +230,7 @@ export const useChatStore = defineStore("chat", () => {
     const target = detail.value?.messages.find((m) => m.id === assistantMessageId);
     if (target) {
       target.content = finalText || target.content;
+      target.tool_calls = streamingTools.value.slice();
       target.status = controller?.signal.aborted ? "interrupted" : target.status;
       if (!controller?.signal.aborted && target.status === "streaming") {
         target.status = "completed";
@@ -189,6 +239,23 @@ export const useChatStore = defineStore("chat", () => {
     streamingMessageId.value = null;
     streamingText.value = "";
     controller = null;
+    void loadConversations();
+  }
+
+  /**
+   * 确认/取消写工具（P3）。
+   *
+   * 服务端是唯一执行入口；前端只负责把用户的决定传过去，然后用返回的
+   * 最新消息替换本地副本（含结果摘要与轨迹状态）。
+   */
+  async function confirmTool(messageId: string, approve: boolean) {
+    const conversationId = detail.value?.id;
+    if (!conversationId) return;
+    const updated = await conversationApi.confirmTool(conversationId, messageId, approve);
+    const index = detail.value?.messages.findIndex((m) => m.id === messageId) ?? -1;
+    if (index >= 0 && detail.value) {
+      detail.value.messages[index] = updated;
+    }
     void loadConversations();
   }
 
@@ -268,6 +335,9 @@ export const useChatStore = defineStore("chat", () => {
     error,
     streamingMessageId,
     streamingText,
+    streamingTools,
+    toolsEnabled,
+    confirmTool,
     loadConversations,
     open,
     create,

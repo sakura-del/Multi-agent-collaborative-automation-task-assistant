@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 MessageRoleLiteral = Literal["user", "assistant", "system"]
-MessageStatusLiteral = Literal["pending", "streaming", "completed", "interrupted", "failed"]
+MessageStatusLiteral = Literal[
+    "pending", "streaming", "completed", "interrupted", "failed", "waiting_approval"
+]
 
 
 class ConversationCreate(BaseModel):
@@ -42,6 +44,30 @@ class MessageAttachment(BaseModel):
     title: str = Field(min_length=1, max_length=256)
 
 
+class MessageToolCall(BaseModel):
+    """一条工具调用轨迹（P3）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    name: str
+    summary: str = ""
+    status: Literal["pending_approval", "ok", "error", "rejected"] = "ok"
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    result_preview: str | None = None
+
+
+class MessagePendingTool(BaseModel):
+    """等待确认的写操作。`arguments` 供确认卡展示「将要做什么」。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    name: str
+    summary: str
+    arguments: dict[str, Any] = Field(default_factory=dict)
+
+
 class MessageOut(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -57,6 +83,8 @@ class MessageOut(BaseModel):
     error: str | None = None
     created_at: datetime
     attachments: list[MessageAttachment] = Field(default_factory=list)
+    tool_calls: list[MessageToolCall] = Field(default_factory=list)
+    pending_tool: MessagePendingTool | None = None
 
 
 class ConversationOut(BaseModel):
@@ -108,3 +136,11 @@ class ConversationCapabilitiesOut(BaseModel):
     max_attachments: int = 5
     max_file_mb: int = 30
     voice: str = "browser"
+
+
+class ToolConfirmIn(BaseModel):
+    """确认/取消待执行的写工具。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    approve: bool

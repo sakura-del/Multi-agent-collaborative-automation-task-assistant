@@ -25,10 +25,12 @@ from typing import Any
 
 from sqlalchemy import select
 
+from app.core.exceptions import AppException
 from app.core.logging import get_logger
 from app.db.models.conversation import Conversation, Message
 from app.llm.models import Message as LLMMessage
-from app.llm.models import MessageRole
+from app.llm.models import MessageRole, ToolSchema
+from app.tools.agent import ToolContext, get_tool, invoke_tool, list_tools
 
 logger = get_logger(__name__)
 
@@ -41,6 +43,17 @@ SYSTEM_PROMPT = (
 
 #: 单轮上下文回溯上限（沿 parent 链；更早的轮次不进上下文——P1 接会话摘要）
 MAX_CONTEXT_MESSAGES = 20
+
+#: 工具循环的最大轮数（模型→工具→模型）。超过后最后一次不带工具收口。
+MAX_TOOL_ROUNDS = 4
+
+#: 工具使用策略（只在启用工具时插入系统提示）
+TOOL_POLICY = (
+    "\n\n你可以调用工具替用户完成操作：查询任务/配额/引用库/知识库、联网搜索、"
+    "创建或取消综述任务、导入文献。"
+    "只读工具可直接调用；创建/取消/重试/导入等写操作会先请用户确认，"
+    "不要在回复里假装已经执行。工具结果以实际返回为准，不要编造。"
+)
 
 #: 周期落库的 delta 计数（客户端断连/进程被杀时，已生成内容不丢）
 PARTIAL_FLUSH_EVERY = 20
@@ -126,14 +139,42 @@ async def build_context(session: Any, message: Message) -> list[LLMMessage]:
 
 
 class ConversationStreamer:
-    """把 assistant 消息的生成过程编排成 SSE 帧，并负责持久化终态。"""
+    """把 assistant 消息的生成过程编排成 SSE 帧，并负责持久化终态。
 
-    def __init__(self, session_factory: Any, llm: Any) -> None:
+    ## 工具循环（P3）
+
+    启用工具时走 `stream_chat_events`：文本照常逐 token 下发；一轮结束后若
+    模型要求调用工具，只读工具立即执行并把结果回灌，继续下一轮；写工具
+    **暂停**为 `waiting_approval`，由用户在前端确认后执行。
+
+    为什么不让模型直接执行写操作：一次幻觉触发的「取消任务」不可恢复。
+    """
+
+    def __init__(
+        self,
+        session_factory: Any,
+        llm: Any,
+        *,
+        tool_context: ToolContext | None = None,
+        tools_enabled: bool = False,
+    ) -> None:
         self._session_factory = session_factory
         self._llm = llm
+        self._tool_context = tool_context
+        self._tools_enabled = tools_enabled
+
+    def _tool_schemas(self) -> list[ToolSchema]:
+        return [
+            ToolSchema(
+                name=item["name"],
+                description=item["summary"],
+                parameters=item["parameters"],
+            )
+            for item in list_tools()
+        ]
 
     async def stream(self, conversation_id: uuid.UUID, message_id: uuid.UUID) -> AsyncIterator[str]:
-        """生成 SSE 流。前 3 个事件固定：start → delta* → done/error。"""
+        """生成 SSE 流：start → (delta | tool_call | tool_result)* → done/error。"""
         async with self._session_factory() as session:
             message = await session.get(Message, message_id)
             if message is None or message.conversation_id != conversation_id:
@@ -146,63 +187,223 @@ class ConversationStreamer:
                 yield sse("error", {"code": "already_streaming", "message": "该消息正在生成中"})
                 return
 
+            use_tools = self._tools_enabled and self._tool_context is not None
             context = await build_context(session, message)
+            if use_tools:
+                # 插在系统提示之后，不覆盖原有定位
+                context.insert(1, LLMMessage(role=MessageRole.SYSTEM, content=TOOL_POLICY))
+            tools = self._tool_schemas() if use_tools else None
+
             message.status = "streaming"
             message.content = ""
             message.error = None
+            message.tool_calls = []
+            message.pending_tool = None
             await session.commit()
 
-            yield sse("start", {"message_id": str(message.id), "model": self._llm.model})
+            yield sse(
+                "start",
+                {"message_id": str(message.id), "model": self._llm.model, "tools": use_tools},
+            )
 
             buffer: list[str] = []
+            records: list[dict[str, Any]] = []
             try:
                 _clear_stop(message_id)
-                delta_count = 0
-                async for delta in self._llm.stream_chat(
-                    context,
-                    max_tokens=2000,
-                ):
-                    if not delta:
-                        continue
-                    if _should_stop(message_id):
-                        await self._finalize(
-                            message_id, "".join(buffer), "interrupted", "用户停止生成"
+                for round_index in range(MAX_TOOL_ROUNDS + 1):
+                    round_tools = tools if round_index < MAX_TOOL_ROUNDS else None
+                    tool_calls = None
+                    delta_count = 0
+                    async for event in self._llm.stream_chat_events(
+                        context,
+                        tools=round_tools,
+                        max_tokens=2000,
+                    ):
+                        if event.type == "delta" and event.text:
+                            if _should_stop(message_id):
+                                await self._finalize(
+                                    message_id,
+                                    "".join(buffer),
+                                    "interrupted",
+                                    "用户停止生成",
+                                    tool_calls=records,
+                                )
+                                _clear_stop(message_id)
+                                logger.info(
+                                    "conversation_message_stopped",
+                                    conversation_id=str(conversation_id),
+                                    message_id=str(message_id),
+                                    chars=len("".join(buffer)),
+                                )
+                                yield sse(
+                                    "done", {"message_id": str(message_id), "interrupted": True}
+                                )
+                                return
+                            buffer.append(event.text)
+                            delta_count += 1
+                            if delta_count % PARTIAL_FLUSH_EVERY == 0:
+                                await self._persist_partial(message_id, "".join(buffer))
+                            yield sse("delta", {"text": event.text})
+                        elif event.type == "done":
+                            tool_calls = event.tool_calls
+
+                    if not tool_calls:
+                        break
+
+                    # 把「模型要调用工具」这一轮写回上下文，保持多轮连贯
+                    context.append(
+                        LLMMessage(
+                            role=MessageRole.ASSISTANT,
+                            content="".join(buffer) or None,
+                            tool_calls=tool_calls,
                         )
-                        _clear_stop(message_id)
-                        logger.info(
-                            "conversation_message_stopped",
-                            conversation_id=str(conversation_id),
-                            message_id=str(message_id),
-                            chars=len("".join(buffer)),
+                    )
+
+                    for call in tool_calls:
+                        args = _parse_arguments(call.arguments)
+                        try:
+                            spec = get_tool(call.name)
+                            summary = spec.summary
+                            write = spec.write
+                        except AppException:
+                            spec = None
+                            summary = call.name
+                            write = False
+
+                        record: dict[str, Any] = {
+                            "id": call.id,
+                            "name": call.name,
+                            "summary": summary,
+                            "status": "ok",
+                            "arguments": args,
+                            "result_preview": None,
+                        }
+                        records.append(record)
+                        yield sse(
+                            "tool_call",
+                            {
+                                "id": call.id,
+                                "name": call.name,
+                                "summary": summary,
+                                "write": write,
+                            },
                         )
-                        yield sse("done", {"message_id": str(message_id), "interrupted": True})
-                        return
-                    buffer.append(delta)
-                    delta_count += 1
-                    if delta_count % PARTIAL_FLUSH_EVERY == 0:
-                        await self._persist_partial(message_id, "".join(buffer))
-                    yield sse("delta", {"text": delta})
+
+                        if spec is None:
+                            record["status"] = "error"
+                            record["result_preview"] = "未知工具"
+                            context.append(
+                                LLMMessage(
+                                    role=MessageRole.TOOL,
+                                    content=json.dumps({"error": "未知工具"}, ensure_ascii=False),
+                                    tool_call_id=call.id,
+                                    name=call.name,
+                                )
+                            )
+                            yield sse(
+                                "tool_result",
+                                {
+                                    "id": call.id,
+                                    "name": call.name,
+                                    "ok": False,
+                                    "preview": "未知工具",
+                                },
+                            )
+                            continue
+
+                        if write:
+                            # 写操作：暂停，交前端确认卡
+                            record["status"] = "pending_approval"
+                            pending = {
+                                "id": call.id,
+                                "name": call.name,
+                                "summary": summary,
+                                "arguments": args,
+                            }
+                            await self._save_pending(message_id, "".join(buffer), records, pending)
+                            logger.info(
+                                "conversation_tool_approval_required",
+                                conversation_id=str(conversation_id),
+                                message_id=str(message_id),
+                                tool=call.name,
+                            )
+                            yield sse("tool_approval", pending)
+                            yield sse(
+                                "done",
+                                {
+                                    "message_id": str(message_id),
+                                    "status": "waiting_approval",
+                                    "tool": call.name,
+                                },
+                            )
+                            return
+
+                        # use_tools 为真时 tool_context 必非空（构造参数保证）
+                        assert self._tool_context is not None
+                        try:
+                            outcome = await invoke_tool(
+                                self._tool_context, call.name, args, confirmed=False
+                            )
+                            result: Any = outcome.get("result", {})
+                            record["status"] = "ok"
+                        except AppException as exc:
+                            result = {"error": exc.message}
+                            record["status"] = "error"
+                        except Exception as exc:
+                            result = {"error": str(exc)[:300]}
+                            record["status"] = "error"
+
+                        preview = json.dumps(result, ensure_ascii=False, default=str)[:600]
+                        record["result_preview"] = preview
+                        context.append(
+                            LLMMessage(
+                                role=MessageRole.TOOL,
+                                content=preview,
+                                tool_call_id=call.id,
+                                name=call.name,
+                            )
+                        )
+                        yield sse(
+                            "tool_result",
+                            {
+                                "id": call.id,
+                                "name": call.name,
+                                "ok": record["status"] == "ok",
+                                "preview": preview,
+                            },
+                        )
+
+                    await self._persist_tools(message_id, records)
+
                 text = "".join(buffer)
-                async with self._session_factory() as finish_session:
-                    row = await finish_session.get(Message, message_id)
-                    if row is not None:
-                        row.content = text
-                        row.status = "completed"
-                        row.model = self._llm.model
-                        conv = await finish_session.get(Conversation, conversation_id)
-                        if conv is not None:
-                            conv.last_message_at = row.updated_at
-                        await finish_session.commit()
+                await self._finalize(
+                    message_id,
+                    text,
+                    "completed",
+                    None,
+                    tool_calls=records,
+                    model=self._llm.model,
+                    touch_conversation=conversation_id,
+                )
                 logger.info(
                     "conversation_message_completed",
                     conversation_id=str(conversation_id),
                     message_id=str(message_id),
                     chars=len(text),
+                    tool_calls=len(records),
                 )
-                yield sse("done", {"message_id": str(message_id), "chars": len(text)})
+                yield sse(
+                    "done",
+                    {
+                        "message_id": str(message_id),
+                        "chars": len(text),
+                        "tool_calls": len(records),
+                    },
+                )
             except asyncio.CancelledError:
-                # 客户端断开 / 服务端取消：保留已生成部分
-                await self._finalize(message_id, "".join(buffer), "interrupted", None)
+                await self._finalize(
+                    message_id, "".join(buffer), "interrupted", None, tool_calls=records
+                )
                 logger.warning(
                     "conversation_message_interrupted",
                     conversation_id=str(conversation_id),
@@ -213,8 +414,9 @@ class ConversationStreamer:
             except Exception as exc:
                 error_text = str(exc)[:500] or "生成失败"
                 if _should_stop(message_id) or _is_connection_error(exc):
-                    # 停止请求 / 客户端断开：保留已生成内容，记为 interrupted
-                    await self._finalize(message_id, "".join(buffer), "interrupted", None)
+                    await self._finalize(
+                        message_id, "".join(buffer), "interrupted", None, tool_calls=records
+                    )
                     _clear_stop(message_id)
                     logger.info(
                         "conversation_message_interrupted",
@@ -224,7 +426,9 @@ class ConversationStreamer:
                     )
                     yield sse("done", {"message_id": str(message_id), "interrupted": True})
                     return
-                await self._finalize(message_id, "".join(buffer), "failed", error_text)
+                await self._finalize(
+                    message_id, "".join(buffer), "failed", error_text, tool_calls=records
+                )
                 logger.error(
                     "conversation_message_failed",
                     conversation_id=str(conversation_id),
@@ -242,8 +446,42 @@ class ConversationStreamer:
             row.content = text
             await session.commit()
 
+    async def _persist_tools(self, message_id: uuid.UUID, records: list[dict[str, Any]]) -> None:
+        async with self._session_factory() as session:
+            row = await session.get(Message, message_id)
+            if row is None or row.status != "streaming":
+                return
+            row.tool_calls = list(records)
+            await session.commit()
+
+    async def _save_pending(
+        self,
+        message_id: uuid.UUID,
+        text: str,
+        records: list[dict[str, Any]],
+        pending: dict[str, Any],
+    ) -> None:
+        async with self._session_factory() as session:
+            row = await session.get(Message, message_id)
+            if row is None:
+                return
+            row.content = text
+            row.tool_calls = list(records)
+            row.pending_tool = pending
+            row.status = "waiting_approval"
+            row.model = self._llm.model
+            await session.commit()
+
     async def _finalize(
-        self, message_id: uuid.UUID, text: str, status: str, error: str | None
+        self,
+        message_id: uuid.UUID,
+        text: str,
+        status: str,
+        error: str | None,
+        *,
+        tool_calls: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        touch_conversation: uuid.UUID | None = None,
     ) -> None:
         async with self._session_factory() as session:
             row = await session.get(Message, message_id)
@@ -252,7 +490,26 @@ class ConversationStreamer:
             row.content = text
             row.status = status
             row.error = error
+            if tool_calls is not None:
+                row.tool_calls = list(tool_calls)
+            if model is not None:
+                row.model = model
+            if touch_conversation is not None:
+                conversation = await session.get(Conversation, touch_conversation)
+                if conversation is not None:
+                    conversation.last_message_at = row.updated_at
             await session.commit()
+
+
+def _parse_arguments(raw: str) -> dict[str, Any]:
+    """工具参数容错解析：空/非法 JSON 一律给空 dict，由工具校验报可读错误。"""
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+        return value if isinstance(value, dict) else {"value": value}
+    except json.JSONDecodeError:
+        return {}
 
 
 async def latest_leaf(session: Any, conversation_id: uuid.UUID) -> uuid.UUID | None:

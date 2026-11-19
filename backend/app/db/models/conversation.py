@@ -112,6 +112,15 @@ class Message(Base):
     attachments: Mapped[list[dict[str, Any]]] = mapped_column(
         _JSON_TYPE, nullable=False, default=list, comment="附件引用列表（JSON）"
     )
+    #: 工具执行轨迹（P3）：`[{id,name,summary,status,arguments,result_preview}]`。
+    #: 存下来是为了刷新后仍能看到「查了什么、建了什么」，而不是只剩一句回答。
+    tool_calls: Mapped[list[dict[str, Any]]] = mapped_column(
+        _JSON_TYPE, nullable=False, default=list, comment="工具调用轨迹（JSON）"
+    )
+    #: 等待用户确认的写操作（P3）；非空时消息状态为 waiting_approval。
+    pending_tool: Mapped[dict[str, Any] | None] = mapped_column(
+        _JSON_TYPE, nullable=True, comment="待确认的写工具（JSON）"
+    )
     status: Mapped[str] = mapped_column(
         String(16),
         nullable=False,

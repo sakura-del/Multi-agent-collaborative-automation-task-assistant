@@ -7,7 +7,31 @@ import { resolveApiBase } from "@/config/endpoint";
 // 落库为 interrupted。所以客户端只需要 AbortController，不需要 stop 端点。
 
 export type MessageRole = "user" | "assistant" | "system";
-export type MessageStatus = "pending" | "streaming" | "completed" | "interrupted" | "failed";
+export type MessageStatus =
+  | "pending"
+  | "streaming"
+  | "completed"
+  | "interrupted"
+  | "failed"
+  | "waiting_approval";
+
+export type ToolCallStatus = "pending_approval" | "ok" | "error" | "rejected";
+
+export interface ChatToolCall {
+  id: string;
+  name: string;
+  summary: string;
+  status: ToolCallStatus;
+  arguments?: Record<string, unknown>;
+  result_preview?: string | null;
+}
+
+export interface ChatPendingTool {
+  id: string;
+  name: string;
+  summary: string;
+  arguments: Record<string, unknown>;
+}
 
 /** 消息附件（P2）：知识库文档引用；文件真源在知识库，消息只存引用 + 标题快照 */
 export interface ChatAttachment {
@@ -38,6 +62,8 @@ export interface ChatMessage {
   error: string | null;
   created_at: string;
   attachments?: ChatAttachment[];
+  tool_calls?: ChatToolCall[];
+  pending_tool?: ChatPendingTool | null;
 }
 
 export interface ChatConversation {
@@ -108,15 +134,42 @@ export const conversationApi = {
   requestStop: (conversationId: string, messageId: string) =>
     api.post(`/conversations/${conversationId}/messages/${messageId}/stop`).then((r) => r.data),
 
+  /** 确认/取消待执行的写工具（P3） */
+  confirmTool: (conversationId: string, messageId: string, approve: boolean) =>
+    api
+      .post<ChatMessage>(
+        `/conversations/${conversationId}/messages/${messageId}/tool-confirm`,
+        { approve }
+      )
+      .then((response) => response.data),
+
   /** SSE 地址（EventSource 不支持 Authorization 头 → 用 fetch + ReadableStream 自建） */
-  streamUrl: (conversationId: string, messageId: string) =>
-    `/conversations/${conversationId}/messages/${messageId}/stream`,
+  streamUrl: (conversationId: string, messageId: string, tools = false) =>
+    `/conversations/${conversationId}/messages/${messageId}/stream${tools ? "?tools=1" : ""}`,
 };
 
 export interface StreamHandlers {
-  onStart?: (data: { message_id: string; model: string }) => void;
+  onStart?: (data: { message_id: string; model: string; tools?: boolean }) => void;
   onDelta?: (text: string) => void;
-  onDone?: (data: { message_id: string; chars: number }) => void;
+  onToolCall?: (data: {
+    id: string;
+    name: string;
+    summary: string;
+    write: boolean;
+  }) => void;
+  onToolResult?: (data: { id: string; name: string; ok: boolean; preview: string }) => void;
+  onToolApproval?: (data: {
+    id: string;
+    name: string;
+    summary: string;
+    arguments: Record<string, unknown>;
+  }) => void;
+  onDone?: (data: {
+    message_id: string;
+    chars?: number;
+    status?: string;
+    interrupted?: boolean;
+  }) => void;
   onError?: (data: { code: string; message: string }) => void;
 }
 
@@ -131,13 +184,14 @@ export async function streamChatMessage(
   conversationId: string,
   messageId: string,
   handlers: StreamHandlers,
-  signal: AbortSignal
+  signal: AbortSignal,
+  tools = false
 ): Promise<void> {
   // 原生 fetch（不走 axios）：只有它能拿到 ReadableStream 做增量解析。
   // axios 的 fetch adapter 在 responseType=text 时会把整个响应读完才 resolve，
   // 那样「流式」就名存实亡。
   const token = getAccessToken();
-  const response = await fetch(`${resolveApiBase()}${conversationApi.streamUrl(conversationId, messageId)}`, {
+  const response = await fetch(`${resolveApiBase()}${conversationApi.streamUrl(conversationId, messageId, tools)}`, {
     method: "GET",
     headers: {
       Accept: "text/event-stream",
@@ -197,6 +251,9 @@ export function parseSseChunk(buffer: string, handlers: StreamHandlers, keepTail
     const data = payload as Record<string, unknown>;
     if (event === "start") handlers.onStart?.(data as never);
     else if (event === "delta") handlers.onDelta?.(String(data.text ?? ""));
+    else if (event === "tool_call") handlers.onToolCall?.(data as never);
+    else if (event === "tool_result") handlers.onToolResult?.(data as never);
+    else if (event === "tool_approval") handlers.onToolApproval?.(data as never);
     else if (event === "done") handlers.onDone?.(data as never);
     else if (event === "error") handlers.onError?.(data as never);
   }

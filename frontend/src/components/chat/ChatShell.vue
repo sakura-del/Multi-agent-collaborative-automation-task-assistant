@@ -31,6 +31,7 @@ import {
   Plus,
   Square,
   Trash2,
+  Wrench,
   X,
 } from "lucide-vue-next";
 
@@ -497,10 +498,12 @@ const panelClass = computed(() => {
         :message="message"
         :branch="store.branchInfo(message.id)"
         :streaming-text="isStreamingMessage(message) ? store.streamingText : null"
+        :streaming-tools="isStreamingMessage(message) ? store.streamingTools : null"
         :editable="message.role === 'user' && !isStreaming"
         @switch-branch="store.switchBranch"
         @edit-resend="editResend"
         @retry="retryAssistant"
+        @confirm-tool="store.confirmTool"
       />
     </div>
 
@@ -570,6 +573,25 @@ const panelClass = computed(() => {
           @click="fileInput?.click()"
         >
           <Paperclip class="size-3" /> 附件
+        </button>
+        <button
+          type="button"
+          data-test="chat-tools-toggle"
+          class="inline-flex items-center gap-1 rounded-lg border px-1.5 py-1 text-[10px] transition-colors"
+          :class="
+            store.toolsEnabled
+              ? 'border-primary/50 bg-primary/10 text-primary'
+              : 'border-border text-muted-foreground hover:text-foreground'
+          "
+          :aria-pressed="store.toolsEnabled"
+          :title="
+            store.toolsEnabled
+              ? '工具已开启：可查询/建任务，写操作会先请你确认'
+              : '工具已关闭：纯聊天（更快）'
+          "
+          @click="store.toolsEnabled = !store.toolsEnabled"
+        >
+          <Wrench class="size-3" /> 工具{{ store.toolsEnabled ? "开" : "关" }}
         </button>
         <button
           v-if="voiceSupported"

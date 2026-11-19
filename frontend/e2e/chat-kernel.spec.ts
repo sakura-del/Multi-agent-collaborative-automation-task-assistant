@@ -411,3 +411,75 @@ test.describe("会话内核：流式状态机（SSE 桩）", () => {
     await expect(branchCount).toHaveText("1/2");
   });
 });
+
+
+test.describe("会话内核：工具调用（真实模型）", () => {
+  test.setTimeout(300_000);
+  test.describe.configure({ retries: 1 });
+
+  test.beforeAll(async ({ request }) => {
+    await cleanup(request);
+  });
+  test.afterAll(async ({ request }) => {
+    await cleanup(request);
+  });
+
+  test("只读工具自动执行 → 继续生成回答", async ({ page }) => {
+    test.skip(!process.env.E2E_REAL_LLM, "需平台模型可用：设 E2E_REAL_LLM=1 开启");
+
+    await login(page);
+    await page.goto("/tasks");
+    await openChat(page);
+    await newConversation(page);
+
+    // 前端开启工具时必须把 tools=1 带到流式请求上
+    const streamRequest = page.waitForRequest(
+      (request) => request.url().includes("/stream") && request.url().includes("tools=1"),
+      { timeout: 30_000 }
+    );
+    await send(page, `${MARKER} 请调用 get_quota 工具查询我的套餐剩余篇数，再告诉我结果`);
+    await streamRequest;
+
+    await expect(page.locator('[data-test="chat-tool-step"]').first()).toBeVisible({
+      timeout: 120_000,
+    });
+    await expect(page.locator('[data-test="chat-tool-timeline"]')).toContainText("查询配额");
+    await waitStreamingSettled(page);
+
+    const assistant = page.locator('[data-test="chat-body-assistant"]');
+    await expect(assistant).toHaveCount(1);
+    await expect
+      .poll(async () => (await assistant.innerText()).trim().length, { timeout: 60_000 })
+      .toBeGreaterThan(5);
+    await expect(page.locator('[data-test="chat-error"]')).toHaveCount(0);
+  });
+
+  test("写工具先出确认卡 → 确认后创建任务", async ({ page }) => {
+    test.skip(!process.env.E2E_REAL_LLM, "需平台模型可用：设 E2E_REAL_LLM=1 开启");
+
+    await login(page);
+    await page.goto("/tasks");
+    await openChat(page);
+    await newConversation(page);
+
+    await send(
+      page,
+      `${MARKER} 请调用 create_task 工具，创建主题为「多智能体协作综述」的综述任务，` +
+        "关键词用「多智能体」「任务编排」"
+    );
+
+    const approval = page.locator('[data-test="chat-tool-approval"]');
+    await expect(approval).toBeVisible({ timeout: 150_000 });
+    await expect(approval).toContainText("创建综述任务");
+
+    await page.locator('[data-test="chat-tool-approve"]').click();
+    await expect(approval).toHaveCount(0, { timeout: 60_000 });
+    // 确认后由服务端执行，消息更新为可读结果
+    await expect(page.locator('[data-test="chat-body-assistant"]')).toContainText(
+      "已创建综述任务",
+      { timeout: 60_000 }
+    );
+    await expect(page.locator('[data-test="chat-tool-step"]').first()).toBeVisible();
+    await expect(page.locator('[data-test="chat-error"]')).toHaveCount(0);
+  });
+});

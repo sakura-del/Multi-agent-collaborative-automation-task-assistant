@@ -17,7 +17,15 @@ from openai import AsyncOpenAI
 
 from app.llm.base import BaseLLM
 from app.llm.model_profiles import apply_model_profile
-from app.llm.models import LLMResponse, Message, MessageRole, ToolCall, Usage
+from app.llm.models import (
+    LLMResponse,
+    Message,
+    MessageRole,
+    StreamEvent,
+    ToolCall,
+    ToolSchema,
+    Usage,
+)
 
 
 def _parse_cache_usage(raw_usage: Any) -> dict[str, int]:
@@ -243,6 +251,78 @@ class OpenAIAdapter(BaseLLM):
             delta = chunk.choices[0].delta
             if delta and delta.content:
                 yield delta.content
+
+    async def stream_chat_events(
+        self,
+        messages: list[Message],
+        *,
+        tools: list[ToolSchema] | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[StreamEvent]:
+        """真流式 + 工具调用累积。
+
+        OpenAI 的 tool_calls 在流里是**按 index 分片**到达的：
+        id/name 可能只在首片，arguments 会拆成多段字符串。必须按 index
+        聚合，最后一次性产出完整 ToolCall，否则参数是残缺 JSON。
+        """
+        client: AsyncOpenAI = self._ensure_client()  # type: ignore[assignment]
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "messages": [self._message_to_dict(m) for m in messages],
+            "stream": True,
+        }
+        if tools:
+            payload["tools"] = [self._tool_to_dict(t) for t in tools]
+        if temperature is not None:
+            payload["temperature"] = temperature
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
+        payload.update(kwargs)
+        apply_model_profile(payload, self.model)
+
+        stream = await client.chat.completions.create(**payload)
+        fragments: dict[int, dict[str, str]] = {}
+        finish_reason: str | None = None
+
+        async for chunk in stream:
+            if not chunk.choices:
+                continue
+            choice = chunk.choices[0]
+            if choice.finish_reason:
+                finish_reason = choice.finish_reason
+            delta = choice.delta
+            if delta is None:
+                continue
+            if delta.content:
+                yield StreamEvent(type="delta", text=delta.content)
+            for call in delta.tool_calls or []:
+                index = call.index if call.index is not None else 0
+                entry = fragments.setdefault(index, {"id": "", "name": "", "arguments": ""})
+                if call.id:
+                    entry["id"] = call.id
+                function = call.function
+                if function is not None:
+                    if function.name:
+                        entry["name"] += function.name
+                    if function.arguments:
+                        entry["arguments"] += function.arguments
+
+        tool_calls = [
+            ToolCall(
+                id=entry["id"] or f"call_{index}",
+                name=entry["name"],
+                arguments=entry["arguments"] or "{}",
+            )
+            for index, entry in sorted(fragments.items())
+            if entry["name"]
+        ]
+        yield StreamEvent(
+            type="done",
+            tool_calls=tool_calls or None,
+            finish_reason=finish_reason or "stop",
+        )
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         """文本向量化：调用 OpenAI Embeddings 接口。"""

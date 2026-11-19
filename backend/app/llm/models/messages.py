@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -102,3 +102,16 @@ class LLMResponse(BaseModel):
         default=None,
         description="原始响应（调试用，生产环境不应依赖此字段）",
     )
+
+
+class StreamEvent(BaseModel):
+    """流式事件：文本增量或最终结果（含工具调用）。
+
+    为什么要事件化：流式与工具调用必须共存——先逐 token 出文本，结束时若模型
+    要求调工具，调用方需要拿到完整 tool_calls。只 yield 字符串无法表达后者。
+    """
+
+    type: Literal["delta", "done"] = "delta"
+    text: str = ""
+    tool_calls: list[ToolCall] | None = None
+    finish_reason: str | None = None

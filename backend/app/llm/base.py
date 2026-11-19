@@ -23,7 +23,7 @@ from typing import Any
 
 from app.core.logging import get_logger
 from app.core.metrics import inc_counter
-from app.llm.models import LLMResponse, Message, ToolSchema
+from app.llm.models import LLMResponse, Message, StreamEvent, ToolSchema
 from app.llm.router import current_node_type, get_model_router
 from app.llm.throttle import llm_slot
 from app.llm.usage_ledger import record_usage
@@ -274,6 +274,36 @@ class BaseLLM(ABC):
         """
         # yield 让此方法成为 async generator；子类需覆盖实现
         yield ""  # pragma: no cover
+
+    async def stream_chat_events(
+        self,
+        messages: list[Message],
+        *,
+        tools: list[ToolSchema] | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[StreamEvent]:
+        """流式事件：默认降级为一次非流式调用。
+
+        适配器能真正边流边收集工具调用时覆盖本方法（OpenAI 已覆盖）；
+        其余适配器退回 `chat()`，把完整文本作为单个 delta 发出——
+        语义正确，只是首个 token 延迟变大。
+        """
+        response = await self.chat(
+            messages,
+            tools=tools,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs,
+        )
+        if response.content:
+            yield StreamEvent(type="delta", text=response.content)
+        yield StreamEvent(
+            type="done",
+            tool_calls=response.tool_calls,
+            finish_reason=response.finish_reason,
+        )
 
     @abstractmethod
     async def embed(self, texts: list[str]) -> list[list[float]]:

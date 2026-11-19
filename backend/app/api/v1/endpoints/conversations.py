@@ -25,6 +25,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
@@ -35,7 +36,14 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_active_user
+from app.api.v1.endpoints.tasks import (
+    ExecutionDep,
+    PlanServiceDep,
+    QuotaDep,
+    WorkspaceIdsDep,
+)
 from app.core.config import get_settings
+from app.core.exceptions import AppException, ValidationException
 from app.db.models.conversation import Conversation, Message
 from app.db.models.knowledge import KnowledgeDoc
 from app.db.models.user import User
@@ -55,12 +63,35 @@ from app.schemas.conversation import (
     MessageCreateIn,
     MessageOut,
     MessagePairOut,
+    MessagePendingTool,
+    MessageToolCall,
+    ToolConfirmIn,
 )
+from app.tools.agent import ToolContext, invoke_tool
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
 CurrentUserDep = Annotated[User, Depends(get_current_active_user)]
 DbDep = Annotated[AsyncSession, Depends(get_db)]
+
+
+def _tool_result_summary(name: str, result: dict[str, Any], ok: bool) -> str:
+    """把工具结果写成人能读的一句话（不把整段 JSON 倒进聊天）。"""
+    if not ok:
+        return f"执行失败：{result.get('error', '未知错误')}"
+    if name == "create_task" and result.get("task_id"):
+        return (
+            f"已创建综述任务 `{result['task_id']}`。规划生成后请在任务页确认，"
+            "确认后才会开始检索与写作。"
+        )
+    if name == "cancel_task" and result.get("task_id"):
+        return f"已取消任务 `{result['task_id']}`。"
+    if name == "import_references":
+        return (
+            f"已导入文献：新增 {result.get('created', 0)} 条、"
+            f"合并 {result.get('merged', 0)} 条、跳过 {result.get('skipped', 0)} 条。"
+        )
+    return "已执行该操作。"
 
 
 def _to_message_out(row: Message) -> MessageOut:
@@ -77,6 +108,10 @@ def _to_message_out(row: Message) -> MessageOut:
         error=row.error,
         created_at=row.created_at,
         attachments=[MessageAttachment.model_validate(item) for item in (row.attachments or [])],
+        tool_calls=[MessageToolCall.model_validate(item) for item in (row.tool_calls or [])],
+        pending_tool=(
+            MessagePendingTool.model_validate(row.pending_tool) if row.pending_tool else None
+        ),
     )
 
 
@@ -337,6 +372,87 @@ async def create_message(
 
 
 @router.post(
+    "/{conversation_id}/messages/{message_id}/tool-confirm",
+    response_model=MessageOut,
+    summary="确认/取消待执行的写工具（P3）",
+)
+async def confirm_tool(
+    conversation_id: uuid.UUID,
+    message_id: uuid.UUID,
+    payload: ToolConfirmIn,
+    current_user: CurrentUserDep,
+    db: DbDep,
+    execution: ExecutionDep,
+    plan_service: PlanServiceDep,
+    quota: QuotaDep,
+    workspace_ids: WorkspaceIdsDep,
+) -> MessageOut:
+    """写工具的唯一执行入口：模型只能「提议」，用户点了确认才真的执行。
+
+    拒绝也要落库（`rejected`），否则刷新后卡片会再次出现。
+    """
+    await _owned(db, current_user.id, conversation_id)
+    row = await db.get(Message, message_id)
+    if row is None or row.conversation_id != conversation_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="消息不存在")
+    if row.status != "waiting_approval" or not row.pending_tool:
+        raise ValidationException("该消息没有待确认的工具操作")
+
+    pending = dict(row.pending_tool)
+    records = [dict(item) for item in (row.tool_calls or [])]
+    index = next(
+        (i for i, item in enumerate(records) if item.get("id") == pending.get("id")),
+        -1,
+    )
+
+    if not payload.approve:
+        if index >= 0:
+            records[index]["status"] = "rejected"
+            records[index]["result_preview"] = "用户取消"
+        row.tool_calls = records
+        row.pending_tool = None
+        row.status = "completed"
+        row.content = "已取消该操作。"
+        await db.commit()
+        await db.refresh(row)
+        return _to_message_out(row)
+
+    context = ToolContext(
+        db=db,
+        user_id=current_user.id,
+        execution=execution,
+        plan_service=plan_service,
+        quota=quota,
+        workspace_ids=workspace_ids,
+    )
+    try:
+        outcome = await invoke_tool(
+            context,
+            str(pending.get("name", "")),
+            dict(pending.get("arguments") or {}),
+            confirmed=True,
+        )
+        result: Any = outcome.get("result", {})
+        ok = True
+    except AppException as exc:
+        result = {"error": exc.message}
+        ok = False
+
+    preview = json.dumps(result, ensure_ascii=False, default=str)[:2000]
+    if index >= 0:
+        records[index]["status"] = "ok" if ok else "error"
+        records[index]["result_preview"] = preview
+    row.tool_calls = records
+    row.pending_tool = None
+    row.status = "completed" if ok else "failed"
+    row.error = None if ok else str(result.get("error"))[:500]
+    row.content = _tool_result_summary(str(pending.get("name", "")), result, ok)
+    await db.commit()
+    await db.refresh(row)
+    return _to_message_out(row)
+
+
+@router.post(
     "/{conversation_id}/messages/{message_id}/stop",
     summary="停止生成（协同取消；生成循环下一个 delta 内退出并落库 interrupted）",
 )
@@ -372,15 +488,43 @@ async def stream_message(
     message_id: uuid.UUID,
     current_user: CurrentUserDep,
     db: DbDep,
+    execution: ExecutionDep,
+    plan_service: PlanServiceDep,
+    quota: QuotaDep,
+    workspace_ids: WorkspaceIdsDep,
+    tools: bool = False,
 ) -> StreamingResponse:
-    """事件：`start` → `delta`* → `done` | `error`。客户端 abort 即中断（落库 interrupted）。"""
+    """事件：`start` → (`delta` | `tool_call` | `tool_result`)* → `done` / `tool_approval`。
+
+    `tools=false`（默认）保持 P0 纯聊天；前端开启「工具」时传 `?tools=1`，
+    只读工具自动执行，写工具暂停为 `waiting_approval` 等确认。
+
+    客户端 abort 即中断（落库 interrupted）。
+    """
     await _owned(db, current_user.id, conversation_id)
 
     from app.db.session import AsyncSessionLocal
     from app.llm.factory import get_llm_manager
 
     llm = get_llm_manager().get_primary()
-    streamer = ConversationStreamer(AsyncSessionLocal, llm)
+    tool_context = (
+        ToolContext(
+            db=db,
+            user_id=current_user.id,
+            execution=execution,
+            plan_service=plan_service,
+            quota=quota,
+            workspace_ids=workspace_ids,
+        )
+        if tools
+        else None
+    )
+    streamer = ConversationStreamer(
+        AsyncSessionLocal,
+        llm,
+        tool_context=tool_context,
+        tools_enabled=tools,
+    )
     return StreamingResponse(
         streamer.stream(conversation_id, message_id),
         media_type="text/event-stream",

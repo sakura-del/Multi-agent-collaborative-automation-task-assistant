@@ -6,9 +6,21 @@
  * Mermaid 在挂载后用动态 import 渲染（体积大，只有出现图表才加载）。
  */
 import { computed, nextTick, onMounted, ref, watch } from "vue";
-import { Check, ChevronLeft, ChevronRight, Copy, FileText, Pencil, RotateCcw } from "lucide-vue-next";
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  CircleAlert,
+  Copy,
+  FileText,
+  Loader2,
+  Pencil,
+  RotateCcw,
+  ShieldCheck,
+  Wrench,
+} from "lucide-vue-next";
 
-import type { ChatMessage } from "@/api/conversations";
+import type { ChatMessage, ChatToolCall } from "@/api/conversations";
 import { renderChatMarkdown, renderMermaidBlocks } from "@/utils/chat-markdown";
 
 const props = defineProps<{
@@ -19,6 +31,8 @@ const props = defineProps<{
   active?: boolean;
   /** 流式中的实时文本（仅 assistant 且正在生成时传入） */
   streamingText?: string | null;
+  /** 流式中的工具轨迹（与 streamingText 同生命周期） */
+  streamingTools?: ChatToolCall[] | null;
   /** 是否可以编辑重发（user 消息且非流式中） */
   editable?: boolean;
 }>();
@@ -27,7 +41,43 @@ const emit = defineEmits<{
   switchBranch: [messageId: string];
   editResend: [messageId: string, content: string];
   retry: [messageId: string];
+  confirmTool: [messageId: string, approve: boolean];
 }>();
+
+const TOOL_LABELS: Record<string, string> = {
+  get_quota: "查询配额",
+  search_web: "联网搜索",
+  search_knowledge: "检索知识库",
+  list_knowledge_documents: "查看知识库",
+  search_references: "检索引用库",
+  import_references: "导入文献",
+  list_tasks: "查看任务",
+  get_task: "查看任务详情",
+  create_task: "创建综述任务",
+  approve_task_plan: "确认规划",
+  cancel_task: "取消任务",
+  retry_task_node: "重试节点",
+};
+
+function toolLabel(name: string): string {
+  return TOOL_LABELS[name] ?? name;
+}
+
+const toolRecords = computed<ChatToolCall[]>(
+  () => props.streamingTools ?? props.message.tool_calls ?? [],
+);
+const confirming = ref(false);
+
+async function decideTool(approve: boolean): Promise<void> {
+  if (confirming.value) return;
+  confirming.value = true;
+  try {
+    emit("confirmTool", props.message.id, approve);
+  } finally {
+    // 结果由 store 刷新消息；此处只防重复点击
+    window.setTimeout(() => (confirming.value = false), 800);
+  }
+}
 
 const root = ref<HTMLElement | null>(null);
 const copied = ref(false);
@@ -139,6 +189,84 @@ function submitEdit() {
 
       <!-- 渲染态 -->
       <template v-else>
+        <!-- 工具执行过程（P3）：可折叠，让用户看到「查了什么」 -->
+        <details
+          v-if="toolRecords.length"
+          data-test="chat-tool-timeline"
+          class="mb-1.5 rounded-lg border border-border/70 bg-muted/30 px-2 py-1.5"
+          :open="Boolean(message.pending_tool)"
+        >
+          <summary class="cursor-pointer select-none text-[11px] text-muted-foreground">
+            执行过程（{{ toolRecords.length }} 步）
+          </summary>
+          <ul class="mt-1 space-y-1">
+            <li
+              v-for="record in toolRecords"
+              :key="record.id"
+              data-test="chat-tool-step"
+              class="flex items-start gap-1.5 text-[11px] leading-4"
+            >
+              <Loader2
+                v-if="record.status === 'pending_approval' && message.status === 'waiting_approval'"
+                class="mt-0.5 size-3 shrink-0 animate-spin text-amber-600"
+              />
+              <CircleAlert
+                v-else-if="record.status === 'error'"
+                class="mt-0.5 size-3 shrink-0 text-destructive"
+              />
+              <Check
+                v-else
+                class="mt-0.5 size-3 shrink-0 text-emerald-600"
+              />
+              <span class="min-w-0">
+                <span class="font-medium text-foreground">{{ toolLabel(record.name) }}</span>
+                <span class="ml-1 text-muted-foreground">{{ record.summary }}</span>
+                <span
+                  v-if="record.result_preview"
+                  class="mt-0.5 block truncate font-mono text-[10px] text-muted-foreground"
+                  :title="record.result_preview"
+                >
+                  {{ record.result_preview }}
+                </span>
+              </span>
+            </li>
+          </ul>
+        </details>
+
+        <!-- 写操作确认卡（P3）：模型只能提议，用户点确认才执行 -->
+        <div
+          v-if="message.pending_tool && message.status === 'waiting_approval'"
+          data-test="chat-tool-approval"
+          class="mb-2 rounded-lg border border-amber-500/40 bg-amber-500/5 px-2.5 py-2"
+        >
+          <p class="flex items-center gap-1 text-[11px] font-medium text-amber-700">
+            <ShieldCheck class="size-3.5" /> 需要你确认
+          </p>
+          <p class="mt-0.5 text-[11px] leading-4 text-muted-foreground">
+            {{ message.pending_tool.summary }}
+          </p>
+          <div class="mt-1.5 flex items-center gap-1.5">
+            <button
+              type="button"
+              data-test="chat-tool-approve"
+              class="inline-flex h-7 items-center gap-1 rounded-md bg-primary px-2 text-[11px] font-medium text-primary-foreground disabled:opacity-50"
+              :disabled="confirming"
+              @click="decideTool(true)"
+            >
+              <Wrench class="size-3" /> 确认执行
+            </button>
+            <button
+              type="button"
+              data-test="chat-tool-reject"
+              class="inline-flex h-7 items-center rounded-md border border-border px-2 text-[11px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+              :disabled="confirming"
+              @click="decideTool(false)"
+            >
+              取消
+            </button>
+          </div>
+        </div>
+
         <!-- 附件（P2）：用户消息携带的知识库文档；只展示标题快照 -->
         <div
           v-if="message.attachments?.length"
