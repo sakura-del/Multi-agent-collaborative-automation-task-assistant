@@ -5,6 +5,7 @@
  * 结构：品牌头 + 菜单 + 用户尾；桌面 16rem ↔ 4.25rem 图标轨，
  * 嵌套菜单用 clip-path + stagger 展开；移动端变成带遮罩的 sheet。
  */
+import GlobalPromptEntry from "@/components/layout/GlobalPromptEntry.vue";
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { AnimatePresence, Motion, useReducedMotion } from "motion-v";
 import {
@@ -181,6 +182,9 @@ const width = computed(() => (props.collapsed ? "4.25rem" : "16rem"));
         <PanelLeftClose :size="15" aria-hidden="true" />
       </button>
     </div>
+
+    <!-- 全局 AI 入口（Issue #8 P0）：一句话开始一篇综述 -->
+    <GlobalPromptEntry :collapsed="props.collapsed" @expand="emit('update:collapsed', false)" />
 
     <!-- 菜单 -->
     <nav class="app-nav__links flex min-w-0 flex-1 flex-col gap-1 overflow-x-hidden overflow-y-auto px-2 py-2" aria-label="主导航">

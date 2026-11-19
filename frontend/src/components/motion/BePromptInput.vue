@@ -24,6 +24,8 @@ const props = withDefaults(
     submitting?: boolean;
     minHeight?: string;
     disabled?: boolean;
+    /** Enter 直提交（一句话入口）；false = Ctrl/⌘+Enter（粘贴区多行） */
+    submitOnEnter?: boolean;
   }>(),
   {
     modelValue: "",
@@ -32,6 +34,7 @@ const props = withDefaults(
     submitting: false,
     minHeight: "10rem",
     disabled: false,
+    submitOnEnter: false,
   }
 );
 
@@ -72,7 +75,9 @@ function submit() {
 }
 
 function onKeydown(event: KeyboardEvent) {
-  if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+  const isCtrlEnter = (event.ctrlKey || event.metaKey) && event.key === "Enter";
+  const isBareEnter = props.submitOnEnter && event.key === "Enter" && !event.shiftKey;
+  if (isCtrlEnter || isBareEnter) {
     event.preventDefault();
     submit();
   }
