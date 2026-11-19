@@ -363,6 +363,37 @@ shadcn CLI 的 `@beui/*` 分发同样面向 React。因此「用 beUI」指的�
   6 条（GitHub MIRAGE / ACL Anthology 2025.findings-naacl / DEV 社区），
   provider=tavily 正确回显。
 
+### 会话内核 P0（Issue #8，2026-11-19，后端 `0f2c884` 起）
+
+**会话式 Agent 界面的地基**，与现有 19 个页面并存（入口是右下 FAB / `/chat` 全屏）：
+
+- **数据模型**：`conversation`（title/archived/message_count/leaf_id）+ `message`
+  （`parent_id` 树、role、status 五态、model/tokens/error），迁移
+  `f5b6c7d8e9a0` → `a7b8c9d0e1f2`（时间戳默认值）→ 循环外键 ALTER；
+- **API**：会话 CRUD + 详情（消息扁平返回，前端建树）+ 发消息（user + assistant 占位）
+  + `GET .../stream`（SSE：start/delta/done/error）+ `POST .../stop`（协同取消）；
+- **中断语义（重要）**：客户端 abort **不会**让生成循环退出（它挂在 LLM await 上），
+  必须走 stop 端点写进程内标志；循环每 delta 检查并落库 `interrupted`；
+  另有周期落库（每 20 delta）与「GET detail 时收敛 >5 分钟僵尸 streaming」；
+- **前端**：Pinia `stores/chat.ts`（扁平建树 + 分支切换 + streamingText 独立存避免
+  整树重渲染）、`ChatShell.vue`（floating FAB / dock / full 三形态，localStorage 记忆）、
+  `ChatMessageItem.vue`（渲染/分支 ‹1/2›/复制/编辑重发/重试/流式光标）；
+  SSE 用**原生 fetch + ReadableStream**（EventSource 不带 JWT），跨 chunk 缓冲到
+  空行再分帧（防中文多字节被切碎）；
+- **渲染**：`utils/chat-markdown.ts`（独立 Marked 实例 + KaTeX inline/block 扩展 +
+  DOMPurify 追加 MathML 白名单；Mermaid 动态 import + strict + 失败保留源码）。
+
+## 三个生产实测事故（都已修复，教训优先）
+
+1. **全站白屏**：`chat-markdown` 在模块加载期 `new Marked()` + `use()` 抛错 →
+   整个 bundle 崩（布局静态 import）。修复：惰性初始化 + 异常降级 +
+   `defineAsyncComponent` 隔离。**教训：任何模块级副作用都必须可失败隔离**；
+2. **流式 0 字符**：`stream_chat()` 漏了 `apply_model_profile`（`chat()` 有）→
+   思考模型把 max_tokens 全花在 reasoning。**教训：成对的 chat/stream 路径必须
+   同源配置**；
+3. **时间戳 500**：手写迁移漏 `server_default=now()`；`Mapped[datetime|None]`
+   默认推导成无时区 TIMESTAMP。**教训：手写迁移对照 Base 约定逐列核对**。
+
 ### 6.5.2 技术栈（**已锁定，不得擅自替换**）
 
 | 能力 | 选型 | 说明 |
