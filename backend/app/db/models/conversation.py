@@ -24,7 +24,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, Index, Integer, String, Text
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -52,8 +52,11 @@ class Conversation(Base):
     message_count: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, comment="消息数（含分支）"
     )
+    # ⚠️ 必须显式 DateTime(timezone=True)：`Mapped[datetime | None]` 的默认推导是
+    # 无时区 TIMESTAMP，写入 aware datetime 时 asyncpg 直接报
+    # 「can't subtract offset-naive and offset-aware datetimes」（生产实测 2026-11-19）。
     last_message_at: Mapped[datetime | None] = mapped_column(
-        nullable=True, comment="最后一条消息时间（列表排序用）"
+        DateTime(timezone=True), nullable=True, comment="最后一条消息时间（列表排序用）"
     )
     #: 当前查看的分支末端；NULL = 取最新叶子（前端切换分支时回写）
     leaf_id: Mapped[uuid.UUID | None] = mapped_column(
