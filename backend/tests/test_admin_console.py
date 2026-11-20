@@ -377,6 +377,8 @@ class TestAuditList:
     def _seed(self, factory):
         from app.db.models.audit import AuditLog
 
+        base = datetime.now(UTC) - timedelta(minutes=10)
+
         async def _run() -> None:
             async with factory() as session:
                 session.add_all(
@@ -386,12 +388,14 @@ class TestAuditList:
                             action="credential.create",
                             target_type="credential",
                             metadata_json={"provider": "deepseek"},
+                            created_at=base,
                         ),
                         AuditLog(
                             actor_name="admin",
                             action="subscription.subscribe",
                             target_type="subscription",
                             metadata_json={"plan_id": "pro"},
+                            created_at=base + timedelta(minutes=5),
                         ),
                     ]
                 )

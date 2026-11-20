@@ -22,7 +22,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 import app.db.models  # noqa: F401
 from app.db.base import Base
-from app.db.models.log import ExecutionLog
 from app.db.models.task import Task
 from app.orchestration.services.task_execution import TaskExecution
 from app.orchestration.validation import audit_citation_alignment
@@ -146,7 +145,7 @@ async def test_guard_fails_task_and_writes_no_output(factory) -> None:
         assert row.review_report is None, "校验不过绝不能落库复盘报告"
         assert list(row.artifacts or []) == [], "校验不过绝不能落库产物"
         events = (
-            (await session.execute(select(TaskEvent).where(TaskEvent.task_id == task.id)))
+            (await session.execute(select(ExecutionLog).where(ExecutionLog.task_id == task.id)))
             .scalars()
             .all()
         )

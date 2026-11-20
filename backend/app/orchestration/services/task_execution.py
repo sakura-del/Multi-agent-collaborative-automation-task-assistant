@@ -1393,12 +1393,8 @@ class TaskExecution:
             str(review_report.get("final_markdown") or ""),
             list(review_report.get("bibliography") or []),
         )
-        logger.info(
-            "citation_consistency_audit",
-            task_id=str(task_id),
-            ok=audit.ok,
-            **audit.to_payload(),
-        )
+        # to_payload() 已含 ok；再显式传会 TypeError（实测：整条任务失败）
+        logger.info("citation_consistency_audit", task_id=str(task_id), **audit.to_payload())
         if audit.ok:
             return True
         # 不落库不一致产出：review_report/artifacts 都不写，任务可 replan 重试
