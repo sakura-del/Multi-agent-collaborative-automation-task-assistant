@@ -75,13 +75,16 @@ class ModelCapabilities(BaseModel):
 
     - ``text``：文本输入（默认 True，几乎所有模型都支持）；
     - ``image``：图片输入（视觉模型才勾，勾了才允许在聊天里传图）；
-    - ``reasoning_tiers``：可用的推理等级档位；空 = 不支持推理参数。
+    - ``reasoning_tiers``：可用的推理等级档位；空 = 不支持推理参数；
+    - ``json_mode``：**生成能力探测**的结果（Issue #28）——发过一次最小结构化
+      输出请求并成功解析。这是唯一的非声明字段：它由探测写入，用户勾选无效。
     """
 
     model_config = ConfigDict(extra="forbid")
 
     text: bool = True
     image: bool = False
+    json_mode: bool = False
     reasoning_tiers: list[ReasoningTier] = Field(default_factory=list, max_length=4)
 
 
@@ -110,6 +113,10 @@ class LLMCredentialCreate(BaseModel):
         description="单次输出上限（token）。非空时作为 max_tokens 真正下发给厂商",
     )
     is_default: bool = Field(default=False, description="是否设为默认；首条会自动成为默认")
+    allow_platform_fallback: bool = Field(
+        default=False,
+        description="凭据不可用（401/402/403）时是否回退平台模型；429 限流不回退",
+    )
     capabilities: ModelCapabilities = Field(
         default_factory=ModelCapabilities, description="模型能力声明（文本/图片/推理档位）"
     )
@@ -172,6 +179,7 @@ class LLMCredentialUpdate(BaseModel):
         default=None, ge=1, le=MAX_OUTPUT_TOKENS, description="传 null 表示清除"
     )
     is_default: bool | None = None
+    allow_platform_fallback: bool | None = None
     status: Literal["active", "disabled"] | None = None
     capabilities: ModelCapabilities | None = Field(
         default=None, description="整体替换能力声明；None = 不改"
@@ -216,12 +224,28 @@ class LLMCredentialOut(BaseModel):
     masked_key: str = Field(description="脱敏回显，如 `sk-…abcd`")
     key_version: int
     is_default: bool
+    allow_platform_fallback: bool
     status: str
     capabilities: dict[str, Any] = Field(default_factory=dict)
     last_verified_at: datetime | None = None
     last_error: str | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class LLMGenerationProbeOut(BaseModel):
+    """生成能力探测结果（Issue #28）。
+
+    成本提示：探测用**用户自己的 key** 发一条 max_tokens=64 的真实请求，
+    UI 必须在按钮旁说明这一点（按钮文案已带「约 100 token」）。
+    """
+
+    ok: bool
+    latency_ms: int
+    json_mode: bool
+    error: str | None = None
+    raw: str | None = Field(default=None, description="模型原始输出（截断到 200 字符）")
+    credential_status: str | None = None
 
 
 class ProviderOut(BaseModel):

@@ -30,6 +30,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    false,
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -115,6 +116,13 @@ class LLMCredential(Base):
     )
     is_default: Mapped[bool] = mapped_column(
         Boolean, default=False, nullable=False, comment="是否该用户的默认模型凭据"
+    )
+    allow_platform_fallback: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default=false(),
+        nullable=False,
+        comment="凭据不可用（401/402/403）时是否允许回退平台模型（Issue #28）",
     )
     status: Mapped[str] = mapped_column(
         String(16), default="active", nullable=False, comment="active/invalid/disabled"

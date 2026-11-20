@@ -155,6 +155,18 @@ class Task(Base):
         Boolean, default=False, nullable=False, comment="配额是否已结算（幂等保护）"
     )
 
+    # ===== 平台回退标注（Issue #28）=====
+    # BYOK 任务回退平台后与创建时快照不一致，必须如实标注，
+    # 否则用户看到的是自己 key 的模型名，以为还在花自己的钱。
+    actual_provider: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, comment="实际使用的模型厂商（回退后 ≠ 快照）"
+    )
+    actual_model: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, comment="实际使用的模型名（回退后 ≠ 快照）"
+    )
+    #: 回退时刻的 used_tokens 基线：结算退款只退平台实际消耗（ESTIMATED − (总量 − 基线)）
+    fallback_token_base: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     # 任务输出格式要求（如 markdown / pdf / xlsx）
     output_format: Mapped[str | None] = mapped_column(String(32), nullable=True, comment="输出格式")
     # 最终产出物（文件路径或文本）

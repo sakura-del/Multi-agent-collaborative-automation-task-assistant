@@ -302,7 +302,8 @@ class TaskExecution:
                 task = await repo.lock_for_update(task_id)
                 if task.quota_settled:
                     return  # 已结算：绝不重复退
-                if self._is_byok_task(task):
+                fallback_base = task.fallback_token_base
+                if self._is_byok_task(task) and fallback_base is None:
                     # BYOK 从未预扣平台 token：只置标记，绝不退款
                     task.quota_settled = True
                     await session.commit()
@@ -310,7 +311,14 @@ class TaskExecution:
                     return
                 task.quota_settled = True
                 used = int(task.used_tokens or 0)
-                refund_tokens = ESTIMATED_TOKENS_PER_TASK - used
+                if fallback_base is not None:
+                    # 回退过平台（Issue #28）：预扣在回退时才发生，退款只退
+                    # **平台实际消耗**（总用量 − 回退前基线）。BYOK 阶段花的是
+                    # 用户自己的钱，算进退款等于凭空发额度。
+                    platform_used = max(0, used - int(fallback_base))
+                    refund_tokens = ESTIMATED_TOKENS_PER_TASK - platform_used
+                else:
+                    refund_tokens = ESTIMATED_TOKENS_PER_TASK - used
                 user_id = task.user_id
                 await session.commit()
         except LookupError:
@@ -1142,14 +1150,86 @@ class TaskExecution:
         )
         return [{"node_type": row.node_type, "credential_id": row.credential_id} for row in result]
 
+    def _platform_llm(self) -> Any | None:
+        """平台主模型客户端（回退目标）；未配置时返回 None。"""
+        try:
+            from app.llm.factory import get_llm_manager
+
+            return get_llm_manager().get_primary()
+        except Exception as exc:
+            logger.warning("platform_llm_unavailable_for_fallback", error=str(exc))
+            return None
+
+    async def _apply_platform_fallback(self, *, task_id: UUID, reason: str) -> bool:
+        """把任务标注为「已回退平台」并完成平台侧计费；只生效一次。
+
+        - 标注 `actual_provider` / `actual_model`（界面据此提示「本次已消耗平台额度」）；
+        - 记 `fallback_token_base`（回退时刻的已用量），结算只退平台实际消耗；
+        - 篇数：BYOK 默认免篇数，回退平台后「照扣」——但提交时若本就按平台扣过
+          （`BILLING__BYOK_CONSUMES_REVIEW_QUOTA=true`），不重复扣；
+        - token：按整任务预估预扣，结算按基线差值退。
+
+        篇数扣减失败**不阻断回退**（call 已经发生，任务不能因为记账失败而崩）；
+        记 warning 留痕，运营可以从 `actual_provider` 反查补账。
+        """
+        from datetime import UTC, datetime
+
+        from app.billing.services.plan_service import PlanService
+
+        marked = False
+        async with self._session_factory() as session:
+            repo = TaskRepository(session)
+            task = await repo.lock_for_update(task_id)
+            if task is None or task.actual_provider is not None:
+                return False  # 已回退过（并发/重复触发）：不重复计费
+
+            platform = self._platform_llm()
+            task.actual_provider = getattr(platform, "provider", None) or "platform"
+            task.actual_model = getattr(platform, "model", None) or "platform"
+            task.fallback_token_base = int(task.used_tokens or 0)
+            if task.is_byok and not get_settings().billing.byok_consumes_review_quota:
+                try:
+                    await PlanService(self._session_factory).check_and_consume_review(task.user_id)
+                except Exception as exc:
+                    logger.warning(
+                        "fallback_review_quota_consume_failed",
+                        task_id=str(task_id),
+                        error=str(exc),
+                    )
+            if self._quota is not None:
+                try:
+                    await self._quota.check_and_consume(
+                        task.user_id, tokens=ESTIMATED_TOKENS_PER_TASK
+                    )
+                except Exception as exc:
+                    # 平台额度不足：不再阻断（调用已经发生），结算时按实际用量校正
+                    logger.warning(
+                        "fallback_token_reserve_failed", task_id=str(task_id), error=str(exc)
+                    )
+            task.updated_at = datetime.now(UTC)
+            await session.commit()
+            marked = True
+        logger.info(
+            "task_platform_fallback_applied",
+            task_id=str(task_id),
+            actual_model=task.actual_model,
+            reason=reason[:200],
+        )
+        return marked
+
     async def _bind_task_llm(self, task: Any | None) -> None:
         """把当前后台协程的 LLM 固定到任务指定的凭据（Issue #15 BYOK）。
 
         必须在 `asyncio.create_task` **之前**执行：子任务会复制当前 context，
         晚于创建就复制不到，会静默回落到平台模型。
 
-        解析失败**不回退平台模型**：那会在用户不知情时花平台的钱。
-        抛 `LLMException`，由调用方按既有路径把任务转人工并给出可读原因。
+        默认**解析失败不回退平台模型**：那会在用户不知情时花平台的钱，
+        抛 `LLMException` 由调用方把任务转人工。用户在凭据上显式开启
+        `allow_platform_fallback`（Issue #28）后才有两条回退路径：
+
+        1. **绑定期失败**（凭据被禁用/停用）：直接改绑平台模型；
+        2. **调用期 401/402/403**：由 `PlatformFallbackClient` 包装，首次失败即
+           粘住平台。429 限流与超时永远不回退。
         """
         if task is None:
             return
@@ -1158,6 +1238,7 @@ class TaskExecution:
         # 主模型走平台默认，但 extract 等节点可路由到用户的本地/免费凭据。
         client: Any | None = None
         user_routes: dict[str, Any] = {}
+        allow_fallback = False
         if credential_id is None:
             # 凭据被删除时外键 SET NULL，但快照还在。**不能**因此静默回落到平台模型：
             # 用户以为在用自己的 key，实际花的是平台的钱。直接失败并说明原因。
@@ -1172,9 +1253,37 @@ class TaskExecution:
         try:
             async with self._session_factory() as session:
                 if credential_id is not None:
-                    client = await get_credential_resolver().resolve(
-                        session, task.user_id, credential_id
-                    )
+                    from app.db.models.llm_credential import LLMCredential
+
+                    record = (
+                        await session.execute(
+                            select(LLMCredential).where(
+                                LLMCredential.id == credential_id,
+                                LLMCredential.user_id == task.user_id,
+                            )
+                        )
+                    ).scalar_one_or_none()
+                    allow_fallback = bool(record is not None and record.allow_platform_fallback)
+                    try:
+                        client = await get_credential_resolver().resolve(
+                            session, task.user_id, credential_id
+                        )
+                    except AppException as resolve_exc:
+                        if not allow_fallback:
+                            raise
+                        # 绑定期就失败（凭据被停用/状态非 active）：直接回平台，
+                        # 不让任务转人工——这正是用户开这个开关要买的行为。
+                        await self._apply_platform_fallback(
+                            task_id=task.id,
+                            reason=getattr(resolve_exc, "message", str(resolve_exc)),
+                        )
+                        logger.warning(
+                            "task_llm_fallback_at_bind",
+                            task_id=str(task.id),
+                            reason=getattr(resolve_exc, "message", str(resolve_exc)),
+                        )
+                        client = None
+                        allow_fallback = False
                 # 用户级节点路由（Issue #22 延伸）：「我的模型」页配置的
                 # (node_type → 凭据) 逐条解析为客户端；解析失败的路由**跳过并
                 # 留痕**而不是整体失败——路由是省钱优化，不该卡死任务主链路。
@@ -1193,6 +1302,16 @@ class TaskExecution:
         except AppException as exc:
             raise LLMException(f"任务指定的模型凭据不可用：{exc.message}") from exc
 
+        if client is not None and allow_fallback:
+            from app.llm.fallback import PlatformFallbackClient
+
+            client = PlatformFallbackClient(
+                client,
+                platform=self._platform_llm,
+                on_fallback=lambda reason: self._apply_platform_fallback(
+                    task_id=task.id, reason=reason
+                ),
+            )
         if client is not None:
             bind_llm_client(client)
         bind_user_routes(user_routes)
@@ -2252,6 +2371,8 @@ class TaskExecution:
             artifacts=list(task.artifacts or []),
             review_report=task.review_report,
             model=model,
+            actual_provider=task.actual_provider,
+            actual_model=task.actual_model,
             # 正文必须随快照下发：MCP/开放 API 的 get_task_output 读的就是它。
             # 曾经漏掉 → MCP 永远返回 markdown: null（tests 用 dict 替身掩盖了）。
             final_output=task.final_output,

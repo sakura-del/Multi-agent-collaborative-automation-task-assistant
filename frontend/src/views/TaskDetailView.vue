@@ -370,6 +370,15 @@ onBeforeUnmount(() => {
                 : "模型：平台默认"
             }}
           </span>
+          <!-- 平台回退标注（Issue #28）：BYOK 任务中途改走了平台模型，
+               必须让用户知道「这次花的不是自己的钱」 -->
+          <span
+            v-if="store.snapshot?.actual_provider"
+            data-test="task-platform-fallback"
+            class="rounded-full border border-warning/40 bg-warning/10 px-2 py-0.5 text-xs text-warning"
+          >
+            已回退平台模型（{{ store.snapshot.actual_model ?? "平台" }}）· 本次消耗平台额度
+          </span>
         </p>
       </div>
 

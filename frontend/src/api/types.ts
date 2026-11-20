@@ -183,6 +183,9 @@ export interface TaskSnapshot {
   review_report: ReviewReport | null;
   /** null = 平台默认模型（存量任务） */
   model?: ModelSelectionSnapshot | null;
+  /** 回退平台后实际使用的厂商；null = 未发生过回退（Issue #28） */
+  actual_provider?: string | null;
+  actual_model?: string | null;
   created_at: string | null;
   updated_at: string | null;
 }
@@ -905,6 +908,8 @@ export interface LLMCredentialInfo {
   /** 换 key 时 +1（前端不需要用，但可用于排查） */
   key_version: number;
   is_default: boolean;
+  /** 凭据不可用（401/402/403）时是否回退平台模型（Issue #28） */
+  allow_platform_fallback: boolean;
   status: "active" | "invalid" | "disabled";
   capabilities: Record<string, unknown>;
   last_verified_at: string | null;
@@ -924,6 +929,8 @@ export interface ModelCapabilities {
   text: boolean;
   /** 视觉模型才勾选；勾了才允许聊天里传图 */
   image: boolean;
+  /** 生成能力探测（Issue #28）写入：true = 已验证能按指令输出可解析 JSON */
+  json_mode: boolean;
   /** 空 = 不支持推理参数 */
   reasoning_tiers: ReasoningTier[];
 }
@@ -940,6 +947,7 @@ export interface LLMCredentialCreate {
   /** 单次输出上限（token）；不填则沿用厂商默认 */
   max_output_tokens?: number | null;
   is_default?: boolean;
+  allow_platform_fallback?: boolean;
   capabilities?: ModelCapabilities;
 }
 
@@ -953,9 +961,20 @@ export interface LLMCredentialUpdate {
   context_window?: number | null;
   max_output_tokens?: number | null;
   is_default?: boolean;
+  allow_platform_fallback?: boolean;
   status?: "active" | "disabled";
   /** 整体替换能力声明；不传 = 不改 */
   capabilities?: ModelCapabilities;
+}
+
+/** 生成能力探测（Issue #28）：用用户 key 发一次 max_tokens=64 的真实请求。 */
+export interface LLMGenerationProbeResult {
+  ok: boolean;
+  latency_ms: number;
+  json_mode: boolean;
+  error: string | null;
+  raw: string | null;
+  credential_status: "active" | "invalid" | "disabled" | null;
 }
 
 /** 测试连接：二选一——已保存凭据 id，或未保存的配置。 */

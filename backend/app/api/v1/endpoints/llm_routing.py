@@ -122,6 +122,18 @@ async def update_routing(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"凭据已停用：{credential.name}",
             )
+        # planner 门禁（Issue #28）：规划要产出结构化 TaskPlan，模型必须能按
+        # 指令输出可解析 JSON。生成能力探测（json_mode）不通过的凭据不允许
+        # 固定为 planner——否则任务会在规划阶段反复失败转人工。
+        if route.node_type == "planner" and not (credential.capabilities or {}).get("json_mode"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"凭据「{credential.name}」未通过结构化输出生成探测，"
+                    "不能用作规划（planner）。请先在「我的模型」里重新探测，"
+                    "或换用其他凭据。"
+                ),
+            )
         resolved.append((route.node_type, route.credential_id))
 
     # 全量替换：先删后插（条数 ≤ 6，单事务）。

@@ -381,6 +381,10 @@ class TaskSnapshot(BaseModel):
     review_report: dict[str, Any] | None = None
     model: ModelSelectionSnapshot | None = None
     """本任务使用的模型；None = 平台模型（存量任务的默认值）。"""
+    actual_provider: str | None = None
+    """回退平台后实际使用的厂商（Issue #28）；None = 未发生过回退。"""
+    actual_model: str | None = None
+    """回退平台后实际使用的模型名；None = 未发生过回退。"""
     #: 综述正文（Markdown）。**必须随快照下发** —— 开放 API / MCP 直接消费它：
     #: `app/mcp/tools.py::get_task_output` 读 `snapshot["final_output"]`，
     #: `get_task_status` 用 `bool(final_output)` 判断「有没有产出」。

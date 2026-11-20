@@ -6,7 +6,7 @@ import {
   updateNodeRouting,
 } from "@/api/llm-routing";
 import { computed, onMounted, ref } from "vue";
-import { Check, Cpu, Pencil, Plus, Star, Trash2, Wifi } from "lucide-vue-next";
+import { Check, Cpu, FileJson, Pencil, Plus, Star, Trash2, Wifi } from "lucide-vue-next";
 
 import EmptyState from "@/components/common/EmptyState.vue";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
@@ -20,6 +20,7 @@ import {
     deleteLLMCredential,
     listLLMCredentials,
     listLLMProviders,
+    probeGeneration,
     probeLLMCredential,
     testLLMCredential,
     updateLLMCredential,
@@ -127,6 +128,10 @@ const formMaxOutput = ref("");
 const formSupportsText = ref(true);
 const formSupportsImage = ref(false);
 const formTiers = ref<{ label: string; value: string }[]>([]);
+// 失败回退平台（Issue #28）：默认关——静默烧平台钱必须由用户显式选择
+const formAllowFallback = ref(false);
+// json_mode 只由「生成能力探测」写入，表单里不可勾选；编辑时原样带回，避免整体替换把它抹掉
+const formJsonMode = ref(false);
 
 function addTier() {
     if (formTiers.value.length >= 4) return;
@@ -306,10 +311,13 @@ function openEdit(credential: LLMCredentialInfo) {
     const caps = (credential.capabilities ?? {}) as {
         text?: boolean;
         image?: boolean;
+        json_mode?: boolean;
         reasoning_tiers?: { label: string; value: string }[];
     };
     formSupportsText.value = caps.text !== false;
     formSupportsImage.value = caps.image === true;
+    formAllowFallback.value = credential.allow_platform_fallback;
+    formJsonMode.value = caps.json_mode === true;
     formTiers.value = Array.isArray(caps.reasoning_tiers)
         ? caps.reasoning_tiers.map((tier) => ({
               label: String(tier.label ?? ""),
@@ -438,16 +446,46 @@ async function probeSaved(credential: LLMCredentialInfo) {
     }
 }
 
+/**
+ * 生成能力探测（Issue #28）：planner 门禁依赖 capabilities.json_mode。
+ * ⚠️ 用用户 key 发一次真实请求（约 100 token），按钮文案已注明。
+ */
+const probingGenId = ref<string | null>(null);
+const genProbeResult = ref<{ ok: boolean; error: string | null } | null>(null);
+
+async function probeGenerationFor(credential: LLMCredentialInfo) {
+    probingGenId.value = credential.credential_id;
+    genProbeResult.value = null;
+    error.value = null;
+    success.value = null;
+    try {
+        const result = await probeGeneration(credential.credential_id);
+        await refresh();
+        genProbeResult.value = { ok: result.ok, error: result.error };
+        if (result.ok) {
+            success.value = `「${credential.name}」通过结构化输出探测（${result.latency_ms}ms），可固定为规划模型`;
+        } else {
+            error.value = `「${credential.name}」生成探测未通过：${result.error ?? "未知错误"}`;
+        }
+    } catch (err) {
+        error.value = (err as Error).message || "生成探测失败";
+    } finally {
+        probingGenId.value = null;
+    }
+}
+
 /** 能力徽章文案：文本 · 图片 · N 档推理 */
 function capabilitiesLabel(credential: LLMCredentialInfo): string {
     const caps = (credential.capabilities ?? {}) as {
         text?: boolean;
         image?: boolean;
+        json_mode?: boolean;
         reasoning_tiers?: unknown[];
     };
     const parts = [caps.text !== false ? "文本" : "", caps.image ? "图片" : ""].filter(
         Boolean,
     );
+    if (caps.json_mode) parts.push("JSON");
     const tiers = Array.isArray(caps.reasoning_tiers) ? caps.reasoning_tiers.length : 0;
     if (tiers) parts.push(`${tiers} 档推理`);
     return parts.length ? parts.join(" · ") : "未声明能力";
@@ -469,6 +507,7 @@ async function submitForm() {
     const capabilities = {
         text: formSupportsText.value,
         image: formSupportsImage.value,
+        json_mode: formJsonMode.value,
         reasoning_tiers: formTiers.value
             .map((tier) => ({ label: tier.label.trim(), value: tier.value.trim() }))
             .filter((tier) => tier.label && tier.value),
@@ -480,6 +519,7 @@ async function submitForm() {
                 model: formModel.value.trim(),
                 context_window: contextWindow,
                 max_output_tokens: maxOutput,
+                allow_platform_fallback: formAllowFallback.value,
                 capabilities,
                 ...(formApiKey.value.trim()
                     ? { api_key: formApiKey.value.trim() }
@@ -497,6 +537,7 @@ async function submitForm() {
                 api_key: formApiKey.value.trim(),
                 context_window: contextWindow,
                 max_output_tokens: maxOutput,
+                allow_platform_fallback: formAllowFallback.value,
                 capabilities,
                 ...(requiresBaseUrl.value
                     ? { base_url: formBaseUrl.value.trim() }
@@ -770,6 +811,25 @@ function statusOf(credential: LLMCredentialInfo): {
                         </div>
                         <div>
                             <div class="flex items-center justify-between">
+                                <span class="text-xs text-muted-foreground">结构化输出（生成探测）</span>
+                                <span
+                                    class="rounded-full border px-1.5 py-0.5 text-[10px]"
+                                    :class="
+                                        formJsonMode
+                                            ? 'border-success/40 bg-success/10 text-success'
+                                            : 'border-border bg-muted text-muted-foreground'
+                                    "
+                                    data-test="model-json-mode"
+                                >
+                                    {{ formJsonMode ? "已通过" : "未探测" }}
+                                </span>
+                            </div>
+                            <p class="mt-1 text-[10px] leading-4 text-muted-foreground">
+                                由「探测 JSON」写入，不能手填；不通过的凭据不能固定为规划（planner）
+                            </p>
+                        </div>
+                        <div>
+                            <div class="flex items-center justify-between">
                                 <span class="text-xs text-muted-foreground">推理等级档位</span>
                                 <button
                                     type="button"
@@ -820,6 +880,21 @@ function statusOf(credential: LLMCredentialInfo): {
                     </div>
                 </div>
                 <div class="grid content-start gap-1.5 sm:col-span-2">
+                    <label class="flex items-start gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2.5">
+                        <input
+                            v-model="formAllowFallback"
+                            data-test="model-allow-fallback"
+                            type="checkbox"
+                            class="mt-0.5 size-4 rounded border-input accent-primary"
+                        />
+                        <span class="text-xs leading-5">
+                            <span class="font-medium">凭据不可用时回退平台模型</span>
+                            <span class="block text-[10px] leading-4 text-muted-foreground">
+                                仅在 key 被拒（401/402/403，欠费或失效）时改走平台模型并**按平台计费**；
+                                限流（429）与超时不会回退。默认关闭：任务失败并提示原因。
+                            </span>
+                        </span>
+                    </label>
                     <Label for="model-key">
                         API Key
                         <span
@@ -1015,6 +1090,21 @@ function statusOf(credential: LLMCredentialInfo): {
                     </div>
 
                     <div class="flex shrink-0 flex-wrap items-center gap-1">
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            :disabled="probingGenId === credential.credential_id"
+                            :data-test="`model-probe-gen-${credential.credential_id}`"
+                            :title="'用你的 key 发一次约 100 token 的真实请求，验证能否按指令输出 JSON'"
+                            @click="probeGenerationFor(credential)"
+                        >
+                            <FileJson />
+                            {{
+                                probingGenId === credential.credential_id
+                                    ? "探测中…"
+                                    : "探测 JSON"
+                            }}
+                        </Button>
                         <Button
                             variant="ghost"
                             size="sm"
