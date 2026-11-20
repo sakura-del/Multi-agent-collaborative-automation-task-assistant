@@ -121,8 +121,8 @@ async function send(page: Page, text: string): Promise<void> {
 }
 
 /** 等待所有流式结束：停止按钮与流式光标都消失（比等某个文字更稳）。 */
-async function waitStreamingSettled(page: Page): Promise<void> {
-  await expect(page.locator('[data-test="chat-stop"]')).toHaveCount(0, { timeout: 180_000 });
+async function waitStreamingSettled(page: Page, stopTimeoutMs = 180_000): Promise<void> {
+  await expect(page.locator('[data-test="chat-stop"]')).toHaveCount(0, { timeout: stopTimeoutMs });
   await expect(page.locator('[data-test="chat-streaming-cursor"]')).toHaveCount(0, {
     timeout: 60_000,
   });
@@ -475,14 +475,14 @@ test.describe("会话内核：工具调用（真实模型）", () => {
     await expect(approval).toBeVisible({ timeout: 150_000 });
     await expect(approval).toContainText("创建文献综述任务");
 
-    await page.locator('[data-test="chat-tool-approve"]').click();
-
-    // 多步连续写操作（P3 核心）：确认后前端必须发起 resume=1 的续跑请求，
-    // 服务端把工具结果回灌给模型继续同一条消息。
+    // 多步连续写操作（P3 核心）：确认后前端必须发起 resume=1 的续跑请求。
+    // ⚠️ waitForRequest 必须在点击**前**注册：确认接口一返回前端就发起续跑，
+    // 先点击再注册会漏接请求导致假超时（实测 2026-11-20）。
     const resumeRequest = page.waitForRequest(
       (request) => request.url().includes("/stream") && request.url().includes("resume=1"),
-      { timeout: 90_000 }
+      { timeout: 120_000 }
     );
+    await page.locator('[data-test="chat-tool-approve"]').click();
     await resumeRequest;
 
     // 续跑后模型会顺势提议下一步写操作（如确认规划）——第一张卡消失后
@@ -498,7 +498,8 @@ test.describe("会话内核：工具调用（真实模型）", () => {
       await page.locator('[data-test="chat-tool-reject"]').click();
       await expect(card).toHaveCount(0, { timeout: 30_000 });
     }
-    await waitStreamingSettled(page);
+    // wait_seconds 长轮询最多 180s + 模型续答，收口窗口放大到 6 分钟
+    await waitStreamingSettled(page, 360_000);
 
     // 确认执行的结果摘要保留在正文里（追加语义，不被续跑覆盖）
     await expect(page.locator('[data-test="chat-body-assistant"]')).toContainText(
