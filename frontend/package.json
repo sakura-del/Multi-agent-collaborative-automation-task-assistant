@@ -1,6 +1,6 @@
 {
   "name": "multi-agent-assistant-frontend",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "description": "多智能体协作自动化任务助手 - 前端应用",

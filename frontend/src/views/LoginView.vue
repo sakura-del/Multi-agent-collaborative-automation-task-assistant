@@ -1,7 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ArrowRight, Check, Loader2, LockKeyhole, MailCheck } from "lucide-vue-next";
+import {
+  ArrowRight,
+  Check,
+  Loader2,
+  LockKeyhole,
+  MailCheck,
+  ShieldCheck,
+} from "lucide-vue-next";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,7 +30,19 @@ const auth = useAuthStore();
 const route = useRoute();
 const router = useRouter();
 
-const mode = ref<"login" | "register">("login");
+type AuthMode = "login" | "register";
+
+// 页签即路由（Issue #26-2）：`/register` 可直达、可分享，浏览器返回键也能回到上一个页签。
+// 单一事实来源是 URL —— 组件用同一份实例在两个路由间复用，只有路由能同时喂给
+// 顶部文案、表单字段和地址栏，避免「地址栏说 login、页签说 register」。
+const mode = computed<AuthMode>({
+  get: () => (route.name === "register" ? "register" : "login"),
+  set: (next) => {
+    if (route.name === next) return;
+    void router.replace({ name: next, query: route.query });
+  },
+});
+
 const account = ref("");
 const username = ref("");
 const email = ref("");
@@ -46,6 +65,8 @@ const captchaError = ref("");
 const captchaChallengeUrl = computed(
   () => `${api.defaults.baseURL ?? ""}/auth/captcha/challenge`,
 );
+// 页脚（「由 ALTCHA 保护」）由统一的一行自己文案替代，见模板里的说明
+const altchaConfiguration = JSON.stringify({ hideFooter: true });
 
 function onCaptchaStateChange(event: Event) {
   const detail = (event as CustomEvent<{ state: string; payload?: string }>).detail;
@@ -65,7 +86,40 @@ onMounted(async () => {
   }
 });
 
-const submitLabel = computed(() => (mode.value === "login" ? "登录" : "注册并登录"));
+/**
+ * 顶部文案随页签切换（Issue #26-1）。
+ * 注册态若沿用登录文案，新用户第一眼看到的是「继续你的研究 / 登录以…」，
+ * 与刚刚点下的「注册」意图相反 —— 这里是纯文案对象，两个态各自说自己的事。
+ */
+const HEADINGS: Record<AuthMode, { eyebrow: string; title: string; hint: string }> = {
+  login: {
+    eyebrow: "Welcome back",
+    title: "继续你的研究",
+    hint: "登录以访问任务、证据与引用库。",
+  },
+  register: {
+    eyebrow: "Create account",
+    title: "创建你的账号",
+    hint: "注册以开始你的第一篇综述。",
+  },
+};
+const heading = computed(() => HEADINGS[mode.value]);
+
+// 注册不再自动登录（邮箱验证是门禁），按钮文案不能再说「注册并登录」
+const submitLabel = computed(() => (mode.value === "login" ? "登录" : "创建账号"));
+
+/** 切页签：清掉上一个态的密码与提示，避免把登录口令带进注册表单。 */
+function switchMode(next: AuthMode) {
+  if (next === mode.value) return;
+  password.value = "";
+  errorMessage.value = "";
+  unverifiedEmail.value = "";
+  // 离开注册态就把人机验证结果丢掉：widget 会被 v-if 卸载，旧 payload 一次性、必然失效
+  captchaSolved.value = false;
+  captchaPayload.value = "";
+  captchaError.value = "";
+  mode.value = next;
+}
 
 /** 页脚能力点：三条都对应系统里真实存在的功能，不是营销词。 */
 const CAPABILITIES = ["证据约束", "引用可核验", "人机协同"] as const;
@@ -89,6 +143,9 @@ async function handleSubmit() {
       });
       // 注册成功 ≠ 进系统：邮箱验证链接已发出，验证后再登录
       pendingVerificationEmail.value = email.value;
+      // 回到登录态（路由同步成 /login）；人机验证已用过，payload 一次性，不能留
+      captchaSolved.value = false;
+      captchaPayload.value = "";
       mode.value = "login";
       account.value = email.value;
       return;
@@ -138,7 +195,13 @@ async function handleResend() {
         class="pointer-events-none absolute top-32 right-12 h-28 w-px bg-primary/25"
         aria-hidden="true"
       />
-      <div class="relative flex items-center gap-2.5">
+      <!-- Logo 是链接（Issue #26-5）：公开页左上角的品牌位点不动，用户会当成坏页面 -->
+      <RouterLink
+        to="/"
+        data-test="brand-home"
+        aria-label="VeriPaper 首页"
+        class="relative flex w-fit items-center gap-2.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
         <img src="/logo.svg" alt="" aria-hidden="true" class="size-9" />
         <div>
           <p class="text-sm font-semibold tracking-tight">VeriPaper</p>
@@ -146,19 +209,18 @@ async function handleResend() {
             EVIDENCE-LED WRITING
           </p>
         </div>
-      </div>
+      </RouterLink>
 
       <div class="relative my-auto max-w-2xl py-10">
         <p class="text-[10px] font-semibold tracking-[0.2em] text-primary uppercase">
           Research, grounded in evidence
         </p>
-        <h1 class="mt-5 font-display text-5xl leading-[1.3] font-medium tracking-[-0.045em] xl:text-6xl">
+        <p class="mt-5 font-display text-5xl leading-[1.3] font-medium tracking-[-0.045em] xl:text-6xl">
           让每一句论断，<br />都<span class="text-primary">有迹可循</span>。
-        </h1>
-        <p class="mt-6 max-w-lg text-sm leading-7 text-muted-foreground">
-          从文献检索、证据筛选到综述成稿，多智能体协同完成研究流程。你负责判断，
-          系统负责让每条引用都能回到原始证据。
         </p>
+        <!-- 中文正文不要跨行折在源码里：Vue 会把文本节点里的换行压成一个空格，
+             「你负责判断， 系统负责…」的逗号后空格就是这么来的（Issue #26-4） -->
+        <p class="mt-6 max-w-lg text-sm leading-7 text-muted-foreground">从文献检索、证据筛选到综述成稿，多智能体协同完成研究流程。你负责判断，系统负责让每条引用都能回到原始证据。</p>
 
         <!-- 这里只是登录页的静态产品示例，明确标注，绝不冒充真实任务核验结果。 -->
         <div
@@ -181,7 +243,14 @@ async function handleResend() {
           </p>
           <div class="mt-4 flex items-center justify-between gap-3 text-[11px] text-muted-foreground">
             <span>GB/T 7714—2025 · 顺序编码制</span>
-            <span class="text-primary">证据可回溯</span>
+            <!-- 只是标签，不是入口（Issue #26-5）：原先用 text-primary 长得像链接，点了没反应 -->
+            <span
+              data-test="proof-traceable-tag"
+              class="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-[10px] text-muted-foreground"
+            >
+              <ShieldCheck :size="11" aria-hidden="true" />
+              证据可回溯
+            </span>
           </div>
         </div>
       </div>
@@ -195,21 +264,33 @@ async function handleResend() {
     <!-- 右侧：登录/注册表单。保留原字段与提交流程，只提升排版层级。 -->
     <section class="flex items-center justify-center bg-card/45 px-4 py-10 sm:px-8 lg:bg-card/35">
       <div class="w-full max-w-sm">
-        <div class="mb-9 lg:hidden">
-          <div class="mb-5 flex items-center gap-2.5">
+        <!-- 窄屏品牌行：桌面端左栏已有 Logo，这里只在表单上方补一行（同样是链接） -->
+        <div class="mb-7 lg:hidden">
+          <RouterLink
+            to="/"
+            aria-label="VeriPaper 首页"
+            class="flex w-fit items-center gap-2.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
             <img src="/logo.svg" alt="" aria-hidden="true" class="size-8" />
             <span class="text-sm font-semibold tracking-tight">VeriPaper</span>
-          </div>
-          <h1 class="font-display text-3xl leading-snug font-medium tracking-[-0.035em]">
-            让每一句论断，<br />都有迹可循。
-          </h1>
+          </RouterLink>
         </div>
 
-        <div class="hidden lg:block">
-          <p class="text-[10px] font-semibold tracking-[0.18em] text-primary uppercase">Welcome back</p>
-          <h2 class="mt-3 font-display text-3xl font-medium tracking-[-0.025em]">继续你的研究</h2>
-          <p class="mt-2 text-sm text-muted-foreground">登录以访问任务、证据与引用库。</p>
-        </div>
+        <header>
+          <p
+            data-test="auth-eyebrow"
+            class="text-[10px] font-semibold tracking-[0.18em] text-primary uppercase"
+          >
+            {{ heading.eyebrow }}
+          </p>
+          <h1
+            data-test="auth-title"
+            class="mt-3 font-display text-3xl font-medium tracking-[-0.025em]"
+          >
+            {{ heading.title }}
+          </h1>
+          <p data-test="auth-hint" class="mt-2 text-sm text-muted-foreground">{{ heading.hint }}</p>
+        </header>
 
         <form class="mt-7 flex flex-col gap-4" @submit.prevent="handleSubmit">
           <div class="grid grid-cols-2 gap-1 rounded-lg border border-border bg-muted p-1" role="tablist">
@@ -228,7 +309,7 @@ async function handleResend() {
                   ? 'bg-card text-foreground shadow-xs'
                   : 'text-muted-foreground hover:text-foreground',
               ]"
-              @click="mode = option.value"
+              @click="switchMode(option.value)"
             >
               {{ option.label }}
             </button>
@@ -256,6 +337,7 @@ async function handleResend() {
                 required
                 minlength="3"
                 autocomplete="username"
+                placeholder="请输入用户名（3 位以上）"
                 class="h-11 bg-card/70"
               />
             </div>
@@ -267,6 +349,7 @@ async function handleResend() {
                 type="email"
                 required
                 autocomplete="email"
+                placeholder="you@example.com"
                 class="h-11 bg-card/70"
               />
             </div>
@@ -331,14 +414,31 @@ async function handleResend() {
               在 v3 已被移除——传错了 widget 不报错，而是回退去请求**当前页面**
               （拿到 text/html），表现为「验证失败：invalid content-type」。
               也没有 `refetchonexpire`：挑战 10 分钟有效期，过期后刷新即可。
+
+              ⚠️ 关页脚只能走 `configuration`。v3 的 observedAttributes 只有
+              auto/challenge/configuration/display/form/language/name/theme/type/workers，
+              `hideFooter` **不在其中**：写成裸属性（`hideFooter` / `hide-footer`）或
+              直接赋同名 property 都不会生效，页面上就会出现两行「由 … 保护」
+              ——Issue #26-6 的两种大小写正是这么来的。
             -->
             <altcha-widget
               :challenge="captchaChallengeUrl"
+              :configuration="altchaConfiguration"
               auto="onload"
               language="zh-cn"
-              hideFooter
               @statechange="onCaptchaStateChange"
             />
+            <!--
+              统一由这一行给文案（Issue #26-6）：widget 自带页脚走语言包，
+              中文包里是「由 ALTCHA 保护」，和别处大小写不一致；hideFooter 后只剩这一处。
+            -->
+            <p
+              data-test="captcha-caption"
+              class="flex items-center gap-1 text-[11px] text-muted-foreground"
+            >
+              <ShieldCheck :size="12" aria-hidden="true" />
+              由 Altcha 保护
+            </p>
             <p v-if="captchaError" class="text-xs text-destructive">{{ captchaError }}</p>
           </div>
 

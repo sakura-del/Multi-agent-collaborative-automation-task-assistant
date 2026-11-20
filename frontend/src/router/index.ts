@@ -36,6 +36,14 @@ export const router = createRouter({
       component: LoginView,
       meta: { public: true },
     },
+    // 注册页签的独立地址（Issue #26-2）：对外分享的注册链接曾直接落回 /login?redirect=/tasks，
+    // 收件人还要自己找到「注册」页签。两个路由共用同一个组件，页签由路由名决定。
+    {
+      path: "/register",
+      name: "register",
+      component: LoginView,
+      meta: { public: true },
+    },
     // 设计演示页（不进导航）：新配色 + beUI 时间线，确认后再往生产页面铺
     {
       path: "/design/timeline",
@@ -134,7 +142,7 @@ router.beforeEach(async (to) => {
   if (!auth.authenticated && !to.meta.public) {
     return { name: "login", query: { redirect: to.fullPath } };
   }
-  if (auth.authenticated && to.name === "login") {
+  if (auth.authenticated && (to.name === "login" || to.name === "register")) {
     return { name: "tasks" };
   }
   // 管理员页面：非 admin 直接回任务列表，不暴露「有这一页」的错误信息

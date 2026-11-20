@@ -158,6 +158,8 @@ describe("ModelSettingsView", () => {
             model: "deepseek-chat",
             api_key: "sk-live-0123456789abcdef",
             is_default: true,
+            // 能力声明始终随创建提交（仅文本、无推理档位）；d0593fa 之后漏更新这条断言
+            capabilities: { text: true, image: false, reasoning_tiers: [] },
             // 未填容量 = 显式传 null（空串在 schema 层也按未填处理）
             context_window: null,
             max_output_tokens: null,

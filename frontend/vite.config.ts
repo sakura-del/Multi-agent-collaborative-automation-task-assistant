@@ -6,7 +6,16 @@ import { fileURLToPath, URL } from "node:url";
 // Vite 配置：开发服务器 + 后端 API 代理 + 单元测试
 export default defineConfig({
   // Tailwind v4 用 Vite 插件（不再需要 postcss.config / tailwind.config）
-  plugins: [vue(), tailwindcss()],
+  // ALTCHA 是原生自定义元素（web component），不声明的话 Vue 每个环境都会报
+  // 「Failed to resolve component: altcha-widget」
+  plugins: [
+    vue({
+      template: {
+        compilerOptions: { isCustomElement: (tag) => tag === "altcha-widget" },
+      },
+    }),
+    tailwindcss(),
+  ],
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
