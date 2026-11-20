@@ -13,6 +13,7 @@ import {
   Gauge,
   KeyRound,
   Library,
+  LayoutDashboard,
   ListChecks,
   LogOut,
   Palette,
