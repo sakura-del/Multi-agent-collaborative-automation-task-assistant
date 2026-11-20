@@ -127,7 +127,7 @@ def search_cache_key(search: LiteratureSearch) -> str:
             search.date_from.isoformat() if search.date_from is not None else "",
             search.date_to.isoformat() if search.date_to is not None else "",
             str(search.max_results),
-            search.sort_by,
+            "fresh" if search.fresh_only else "all",
         )
     )
 

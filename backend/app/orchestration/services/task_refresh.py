@@ -374,9 +374,10 @@ class RefreshRunner:
                             query=query,
                             max_results=cfg.max_results_per_query,
                             date_from=window_from.date() if window_from else None,
-                            # 增量场景要「最新的」：按相关度取前 N 再按日期过滤，
-                            # 老主题常常一篇新的都捞不到，刷新看起来就像坏了。
-                            sort_by="submitted",
+                            # 只要窗口内的新文献，但仍在窗口内按相关度排序：
+                            # 纯按时间倒序会捞回一堆不相关的新论文（实测过）。
+                            fresh_only=True,
+                            date_to=window_to.date() if window_to else None,
                         )
                     )
                 except Exception as exc:  # 单个源/单条检索失败不该拖垮整次刷新
