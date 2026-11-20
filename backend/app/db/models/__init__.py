@@ -22,6 +22,7 @@
   llm_credential.py: LLM_CREDENTIAL（Issue #15：用户自带的模型密钥，加密存储）
   billing.py:     PLAN / SUBSCRIPTION / USAGE_COUNTER
                   （Phase 2：计费套餐——篇数为主、token 为辅）
+  audit.py:       AUDIT_LOG（Issue #25：关键操作审计）
   reference_library.py: REFERENCE_LIBRARY_ITEM
                   （2026-10-26：个人引用库——导入的 BibTeX/RIS 可存下来供任务使用）
 """
@@ -29,6 +30,7 @@
 from app.db.models.agent import Agent, AgentInteraction
 from app.db.models.annotation import TaskAnnotation
 from app.db.models.api_key import ApiKey
+from app.db.models.audit import AuditLog
 from app.db.models.billing import Plan, Subscription, UsageCounter
 from app.db.models.citation_style import CitationStyle
 from app.db.models.conversation import Conversation, Message
@@ -53,6 +55,7 @@ __all__ = [
     "Agent",
     "AgentInteraction",
     "ApiKey",
+    "AuditLog",
     "CitationStyle",
     "Conversation",
     "DocChunk",

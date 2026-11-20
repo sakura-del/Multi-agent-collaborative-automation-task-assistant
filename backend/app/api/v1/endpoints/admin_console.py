@@ -27,12 +27,15 @@ from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_admin_user
+from app.db.models.audit import AuditLog
 from app.db.models.billing import Plan, Subscription
 from app.db.models.llm_credential import LLMCredential
 from app.db.models.task import Task
 from app.db.models.user import User
 from app.db.session import get_db
 from app.schemas.admin_console import (
+    AdminAuditPage,
+    AdminAuditRow,
     AdminOverviewOut,
     AdminTaskPage,
     AdminTaskRow,
@@ -263,3 +266,54 @@ async def list_users(
         for user, plan_name, task_count, credential_count in rows
     ]
     return AdminUserPage(total=total, items=items)
+
+
+@router.get("/audit", response_model=AdminAuditPage, summary="审计日志（只读）")
+async def list_audit(
+    _admin: AdminDep,
+    db: DbDep,
+    action: Annotated[
+        str | None, Query(max_length=64, description="动作键，如 credential.create")
+    ] = None,
+    target_type: Annotated[str | None, Query(max_length=32)] = None,
+    actor: Annotated[str | None, Query(max_length=64, description="操作者用户名关键词")] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> AdminAuditPage:
+    """关键操作留痕（凭据/计费），按时间倒序。"""
+    base: Select[Any] = select(AuditLog)
+    count_query: Select[Any] = select(func.count()).select_from(AuditLog)
+    filters = []
+    if action:
+        filters.append(AuditLog.action == action)
+    if target_type:
+        filters.append(AuditLog.target_type == target_type)
+    if actor:
+        filters.append(AuditLog.actor_name.ilike(f"%{actor.strip()}%"))
+    for cond in filters:
+        base = base.where(cond)
+        count_query = count_query.where(cond)
+
+    total = int(await db.scalar(count_query) or 0)
+    rows = (
+        (await db.execute(base.order_by(AuditLog.created_at.desc()).offset(offset).limit(limit)))
+        .scalars()
+        .all()
+    )
+    return AdminAuditPage(
+        total=total,
+        items=[
+            AdminAuditRow(
+                id=row.id,
+                actor_id=row.actor_id,
+                actor_name=row.actor_name,
+                action=row.action,
+                target_type=row.target_type,
+                target_id=row.target_id,
+                metadata=row.metadata_json or {},
+                ip=row.ip,
+                created_at=row.created_at,
+            )
+            for row in rows
+        ],
+    )

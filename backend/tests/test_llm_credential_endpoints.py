@@ -805,3 +805,59 @@ class TestProbe:
             headers=_headers(bob),
         )
         assert resp.status_code == 404
+
+
+# ===== Issue #25 沉淀项 3：凭据变更留审计 =====
+
+
+def test_create_writes_audit_without_secret(credential_app: Any) -> None:
+    """创建凭据必须留审计行：谁、什么动作、目标；且审计里不得出现明文 key。"""
+    import json
+
+    from sqlalchemy import select as sa_select
+
+    from app.db.models.audit import AuditLog
+
+    user = _make_user(credential_app.state.factory, "cred_audit")
+    resp = _create(credential_app, user)
+    assert resp.status_code == 201, resp.text
+    credential_id = resp.json()["credential_id"]
+
+    async def _rows() -> list[AuditLog]:
+        async with credential_app.state.factory() as session:
+            return list((await session.execute(sa_select(AuditLog))).scalars().all())
+
+    rows = asyncio.run(_rows())
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.action == "credential.create"
+    assert row.target_type == "credential"
+    assert row.target_id == credential_id
+    assert row.actor_name == "cred_audit"
+    assert row.actor_id == user.id
+    dumped = json.dumps(row.metadata_json, ensure_ascii=False)
+    assert PLAINTEXT not in dumped
+    assert "api_key" not in dumped
+    assert row.metadata_json.get("provider") == "deepseek"
+
+
+def test_delete_writes_audit(credential_app: Any) -> None:
+    from sqlalchemy import select as sa_select
+
+    from app.db.models.audit import AuditLog
+
+    user = _make_user(credential_app.state.factory, "cred_audit_del")
+    created = _create(credential_app, user)
+    assert created.status_code == 201
+    deleted = credential_app.state.client.delete(
+        f"/api/v1/llm-credentials/{created.json()['credential_id']}",
+        headers=_headers(user),
+    )
+    assert deleted.status_code == 204
+
+    async def _actions() -> list[str]:
+        async with credential_app.state.factory() as session:
+            rows = (await session.execute(sa_select(AuditLog))).scalars().all()
+            return [row.action for row in rows]
+
+    assert "credential.delete" in asyncio.run(_actions())

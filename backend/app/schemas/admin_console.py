@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -104,3 +105,26 @@ class AdminUserPage(BaseModel):
 
     total: int
     items: list[AdminUserRow] = Field(default_factory=list)
+
+
+class AdminAuditRow(BaseModel):
+    """一条审计记录（只读；metadata 不含敏感值）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: uuid.UUID
+    actor_id: uuid.UUID | None = None
+    actor_name: str
+    action: str
+    target_type: str
+    target_id: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    ip: str | None = None
+    created_at: datetime | None = None
+
+
+class AdminAuditPage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    total: int
+    items: list[AdminAuditRow] = Field(default_factory=list)

@@ -21,7 +21,7 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_active_user
@@ -40,6 +40,7 @@ from app.schemas.llm_credential import (
     LLMProbeRequest,
     ProviderOut,
 )
+from app.security.audit import record_audit
 from app.security.llm_credential_service import LLMCredentialService
 
 router = APIRouter(prefix="/llm-credentials", tags=["llm-credentials"])
@@ -165,9 +166,21 @@ async def list_credentials(current_user: CurrentUserDep, db: DbDep) -> list[LLMC
 
 @router.post("", response_model=LLMCredentialOut, status_code=201, summary="新增模型凭据")
 async def create_credential(
-    payload: LLMCredentialCreate, current_user: CurrentUserDep, db: DbDep
+    payload: LLMCredentialCreate,
+    current_user: CurrentUserDep,
+    db: DbDep,
+    request: Request,
 ) -> LLMCredentialOut:
     record = await _service().create(db, current_user.id, payload)
+    await record_audit(
+        db,
+        actor=current_user,
+        action="credential.create",
+        target_type="credential",
+        target_id=record.id,
+        metadata={"provider": record.provider, "model": record.model, "name": record.name},
+        request=request,
+    )
     return _to_out(record)
 
 
@@ -185,14 +198,36 @@ async def update_credential(
     payload: LLMCredentialUpdate,
     current_user: CurrentUserDep,
     db: DbDep,
+    request: Request,
 ) -> LLMCredentialOut:
     record = await _service().update(db, current_user.id, credential_id, payload)
+    await record_audit(
+        db,
+        actor=current_user,
+        action="credential.update",
+        target_type="credential",
+        target_id=credential_id,
+        # 只记改了哪些字段名；key 轮换标记出来，但绝不记值
+        metadata={
+            "fields": sorted(payload.model_fields_set),
+            "key_rotated": "api_key" in payload.model_fields_set,
+        },
+        request=request,
+    )
     return _to_out(record)
 
 
 @router.delete("/{credential_id}", status_code=204, summary="删除凭据")
 async def delete_credential(
-    credential_id: UUID, current_user: CurrentUserDep, db: DbDep
+    credential_id: UUID, current_user: CurrentUserDep, db: DbDep, request: Request
 ) -> Response:
     await _service().delete(db, current_user.id, credential_id)
+    await record_audit(
+        db,
+        actor=current_user,
+        action="credential.delete",
+        target_type="credential",
+        target_id=credential_id,
+        request=request,
+    )
     return Response(status_code=204)

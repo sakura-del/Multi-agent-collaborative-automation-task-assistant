@@ -8,6 +8,11 @@
   - vector：按**当前后端**探测（chroma → heartbeat；pgvector → 池上 SELECT 1）
   任一必需依赖失败 → 503 且对应依赖标记 failed；全部通过 → 200 ready。
   LLM 可用性不纳入容器就绪（配额/网络抖动不应让容器被判未就绪）。
+
+**LLM 凭据配置态**（Issue #19/#25）：只看配置是否就位、不发网络请求。
+缺 key 或占位符 → `status=degraded` + `checks.llm_credentials` + `warnings`，
+仍返回 200（其余依赖正常时容器可服务 BYOK 用户），但外部巡检按 status
+判断会告警——「功能在、密钥缺」不再静默。
 """
 
 from __future__ import annotations
@@ -25,6 +30,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.redis import RedisManager
 from app.db.session import engine
+from app.llm.health import platform_llm_status
 
 router = APIRouter(tags=["health"])
 
@@ -143,11 +149,24 @@ async def readiness_check() -> JSONResponse:
     if backend != "pgvector":
         checks["chroma"] = checks["vector"]
 
+    llm_status = platform_llm_status()
+    checks["llm_credentials"] = llm_status
+
     ready = db_ok and redis_ok and vector_ok
     if not ready:
         logger.info("readiness_not_ready", **checks)
         return JSONResponse(
             status_code=503,
             content={"status": "not_ready", "checks": checks},
+        )
+    if llm_status != "ok":
+        # 依赖齐全但平台模型凭据没配：容器能起，但「平台模型」功能整体不可用。
+        # 用 degraded（200）而不是 not_ready（503）：BYOK 用户仍可工作，
+        # 且 503 会让部署健康门禁把「忘配 key」误判成「服务挂了」。
+        warning = "平台模型凭据未配置：设置 LLM__OPENAI_API_KEY（或改用 BYOK 用户自带凭据）"
+        logger.warning("readiness_platform_llm_unconfigured", status=llm_status)
+        return JSONResponse(
+            status_code=200,
+            content={"status": "degraded", "checks": checks, "warnings": [warning]},
         )
     return JSONResponse(status_code=200, content={"status": "ready", "checks": checks})

@@ -167,10 +167,14 @@ class TestAuth:
     def test_admin_can_read(self, factory) -> None:
         admin = asyncio.run(_user(factory, "admin_user", role="admin"))
         client = _client(factory)
-        for path in ("/api/v1/admin/console/overview", "/api/v1/admin/console/tasks"):
+        for path in (
+            "/api/v1/admin/console/overview",
+            "/api/v1/admin/console/tasks",
+            "/api/v1/admin/console/users",
+            "/api/v1/admin/console/audit",
+        ):
             resp = client.get(path, headers=_auth(admin))
             assert resp.status_code == 200, path
-        assert client.get("/api/v1/admin/console/users", headers=_auth(admin)).status_code == 200
 
     def test_regular_user_is_forbidden(self, factory) -> None:
         user = asyncio.run(_user(factory, "plain_user"))
@@ -179,6 +183,7 @@ class TestAuth:
             "/api/v1/admin/console/overview",
             "/api/v1/admin/console/tasks",
             "/api/v1/admin/console/users",
+            "/api/v1/admin/console/audit",
         ):
             assert client.get(path, headers=_auth(user)).status_code == 403, path
 
@@ -366,3 +371,57 @@ class TestUserList:
             "/api/v1/admin/console/users", params={"q": "plain"}, headers=_auth(admin)
         ).json()
         assert searched["total"] == 1 and searched["items"][0]["username"] == "plain_a"
+
+
+class TestAuditList:
+    def _seed(self, factory):
+        from app.db.models.audit import AuditLog
+
+        async def _run() -> None:
+            async with factory() as session:
+                session.add_all(
+                    [
+                        AuditLog(
+                            actor_name="alice",
+                            action="credential.create",
+                            target_type="credential",
+                            metadata_json={"provider": "deepseek"},
+                        ),
+                        AuditLog(
+                            actor_name="admin",
+                            action="subscription.subscribe",
+                            target_type="subscription",
+                            metadata_json={"plan_id": "pro"},
+                        ),
+                    ]
+                )
+                await session.commit()
+
+        asyncio.run(_run())
+
+    def test_lists_desc_and_filters(self, factory) -> None:
+        self._seed(factory)
+        admin = asyncio.run(_user(factory, "admin_audit", role="admin"))
+        client = _client(factory)
+
+        data = client.get("/api/v1/admin/console/audit", headers=_auth(admin)).json()
+        assert data["total"] == 2
+        # 后写入的排在前面（created_at 倒序）
+        assert data["items"][0]["action"] == "subscription.subscribe"
+        assert data["items"][0]["metadata"]["plan_id"] == "pro"
+
+        filtered = client.get(
+            "/api/v1/admin/console/audit",
+            params={"action": "credential.create"},
+            headers=_auth(admin),
+        ).json()
+        assert filtered["total"] == 1
+        assert filtered["items"][0]["actor_name"] == "alice"
+
+        by_actor = client.get(
+            "/api/v1/admin/console/audit",
+            params={"actor": "adm"},
+            headers=_auth(admin),
+        ).json()
+        assert by_actor["total"] == 1
+        assert by_actor["items"][0]["action"] == "subscription.subscribe"

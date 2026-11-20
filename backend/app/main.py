@@ -51,6 +51,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger = get_logger(__name__)
     logger.info("应用启动", version=__version__, env=settings.app.env)
 
+    # 平台模型凭据自检（Issue #19/#25）：忘配 key 时功能整体不可用，
+    # 必须在启动日志里显式喊一声，而不是等第一个用户任务 401。
+    from app.llm.health import platform_llm_status
+
+    llm_status = platform_llm_status()
+    if llm_status != "ok":
+        logger.warning(
+            "平台模型凭据未配置，平台模型功能不可用（BYOK 用户不受影响）",
+            status=llm_status,
+        )
+
     # 显式初始化知识库：嵌入/重排按配置选择真实或 Mock（环境变量 RAG_EMBEDDING_MOCK 控制）
     from app.db.session import AsyncSessionLocal
     from app.knowledge.services.document_service import KnowledgeDocumentService

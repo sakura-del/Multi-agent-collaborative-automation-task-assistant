@@ -47,6 +47,10 @@ def test_health_check_echoes_custom_request_id() -> None:
 def test_readiness_check_endpoint_all_ok(monkeypatch) -> None:
     """`/health/ready` 全部探测通过时应返回 200 且三项 ok。"""
     from app.api.v1.endpoints import health
+    from app.core.config import settings
+
+    # Issue #25：readiness 现在也报告平台凭据配置态；预置一个非占位 key
+    monkeypatch.setattr(settings.llm, "openai_api_key", "sk-test-health-key")
 
     async def _ok() -> bool:
         return True
@@ -88,3 +92,44 @@ def test_readiness_check_endpoint_db_down(monkeypatch) -> None:
     body: dict[str, Any] = response.json()
     assert body["status"] == "not_ready"
     assert body["checks"]["database"] == "failed"
+
+
+def test_readiness_degrades_when_platform_key_missing(monkeypatch) -> None:
+    """平台 key 缺失：依赖齐全 → 200 degraded + 明确 warning（#19/#25）。"""
+    from app.api.v1.endpoints import health
+    from app.core.config import settings
+
+    async def _ok_bool() -> bool:
+        return True
+
+    monkeypatch.setattr(health, "probe_database", _ok_bool)
+    monkeypatch.setattr(health, "probe_redis", _ok_bool)
+    monkeypatch.setattr(health, "probe_vector", _ok_bool)
+    monkeypatch.setattr(settings.llm, "openai_api_key", "")
+
+    response = TestClient(app).get("/api/v1/health/ready")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "degraded"
+    assert body["checks"]["llm_credentials"] == "missing_credentials"
+    assert "平台模型凭据未配置" in body["warnings"][0]
+    # 硬依赖仍标记 ok：容器本身是健康的
+    assert body["checks"]["database"] == "ok"
+
+
+def test_readiness_degrades_on_placeholder_key(monkeypatch) -> None:
+    """占位符 key（your-...）与缺 key 同样视为未配置。"""
+    from app.api.v1.endpoints import health
+    from app.core.config import settings
+
+    async def _ok_bool() -> bool:
+        return True
+
+    monkeypatch.setattr(health, "probe_database", _ok_bool)
+    monkeypatch.setattr(health, "probe_redis", _ok_bool)
+    monkeypatch.setattr(health, "probe_vector", _ok_bool)
+    monkeypatch.setattr(settings.llm, "openai_api_key", "your-openai-api-key")
+
+    body = TestClient(app).get("/api/v1/health/ready").json()
+    assert body["status"] == "degraded"
+    assert body["checks"]["llm_credentials"] == "placeholder_credentials"

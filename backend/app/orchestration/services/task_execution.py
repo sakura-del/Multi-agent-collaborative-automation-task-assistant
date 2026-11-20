@@ -64,6 +64,7 @@ from app.orchestration.services.literature_source import (
     is_offline_literature_task,
     resolve_literature_source,
 )
+from app.orchestration.validation import audit_citation_alignment
 from app.orchestration.workflows.literature_review import (
     LiteratureNodeExecutor,
     LiteratureNodeValidator,
@@ -1380,6 +1381,57 @@ class TaskExecution:
             await session.commit()
         await self._publish(event)
 
+    async def _guard_citation_consistency(
+        self, task_id: UUID, review_report: dict[str, Any]
+    ) -> bool:
+        """落库前引用一致性闸门：不通过则任务转 FAILED，返回 False。
+
+        独立成方法是为了可测：直接对「报告 + 任务状态」断言，不用跑完整个
+        调度/复盘流程（那需要 reviewer、容器、证据链的全部替身）。
+        """
+        audit = audit_citation_alignment(
+            str(review_report.get("final_markdown") or ""),
+            list(review_report.get("bibliography") or []),
+        )
+        logger.info(
+            "citation_consistency_audit",
+            task_id=str(task_id),
+            ok=audit.ok,
+            **audit.to_payload(),
+        )
+        if audit.ok:
+            return True
+        # 不落库不一致产出：review_report/artifacts 都不写，任务可 replan 重试
+        await self._fail_review(task_id, f"引用一致性校验未通过：{audit.reason}")
+        return False
+
+    async def _fail_review(self, task_id: UUID, reason: str) -> None:
+        """复盘阶段校验失败：REVIEWING → FAILED（不落库不一致产出）。
+
+        与 `_mark_waiting_human` 的区别：
+        - 这里的失败**不是缺数据/缺输入**，而是产出不满足硬性一致性要求；
+        - 用 FAILED 而不是 WAITING_HUMAN，是因为用户唯一有效的动作是
+          「换模型或重试」——`replan` 允许 FAILED 状态，且失败率看板应统计到它。
+        """
+        async with self._session_factory() as session:
+            repo = TaskRepository(session)
+            task = await repo.lock_for_update(task_id)
+            if task.status != TaskStatus.REVIEWING.value:
+                return
+            await repo.transition(task, {TaskStatus.REVIEWING}, TaskStatus.FAILED)
+            event = await self._append_event(
+                session,
+                task_id,
+                event_type="task_failed",
+                status=TaskStatus.FAILED.value,
+                payload={"reason": reason[:2000], "stage": "review_validation"},
+            )
+            await session.commit()
+        await self._publish(event)
+        logger.warning("task_review_validation_failed", task_id=str(task_id), reason=reason[:300])
+        await self.settle_quota(task_id)
+        await self._record_task_terminal(task_id, TaskStatus.FAILED.value)
+
     async def _finish_reviewing(
         self,
         task_id: UUID,
@@ -1424,6 +1476,9 @@ class TaskExecution:
                     "event_stats": {"event_count": event_count, "task_id": str(task_id)},
                 }
             )
+            # Issue #25 沉淀项 1：Agent 产出**落库前**强制校验引用一致性。
+            if not await self._guard_citation_consistency(task_id, review_report):
+                return
             artifacts = self._export_literature_artifacts(
                 user_id, task_id, review_report, citation_style=citation_style
             )
