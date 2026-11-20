@@ -541,6 +541,26 @@ E2E 双视口 **16/16 passed**（写工具用例覆盖 resume=1 请求与多步�
 **上游抖动**：平台模型偶发 `Concurrency limit exceeded`，属共享密钥并发限流，
 重试即可（验收脚本已内置 15s×4 重试）。遇到它不要当代码缺陷排查。
 
+### 后台管理控制台（Issue #12，2026-11-20）
+
+- **只读原则**：管理端不提供代用户操作任务的接口（不代取消/重试/改配置）——
+  需要处置时走用户侧已有控制命令，责任边界清晰。唯一写操作在原有
+  BYOK 看板与套餐开通端点里。
+- 端点（均 `get_current_admin_user`，普通用户 403）：
+  - `GET /admin/console/overview?days=7`：用户/任务/失败率/待处理/token/BYOK
+    一次聚合（同快照，避免首屏 6 个请求数字不同步）；
+  - `GET /admin/console/tasks`：跨用户列表（owner、模型快照标签、BYOK 标记、
+    token），状态/关键词/分页下推 SQL，`total` 在 body（不做 X-Total-Count）；
+  - `GET /admin/console/users`：active 订阅 join 套餐名 + 任务数/凭据数。
+- **口径**：窗口按 `created_at` 切（「这周失败率」= 这周提交的任务里失败占比）；
+  失败率分母是**已结束**（completed/failed/cancelled），不是全部任务。
+- 前端 `/admin`（requiresAdmin，侧栏「后台管理」）：6 张 KPI 卡（骨架屏）+
+  任务/用户两表；状态色只表语义且必带文字。
+
+**门禁教训**：前端类型检查必须用 `vue-tsc -b`（deploy 脚本用的就是它）。
+`npx vue-tsc --noEmit` 会漏检部分文件——本次 `AppLayout` 少一个图标导入，
+`--noEmit` 绿、`-b` 红、Pages 构建直接失败。
+
 ### 磁盘维护（生产 47.253.81.6）
 
 2026-11-19 清理：`docker builder prune -af` 回收 **18.8GB**（containerd 里的
