@@ -106,6 +106,23 @@ describe("持续更新面板", () => {
     wrapper.unmount();
   });
 
+  it("点历史行可以展开/收起摘要", async () => {
+    // 最新一次「无新增」不会自动展开，点一下才显示
+    mocked.refreshes.mockResolvedValue([run({ new_count: 0 })] as never);
+    const wrapper = mountPanel();
+    await flushPromises();
+
+    expect(wrapper.find('[data-test="refresh-summary"]').exists()).toBe(false);
+    await wrapper.find('[data-test="refresh-runs"] li button').trigger("click");
+    await flushPromises();
+    expect(wrapper.find('[data-test="refresh-summary"]').exists()).toBe(true);
+
+    await wrapper.find('[data-test="refresh-runs"] li button').trigger("click");
+    await flushPromises();
+    expect(wrapper.find('[data-test="refresh-summary"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
   it("切换排期频率会保存 cadence", async () => {
     mocked.routine.mockResolvedValue(routine);
     mocked.saveRoutine.mockResolvedValue({ ...routine, cadence: "monthly" });

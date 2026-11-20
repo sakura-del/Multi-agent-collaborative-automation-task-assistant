@@ -145,8 +145,15 @@ function toggleNotify(event: Event) {
   void saveRoutine({ notify: checked ? "email" : "none" });
 }
 
+/** 最新一次且本期有新增时默认展开；用户点过就听用户的。 */
+function isOpen(run: TaskRefreshRun): boolean {
+  if (expandedRunId.value !== null) return expandedRunId.value === run.id;
+  return run === runs.value[0] && hasNew.value;
+}
+
 function toggleRun(run: TaskRefreshRun) {
-  expandedRunId.value = expandedRunId.value === run.id ? null : run.id;
+  // 默认展开时点「收起」要能真的收起：先落到显式状态，再翻转
+  expandedRunId.value = isOpen(run) ? "none" : run.id;
 }
 
 const CADENCE_LABEL: Record<string, string> = { weekly: "每周", monthly: "每月" };
@@ -271,12 +278,12 @@ onBeforeUnmount(stopPolling);
           <span v-if="run.status === 'completed' && !run.citation_ok" class="text-[10px] text-warning">
             摘要已回落为清单
           </span>
-          <span class="ml-auto text-muted-foreground">{{ expandedRunId === run.id ? "收起" : "展开" }}</span>
+          <span class="ml-auto text-muted-foreground">{{ isOpen(run) ? "收起" : "展开" }}</span>
         </button>
 
         <!-- 本轮摘要（Markdown 渲染，renderMarkdown 内部已消毒） -->
         <div
-          v-if="expandedRunId === run.id || (run === runs[0] && hasNew)"
+          v-if="isOpen(run)"
           class="md-body mt-2 border-t border-border/60 pt-2 text-sm"
           data-test="refresh-summary"
           v-html="renderMarkdown(run.summary_markdown ?? '')"
