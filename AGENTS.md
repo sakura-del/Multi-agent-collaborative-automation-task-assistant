@@ -577,6 +577,20 @@ E2E 双视口 **16/16 passed**（写工具用例覆盖 resume=1 请求与多步�
   **审计写用 SAVEPOINT**：失败只回滚该条 INSERT——第一版对请求会话整体
   `rollback()` 导致业务对象过期、`_to_out` 懒加载 `MissingGreenlet`、创建凭据 500
   （生产实测）。参数只传 `actor_id/actor_name` 快照，不在审计函数里碰 ORM。
+### 定时重跑 / 增量刷新（Issue #27，2026-11-20）
+
+- 表：`task_routine`（每任务 0..1 条排期）+ `task_refresh`（每次运行记录），
+  迁移 `f3c9d2a7b1e8`。
+- 调度跑在**应用进程内**（单 uvicorn worker）：lifespan 起一个 asyncio tick，
+  每分钟 `UPDATE ... WHERE next_run_at <= now` 原子认领 + `SKIP LOCKED`。
+  **不要**在容器里再起一份同样的进程，否则排期会被两个进程同时推进。
+- 刷新**不扣「篇数」**（不是新综述），token 用量记在 `task_refresh.tokens_used`；
+  手动刷新有 10 分钟冷却。
+- 检索相关性靠三层：窗口写进 arXiv 检索式（`submittedDate:[...]`）+ OpenAlex
+  `from_publication_date` + 主题词过滤（题名/摘要命中任一主题词）。只按时间倒序
+  会把「同期上传但与主题无关」的论文当成新证据（验收实测过）。
+- 上游 429/503 是常态：arXiv 429 归为临时错误，全检索式失败会等 20s 重试一次。
+
 - **发布纪律**：版本三处一致（`pyproject.toml` / `package.json` / `__version__`），
   每次生产部署在 `docs/releases/` 写一条记录（版本、提交、摘要、回滚点）。
   当前 `0.3.0`。
