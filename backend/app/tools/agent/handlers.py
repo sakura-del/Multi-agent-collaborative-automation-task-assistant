@@ -225,7 +225,8 @@ async def get_task(ctx: ToolContext, args: GetTaskArgs) -> dict[str, Any]:
     }
     if args.include_output and snapshot.final_output:
         result["output_markdown"] = snapshot.final_output[:8000]
-    if waited:
+    if args.wait_seconds > 0:
+        # 只要请求过等待就回报（哪怕不足 1s）：模型需要区分「查了一次」与「等过了」
         result["waited_seconds"] = waited
     return result
 
@@ -281,7 +282,7 @@ async def approve_task_plan(ctx: ToolContext, args: ApproveTaskArgs) -> dict[str
         "plan_version": updated.plan_version,
         "approved": True,
     }
-    if waited:
+    if args.wait_seconds > 0:
         result["waited_seconds"] = waited
     return result
 
