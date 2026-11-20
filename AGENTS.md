@@ -488,8 +488,18 @@ Node 20 + `vite preview`；结束后 `down -v` 并删除含密钥的临时 env/o
   （`role=tool` + `tool_call_id`）；**写工具暂停**为 `waiting_approval`，
   由 `POST /conversations/{cid}/messages/{mid}/tool-confirm` 决定执行或取消。
   拒绝也要落库（`rejected`），否则刷新后确认卡会复活。
-- SSE 事件：`start`(tools) / `delta` / `tool_call`(write) / `tool_result`(ok,preview) /
+- SSE 事件：`start`(tools, resumed) / `delta` / `tool_call`(write) / `tool_result`(ok,preview) /
   `tool_approval`(arguments) / `done`(status) / `error`；`?tools=1` 才启用工具。
+- **多步连续写操作（确认后续跑）**：`?tools=1&resume=1` 重开同一条消息的流——
+  保留正文与轨迹，把已执行结果按 `assistant(tool_calls)+tool` **成对**回灌，模型继续
+  生成并可提议下一个写工具 → 再暂停 → 再确认。前端 `confirmTool` 确认后自动续跑，
+  拒绝不续跑。**确认摘要/取消说明必须追加到正文**（续跑以正文为基底重建上下文，
+  覆盖会丢提议前文）。
+- 防套娃护栏：单条消息写提议上限 `MAX_WRITE_PROPOSALS = 5`；同一 (工具,参数)
+  被拒绝过 → `_write_blocked` 直接拦下并回灌原因（模型改口，不再弹卡）；
+  空轨迹 resume 显式报 `nothing_to_resume`。
+- `MessageToolCall.write` 字段必须存在（契约 `extra=forbid`）：轨迹记录带 `write`
+  键但契约不认时，确认接口与会话详情回读都会 500——E2E 实测踩过。
 - 持久化：`message.tool_calls` / `message.pending_tool` JSONB（迁移 `c9d0e1f2a3b4`）。
   存在消息上而不是独立表——它是这一轮回答的「过程」，与内容同生命周期。
 - 前端：输入区「工具开/关」（`vp:chat:tools`）；气泡内「执行过程（N 步）」
@@ -506,11 +516,13 @@ system——否则开了工具整轮 400「System message must be at the beginni
 （`full` 形态除外）并提到 `z-200`。**教训：固定定位元素「点不到」先量布局宽度，
 不要只加 z-index。**
 
-**验收**：后端定向 17 passed（工具循环 2 例：读工具续答 / 写工具不执行）；
-E2E 双视口 **16/16 passed**（真实链路、状态机、附件、工具读/写）。
-生产实测：`get_quota` 自动执行并落库 `ok`；写工具 `tool_call → tool_approval →
-done(waiting_approval)`；确认后创建任务并可取消；拒绝后轨迹为 `rejected`、
-正文「已取消该操作。」
+**验收**：后端定向 21 passed（含 resume 续跑/回灌成对/空轨迹报错/拒绝防重复）；
+E2E 双视口 **16/16 passed**（写工具用例覆盖 resume=1 请求与多步卡收口）。
+生产实测多步链（2026-11-20）：`create_task(ok)` → 确认 → 续跑 →
+`get_task(ok)` + `approve_task_plan` 提议 → 确认 → 规划未就绪的真实错误回灌 →
+再续跑 → 模型如实总结两步结果；任务可查、可取消，全程无编造。
+**E2E 注意**：第一张确认卡点掉后模型可能立刻提议下一张（多步链路的正常表现），
+不能用 `toHaveCount(0)` 断言「卡没了」，要用循环处理后续卡。
 
 **上游抖动**：平台模型偶发 `Concurrency limit exceeded`，属共享密钥并发限流，
 重试即可（验收脚本已内置 15s×4 重试）。遇到它不要当代码缺陷排查。
