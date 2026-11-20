@@ -205,7 +205,7 @@ async def test_resume_after_approval_continues_same_message() -> None:
     frames2 = await _collect(streamer, assistant, resume=True)
 
     joined = "".join(frames2)
-    assert "event: start" in joined and '"resumed":true' in joined
+    assert "event: start" in joined and '"resumed": true' in joined
     assert "event: delta" in joined
     assert "event: tool_approval" not in joined, "续跑第一轮不应再次暂停"
     # 正文 = 确认摘要（基底）+ 续跑生成，不能互相覆盖
