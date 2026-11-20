@@ -610,6 +610,363 @@ class TaskExecution:
         logger.info("task_control", task_id=str(task_id), command=request.command.value)
         return snapshot
 
+    # ===== 增量刷新与定时重跑（Issue #27）=====
+
+    async def start_refresh(
+        self,
+        user_id: UUID,
+        task_id: UUID,
+        *,
+        trigger: Literal["manual", "schedule"] = "manual",
+    ) -> Any:
+        """启动一次增量刷新，返回运行记录（`TaskRefresh`）。
+
+        ## 为什么只允许已完成任务
+
+        刷新是「给已经成稿的综述补新证据」。任务还在跑时刷新，会和执行线程争
+        同一批 screening 记录与 reviewer 产出，两条链路互相看不到对方写的东西。
+        等它跑完（哪怕 failed）再说 —— 失败任务本就该先 replan/retry。
+
+        ## 为什么手动刷新要冷却
+
+        检索 + 摘要都是真金白银（平台模型时花平台的钱）。没有冷却的话，
+        用户连点五下就是五次检索 + 五次模型调用，还都是同一批文献。
+        定时刷新不走冷却（周期由排期决定）。
+        """
+        from datetime import UTC, datetime, timedelta
+
+        from app.db.models.routine import TaskRefresh
+        from app.orchestration.services.task_refresh import as_utc
+
+        cfg = get_settings().routine
+        now = datetime.now(UTC)
+        async with self._session_factory() as session:
+            repo = TaskRepository(session)
+            task = await repo.get_for_user(user_id, task_id)
+            if task is None:
+                raise NotFoundException("任务不存在")
+            if TaskStatus(task.status) is not TaskStatus.COMPLETED:
+                raise ValidationException(
+                    "只有已完成的任务可以检索新文献", details={"status": task.status}
+                )
+
+            running = (
+                await session.execute(
+                    select(TaskRefresh)
+                    .where(
+                        TaskRefresh.task_id == task_id,
+                        TaskRefresh.status == "running",
+                    )
+                    .order_by(TaskRefresh.started_at.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if running is not None:
+                # 进程重启会让在跑的刷新永远停在 running（协程没了），
+                # 之后所有刷新都会被这条挡住。超过 15 分钟仍未结束的按「中断」处理。
+                started = as_utc(running.started_at)
+                stale = started is None or (now - started) > timedelta(minutes=15)
+                if not stale:
+                    raise ValidationException(
+                        "上一次检索还在进行中，请稍候", details={"refresh_id": str(running.id)}
+                    )
+                running.status = "failed"
+                running.error = "进程重启导致本次刷新中断"
+                running.finished_at = now
+                await session.flush()
+
+            last = (
+                await session.execute(
+                    select(TaskRefresh)
+                    .where(TaskRefresh.task_id == task_id, TaskRefresh.status == "completed")
+                    .order_by(TaskRefresh.started_at.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+
+            if trigger == "manual" and cfg.manual_cooldown_seconds > 0 and last is not None:
+                anchor = as_utc(last.started_at)
+                if anchor is not None:
+                    earliest = anchor + timedelta(seconds=cfg.manual_cooldown_seconds)
+                    if now < earliest:
+                        raise ValidationException(
+                            "刚检索过，请稍后再试",
+                            details={
+                                "retry_at": earliest.isoformat(),
+                                "cooldown_seconds": cfg.manual_cooldown_seconds,
+                            },
+                        )
+
+            # 窗口左端：上次刷新（没有则任务完成时刻）− 索引延迟的回退天数
+            base = as_utc(last.started_at) if last is not None else as_utc(task.completed_at)
+            window_from = (base or now) - timedelta(days=cfg.overlap_days)
+            refresh = TaskRefresh(
+                task_id=task_id,
+                user_id=user_id,
+                trigger=trigger,
+                status="running",
+                window_from=window_from,
+                window_to=now,
+                queries=[],
+                started_at=now,
+            )
+            session.add(refresh)
+            await session.commit()
+
+        self.container.track(task_id, self._refresh(refresh.id))
+        logger.info(
+            "task_refresh_started",
+            task_id=str(task_id),
+            refresh_id=str(refresh.id),
+            trigger=trigger,
+        )
+        return refresh
+
+    async def _refresh(self, refresh_id: UUID) -> None:
+        """后台刷新协程：绑模型 → 跑（检索/摘要/落库）→ 汇报。"""
+        from app.db.models.routine import TaskRefresh
+        from app.orchestration.services.task_refresh import RefreshRunner, SessionBoundSource
+
+        trigger = "manual"
+        try:
+            async with self._session_factory() as session:
+                refresh = await session.get(TaskRefresh, refresh_id)
+                if refresh is None:
+                    return
+                task = await session.get(Task, refresh.task_id)
+                trigger = refresh.trigger
+            if task is None:
+                return
+
+            # 与执行链路一致：刷新用任务指定的凭据（BYOK 花用户自己的钱）
+            await self._bind_task_llm(task)
+
+            async def source_factory(_context: Any) -> Any:
+                source_session = self._session_factory()
+                try:
+                    source = resolve_literature_source(task, session=source_session)
+                except Exception:
+                    await source_session.close()
+                    raise
+                if source is None:
+                    await source_session.close()
+                    raise ValidationException("任务没有可用的文献源，无法检索新文献")
+                return SessionBoundSource(source, source_session)
+
+            runner = RefreshRunner(
+                session_factory=self._session_factory,
+                source_factory=source_factory,
+            )
+            outcome = await runner.run(refresh_id)
+            await self._notify_refresh(outcome, trigger=trigger)
+        except Exception as exc:  # 后台协程不能把异常抛给事件循环
+            logger.exception("task_refresh_failed", refresh_id=str(refresh_id), error=str(exc))
+            await self._fail_refresh(refresh_id, str(exc))
+
+    async def _fail_refresh(self, refresh_id: UUID, reason: str) -> None:
+        """把刷新记录标失败（协程异常兜底）。"""
+        from datetime import UTC, datetime
+
+        from app.db.models.routine import TaskRefresh
+
+        try:
+            async with self._session_factory() as session:
+                refresh = await session.get(TaskRefresh, refresh_id)
+                if refresh is None or refresh.status != "running":
+                    return
+                refresh.status = "failed"
+                refresh.error = reason[:2000]
+                refresh.finished_at = datetime.now(UTC)
+                await session.commit()
+        except Exception:
+            logger.warning("task_refresh_mark_failed_skipped", refresh_id=str(refresh_id))
+
+    async def _notify_refresh(self, outcome: Any, *, trigger: str) -> None:
+        """定时刷新有新证据时发一封汇报邮件（手动刷新由页面自己展示）。"""
+        from app.db.models.routine import TaskRefresh, TaskRoutine
+
+        if trigger != "schedule" or outcome.status != "completed" or outcome.new_count == 0:
+            return
+        try:
+            async with self._session_factory() as session:
+                routine = (
+                    await session.execute(
+                        select(TaskRoutine).where(TaskRoutine.task_id == outcome.task_id)
+                    )
+                ).scalar_one_or_none()
+                if routine is None or routine.notify != "email":
+                    return
+                refresh = await session.get(TaskRefresh, outcome.refresh_id)
+                if refresh is None or refresh.notified:
+                    return
+                from app.db.models.user import User
+
+                user = await session.get(User, outcome.user_id)
+                email = getattr(user, "email", None)
+                if not email:
+                    return
+                refresh.notified = True
+                await session.commit()
+
+            from app.services.email_sender import get_cached_email_sender
+
+            settings = get_settings()
+            link = f"{settings.email.frontend_base_url.rstrip('/')}/tasks/{outcome.task_id}"
+            titles = "\n".join(f"- {title}" for title in outcome.new_titles[:5])
+            body = (
+                f"《{outcome.task_title}》本期新增 {outcome.new_count} 篇文献。\n\n"
+                f"{titles}\n\n"
+                f"完整摘要与新增文献清单：{link}\n\n"
+                "（这是定时重跑的汇报邮件；可在任务详情页关闭排期或改为不发邮件。）"
+            )
+            await get_cached_email_sender().send(
+                to=email,
+                subject=f"【VeriPaper】《{outcome.task_title}》新增 {outcome.new_count} 篇证据",
+                body=body,
+            )
+        except Exception as exc:
+            # 邮件失败不影响刷新结果本身（与账号邮件同一原则）
+            logger.warning(
+                "refresh_notify_failed",
+                task_id=str(outcome.task_id),
+                refresh_id=str(outcome.refresh_id),
+                error=str(exc),
+            )
+
+    async def start_scheduled_refresh(self, task_id: UUID, user_id: UUID) -> None:
+        """调度器回调：按排期启动刷新。
+
+        任务可能已经被删/被重规划成非 completed，这类情况只记日志不抛错——
+        调度器不该因为一条过期排期而中断整轮扫描。
+        """
+        from app.db.models.routine import TaskRoutine
+
+        try:
+            await self.start_refresh(user_id, task_id, trigger="schedule")
+        except (ValidationException, NotFoundException) as exc:
+            reason = getattr(exc, "message", str(exc))
+            logger.info("routine_refresh_skipped", task_id=str(task_id), reason=reason)
+            # 任务已不是「已完成」（被 replan/取消/删除）：排期不可能再成功，
+            # 留着会每个周期空跑一次。直接停用，让用户在页面上看到状态变化。
+            try:
+                async with self._session_factory() as session:
+                    routine = (
+                        await session.execute(
+                            select(TaskRoutine).where(TaskRoutine.task_id == task_id)
+                        )
+                    ).scalar_one_or_none()
+                    if routine is not None and routine.enabled:
+                        routine.enabled = False
+                        await session.commit()
+                        logger.info("routine_auto_disabled", task_id=str(task_id))
+            except Exception:
+                logger.warning("routine_auto_disable_failed", task_id=str(task_id))
+
+    async def list_refreshes(self, user_id: UUID, task_id: UUID, *, limit: int = 20) -> list[Any]:
+        """列出刷新历史（最新在前）。owner-scoped。"""
+        from app.db.models.routine import TaskRefresh
+
+        async with self._session_factory() as session:
+            task = await TaskRepository(session).get_for_user(user_id, task_id)
+            if task is None:
+                raise NotFoundException("任务不存在")
+            result = await session.execute(
+                select(TaskRefresh)
+                .where(TaskRefresh.task_id == task_id)
+                .order_by(TaskRefresh.created_at.desc())
+                .limit(max(1, min(limit, 50)))
+            )
+            return list(result.scalars())
+
+    async def get_routine(self, user_id: UUID, task_id: UUID) -> Any | None:
+        """读取任务的排期（没有则 None）。owner-scoped。"""
+        from app.db.models.routine import TaskRoutine
+
+        async with self._session_factory() as session:
+            task = await TaskRepository(session).get_for_user(user_id, task_id)
+            if task is None:
+                raise NotFoundException("任务不存在")
+            return (
+                await session.execute(select(TaskRoutine).where(TaskRoutine.task_id == task_id))
+            ).scalar_one_or_none()
+
+    async def save_routine(
+        self,
+        user_id: UUID,
+        task_id: UUID,
+        *,
+        enabled: bool,
+        cadence: str,
+        notify: str,
+    ) -> Any:
+        """新建/更新排期。
+
+        `next_run_at` 每次都从**当前时刻**往后推：用户改了设置就是要按新设置
+        重新计时；沿用旧的下次运行时刻会出现「关了又开，立刻就跑一次」。
+        """
+        from datetime import UTC, datetime
+
+        from app.db.models.routine import TaskRoutine
+        from app.orchestration.services.routine_scheduler import advance
+
+        if cadence not in {"weekly", "monthly"}:
+            raise ValidationException("排期频率只支持 weekly / monthly")
+        if notify not in {"none", "email"}:
+            raise ValidationException("汇报方式只支持 none / email")
+
+        async with self._session_factory() as session:
+            task = await TaskRepository(session).get_for_user(user_id, task_id)
+            if task is None:
+                raise NotFoundException("任务不存在")
+            if TaskStatus(task.status) is not TaskStatus.COMPLETED:
+                raise ValidationException(
+                    "只有已完成的任务可以设置定时重跑", details={"status": task.status}
+                )
+            routine = (
+                await session.execute(select(TaskRoutine).where(TaskRoutine.task_id == task_id))
+            ).scalar_one_or_none()
+            now = datetime.now(UTC)
+            if routine is None:
+                routine = TaskRoutine(
+                    task_id=task_id,
+                    user_id=user_id,
+                    enabled=enabled,
+                    cadence=cadence,
+                    notify=notify,
+                    next_run_at=advance(cadence, now),
+                )
+                session.add(routine)
+            else:
+                routine.enabled = enabled
+                routine.cadence = cadence
+                routine.notify = notify
+                routine.next_run_at = advance(cadence, now)
+            await session.commit()
+            logger.info(
+                "task_routine_saved",
+                task_id=str(task_id),
+                cadence=cadence,
+                enabled=enabled,
+                notify=notify,
+            )
+            return routine
+
+    async def delete_routine(self, user_id: UUID, task_id: UUID) -> None:
+        """删除排期（任务本身不受影响）。"""
+        from app.db.models.routine import TaskRoutine
+
+        async with self._session_factory() as session:
+            task = await TaskRepository(session).get_for_user(user_id, task_id)
+            if task is None:
+                raise NotFoundException("任务不存在")
+            routine = (
+                await session.execute(select(TaskRoutine).where(TaskRoutine.task_id == task_id))
+            ).scalar_one_or_none()
+            if routine is None:
+                return
+            await session.delete(routine)
+            await session.commit()
+
     async def get_snapshot(
         self,
         user_id: UUID,

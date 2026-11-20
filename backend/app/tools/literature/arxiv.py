@@ -79,7 +79,7 @@ class ArxivClient:
             "search_query": f"all:{search.query}",
             "start": "0",
             "max_results": str(search.max_results),
-            "sortBy": "relevance",
+            "sortBy": "submittedDate" if search.sort_by == "submitted" else "relevance",
             "sortOrder": "descending",
         }
         try:

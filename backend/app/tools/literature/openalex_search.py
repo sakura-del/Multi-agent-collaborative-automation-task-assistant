@@ -87,7 +87,9 @@ class OpenAlexSearchSource(OpenAlexClient):
         params: dict[str, str] = {
             "search": search.query,
             "per_page": str(min(search.max_results, 50)),
-            "sort": "relevance_score:desc",
+            "sort": (
+                "publication_date:desc" if search.sort_by == "submitted" else "relevance_score:desc"
+            ),
         }
         filters: list[str] = []
         if search.date_from is not None:

@@ -23,6 +23,8 @@
   billing.py:     PLAN / SUBSCRIPTION / USAGE_COUNTER
                   （Phase 2：计费套餐——篇数为主、token 为辅）
   audit.py:       AUDIT_LOG（Issue #25：关键操作审计）
+  routine.py:     TASK_ROUTINE / TASK_REFRESH
+                  （Issue #27：定时重跑排期 + 每次增量刷新的运行记录）
   reference_library.py: REFERENCE_LIBRARY_ITEM
                   （2026-10-26：个人引用库——导入的 BibTeX/RIS 可存下来供任务使用）
 """
@@ -41,6 +43,7 @@ from app.db.models.llm_credential import LLMCredential, LLMNodeRouting
 from app.db.models.log import ExecutionLog, FailureCase, ValidationResult
 from app.db.models.reference_library import ReferenceLibraryItem
 from app.db.models.revoked_token import RevokedRefreshToken
+from app.db.models.routine import TaskRefresh, TaskRoutine
 from app.db.models.screening import (
     ScreeningDecision,
     ScreeningRecord,
@@ -78,6 +81,8 @@ __all__ = [
     "Task",
     "TaskAnnotation",
     "TaskDag",
+    "TaskRefresh",
+    "TaskRoutine",
     "UsageCounter",
     "User",
     "UserTemplate",

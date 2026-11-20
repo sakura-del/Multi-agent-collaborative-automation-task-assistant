@@ -34,6 +34,9 @@ class LiteratureSearch(BaseModel):
     max_results: int = Field(default=10, ge=MIN_SEARCH_RESULTS, le=MAX_SEARCH_RESULTS)
     date_from: date | None = None
     date_to: date | None = None
+    #: 排序口径。`relevance` = 首次综述（要最相关）；`submitted` = 增量刷新
+    #: （要最新的，否则「按相关度取前 N 篇再按日期过滤」经常一篇新的都捞不到）。
+    sort_by: Literal["relevance", "submitted"] = "relevance"
 
 
 class LiteratureRecord(BaseModel):

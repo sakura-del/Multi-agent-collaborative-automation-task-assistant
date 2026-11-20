@@ -8,6 +8,9 @@
     POST   /api/v1/tasks/{task_id}/plan/approve   确认规划
     POST   /api/v1/tasks/{task_id}/control        人工控制
     GET    /api/v1/tasks/{task_id}/events         事件回放
+    POST   /api/v1/tasks/{task_id}/refresh        增量检索新文献（Issue #27）
+    GET    /api/v1/tasks/{task_id}/refreshes      刷新历史
+    GET/PUT/DELETE /api/v1/tasks/{task_id}/routine 定时重跑排期
 
 鉴权：全部端点要求 Bearer access token；跨用户访问统一 404。
 """
@@ -35,6 +38,7 @@ from app.db.session import get_db
 from app.orchestration.contracts import STATUS_GROUPS, TaskSnapshot, TaskStatus
 from app.orchestration.services.task_execution import TaskExecution
 from app.orchestration.services.task_submission import submit_review_task
+from app.schemas.routine import RefreshOut, RoutineIn, RoutineOut
 from app.schemas.task import (
     PlanApproval,
     TaskControl,
@@ -359,6 +363,95 @@ async def control_task(
 ) -> TaskSnapshot:
     """pause / resume / cancel / retry_node / supply_input / replan。"""
     return await execution.control(current_user.id, task_id, payload.to_contract())
+
+
+@router.post(
+    "/{task_id}/refresh",
+    response_model=RefreshOut,
+    status_code=202,
+    summary="增量检索新文献（手动刷新）",
+)
+async def start_refresh(
+    task_id: UUID,
+    execution: ExecutionDep,
+    current_user: ApiUserDep,
+    _scope: TasksWriteScope,
+) -> RefreshOut:
+    """对已完成任务重跑检索，只保留新增文献并生成增量摘要（Issue #27）。
+
+    后台执行：立刻返回 `running` 记录，前端轮询 `GET /{task_id}/refreshes`。
+    不扣「篇数」（刷新不是新综述），token 用量记在记录里。
+    """
+    refresh = await execution.start_refresh(current_user.id, task_id, trigger="manual")
+    return RefreshOut.model_validate(refresh)
+
+
+@router.get(
+    "/{task_id}/refreshes",
+    response_model=list[RefreshOut],
+    summary="刷新历史（最新在前）",
+)
+async def list_refreshes(
+    task_id: UUID,
+    execution: ExecutionDep,
+    current_user: ApiUserDep,
+    _scope: TasksReadScope,
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+) -> list[RefreshOut]:
+    rows = await execution.list_refreshes(current_user.id, task_id, limit=limit)
+    return [RefreshOut.model_validate(row) for row in rows]
+
+
+@router.get(
+    "/{task_id}/routine",
+    response_model=RoutineOut | None,
+    summary="读取定时重跑排期",
+)
+async def get_routine(
+    task_id: UUID,
+    execution: ExecutionDep,
+    current_user: ApiUserDep,
+    _scope: TasksReadScope,
+) -> RoutineOut | None:
+    routine = await execution.get_routine(current_user.id, task_id)
+    return RoutineOut.model_validate(routine) if routine is not None else None
+
+
+@router.put(
+    "/{task_id}/routine",
+    response_model=RoutineOut,
+    summary="新建/更新定时重跑排期",
+)
+async def save_routine(
+    task_id: UUID,
+    payload: RoutineIn,
+    execution: ExecutionDep,
+    current_user: ApiUserDep,
+    _scope: TasksWriteScope,
+) -> RoutineOut:
+    routine = await execution.save_routine(
+        current_user.id,
+        task_id,
+        enabled=payload.enabled,
+        cadence=payload.cadence,
+        notify=payload.notify,
+    )
+    return RoutineOut.model_validate(routine)
+
+
+@router.delete(
+    "/{task_id}/routine",
+    status_code=204,
+    summary="删除定时重跑排期",
+)
+async def delete_routine(
+    task_id: UUID,
+    execution: ExecutionDep,
+    current_user: ApiUserDep,
+    _scope: TasksWriteScope,
+) -> Response:
+    await execution.delete_routine(current_user.id, task_id)
+    return Response(status_code=204)
 
 
 @router.get("/{task_id}/events", response_model=TaskEventPage, summary="回放任务事件")

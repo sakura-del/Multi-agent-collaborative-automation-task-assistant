@@ -483,6 +483,42 @@ class OrchestrationConfig(BaseModel):
     retry_backoff_factor: int = 3
 
 
+class RoutineConfig(BaseModel):
+    """定时重跑 / 增量刷新（Issue #27）。
+
+    调度跑在**应用进程内**（单 uvicorn worker，见 entrypoint.sh）：
+    每分钟扫一次到期的 routine，用 `UPDATE ... WHERE next_run_at <= now`
+    原子认领，多进程部署也不会重复跑（认领失败即跳过）。
+    """
+
+    enabled: bool = True
+    """关闭后不再扫描排期（已排期的记录保留，重新打开即恢复）。"""
+
+    tick_seconds: int = Field(default=60, ge=5)
+    """扫描间隔。"""
+
+    batch_size: int = Field(default=5, ge=1, le=50)
+    """单次扫描最多认领多少条，避免一次拉起太多任务把模型配额打满。"""
+
+    overlap_days: int = Field(default=7, ge=0, le=90)
+    """窗口左端回退天数：文献源有索引延迟，严格从上次运行时刻切会漏文章。"""
+
+    max_queries: int = Field(default=5, ge=1, le=10)
+    """每次刷新最多用几条检索式（取任务计划的前 N 条）。"""
+
+    max_results_per_query: int = Field(default=20, ge=1, le=50)
+    """单条检索式最多取多少篇。"""
+
+    max_new_per_run: int = Field(default=30, ge=1, le=100)
+    """单次刷新最多纳入多少篇新文献（摘要 prompt 的长度上限，防止爆上下文）。"""
+
+    manual_cooldown_seconds: int = Field(default=600, ge=0)
+    """手动刷新的冷却时间：同一任务两次手动刷新之间至少间隔这么久。"""
+
+    default_cadence: str = "weekly"
+    """新建排期时的默认频率（weekly / monthly）。"""
+
+
 class ReferenceVerificationConfig(BaseModel):
     """引用真实性核验配置（Issue #3 / 计划 §2.5）。
 
@@ -627,6 +663,7 @@ class Settings(BaseSettings):
     rag: RAGConfig = RAGConfig()
     agent: AgentConfig = AgentConfig()
     orchestration: OrchestrationConfig = OrchestrationConfig()
+    routine: RoutineConfig = RoutineConfig()
     reference_verification: ReferenceVerificationConfig = ReferenceVerificationConfig()
     email: EmailConfig = EmailConfig()
     captcha: CaptchaConfig = CaptchaConfig()

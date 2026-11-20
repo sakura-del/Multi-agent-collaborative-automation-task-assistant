@@ -114,9 +114,26 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as exc:  # 测试库未建表时不阻塞启动
         logger.warning("task_runtime_recover_skipped", error=str(exc))
 
+    # ===== 定时重跑（Issue #27）=====
+    # 单 worker 部署，进程内一个 tick 循环足够；关闭开关时不启动（排期数据保留）。
+    routine_scheduler = None
+    if settings.routine.enabled:
+        from app.db.session import AsyncSessionLocal
+        from app.orchestration.services.routine_scheduler import RoutineScheduler
+
+        routine_scheduler = RoutineScheduler(
+            session_factory=AsyncSessionLocal,
+            starter=task_execution.start_scheduled_refresh,
+            config=settings.routine,
+        )
+        routine_scheduler.start()
+    app.state.routine_scheduler = routine_scheduler
+
     yield
 
     logger.info("应用关闭，释放资源")
+    if routine_scheduler is not None:
+        await routine_scheduler.stop()
     await container.close()
 
     # 关闭兜底：容器只跟踪自己 `track()` 过的协程；工作流/通信层仍可能留下

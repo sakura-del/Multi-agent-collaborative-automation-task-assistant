@@ -13,6 +13,7 @@ import AnnotationPanel from "@/components/collaboration/AnnotationPanel.vue";
 import NodeDetail from "@/components/tasks/NodeDetail.vue";
 import PlanPanel from "@/components/tasks/PlanPanel.vue";
 import TaskDag from "@/components/tasks/TaskDag.vue";
+import TaskRefreshPanel from "@/components/tasks/TaskRefreshPanel.vue";
 import TaskLog from "@/components/tasks/TaskLog.vue";
 import TaskResult from "@/components/tasks/TaskResult.vue";
 import TaskToolbar from "@/components/tasks/TaskToolbar.vue";
@@ -396,6 +397,9 @@ onBeforeUnmount(() => {
         </RouterLink>
       </div>
     </header>
+
+    <!-- 持续更新（Issue #27）：已完成任务才渲染，手动刷新 + 定时重跑 + 历史摘要 -->
+    <TaskRefreshPanel :task-id="props.taskId" :status="store.snapshot?.status ?? 'created'" />
 
     <!-- 需要用户行动时显式提示：这是本页唯一「你必须做点什么」的信息，
          以前只靠状态徽标暗示，容易被忽略。 -->

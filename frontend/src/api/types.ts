@@ -187,6 +187,48 @@ export interface TaskSnapshot {
   updated_at: string | null;
 }
 
+/** 定时重跑排期（Issue #27）：每任务最多一条。 */
+export interface TaskRoutine {
+  task_id: string;
+  enabled: boolean;
+  cadence: "weekly" | "monthly";
+  notify: "none" | "email";
+  next_run_at: string;
+  last_run_at: string | null;
+}
+
+/** 保存排期的入参。 */
+export interface TaskRoutineInput {
+  enabled: boolean;
+  cadence: "weekly" | "monthly";
+  notify: "none" | "email";
+}
+
+/**
+ * 一次增量刷新记录。
+ *
+ * `new_count=0 && status="completed"` 是「本期无新增」，不是失败；
+ * `error` 非空但状态是 completed，说明部分检索式失败（其余照常汇总）。
+ */
+export interface TaskRefreshRun {
+  id: string;
+  trigger: "manual" | "schedule";
+  status: "running" | "completed" | "failed";
+  window_from: string | null;
+  window_to: string | null;
+  hits_total: number;
+  new_count: number;
+  duplicate_count: number;
+  sources: Record<string, number>;
+  summary_markdown: string | null;
+  citation_ok: boolean;
+  tokens_used: number;
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string | null;
+}
+
 export interface TaskEvent {
   event_id: number;
   task_id: string;
