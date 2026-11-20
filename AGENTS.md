@@ -561,6 +561,26 @@ E2E 双视口 **16/16 passed**（写工具用例覆盖 resume=1 请求与多步�
 `npx vue-tsc --noEmit` 会漏检部分文件——本次 `AppLayout` 少一个图标导入，
 `--noEmit` 绿、`-b` 红、Pages 构建直接失败。
 
+### 产出落库前校验 / 审计 / 发布纪律（Issue #25，2026-11-20）
+
+- **落库前引用闸门**（关联 #17）：`app/orchestration/validation/citation_consistency.py`
+  做正文 `[E#]` ↔ 参考文献 `index` **双向**审计；`_finish_reviewing` 里
+  `_guard_citation_consistency` 不通过 → 不写 `review_report`/`artifacts`，
+  任务 REVIEWING→FAILED（可 `replan`），事件 `task_failed` 带原因。
+  两边都空视为合法；缺条目/孤儿条目/条目缺 index 都判不通过。
+- **平台凭据探活**：`app/llm/health.py` 只看配置态（不发网络请求）；
+  `/health/ready` 增加 `checks.llm_credentials`，缺 key/占位符 →
+  `status=degraded`（HTTP 200）+ `warnings`，启动日志同步告警。
+  ⚠️ 外部巡检必须按 **status=ready** 判断，否则 degraded 不告警。
+- **审计日志**：`audit_log` 表（迁移 `d0e1f2a3b4c5` + `e1f2a3b4c5d6` 补时间列默认值），
+  凭据创建/更新/删除、计费开通/取消留痕；`GET /admin/console/audit`（admin）。
+  **审计写用 SAVEPOINT**：失败只回滚该条 INSERT——第一版对请求会话整体
+  `rollback()` 导致业务对象过期、`_to_out` 懒加载 `MissingGreenlet`、创建凭据 500
+  （生产实测）。参数只传 `actor_id/actor_name` 快照，不在审计函数里碰 ORM。
+- **发布纪律**：版本三处一致（`pyproject.toml` / `package.json` / `__version__`），
+  每次生产部署在 `docs/releases/` 写一条记录（版本、提交、摘要、回滚点）。
+  当前 `0.2.0`。
+
 ### 磁盘维护（生产 47.253.81.6）
 
 2026-11-19 清理：`docker builder prune -af` 回收 **18.8GB**（containerd 里的
