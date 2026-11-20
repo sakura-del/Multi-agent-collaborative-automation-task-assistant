@@ -87,9 +87,9 @@ class OpenAlexSearchSource(OpenAlexClient):
         params: dict[str, str] = {
             "search": search.query,
             "per_page": str(min(search.max_results, 50)),
-            "sort": (
-                "publication_date:desc" if search.sort_by == "submitted" else "relevance_score:desc"
-            ),
+            # 窗口由 from_publication_date 过滤，排序始终按相关度：
+            # 「最新优先」会把不相关的新论文排到最前（arXiv 侧实测过）。
+            "sort": "relevance_score:desc",
         }
         filters: list[str] = []
         if search.date_from is not None:
