@@ -33,7 +33,7 @@
 | 数据库迁移 head | **`a7d3e9b6c1f4`**（`revoked_refresh_token`；前一个 `c4f2a8d7e9b1` = `knowledge_vectors_bge` 影子表） |
 | 后端测试 | **3157 passed**, 21 skipped；覆盖率 **90%**；`mypy` 0 错误（219 文件）；`.csl` 4 红已由 `.gitattributes`（`*.csl -text`）消除 |
 | 前端测试 | Vitest **458 passed**（+6 skipped）；**Playwright E2E 44 场景**（chromium + mobile-chrome 双视口） |
-| 发布方式 | **前端：`git push backup main` 后 Cloudflare Pages 自动构建部署**（Git 集成，无需本机 Node）；**后端：bundle + `deploy/ecs` 目录 `docker compose build backend`** |
+| 发布方式 | **前端：Cloudflare Pages `Direct Upload`**（`node scripts/deploy-pages.mjs`，凭据 `C:/Users/Lenovo/cf-secrets.env`）。⚠️ 2026-11-20 核实：**不是** git 构建——仓库 `main` 落后 78 个提交，线上包却已含 v0.2.0 的 `admin-console`/`我的模型`，`git push` 不会触发任何构建；**后端：bundle + `deploy/ecs` 目录 `docker compose build backend`** |
 | CI | ⚠️ **2026-10-28 起 CI 因 GitHub Actions 账单额度停摆**（报 spending limit），作业 0~2s 就 X，**不是代码问题**。⚠️ **GitHub 直连时通时不通**：不通时走代理（`git -c http.proxy=http://127.0.0.1:7894 ...`，`gh` 需 `$env:HTTPS_PROXY`） |
 | 服务器 | `root@47.253.81.6`，HEAD **`9fceda6`**（CD 自动部署），backend 镜像 `c476209d879c`（1.78 GB，已无 chromadb）；80/443 仅接受 Cloudflare 回源（`DOCKER-USER`，第三方探测 443=0/4）；UFW active；SSH 3 把密钥、X11 关、MaxAuthTries 3；监控两层已上线（站内 2 分钟 / 站外 5 分钟），**webhook 已配置并验证**（`/etc/veripaper/notify.env` + 仓库 secret `WECOM_WEBHOOK_URL`，2026-11-13）（回滚锚点 `shadow-mock`=`79ac91a4374c`），五容器 healthy，公网 `ready`，嵌入 = **SiliconFlow BGE-M3**（1600 RPM / 400k TPM），**user=2（Lingrove=admin + `yanglin125210@gmail.com`=user，**保留作以后的用户测试账号**）/ task 86 / doc_chunk 2835 / 两表各 2835**（2026-11-11 清掉 26 个测试账号后），磁盘 38% |
 
@@ -579,7 +579,17 @@ E2E 双视口 **16/16 passed**（写工具用例覆盖 resume=1 请求与多步�
   （生产实测）。参数只传 `actor_id/actor_name` 快照，不在审计函数里碰 ORM。
 - **发布纪律**：版本三处一致（`pyproject.toml` / `package.json` / `__version__`），
   每次生产部署在 `docs/releases/` 写一条记录（版本、提交、摘要、回滚点）。
-  当前 `0.2.0`。
+  当前 `0.2.1`。
+- **公开页（登录/注册/重置）两个坑**（Issue #26）：
+  1. Vue 的 `whitespace: condense` 会把模板里**跨行折断的中文文本**压成一个空格
+     （「你负责判断， 系统负责」）。中文正文写在一行里，别为了排版折行。
+     反过来，巡检报告里标题「让每一句论断， 都…」是 `innerText` 把 `<br>` 当换行
+     产生的假阳性——判据要用 `textContent`。
+  2. ALTCHA v3 的 `observedAttributes` 只有
+     `auto/challenge/configuration/display/form/language/name/theme/type/workers`，
+     **`hideFooter` 不在其中**：裸写 `hideFooter`/`hide-footer` 或直接赋同名
+     property 都不生效，页脚会多出一行「由 ALTCHA 保护」。必须走
+     `configuration='{"hideFooter":true}'`。
 
 ### 磁盘维护（生产 47.253.81.6）
 
