@@ -509,6 +509,20 @@ Node 20 + `vite preview`；结束后 `down -v` 并删除含密钥的临时 env/o
 第二条 system**。工具策略必须**并入** `context[0]` 正文，不能 `insert` 一条新
 system——否则开了工具整轮 400「System message must be at the beginning」。
 
+- **可等待工具（wait_seconds 轮询）**：`get_task` / `approve_task_plan` 带
+  `wait_seconds`（0~180），任务仍在 created/planning/retrying 时**工具内轮询**
+  （5s 间隔）直到就绪/离开过渡态；`approve_task_plan` 就绪即自动确认，
+  超时如实回报 `approved=false`（绝不硬确认）。为什么在工具内轮询而不是让
+  模型反复调 get_task：每轮都要过一次模型（慢、贵、可能跑偏）。
+- **执行期 keepalive**：慢工具执行期间流上每 15s 发 `tool_wait` 帧——Cloudflare
+  约 100s 空闲掐断静默流；等待期间点停止同样生效（循环里检查 `_should_stop`）。
+  前端把 wait 写进时间线预览（「等待任务状态变化…已等 Ns」）。
+- ⚠️ **tool-confirm 必须单独放宽 axios 超时**：写工具在确认请求里执行，
+  `wait_seconds=180` 时服务端轮询可达 180s+，全局 15s 超时会假失败
+  （前端报错但服务端其实已确认）→ 当前 `confirmTool` 单独 240s。
+- ⚠️ **E2E：resume 断言必须先于点击注册**：确认接口一返回前端就发起
+  resume 请求，先点击再 `waitForRequest` 会漏接 → 假超时（实测踩过）。
+
 **移动端可用性（踩过）**：任务页时间线两侧卡片把布局宽度撑到 614px
 （Pixel 5 视口 393px），`position: fixed` 按布局宽度定位 → 聊天 FAB 落在可视区外，
 点击无反应。三道修法：`BeTimeline` 加 `overflow-x-clip`；时间线容器
