@@ -476,7 +476,6 @@ test.describe("会话内核：工具调用（真实模型）", () => {
     await expect(approval).toContainText("创建文献综述任务");
 
     await page.locator('[data-test="chat-tool-approve"]').click();
-    await expect(approval).toHaveCount(0, { timeout: 60_000 });
 
     // 多步连续写操作（P3 核心）：确认后前端必须发起 resume=1 的续跑请求，
     // 服务端把工具结果回灌给模型继续同一条消息。
@@ -486,11 +485,18 @@ test.describe("会话内核：工具调用（真实模型）", () => {
     );
     await resumeRequest;
 
-    // 续跑后模型可能顺势提议下一步写操作（如确认规划）——这是多步链路的
-    // 正常表现；出现就取消，保证用例可收口（拒绝路径同时被覆盖）。
-    const secondCard = page.locator('[data-test="chat-tool-approval"]');
-    if (await secondCard.isVisible({ timeout: 60_000 }).catch(() => false)) {
+    // 续跑后模型会顺势提议下一步写操作（如确认规划）——第一张卡消失后
+    // 可能立刻出现新卡，不能用 toHaveCount(0) 断言「卡没了」。
+    // 循环处理后续卡：最多 3 张，全部取消收口（拒绝路径同时被覆盖）。
+    for (let round = 0; round < 3; round += 1) {
+      const card = page.locator('[data-test="chat-tool-approval"]');
+      const appeared = await card
+        .waitFor({ state: "visible", timeout: 30_000 })
+        .then(() => true)
+        .catch(() => false);
+      if (!appeared) break;
       await page.locator('[data-test="chat-tool-reject"]').click();
+      await expect(card).toHaveCount(0, { timeout: 30_000 });
     }
     await waitStreamingSettled(page);
 
