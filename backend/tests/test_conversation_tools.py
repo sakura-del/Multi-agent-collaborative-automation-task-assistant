@@ -7,11 +7,14 @@
 - 写工具：**不执行**，消息落库为 waiting_approval + pending_tool；
 - 工具轨迹持久化（刷新后仍能看到执行过程）；
 - 确认后续跑（resume）：结果回灌 → 模型继续同一条消息，正文/轨迹不丢；
-- 被拒绝的写操作不重复弹卡；空轨迹 resume 报错。
+- 被拒绝的写操作不重复弹卡；空轨迹 resume 报错；
+- 可等待工具：wait_seconds 轮询到就绪/超时回报/参数封顶；
+- 慢工具执行期间流上发 keepalive（tool_wait），防代理空闲断连。
 """
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from typing import Any
 
@@ -283,3 +286,129 @@ async def test_rejected_tool_is_not_proposed_again() -> None:
         records, "create_task", {"topic": "另一个主题", "keywords": []}
     )
     assert not blocked2
+
+
+# ===== 可等待工具（wait_seconds 轮询）=====
+
+
+class _SnapStub:
+    def __init__(self, task_id: uuid.UUID, status: str, plan_version: int = 1) -> None:
+        self.task_id = task_id
+        self.status = status
+        self.plan_version = plan_version
+        self.revision = 0
+        self.subtasks: list[Any] = []
+        self.final_output = None
+        self.title = "t"
+
+
+class _ExecStub:
+    """脚本化状态机：第 n 次查询返回 statuses[min(n, last)]。"""
+
+    def __init__(self, statuses: list[str]) -> None:
+        self._statuses = statuses
+        self.reads = 0
+        self.approved: tuple[uuid.UUID, int] | None = None
+
+    async def get_snapshot(
+        self, user_id: Any, task_id: uuid.UUID, workspace_ids: Any = None
+    ) -> _SnapStub:
+        status = self._statuses[min(self.reads, len(self._statuses) - 1)]
+        self.reads += 1
+        return _SnapStub(task_id, status)
+
+    async def approve_plan(self, user_id: Any, task_id: uuid.UUID, revision: int) -> _SnapStub:
+        self.approved = (task_id, revision)
+        return _SnapStub(task_id, "running", revision)
+
+
+def _tool_ctx(execution: _ExecStub) -> ToolContext:
+    return ToolContext(
+        db=None,  # type: ignore[arg-type]
+        user_id=uuid.uuid4(),
+        execution=execution,  # type: ignore[arg-type]
+        plan_service=_PlanStub(),  # type: ignore[arg-type]
+        quota=None,
+        workspace_ids=(),
+    )
+
+
+async def test_get_task_wait_polls_until_ready(monkeypatch: Any) -> None:
+    from app.tools.agent import handlers
+    from app.tools.agent.handlers import GetTaskArgs, get_task
+
+    monkeypatch.setattr(handlers, "_WAIT_TICK_S", 0.01)
+    execution = _ExecStub(["planning", "planning", "waiting_approval"])
+    ctx = _tool_ctx(execution)
+    task_id = uuid.uuid4()
+    result = await get_task(ctx, GetTaskArgs(task_id=task_id, wait_seconds=30))
+    assert result["status"] == "waiting_approval"
+    assert result["waited_seconds"] >= 0
+    assert execution.reads == 3
+
+
+async def test_approve_task_plan_waits_then_approves(monkeypatch: Any) -> None:
+    from app.tools.agent import handlers
+    from app.tools.agent.handlers import ApproveTaskArgs, approve_task_plan
+
+    monkeypatch.setattr(handlers, "_WAIT_TICK_S", 0.01)
+    execution = _ExecStub(["planning", "waiting_approval"])
+    ctx = _tool_ctx(execution)
+    task_id = uuid.uuid4()
+    result = await approve_task_plan(ctx, ApproveTaskArgs(task_id=task_id, wait_seconds=30))
+    assert result["approved"] is True
+    assert result["status"] == "running"
+    assert execution.approved == (task_id, 1)
+
+
+async def test_approve_task_plan_wait_timeout_reports(monkeypatch: Any) -> None:
+    from app.tools.agent import handlers
+    from app.tools.agent.handlers import ApproveTaskArgs, approve_task_plan
+
+    monkeypatch.setattr(handlers, "_WAIT_TICK_S", 0.01)
+    execution = _ExecStub(["planning"])
+    ctx = _tool_ctx(execution)
+    result = await approve_task_plan(ctx, ApproveTaskArgs(task_id=uuid.uuid4(), wait_seconds=5))
+    assert result["approved"] is False
+    assert result["status"] == "planning"
+    assert "仍处于 planning" in result["error"]
+    assert execution.approved is None, "超时绝不能硬确认"
+
+
+async def test_wait_seconds_over_cap_rejected() -> None:
+    import pytest
+    from pydantic import ValidationError
+
+    from app.tools.agent.handlers import ApproveTaskArgs
+
+    with pytest.raises(ValidationError):
+        ApproveTaskArgs(task_id=uuid.uuid4(), wait_seconds=999)
+
+
+async def test_slow_tool_emits_keepalive(monkeypatch: Any) -> None:
+    """执行超过一个 tick 的工具必须发 tool_wait 帧（防代理空闲断连）。"""
+    from app.orchestration.services import conversation_stream as cs
+
+    monkeypatch.setattr(cs, "TOOL_WAIT_TICK_S", 0.05)
+
+    class _SlowPlan(_PlanStub):
+        async def get_usage(self, user_id: uuid.UUID) -> dict[str, Any]:
+            await asyncio.sleep(0.25)
+            return await super().get_usage(user_id)
+
+    streamer, assistant, _rows, _llm = _fixture()
+    # 替换 plan_service 为慢实现：get_quota 就会超过一个 tick
+    streamer._tool_context = ToolContext(
+        db=None,  # type: ignore[arg-type]
+        user_id=assistant.conversation_id,
+        execution=None,  # type: ignore[arg-type]
+        plan_service=_SlowPlan(),  # type: ignore[arg-type]
+        quota=None,
+        workspace_ids=(),
+    )
+    frames = await _collect(streamer, assistant)
+    joined = "".join(frames)
+    assert "event: tool_wait" in joined
+    assert '"name": "get_quota"' in joined
+    # 工具最终仍正常完成
+    assert assistant.tool_calls and assistant.tool_calls[0]["status"] == "ok"

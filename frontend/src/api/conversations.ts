@@ -172,6 +172,8 @@ export interface StreamHandlers {
     write: boolean;
   }) => void;
   onToolResult?: (data: { id: string; name: string; ok: boolean; preview: string }) => void;
+  /** 可等待工具执行中的 keepalive：轮询还没结束，让时间线显示进展 */
+  onToolWait?: (data: { id: string; name: string; waited_seconds: number }) => void;
   onToolApproval?: (data: {
     id: string;
     name: string;
@@ -268,6 +270,7 @@ export function parseSseChunk(buffer: string, handlers: StreamHandlers, keepTail
     else if (event === "delta") handlers.onDelta?.(String(data.text ?? ""));
     else if (event === "tool_call") handlers.onToolCall?.(data as never);
     else if (event === "tool_result") handlers.onToolResult?.(data as never);
+    else if (event === "tool_wait") handlers.onToolWait?.(data as never);
     else if (event === "tool_approval") handlers.onToolApproval?.(data as never);
     else if (event === "done") handlers.onDone?.(data as never);
     else if (event === "error") handlers.onError?.(data as never);

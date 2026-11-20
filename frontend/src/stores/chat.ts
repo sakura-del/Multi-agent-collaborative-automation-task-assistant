@@ -207,6 +207,12 @@ export const useChatStore = defineStore("chat", () => {
             record.result_preview = data.preview;
           }
         },
+        onToolWait: (data) => {
+          const record = streamingTools.value.find((item) => item.id === data.id);
+          if (record) {
+            record.result_preview = `等待任务状态变化…已等 ${data.waited_seconds}s`;
+          }
+        },
         onToolApproval: (data) => {
           const record = streamingTools.value.find((item) => item.id === data.id);
           if (record) {

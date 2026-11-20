@@ -13,7 +13,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
+import time
 from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
@@ -52,6 +54,16 @@ class TaskIdArgs(_Args):
 
 class GetTaskArgs(TaskIdArgs):
     include_output: bool = Field(False, description="是否带上正文（截断 8000 字）")
+    wait_seconds: int = Field(
+        0,
+        ge=0,
+        le=180,
+        description=(
+            "任务仍在 planning/created 时最多等待的秒数（轮询直到状态变化）。"
+            "适合「创建后等规划就绪」：传 120 左右，规划就绪后返回最新状态；"
+            "0 = 不等待，立即返回当前状态"
+        ),
+    )
 
 
 class CreateTaskArgs(_Args):
@@ -67,6 +79,15 @@ class CreateTaskArgs(_Args):
 
 class ApproveTaskArgs(TaskIdArgs):
     revision: int | None = Field(None, ge=1, description="规划版本；不传 = 用当前 plan_version")
+    wait_seconds: int = Field(
+        0,
+        ge=0,
+        le=180,
+        description=(
+            "规划尚未就绪（仍在 planning）时最多等待的秒数，轮询到可确认即自动确认。"
+            "「建任务后确认规划」应传 120~180；0 = 不等待，未就绪直接报错"
+        ),
+    )
 
 
 class RetryNodeArgs(TaskIdArgs):
@@ -151,10 +172,39 @@ async def list_tasks(ctx: ToolContext, args: ListTasksArgs) -> dict[str, Any]:
     }
 
 
-async def get_task(ctx: ToolContext, args: GetTaskArgs) -> dict[str, Any]:
+#: 轮询参数实际上限（schema le=180 的运行时兜底）
+_MAX_WAIT_S = 180
+#: 轮询间隔（秒）
+_WAIT_TICK_S = 5.0
+#: 「仍在变化中」的状态：等待会继续轮询，直到离开或超时
+_TRANSIENT_STATUSES = {"created", "planning", "retrying"}
+
+
+async def _settle_snapshot(ctx: ToolContext, task_id: UUID, wait_seconds: int) -> tuple[Any, int]:
+    """轮询任务快照直到离开过渡态（或超时）。
+
+    返回 `(最终快照, 实际等待秒数)`。`wait_seconds=0` 时只查一次。
+    为什么在工具内轮询而不是让模型反复调 get_task：每轮都要过一次模型
+    （慢、贵、可能跑偏）；轮询发生在工具执行里，模型只看到最终结果。
+    """
+    seconds = min(max(wait_seconds, 0), _MAX_WAIT_S)
     snapshot = await ctx.execution.get_snapshot(
-        ctx.user_id, args.task_id, workspace_ids=ctx.workspace_ids
+        ctx.user_id, task_id, workspace_ids=ctx.workspace_ids
     )
+    if seconds <= 0 or snapshot.status not in _TRANSIENT_STATUSES:
+        return snapshot, 0
+    deadline = time.monotonic() + seconds
+    while snapshot.status in _TRANSIENT_STATUSES and time.monotonic() < deadline:
+        remaining = deadline - time.monotonic()
+        await asyncio.sleep(min(_WAIT_TICK_S, max(remaining, 0.01)))
+        snapshot = await ctx.execution.get_snapshot(
+            ctx.user_id, task_id, workspace_ids=ctx.workspace_ids
+        )
+    return snapshot, int(seconds - max(deadline - time.monotonic(), 0))
+
+
+async def get_task(ctx: ToolContext, args: GetTaskArgs) -> dict[str, Any]:
+    snapshot, waited = await _settle_snapshot(ctx, args.task_id, args.wait_seconds)
     failed = [item for item in snapshot.subtasks if item.status == "failed"]
     result: dict[str, Any] = {
         "task_id": str(snapshot.task_id),
@@ -175,6 +225,8 @@ async def get_task(ctx: ToolContext, args: GetTaskArgs) -> dict[str, Any]:
     }
     if args.include_output and snapshot.final_output:
         result["output_markdown"] = snapshot.final_output[:8000]
+    if waited:
+        result["waited_seconds"] = waited
     return result
 
 
@@ -203,16 +255,35 @@ async def create_task(ctx: ToolContext, args: CreateTaskArgs) -> dict[str, Any]:
 
 
 async def approve_task_plan(ctx: ToolContext, args: ApproveTaskArgs) -> dict[str, Any]:
-    snapshot = await ctx.execution.get_snapshot(
-        ctx.user_id, args.task_id, workspace_ids=ctx.workspace_ids
-    )
+    waited = 0
+    if args.wait_seconds > 0:
+        snapshot, waited = await _settle_snapshot(ctx, args.task_id, args.wait_seconds)
+        if snapshot.status != "waiting_approval":
+            # 等满了还没就绪（或已进入失败/取消）：如实回报，不硬确认。
+            # 模型拿到这个结果可以向用户解释，而不是拿到 4xx 后盲目重试。
+            return {
+                "task_id": str(args.task_id),
+                "approved": False,
+                "status": snapshot.status,
+                "waited_seconds": waited,
+                "error": f"等待 {waited}s 后任务仍处于 {snapshot.status}，规划不可确认",
+                "hint": "稍后用 get_task 查看状态，就绪后再调 approve_task_plan",
+            }
+    else:
+        snapshot = await ctx.execution.get_snapshot(
+            ctx.user_id, args.task_id, workspace_ids=ctx.workspace_ids
+        )
     revision = args.revision if args.revision is not None else snapshot.plan_version
     updated = await ctx.execution.approve_plan(ctx.user_id, args.task_id, revision)
-    return {
+    result: dict[str, Any] = {
         "task_id": str(updated.task_id),
         "status": updated.status,
         "plan_version": updated.plan_version,
+        "approved": True,
     }
+    if waited:
+        result["waited_seconds"] = waited
+    return result
 
 
 async def cancel_task(ctx: ToolContext, args: TaskIdArgs) -> dict[str, Any]:

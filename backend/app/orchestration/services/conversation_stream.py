@@ -62,6 +62,10 @@ TOOL_POLICY = (
     "也不要在用户拒绝后重复提议同一个操作。"
 )
 
+#: 工具执行 keepalive 间隔（秒）：可等待工具（wait_seconds 轮询）执行期间
+#: 流上没有 delta，Cloudflare 约 100s 空闲会掐断连接——必须周期性发帧。
+TOOL_WAIT_TICK_S = 15.0
+
 #: 周期落库的 delta 计数（客户端断连/进程被杀时，已生成内容不丢）
 PARTIAL_FLUSH_EVERY = 20
 
@@ -536,11 +540,28 @@ class ConversationStreamer:
 
                 # use_tools 为真时 tool_context 必非空（构造参数保证）
                 assert self._tool_context is not None
+                # 工具可能内部轮询（wait_seconds）：执行期间发 keepalive 帧，
+                # 既保住 SSE 连接（Cloudflare 空闲超时会掐断静默流），
+                # 也让用户在「执行过程」里看到进展而不是干等。
+                tool_task = asyncio.create_task(
+                    invoke_tool(self._tool_context, call.name, args, confirmed=False)
+                )
                 try:
-                    outcome = await invoke_tool(
-                        self._tool_context, call.name, args, confirmed=False
-                    )
-                    result: Any = outcome.get("result", {})
+                    waited = 0
+                    while True:
+                        done, _pending = await asyncio.wait({tool_task}, timeout=TOOL_WAIT_TICK_S)
+                        if done:
+                            break
+                        if _should_stop(message_id):
+                            # 等待期间用户点了停止：取消工具，走中断收口
+                            raise asyncio.CancelledError
+                        waited += int(TOOL_WAIT_TICK_S)
+                        yield sse(
+                            "tool_wait",
+                            {"id": call.id, "name": call.name, "waited_seconds": waited},
+                        )
+                    outcome = tool_task.result()
+                    result = outcome.get("result", {})
                     record["status"] = "ok"
                 except AppException as exc:
                     result = {"error": exc.message}
@@ -548,6 +569,10 @@ class ConversationStreamer:
                 except Exception as exc:
                     result = {"error": str(exc)[:300]}
                     record["status"] = "error"
+                finally:
+                    # 防御：生成器被提前关闭时不要留下孤儿任务
+                    if not tool_task.done():
+                        tool_task.cancel()
 
                 preview = json.dumps(result, ensure_ascii=False, default=str)[:600]
                 record["result_preview"] = preview
