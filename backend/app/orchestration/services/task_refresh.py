@@ -29,7 +29,7 @@ import json
 import re
 import unicodedata
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -104,6 +104,115 @@ def record_keys(record: LiteratureRecord) -> set[str]:
     return keys
 
 
+#: 检索式里出现但不带信息量的英文词（否则「for」「the」会让任何论文都算相关）
+_STOPWORDS = frozenset(
+    {
+        "the",
+        "and",
+        "for",
+        "with",
+        "from",
+        "into",
+        "onto",
+        "that",
+        "this",
+        "these",
+        "those",
+        "a",
+        "an",
+        "of",
+        "in",
+        "on",
+        "to",
+        "by",
+        "as",
+        "at",
+        "is",
+        "are",
+        "be",
+        "or",
+        "vs",
+        "using",
+        "based",
+        "toward",
+        "towards",
+        "via",
+        "study",
+        "survey",
+        "review",
+        "analysis",
+        "method",
+        "methods",
+        "approach",
+        "approaches",
+        "system",
+        "systems",
+        "evaluation",
+        "assessment",
+        "quality",
+        "dataset",
+        "datasets",
+        "benchmark",
+        "benchmarks",
+    }
+)
+
+
+def relevance_terms(
+    *, keywords: Sequence[str], queries: Sequence[str], limit: int = 40
+) -> list[str]:
+    """从关键词与检索式里抽「主题词」，用于把跑题的新文献挡在门外。
+
+    ## 为什么需要这道过滤
+
+    上游检索是**全文/宽匹配**语义：一条长检索式里的任意词命中就算一条。窗口
+    只有一两周时，剩下来的往往全是「同一周上传、但和主题无关」的论文——实测
+    RAG 评估主题刷新出颈动脉超声、老年外语学习。把窗口内的每一篇都当新证据，
+    比刷新没结果更糟：用户会开始怀疑整篇综述的可信度。
+
+    ## 口径
+
+    中文按 2 字以上、英文按 3 字以上取词，去掉高频虚词；命中**任意一个**术语
+    即视为相关（宁可放宽召回，也别把真正的同义研究误杀）。
+    """
+    terms: list[str] = []
+    seen: set[str] = set()
+
+    def add(term: str) -> None:
+        normalized = term.strip().casefold()
+        if len(normalized) < 2 or normalized in seen:
+            return
+        seen.add(normalized)
+        terms.append(normalized)
+
+    for keyword in keywords:
+        if keyword.strip():
+            add(keyword.strip())
+
+    for query in queries:
+        for token in re.split(r"[^0-9A-Za-z\u4e00-\u9fa5]+", query):
+            token = token.strip()
+            if not token:
+                continue
+            is_ascii = token.isascii()
+            if is_ascii and (len(token) < 3 or token.casefold() in _STOPWORDS):
+                continue
+            if not is_ascii and len(token) < 2:
+                continue
+            add(token)
+            if len(terms) >= limit:
+                return terms
+    return terms
+
+
+def is_relevant(record: LiteratureRecord, terms: Sequence[str]) -> bool:
+    """题名或摘要命中任一主题词即算相关（大小写不敏感）。"""
+    if not terms:
+        return True
+    haystack = f"{record.title} {record.abstract or ''}".casefold()
+    return any(term in haystack for term in terms)
+
+
 def collect_queries(task: Any, *, limit: int) -> list[str]:
     """取检索式：优先任务计划（用户确认过），退回任务配置的主题/关键词。
 
@@ -147,6 +256,7 @@ class RefreshOutcome:
     status: str
     new_count: int = 0
     duplicate_count: int = 0
+    filtered_count: int = 0
     hits_total: int = 0
     summary_markdown: str | None = None
     citation_ok: bool = True
@@ -162,6 +272,7 @@ class _TaskContext:
     user_id: uuid.UUID
     title: str
     queries: list[str]
+    keywords: list[str]
     known: set[str]
 
 
@@ -188,6 +299,7 @@ def compose_summary(
     window_to: datetime | None,
     hits_total: int,
     duplicate_count: int,
+    filtered_count: int = 0,
     fallback_reason: str | None = None,
 ) -> str:
     """拼出完整摘要：模型要点 + 确定性清单。
@@ -198,9 +310,10 @@ def compose_summary(
     start = window_from.date().isoformat() if window_from else "上次刷新"
     end = window_to.date().isoformat() if window_to else _now().date().isoformat()
     lines: list[str] = [f"## 新增证据摘要（{end}）", ""]
+    filtered = f"，另有 {filtered_count} 篇与主题无关已过滤" if filtered_count else ""
     lines.append(
         f"本期检索命中 {hits_total} 篇，去重后**新增 {len(records)} 篇**"
-        f"（窗口 {start} → {end}，与既有记录重复 {duplicate_count} 条）。"
+        f"（窗口 {start} → {end}，与既有记录重复 {duplicate_count} 条{filtered}）。"
     )
     lines.append("")
 
@@ -345,11 +458,17 @@ class RefreshRunner:
             if task is None:
                 raise LookupError(f"任务不存在：{refresh.task_id}")
             cfg = self._routine_config()
+            config = getattr(task, "config", None) or {}
             context = _TaskContext(
                 task_id=task.id,
                 user_id=task.user_id,
                 title=task.title,
                 queries=collect_queries(task, limit=cfg.max_queries),
+                keywords=[
+                    str(item).strip()
+                    for item in (config.get("keywords") or [])
+                    if str(item).strip()
+                ],
                 known=await self._known_keys(session, task),
             )
             window_from = refresh.window_from
@@ -402,14 +521,19 @@ class RefreshRunner:
                 )
                 await asyncio.sleep(self._retry_delay)
 
+        terms = relevance_terms(keywords=context.keywords, queries=context.queries)
         new_records: list[LiteratureRecord] = []
         duplicates = 0
+        filtered = 0
         for query, records in hits_by_query.items():
             fresh, dup = self._split_new(records, context.known)
             duplicates += dup
-            if fresh:
-                await self._record_search(context, query=query, hits=records, fresh=fresh)
-            new_records.extend(fresh)
+            # 主题相关度过滤：窗口内的「新」不等于「相关」，跑题的不能当新证据
+            relevant = [item for item in fresh if is_relevant(item, terms)]
+            filtered += len(fresh) - len(relevant)
+            if relevant:
+                await self._record_search(context, query=query, hits=records, fresh=relevant)
+            new_records.extend(relevant)
 
         # 上限截断：宁可少报，也不要把摘要 prompt 撑爆
         if len(new_records) > cfg.max_new_per_run:
@@ -417,6 +541,7 @@ class RefreshRunner:
 
         outcome.hits_total = sum(len(items) for items in hits_by_query.values())
         outcome.duplicate_count = duplicates
+        outcome.filtered_count = filtered
         outcome.new_count = len(new_records)
         outcome.new_titles = [record.title for record in new_records]
 
@@ -438,6 +563,7 @@ class RefreshRunner:
             window_to=window_to,
             hits_total=outcome.hits_total,
             duplicate_count=duplicates,
+            filtered_count=filtered,
             fallback_reason=fallback_reason,
         )
         if errors:

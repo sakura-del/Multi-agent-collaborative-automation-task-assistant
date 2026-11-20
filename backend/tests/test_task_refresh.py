@@ -31,8 +31,10 @@ from app.orchestration.services.task_refresh import (
     audit_bullets,
     collect_queries,
     compose_summary,
+    is_relevant,
     normalize_title,
     record_keys,
+    relevance_terms,
 )
 from app.tools.literature.models import LiteratureRecord
 
@@ -67,9 +69,9 @@ def record(
 ) -> LiteratureRecord:
     return LiteratureRecord(
         source_id=f"{source}:{n}",
-        title=title or f"Paper {n}",
+        title=title or f"GNN paper {n}",
         authors=["张三", "李四"],
-        abstract=f"abstract {n}",
+        abstract=f"graph neural network abstract {n}",
         published_at=datetime(2026, 1, n, tzinfo=UTC),
         source_url=doi or f"https://arxiv.org/abs/{n}",
         pdf_url=f"https://arxiv.org/pdf/{n}",
@@ -160,7 +162,27 @@ def test_record_keys_cover_doi_source_id_title() -> None:
     keys = record_keys(item)
     assert "doi:10.1000/abc" in keys
     assert "sid:arxiv:1" in keys
-    assert f"title:{normalize_title('Paper 1')}" in keys
+    assert f"title:{normalize_title('GNN paper 1')}" in keys
+
+
+def test_relevance_terms_drops_stopwords_and_short_tokens() -> None:
+    terms = relevance_terms(
+        keywords=["检索增强生成"],
+        queries=["retrieval augmented generation evaluation", "RAG 评估基准 数据集"],
+    )
+    assert "检索增强生成" in terms
+    assert "retrieval" in terms and "augmented" in terms
+    # 虚词与过长检索式里的噪音词不该进词表
+    assert "evaluation" not in terms
+    assert "the" not in terms
+
+
+def test_is_relevant_rejects_off_topic_paper() -> None:
+    terms = relevance_terms(keywords=["检索增强生成"], queries=["retrieval augmented generation"])
+    on_topic = record(1, title="Retrieval augmented generation for evidence tracing")
+    off_topic = record(2, title="Carotid plaque assessment with contrast ultrasound")
+    assert is_relevant(on_topic, terms) is True
+    assert is_relevant(off_topic, terms) is False
 
 
 def test_compose_summary_cites_every_entry() -> None:
@@ -249,6 +271,29 @@ def test_refresh_run_dedupes_and_records_only_new(factory) -> None:
         # 库里原有一条 + 新增两条；Paper 2 不会被重复写入
         assert len(rows) == 3
         assert sorted(row.source_id for row in rows) == ["arxiv:1", "arxiv:2", "arxiv:3"]
+
+    asyncio.run(scenario())
+
+
+def test_refresh_filters_off_topic_new_records(factory) -> None:
+    """窗口内的「新」不等于「相关」：跑题的不能进摘要。"""
+
+    async def scenario():
+        task = await make_task(factory, plan={"search_queries": ["GNN survey"]})
+        refresh = await make_refresh(factory, task)
+        runner = RefreshRunner(
+            session_factory=factory,
+            source_factory=lambda _ctx: _as_coroutine(
+                _Source([record(1), record(2, title="Carotid plaque ultrasound scoring")])
+            ),
+            chat=lambda *a, **k: _as_coroutine(_Response("- 新证据 [E1]")),
+            config=CFG,
+        )
+        outcome = await runner.run(refresh.id)
+
+        assert outcome.new_count == 1
+        assert outcome.filtered_count == 1
+        assert "与主题无关已过滤" in (outcome.summary_markdown or "")
 
     asyncio.run(scenario())
 
