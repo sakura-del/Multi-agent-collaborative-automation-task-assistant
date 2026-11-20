@@ -10,6 +10,7 @@ from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
     admin_byok,
+    admin_console,
     agent_tools,
     api_keys,
     auth,
@@ -73,3 +74,4 @@ api_router.include_router(llm_credentials.router)
 api_router.include_router(billing.router)
 # 管理员看板（Issue #15 P2）：BYOK 渗透率，admin only、不走 API Key
 api_router.include_router(admin_byok.router)
+api_router.include_router(admin_console.router)

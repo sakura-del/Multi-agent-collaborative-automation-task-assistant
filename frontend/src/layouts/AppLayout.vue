@@ -134,6 +134,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { name: "models", label: "我的模型", icon: Cpu },
       { name: "api-keys", label: "API Key", icon: KeyRound },
       { name: "plan", label: "我的套餐", icon: CreditCard },
+      { name: "admin-console", label: "后台管理", icon: LayoutDashboard, adminOnly: true },
       { name: "admin-byok", label: "BYOK 看板", icon: Gauge, adminOnly: true },
     ],
   },

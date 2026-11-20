@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from "vue-router";
 
 import AppLayout from "@/layouts/AppLayout.vue";
 import AdminByokView from "@/views/AdminByokView.vue";
+import AdminConsoleView from "@/views/AdminConsoleView.vue";
 import DesignTimelineView from "@/views/DesignTimelineView.vue";
 import ApiKeyView from "@/views/ApiKeyView.vue";
 import PlanView from "@/views/PlanView.vue";
@@ -102,6 +103,13 @@ export const router = createRouter({
         { path: "settings/api-keys", name: "api-keys", component: ApiKeyView },
         // 我的套餐（Phase 2 计费套餐）
         { path: "settings/plan", name: "plan", component: PlanView },
+        // 后台管理控制台（Issue #12）：全站 KPI + 跨用户任务/用户
+        {
+          path: "admin",
+          name: "admin-console",
+          component: AdminConsoleView,
+          meta: { requiresAdmin: true },
+        },
         // 管理员侧 BYOK 渗透率看板（Issue #15 P2）：仅 admin
         {
           path: "admin/byok",
