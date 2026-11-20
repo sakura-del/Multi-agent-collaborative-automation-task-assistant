@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { demoPassword } from "./credentials";
+import { E2E_DEMO_ACCOUNT, demoPassword } from "./credentials";
 
 // 账号生命周期页面验收（Phase 1 P1-C 前端）
 // 覆盖：登录页「忘记密码」入口 → 申请重置（恒定响应）→ 邮箱验证页重发
@@ -10,7 +10,7 @@ import { demoPassword } from "./credentials";
 //   E2E_BASE_URL=http://10.0.10.2:48080 pnpm exec playwright test e2e/account-lifecycle.spec.ts
 
 const SHOTS = resolve(dirname(fileURLToPath(import.meta.url)), "screenshots");
-const CREDENTIALS = { account: "demo", password: demoPassword() };
+const CREDENTIALS = { account: E2E_DEMO_ACCOUNT, password: demoPassword() };
 
 async function login(page: Page) {
   await page.goto("/login");
