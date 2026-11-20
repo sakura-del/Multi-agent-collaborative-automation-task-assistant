@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 import app.db.models  # noqa: F401
 from app.db.base import Base
+from app.db.models.log import ExecutionLog
 from app.db.models.task import Task
 from app.orchestration.services.task_execution import TaskExecution
 from app.orchestration.validation import audit_citation_alignment
