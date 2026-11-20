@@ -22,8 +22,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 import app.db.models  # noqa: F401
 from app.db.base import Base
-from app.db.models.log import ExecutionLog  # noqa: F401 - 建表用
-from app.db.models.task import Task, TaskEvent
+from app.db.models.log import ExecutionLog
+from app.db.models.task import Task
 from app.orchestration.services.task_execution import TaskExecution
 from app.orchestration.validation import audit_citation_alignment
 
@@ -152,7 +152,7 @@ async def test_guard_fails_task_and_writes_no_output(factory) -> None:
         )
         failed_events = [e for e in events if e.event_type == "task_failed"]
         assert failed_events, "必须留一条 task_failed 事件"
-        assert "引用一致性" in str(failed_events[0].payload)
+        assert "引用一致性" in str(failed_events[0].context)
     assert harness.settled == [task.id]
 
 
