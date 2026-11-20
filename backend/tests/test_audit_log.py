@@ -55,20 +55,23 @@ async def test_record_writes_row_and_snapshots_actor(factory) -> None:
     assert row.ip == "1.2.3.4"
 
 
-async def test_record_failure_does_not_raise(factory) -> None:
-    """审计写失败只记日志；且**不得**回滚调用方会话（否则对象过期 → 500）。"""
+async def test_record_failure_isolated_by_savepoint(factory) -> None:
+    """审计写失败只记日志；调用方会话仍可用（否则端点读对象会 500）。
 
-    class _Broken:
-        def get_bind(self) -> object:
-            raise RuntimeError("bind unavailable")
-
-    await record_audit(
-        _Broken(),  # type: ignore[arg-type]
-        actor_id=None,
-        actor_name="system",
-        action="x",
-        target_type="y",
-    )
+    用不可 JSON 序列化的 metadata 触发 flush 失败。
+    """
+    actor_id = uuid.uuid4()
+    async with factory() as session:
+        await record_audit(
+            session,
+            actor_id=actor_id,
+            actor_name="alice",
+            action="credential.create",
+            target_type="credential",
+            metadata={"bad": object()},  # 无法 JSON 编码 → INSERT 失败
+        )
+        # 会话未被整体回滚：还能继续查询（业务对象不会因 rollback 过期）
+        assert (await session.execute(select(AuditLog))).scalars().all() == []
 
 
 def test_request_ip_prefers_socket_when_not_trusting_proxy() -> None:

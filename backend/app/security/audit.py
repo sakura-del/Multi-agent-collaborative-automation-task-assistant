@@ -7,13 +7,15 @@
 - 凭据变更（BYOK 创建/更新/删除）——凭据泄露时能回答「谁什么时候加的」；
 - 计费变更（管理员手工开通/取消套餐）——涉及钱，必须留痕。
 
-## 为什么自己开一个会话（2026-11-20 生产事故）
+## 为什么用 SAVEPOINT 而不是整会话回滚（2026-11-20 生产事故）
 
-第一版复用请求的 `db` 会话，审计写失败时对其 `rollback()` ——
-**rollback 会把该会话里已加载的对象全部标记过期**，随后端点读取
-`record.id` 触发同步懒加载 → `MissingGreenlet`，用户看到 500，
-而业务数据其实已经写入。审计是旁路管道，绝不能影响主流程：
-现在用同一 bind 另开一个会话，失败只记日志，调用方对象不受影响。
+第一版审计写失败时对请求会话 `rollback()` —— **整体 rollback 会把该会话里
+已加载的对象全部标记过期**，随后端点读 `record.id` 触发同步懒加载 →
+`MissingGreenlet`，用户看到 500，而业务数据其实已写入。
+
+现在审计插入包在 SAVEPOINT 里：失败只回滚这一条 INSERT，已提交的业务对象
+不受影响。不用「另开会话」是因为同一 bind 的独立会话在 SQLite 内存库测试里
+会落到另一条空库（每连接一个库），把测试与实现绑死。
 
 ## 为什么参数是原始值而不是 ORM 对象
 
@@ -30,10 +32,10 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any, cast
+from typing import Any
 
 from fastapi import Request
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -65,12 +67,13 @@ async def record_audit(
     metadata: dict[str, Any] | None = None,
     request: Request | None = None,
 ) -> None:
-    """写一条审计日志（独立会话）；失败只记 `audit_write_failed`，不影响业务。"""
+    """写一条审计日志（SAVEPOINT 隔离）；失败只记 `audit_write_failed`，不影响业务。"""
     try:
-        # 运行期一定是 AsyncEngine（AsyncSession 绑定的引擎）；类型标注偏宽
-        bind = cast(AsyncEngine, session.get_bind())
-        async with AsyncSession(bind=bind, expire_on_commit=False) as own:
-            own.add(
+        # SAVEPOINT：失败只回滚审计这条 INSERT，业务对象不进入过期状态。
+        # 不用「另开会话」：同一 bind 的独立会话在 SQLite 内存库（每连接一个库）
+        # 会落到另一条空库，测试与实现被绑死（2026-11-20 实测）。
+        async with session.begin_nested():
+            session.add(
                 AuditLog(
                     actor_id=actor_id,
                     actor_name=(actor_name or "system")[:64],
@@ -81,7 +84,7 @@ async def record_audit(
                     ip=request_ip(request),
                 )
             )
-            await own.commit()
+        await session.commit()
     except Exception as exc:
         logger.error(
             "audit_write_failed",
