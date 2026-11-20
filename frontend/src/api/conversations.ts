@@ -24,6 +24,8 @@ export interface ChatToolCall {
   status: ToolCallStatus;
   arguments?: Record<string, unknown>;
   result_preview?: string | null;
+  /** 写操作标记（后端续跑护栏按它计数） */
+  write?: boolean;
 }
 
 export interface ChatPendingTool {

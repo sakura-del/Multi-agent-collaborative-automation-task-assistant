@@ -45,7 +45,12 @@ class MessageAttachment(BaseModel):
 
 
 class MessageToolCall(BaseModel):
-    """一条工具调用轨迹（P3）。"""
+    """一条工具调用轨迹（P3）。
+
+    `write` 标记写操作：续跑护栏（拒绝防重复、提议上限）按它计数，
+    前端也能据此区分「查询」与「操作」步骤。曾因缺这个字段 + extra=forbid
+    导致确认接口 500（轨迹里有 write 键但契约不认）。
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -55,6 +60,7 @@ class MessageToolCall(BaseModel):
     status: Literal["pending_approval", "ok", "error", "rejected"] = "ok"
     arguments: dict[str, Any] = Field(default_factory=dict)
     result_preview: str | None = None
+    write: bool = False
 
 
 class MessagePendingTool(BaseModel):
