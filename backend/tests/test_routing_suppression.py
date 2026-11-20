@@ -91,5 +91,3 @@ class TestDelegationNoLoop:
         assert response.content == "adapter"
         assert delegations["count"] == 1, "委派必须只有一层"
         assert adapter.calls == 1
-
-

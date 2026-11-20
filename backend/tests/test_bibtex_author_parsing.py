@@ -32,9 +32,7 @@ class TestStandardInput:
 
 class TestEdgeCases:
     def test_single_author(self) -> None:
-        assert [_name_to_text(n) for n in _parse_bibtex_authors("Smith, John")] == [
-            "Smith, John"
-        ]
+        assert [_name_to_text(n) for n in _parse_bibtex_authors("Smith, John")] == ["Smith, John"]
 
     def test_suffix_jr_kept_in_given(self) -> None:
         """citeproc 惯例：Jr. 属于 given 部分，不得吞掉。"""

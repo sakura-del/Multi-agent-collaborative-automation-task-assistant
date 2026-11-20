@@ -33,7 +33,9 @@ class TestSseFrame:
 
 
 class _FakeMessage:
-    def __init__(self, mid: str, parent: str | None, role: str = "user", content: str = "x") -> None:
+    def __init__(
+        self, mid: str, parent: str | None, role: str = "user", content: str = "x"
+    ) -> None:
         self.id = uuid.UUID(mid)
         self.parent_id = uuid.UUID(parent) if parent else None
         self.conversation_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
