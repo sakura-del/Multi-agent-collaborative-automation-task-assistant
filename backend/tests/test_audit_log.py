@@ -34,11 +34,12 @@ def _request(
 
 
 async def test_record_writes_row_and_snapshots_actor(factory) -> None:
-    actor = SimpleNamespace(id=uuid.uuid4(), username="alice")
+    actor_id = uuid.uuid4()
     async with factory() as session:
         await record_audit(
             session,
-            actor=actor,
+            actor_id=actor_id,
+            actor_name="alice",
             action="credential.create",
             target_type="credential",
             target_id="cid-1",
@@ -55,21 +56,16 @@ async def test_record_writes_row_and_snapshots_actor(factory) -> None:
 
 
 async def test_record_failure_does_not_raise(factory) -> None:
-    """审计写失败只记日志，不能把已完成的业务操作拖挂。"""
+    """审计写失败只记日志；且**不得**回滚调用方会话（否则对象过期 → 500）。"""
 
     class _Broken:
-        def add(self, *_: object) -> None:
-            raise RuntimeError("disk full")
-
-        async def commit(self) -> None:  # pragma: no cover - 不会走到
-            pass
-
-        async def rollback(self) -> None:
-            return None
+        def get_bind(self) -> object:
+            raise RuntimeError("bind unavailable")
 
     await record_audit(
         _Broken(),  # type: ignore[arg-type]
-        actor=None,
+        actor_id=None,
+        actor_name="system",
         action="x",
         target_type="y",
     )

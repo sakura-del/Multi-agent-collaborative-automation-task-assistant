@@ -171,10 +171,13 @@ async def create_credential(
     db: DbDep,
     request: Request,
 ) -> LLMCredentialOut:
+    # 先取快照：审计参数不依赖调用后的会话状态
+    actor_id, actor_name = current_user.id, current_user.username
     record = await _service().create(db, current_user.id, payload)
     await record_audit(
         db,
-        actor=current_user,
+        actor_id=actor_id,
+        actor_name=actor_name,
         action="credential.create",
         target_type="credential",
         target_id=record.id,
@@ -200,10 +203,12 @@ async def update_credential(
     db: DbDep,
     request: Request,
 ) -> LLMCredentialOut:
+    actor_id, actor_name = current_user.id, current_user.username
     record = await _service().update(db, current_user.id, credential_id, payload)
     await record_audit(
         db,
-        actor=current_user,
+        actor_id=actor_id,
+        actor_name=actor_name,
         action="credential.update",
         target_type="credential",
         target_id=credential_id,
@@ -221,10 +226,12 @@ async def update_credential(
 async def delete_credential(
     credential_id: UUID, current_user: CurrentUserDep, db: DbDep, request: Request
 ) -> Response:
+    actor_id, actor_name = current_user.id, current_user.username
     await _service().delete(db, current_user.id, credential_id)
     await record_audit(
         db,
-        actor=current_user,
+        actor_id=actor_id,
+        actor_name=actor_name,
         action="credential.delete",
         target_type="credential",
         target_id=credential_id,

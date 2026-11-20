@@ -182,7 +182,8 @@ async def subscribe(
         raise HTTPException(status_code=status, detail=message) from exc
     await record_audit(
         db,
-        actor=current_admin,
+        actor_id=current_admin.id,
+        actor_name=current_admin.username,
         action="subscription.subscribe",
         target_type="subscription",
         target_id=subscription.id,
@@ -216,7 +217,8 @@ async def cancel_subscription(
     await service.cancel(user_id)
     await record_audit(
         db,
-        actor=current_admin,
+        actor_id=current_admin.id,
+        actor_name=current_admin.username,
         action="subscription.cancel",
         target_type="subscription",
         target_id=user_id,
