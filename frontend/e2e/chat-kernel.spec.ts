@@ -477,7 +477,24 @@ test.describe("会话内核：工具调用（真实模型）", () => {
 
     await page.locator('[data-test="chat-tool-approve"]').click();
     await expect(approval).toHaveCount(0, { timeout: 60_000 });
-    // 确认后由服务端执行，消息更新为可读结果
+
+    // 多步连续写操作（P3 核心）：确认后前端必须发起 resume=1 的续跑请求，
+    // 服务端把工具结果回灌给模型继续同一条消息。
+    const resumeRequest = page.waitForRequest(
+      (request) => request.url().includes("/stream") && request.url().includes("resume=1"),
+      { timeout: 90_000 }
+    );
+    await resumeRequest;
+
+    // 续跑后模型可能顺势提议下一步写操作（如确认规划）——这是多步链路的
+    // 正常表现；出现就取消，保证用例可收口（拒绝路径同时被覆盖）。
+    const secondCard = page.locator('[data-test="chat-tool-approval"]');
+    if (await secondCard.isVisible({ timeout: 60_000 }).catch(() => false)) {
+      await page.locator('[data-test="chat-tool-reject"]').click();
+    }
+    await waitStreamingSettled(page);
+
+    // 确认执行的结果摘要保留在正文里（追加语义，不被续跑覆盖）
     await expect(page.locator('[data-test="chat-body-assistant"]')).toContainText(
       "已创建综述任务",
       { timeout: 60_000 }

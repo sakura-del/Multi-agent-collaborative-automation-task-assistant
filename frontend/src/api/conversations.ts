@@ -144,12 +144,24 @@ export const conversationApi = {
       .then((response) => response.data),
 
   /** SSE 地址（EventSource 不支持 Authorization 头 → 用 fetch + ReadableStream 自建） */
-  streamUrl: (conversationId: string, messageId: string, tools = false) =>
-    `/conversations/${conversationId}/messages/${messageId}/stream${tools ? "?tools=1" : ""}`,
+  streamUrl: (conversationId: string, messageId: string, tools = false, resume = false) => {
+    const query = [
+      tools ? "tools=1" : "",
+      resume ? "resume=1" : "",
+    ]
+      .filter(Boolean)
+      .join("&");
+    return `/conversations/${conversationId}/messages/${messageId}/stream${query ? `?${query}` : ""}`;
+  },
 };
 
 export interface StreamHandlers {
-  onStart?: (data: { message_id: string; model: string; tools?: boolean }) => void;
+  onStart?: (data: {
+    message_id: string;
+    model: string;
+    tools?: boolean;
+    resumed?: boolean;
+  }) => void;
   onDelta?: (text: string) => void;
   onToolCall?: (data: {
     id: string;
@@ -185,13 +197,14 @@ export async function streamChatMessage(
   messageId: string,
   handlers: StreamHandlers,
   signal: AbortSignal,
-  tools = false
+  tools = false,
+  resume = false
 ): Promise<void> {
   // 原生 fetch（不走 axios）：只有它能拿到 ReadableStream 做增量解析。
   // axios 的 fetch adapter 在 responseType=text 时会把整个响应读完才 resolve，
   // 那样「流式」就名存实亡。
   const token = getAccessToken();
-  const response = await fetch(`${resolveApiBase()}${conversationApi.streamUrl(conversationId, messageId, tools)}`, {
+  const response = await fetch(`${resolveApiBase()}${conversationApi.streamUrl(conversationId, messageId, tools, resume)}`, {
     method: "GET",
     headers: {
       Accept: "text/event-stream",

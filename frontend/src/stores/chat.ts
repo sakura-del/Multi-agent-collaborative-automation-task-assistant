@@ -156,18 +156,31 @@ export const useChatStore = defineStore("chat", () => {
     }
   }
 
-  async function runStream(assistantMessageId: string) {
+  /**
+   * 流式生成一条 assistant 消息（发送与确认后续跑共用）。
+   *
+   * `resume=true`：写操作确认后的续跑。**不能**清空正文与工具轨迹——
+   * 它们是模型继续生成的基础（服务端把它们回灌成上下文），也是执行过程
+   * 时间线在界面上不闪断的原因。
+   */
+  async function runStream(
+    assistantMessageId: string,
+    options?: { resume?: boolean }
+  ) {
     const conversationId = detail.value?.id;
     if (!conversationId) return;
-    streamingMessageId.value = assistantMessageId;
-    streamingText.value = "";
-    streamingTools.value = [];
-    controller = new AbortController();
+    const resume = options?.resume === true;
     const message = detail.value?.messages.find((m) => m.id === assistantMessageId);
+    streamingMessageId.value = assistantMessageId;
+    streamingText.value = resume ? (message?.content ?? "") : "";
+    streamingTools.value = resume ? (message?.tool_calls ?? []).slice() : [];
+    controller = new AbortController();
     if (message) {
       message.status = "streaming";
-      message.tool_calls = [];
       message.pending_tool = null;
+      if (!resume) {
+        message.tool_calls = [];
+      }
     }
 
     await streamChatMessage(
@@ -217,7 +230,8 @@ export const useChatStore = defineStore("chat", () => {
         },
       },
       controller.signal,
-      toolsEnabled.value
+      toolsEnabled.value,
+      resume
     ).catch((err: unknown) => {
       // AbortError 是「用户点了停止」的正常路径，不报错
       const name = (err as Error)?.name;
@@ -257,6 +271,13 @@ export const useChatStore = defineStore("chat", () => {
       detail.value.messages[index] = updated;
     }
     void loadConversations();
+    // 确认执行后**自动续跑**同一轮生成：服务端已把工具结果写进轨迹，
+    // resume 流会把结果回灌给模型继续——多步写链（建任务 → 确认规划 →
+    // 重试节点）每步都这样衔接，用户只管逐张确认卡。
+    // 拒绝不续跑：操作没有发生，模型无需再对结果发表意见。
+    if (approve && (updated.tool_calls?.length ?? 0) > 0) {
+      await runStream(messageId, { resume: true });
+    }
   }
 
   /**

@@ -75,6 +75,12 @@ CurrentUserDep = Annotated[User, Depends(get_current_active_user)]
 DbDep = Annotated[AsyncSession, Depends(get_db)]
 
 
+def _append_note(existing: str | None, note: str) -> str:
+    """把工具结果/取消说明追加到正文：空正文直接用 note，否则空行分隔。"""
+    base = (existing or "").rstrip()
+    return f"{base}\n\n{note}" if base else note
+
+
 def _tool_result_summary(name: str, result: dict[str, Any], ok: bool) -> str:
     """把工具结果写成人能读的一句话（不把整段 JSON 倒进聊天）。"""
     if not ok:
@@ -412,7 +418,9 @@ async def confirm_tool(
         row.tool_calls = records
         row.pending_tool = None
         row.status = "completed"
-        row.content = "已取消该操作。"
+        # 追加而不是覆盖：模型的提议前文是上下文的一部分，删掉会让
+        # 「已取消」凭空出现，也让潜在的续跑丢失语境。
+        row.content = _append_note(row.content, "已取消该操作。")
         await db.commit()
         await db.refresh(row)
         return _to_message_out(row)
@@ -446,7 +454,11 @@ async def confirm_tool(
     row.pending_tool = None
     row.status = "completed" if ok else "failed"
     row.error = None if ok else str(result.get("error"))[:500]
-    row.content = _tool_result_summary(str(pending.get("name", "")), result, ok)
+    # 摘要**追加**到模型已生成的文本后（不覆盖）：前端确认后会以 resume=1
+    # 续跑同一条消息，续跑以 content 为基底回灌上下文——覆盖会丢掉提议前文。
+    row.content = _append_note(
+        row.content, _tool_result_summary(str(pending.get("name", "")), result, ok)
+    )
     await db.commit()
     await db.refresh(row)
     return _to_message_out(row)
@@ -493,11 +505,16 @@ async def stream_message(
     quota: QuotaDep,
     workspace_ids: WorkspaceIdsDep,
     tools: bool = False,
+    resume: bool = False,
 ) -> StreamingResponse:
     """事件：`start` → (`delta` | `tool_call` | `tool_result`)* → `done` / `tool_approval`。
 
     `tools=false`（默认）保持 P0 纯聊天；前端开启「工具」时传 `?tools=1`，
     只读工具自动执行，写工具暂停为 `waiting_approval` 等确认。
+
+    `resume=true` 是写操作确认后的**续跑**：保留已有正文与工具轨迹，把已执行
+    工具的结果回灌给模型继续生成同一条消息——多步写链（建任务 → 确认规划 →
+    重试节点）靠它才能连贯。必须与 `tools=1` 同用。
 
     客户端 abort 即中断（落库 interrupted）。
     """
@@ -526,7 +543,7 @@ async def stream_message(
         tools_enabled=tools,
     )
     return StreamingResponse(
-        streamer.stream(conversation_id, message_id),
+        streamer.stream(conversation_id, message_id, resume=resume),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
