@@ -141,7 +141,10 @@ export const conversationApi = {
     api
       .post<ChatMessage>(
         `/conversations/${conversationId}/messages/${messageId}/tool-confirm`,
-        { approve }
+        { approve },
+        // 可等待写工具（wait_seconds 最多 180s）在服务端轮询完成后才返回；
+        // 全局 15s 超时会把它掐死 → 前端假失败、续跑不发生（实测踩过）
+        { timeout: 240_000 }
       )
       .then((response) => response.data),
 
