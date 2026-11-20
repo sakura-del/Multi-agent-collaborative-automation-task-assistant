@@ -106,6 +106,10 @@ class ArxivClient:
         except httpx.TransportError as exc:
             raise UpstreamTemporaryError("arXiv 连接失败") from exc
 
+        if response.status_code == 429:
+            # arXiv 对突发请求直接 429（官方建议 ≥3s 间隔）。按**临时**错误处理：
+            # 判成永久错误会让「刷新时恰好被限流」变成一次确定的失败。
+            raise UpstreamTemporaryError("arXiv 限流（429），请稍后重试")
         if response.status_code >= 500:
             raise UpstreamTemporaryError(f"arXiv 返回 {response.status_code}")
         if response.status_code >= 400:

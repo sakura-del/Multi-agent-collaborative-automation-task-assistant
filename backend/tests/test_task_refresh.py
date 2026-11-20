@@ -291,6 +291,41 @@ def test_refresh_without_new_records_says_so(factory) -> None:
     asyncio.run(scenario())
 
 
+def test_refresh_retries_once_when_all_queries_fail(factory) -> None:
+    """上游限流（arXiv 429）导致全失败时，等一会儿重试一次再判定。"""
+
+    class _FlakySource:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def search(self, search):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("arXiv 限流（429），请稍后重试")
+            return [record(1)]
+
+        async def aclose(self) -> None:
+            return None
+
+    async def scenario():
+        task = await make_task(factory, plan={"search_queries": ["GNN survey"]})
+        refresh = await make_refresh(factory, task)
+        source = _FlakySource()
+        runner = RefreshRunner(
+            session_factory=factory,
+            source_factory=lambda _ctx: _as_coroutine(source),
+            chat=lambda *a, **k: _as_coroutine(_Response("- 新证据 [E1]")),
+            config=CFG,
+            retry_delay=0,
+        )
+        outcome = await runner.run(refresh.id)
+        assert outcome.status == "completed"
+        assert outcome.new_count == 1
+        assert source.calls == 2
+
+    asyncio.run(scenario())
+
+
 # ===== 调度器 =====
 
 

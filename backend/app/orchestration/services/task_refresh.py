@@ -24,6 +24,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import unicodedata
@@ -54,6 +55,9 @@ SUMMARY_SYSTEM = (
 _MAX_PROMPT_ENTRIES = 12
 
 _CITATION_MARKER = re.compile(r"\[E(\d+)\]")
+
+#: 全部检索式失败后的等待时间（给上游限流留恢复窗口）
+SEARCH_RETRY_DELAY_SECONDS = 20.0
 
 
 def _now() -> datetime:
@@ -305,11 +309,13 @@ class RefreshRunner:
         chat: Callable[..., Awaitable[Any]] | None = None,
         config: Any | None = None,
         now: Callable[[], datetime] = _now,
+        retry_delay: float = SEARCH_RETRY_DELAY_SECONDS,
     ) -> None:
         self._session_factory = session_factory
         self._source_factory = source_factory
         self._config = config
         self._now = now
+        self._retry_delay = retry_delay
         if chat is None:
             from app.llm.factory import get_llm_manager
 
@@ -365,38 +371,36 @@ class RefreshRunner:
 
         hits_by_query: dict[str, list[LiteratureRecord]] = {}
         errors: list[str] = []
-        source = await self._source_factory(context)
-        try:
-            for query in context.queries:
-                try:
-                    records = await source.search(
-                        LiteratureSearch(
-                            query=query,
-                            max_results=cfg.max_results_per_query,
-                            date_from=window_from.date() if window_from else None,
-                            # 只要窗口内的新文献，但仍在窗口内按相关度排序：
-                            # 纯按时间倒序会捞回一堆不相关的新论文（实测过）。
-                            fresh_only=True,
-                            date_to=window_to.date() if window_to else None,
-                        )
-                    )
-                except Exception as exc:  # 单个源/单条检索失败不该拖垮整次刷新
-                    logger.warning(
-                        "refresh_search_failed",
-                        task_id=str(context.task_id),
-                        query=query,
-                        error=str(exc),
-                    )
-                    errors.append(f"{query}: {exc}")
-                    continue
-                hits_by_query[query] = list(records)
-        finally:
-            closer = getattr(source, "aclose", None)
-            if closer is not None:
-                try:
-                    await closer()
-                except Exception:
-                    logger.warning("refresh_source_close_failed", task_id=str(context.task_id))
+        # 全部检索式都失败时重试一次：最常见的原因是上游限流（arXiv 429），
+        # 后台任务等一会儿再来，比直接给用户留一条 failed 有用。
+        for attempt in range(2):
+            source = await self._source_factory(context)
+            try:
+                found, attempt_errors = await self._search_queries(
+                    source,
+                    context=context,
+                    window_from=window_from,
+                    window_to=window_to,
+                    cfg=cfg,
+                )
+            finally:
+                closer = getattr(source, "aclose", None)
+                if closer is not None:
+                    try:
+                        await closer()
+                    except Exception:
+                        logger.warning("refresh_source_close_failed", task_id=str(context.task_id))
+            errors.extend(attempt_errors)
+            if found:
+                hits_by_query = found
+                break
+            if attempt == 0:
+                logger.warning(
+                    "refresh_all_queries_failed_retrying",
+                    task_id=str(context.task_id),
+                    errors=attempt_errors[:2],
+                )
+                await asyncio.sleep(self._retry_delay)
 
         new_records: list[LiteratureRecord] = []
         duplicates = 0
@@ -440,6 +444,43 @@ class RefreshRunner:
             outcome.error = "部分检索失败：" + "; ".join(errors[:3])
         await self._finish(outcome, window_from=window_from, window_to=window_to)
         return outcome
+
+    async def _search_queries(
+        self,
+        source: Any,
+        *,
+        context: _TaskContext,
+        window_from: datetime | None,
+        window_to: datetime | None,
+        cfg: Any,
+    ) -> tuple[dict[str, list[LiteratureRecord]], list[str]]:
+        """逐条检索式检索；单条失败只记录，不影响其余。"""
+        found: dict[str, list[LiteratureRecord]] = {}
+        errors: list[str] = []
+        for query in context.queries:
+            try:
+                records = await source.search(
+                    LiteratureSearch(
+                        query=query,
+                        max_results=cfg.max_results_per_query,
+                        date_from=window_from.date() if window_from else None,
+                        # 只要窗口内的新文献，但仍在窗口内按相关度排序：
+                        # 纯按时间倒序会捞回一堆不相关的新论文（实测过）。
+                        fresh_only=True,
+                        date_to=window_to.date() if window_to else None,
+                    )
+                )
+            except Exception as exc:  # 单个源/单条检索式失败不该拖垮整次刷新
+                logger.warning(
+                    "refresh_search_failed",
+                    task_id=str(context.task_id),
+                    query=query,
+                    error=str(exc),
+                )
+                errors.append(f"{query}: {exc}")
+                continue
+            found[query] = list(records)
+        return found, errors
 
     # ---- 去重 ----
 
