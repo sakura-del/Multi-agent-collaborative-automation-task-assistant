@@ -165,10 +165,8 @@ async def list_all_tasks(
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> AdminTaskPage:
-    base: Select[Any] = select(Task, User.username).join(User, User.id == Task.user_id)
-    count_query: Select[Any] = (
-        select(func.count()).select_from(Task).join(User, User.id == Task.user_id)
-    )
+    base = select(Task, User.username).join(User, User.id == Task.user_id)
+    count_query = select(func.count()).select_from(Task).join(User, User.id == Task.user_id)
     if status:
         base = base.where(Task.status == status)
         count_query = count_query.where(Task.status == status)

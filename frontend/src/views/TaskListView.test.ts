@@ -176,11 +176,12 @@ describe("进度列：不再有说谎的百分比进度条", () => {
 });
 
 describe("汇总统计", () => {
-  it("待人工介入时说明处理暂停原因，不误导为尚未开始", async () => {
+  it("待人工介入时明确等待判断，不误导为尚未开始", async () => {
     const wrapper = await mountWith([task({ task_id: "human", status: "waiting_human" })]);
     const action = wrapper.find('[data-test="attention-needs-me"]');
 
-    expect(action.text()).toContain("暂停原因");
+    // b629900 改版后文案为「N 项等待你的判断 / 筛选待办 →」，仍是「等你处理」而不是「未开始」
+    expect(action.text()).toContain("等待你的判断");
     expect(action.text()).not.toContain("开始检索");
   });
 
