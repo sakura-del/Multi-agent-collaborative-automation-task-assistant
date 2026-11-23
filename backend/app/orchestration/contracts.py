@@ -178,6 +178,45 @@ class ValidationCheck(BaseModel):
     """
 
 
+#: 论断级核验结论（Issue #31 Phase 2）。
+#:
+#: 六种判定：有证据直接支持 / 支持但偏弱 / 表述夸大 / 曲解原意 /
+#: 与证据矛盾 / 无法核验（含只有题录或摘要、看不到该细节）。
+ClaimVerdict = Literal[
+    "supported",
+    "weakly_supported",
+    "overstated",
+    "misrepresented",
+    "contradicted",
+    "unverifiable",
+]
+
+
+class ClaimCheckResult(BaseModel):
+    """单条论断的核验结论（Issue #31 Phase 2）。
+
+    `claim_id` 由抽取阶段生成、带节点前缀（``{node_id}:c{n}``），
+    复盘把它重写成最终正文的全局引用编号后仍保持稳定，前端据此定位。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    claim_id: str = Field(min_length=1, max_length=80)
+    sentence_text: str = Field(min_length=1, max_length=2000)
+    #: 引用编号（``E3`` 形式，与正文 ``[E3]`` 对应；不带方括号）
+    cited_ref_ids: list[str] = Field(default_factory=list, max_length=20)
+    verdict: ClaimVerdict
+    confidence: float = Field(ge=0.0, le=1.0)
+    #: 原文中最相关的精确子句，供前端高亮（找不到时为空）
+    evidence_quote: str | None = Field(default=None, max_length=1000)
+    rationale: str = Field(default="", max_length=1000)
+    suggested_fix: str | None = Field(default=None, max_length=1000)
+    #: ``abstract_only`` = 只有题录/摘要、没有全文分片（此时「看不出该细节」只能判 unverifiable）
+    evidence_scope: Literal["full_text", "abstract_only"] | None = None
+    #: 命中 quote 所在的完整片段（前端据此展示上下文并做模糊高亮）
+    evidence_passage: str | None = Field(default=None, max_length=2000)
+
+
 class ValidationReport(BaseModel):
     """校验 Agent 输出：是否通过、评分、重试建议。"""
 
@@ -188,6 +227,14 @@ class ValidationReport(BaseModel):
     checks: list[ValidationCheck]
     retryable: bool
     feedback: str
+    #: 论断级核验明细（Issue #31 Phase 2）；空列表 = 未执行（无引用/未启用 LLM）
+    claim_checks: list[ClaimCheckResult] = Field(default_factory=list)
+    #: 完全支持率（0–1）；None = 没有可核验的论断
+    supported_rate: float | None = Field(default=None, ge=0.0, le=1.0)
+    #: 非 supported 的论断数（weakly/overstated/misrepresented/contradicted/unverifiable）
+    flagged_claims_count: int = Field(default=0, ge=0)
+    #: 参考文献中带撤稿标记的条数（Issue #31 Phase 1 的 quality_flags）
+    retracted_refs_count: int = Field(default=0, ge=0)
 
 
 class ReviewReport(BaseModel):
@@ -200,6 +247,9 @@ class ReviewReport(BaseModel):
     scores: dict[str, float]
     issues: list[str]
     stats: dict[str, Any]
+    #: 论断级核验明细（Issue #31 Phase 2），引用编号已重写为最终正文的全局编号
+    claim_checks: list[ClaimCheckResult] = Field(default_factory=list)
+    claim_stats: dict[str, Any] = Field(default_factory=dict)
 
 
 class TaskEvent(BaseModel):

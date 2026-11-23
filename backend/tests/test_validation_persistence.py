@@ -258,3 +258,63 @@ class TestValidationRepositoryRobustness:
                 assert row.score == 1.0
         finally:
             await engine.dispose()
+
+
+_CLAIM_PAYLOAD: dict[str, Any] = {
+    "claim_id": "n2:c1",
+    "sentence_text": "该方法显著优于基线 [E1]。",
+    "cited_ref_ids": ["E1"],
+    "verdict": "overstated",
+    "confidence": 0.72,
+    "evidence_quote": "improved accuracy",
+    "rationale": "原文只说观察到改善",
+    "suggested_fix": "把「显著优于」改为「观察到改善」",
+    "evidence_scope": "abstract_only",
+    "evidence_passage": "We observed an improvement in accuracy.",
+}
+
+
+class TestValidationClaimPersistence:
+    """Issue #31 Phase 2：论断核验明细必须落库，否则刷新页面就丢。"""
+
+    async def test_claim_checks_go_to_claim_results(self) -> None:
+        engine, session_factory, _task_id, subtask_id = await _setup()
+        try:
+            report = {**_report(), "claim_checks": [_CLAIM_PAYLOAD]}
+            async with session_factory() as session:
+                await ValidationRepository(session).save(subtask_id, report)
+                await session.commit()
+
+            async with session_factory() as session:
+                row = (await session.execute(select(ValidationResult))).scalar_one()
+                assert row.claim_results == [_CLAIM_PAYLOAD]
+        finally:
+            await engine.dispose()
+
+    async def test_claim_results_default_to_empty_list(self) -> None:
+        engine, session_factory, _task_id, subtask_id = await _setup()
+        try:
+            async with session_factory() as session:
+                await ValidationRepository(session).save(subtask_id, _report())
+                await session.commit()
+
+            async with session_factory() as session:
+                row = (await session.execute(select(ValidationResult))).scalar_one()
+                assert row.claim_results == []
+        finally:
+            await engine.dispose()
+
+    async def test_non_list_claim_checks_are_ignored(self) -> None:
+        """形状不对的载荷不能让持久化炸掉（降级为空列表）。"""
+        engine, session_factory, _task_id, subtask_id = await _setup()
+        try:
+            report = {**_report(), "claim_checks": {"broken": True}}
+            async with session_factory() as session:
+                await ValidationRepository(session).save(subtask_id, report)
+                await session.commit()
+
+            async with session_factory() as session:
+                row = (await session.execute(select(ValidationResult))).scalar_one()
+                assert row.claim_results == []
+        finally:
+            await engine.dispose()

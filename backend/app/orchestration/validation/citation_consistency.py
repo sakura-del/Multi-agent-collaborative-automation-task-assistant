@@ -31,6 +31,15 @@ from typing import Any
 
 #: 正文全局引用编号（#17 之后所有节点编号已重写为全局 [E#]）
 _CITATION_RE = re.compile(r"\[E(\d+)\]")
+#: 标题行（用来给论断标注 section；``### 3.1 方法`` → "3.1 方法"）
+_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$")
+#: 围栏代码块与行内代码：其中的 [E#] 不是引用，不能当论断
+_FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
+_INLINE_CODE_RE = re.compile(r"`[^`]*`")
+#: 句子切分：中文句末标点后可直接切；英文句末标点要求后跟空白，避免切坏 3.5 之类
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[。！？；])\s*|(?<=[.!?;])\s+|\n+")
+#: 参考文献行（``- [1] 标题``）不是正文论断
+_BIBLIOGRAPHY_LINE_RE = re.compile(r"^\s*[-*]\s*\[(\d+)\]")
 
 
 @dataclass(frozen=True)
@@ -61,6 +70,63 @@ def _entry_index(entry: Any) -> int | None:
         return None
     value = entry.get("index")
     return value if isinstance(value, int) and value > 0 else None
+
+
+@dataclass(frozen=True)
+class CitedClaim:
+    """按句抽取出的、带引用的论断（Issue #31 Phase 2）。
+
+    `claim_id` 形如 ``{node_id}:c3``：复盘按它把节点局部引用编号重写成
+    最终正文的全局编号，前端再用 `data-cite-index` 找到对应论断。
+    """
+
+    claim_id: str
+    section: str
+    sentence_text: str
+    cited_ref_ids: tuple[int, ...]
+
+
+def extract_cited_claims(markdown: str | None, *, claim_prefix: str = "") -> list[CitedClaim]:
+    """从 Markdown 正文抽取「带 `[E#]` 引用的句子」。
+
+    设计取舍：
+
+    - 只抽带引用的句子 —— 没有引用就没有可核验的证据，纯叙述句不进核验表；
+    - 章节取最近一个标题（``## 3.1 方法`` → ``3.1 方法``），无标题时记「正文」；
+    - 代码块与行内代码里的 `[E#]` 不是引用，先剔除再切句；
+    - 参考文献列表行（``- [1] ...``）不参与论断抽取。
+    """
+    text = _FENCE_RE.sub(" ", markdown or "")
+    text = _INLINE_CODE_RE.sub(" ", text)
+
+    claims: list[CitedClaim] = []
+    section = "正文"
+    for raw_line in text.splitlines():
+        heading = _HEADING_RE.match(raw_line)
+        if heading:
+            section = heading.group(1).strip() or section
+            continue
+        line = raw_line.strip()
+        if not line or _BIBLIOGRAPHY_LINE_RE.match(line):
+            continue
+        # 列表/引用块前缀不影响句子本身
+        line = re.sub(r"^(?:>\s*|[-*]\s+|\d+[.)]\s+)+", "", line)
+        for sentence in _SENTENCE_SPLIT_RE.split(line):
+            sentence = sentence.strip()
+            if not sentence:
+                continue
+            numbers = tuple(sorted({int(match) for match in _CITATION_RE.findall(sentence)}))
+            if not numbers:
+                continue
+            claims.append(
+                CitedClaim(
+                    claim_id=f"{claim_prefix}c{len(claims) + 1}",
+                    section=section,
+                    sentence_text=sentence[:2000],
+                    cited_ref_ids=numbers,
+                )
+            )
+    return claims
 
 
 def audit_citation_alignment(

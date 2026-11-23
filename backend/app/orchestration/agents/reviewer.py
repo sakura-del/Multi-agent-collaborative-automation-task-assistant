@@ -490,6 +490,14 @@ class ReviewerAgent(BaseAgent):
             validation.feedback for validation in validations if validation.feedback
         ]
 
+        # Issue #31 Phase 2：论断核验的引用编号是**节点局部**编号，
+        # 必须按 local_to_global 重写成与最终正文一致的全局 [E#]，
+        # 否则前端点 [E3] 会打开另一篇文献的证据（引用错配比没有更糟）。
+        claim_checks = self._globalize_claims(validations, local_to_global)
+        from app.orchestration.validation.claim_verification import summarize_claim_checks
+
+        claim_stats = summarize_claim_checks(claim_checks)
+
         if self.llm is not None:
             polished = await self._polish_literature_review(
                 topic, results, validations, event_stats
@@ -534,7 +542,35 @@ class ReviewerAgent(BaseAgent):
             "scores": scores,
             "issues": issues,
             "stats": stats,
+            "claim_checks": [item.model_dump() for item in claim_checks],
+            "claim_stats": claim_stats,
         }
+
+    @staticmethod
+    def _globalize_claims(
+        validations: list[Any],
+        local_to_global: dict[tuple[str, int], int],
+    ) -> list[Any]:
+        """把各节点的论断核验结论重写成最终正文的全局引用编号。
+
+        映射缺失时**保留原编号**并把 `cited_ref_ids` 置空：宁可少一条对应，
+        也不能把局部编号直接当全局编号喂给前端（会打开错误的文献）。
+        """
+        globalized: list[Any] = []
+        for validation in validations:
+            for check in getattr(validation, "claim_checks", []) or []:
+                node_id, sep, _ = check.claim_id.partition(":")
+                refs: list[str] = []
+                for ref in check.cited_ref_ids:
+                    number = int(ref[1:]) if ref.startswith("E") and ref[1:].isdigit() else None
+                    if not sep or number is None:
+                        continue
+                    mapped = local_to_global.get((node_id, number))
+                    if mapped is not None:
+                        refs.append(f"E{mapped}")
+                if refs or not check.cited_ref_ids:
+                    globalized.append(check.model_copy(update={"cited_ref_ids": refs}))
+        return globalized
 
     async def _verify_bibliography(
         self, bibliography: list[dict[str, Any]]

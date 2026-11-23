@@ -3,20 +3,23 @@ import { computed, ref } from "vue";
 import { Download } from "lucide-vue-next";
 
 import { taskApi } from "@/api/tasks";
+import ClaimEvidenceDrawer from "@/components/tasks/ClaimEvidenceDrawer.vue";
 import ReferenceVerificationPanel from "@/components/tasks/ReferenceVerificationPanel.vue";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import type {
   Artifact,
   BibliographyEntry,
+  ClaimCheckResult,
   QualityFlag,
   ReferenceVerificationSummary,
   ReviewReport,
   VerificationStatus,
 } from "@/api/types";
+import { parseClaimChecks } from "@/utils/claim-verdict";
 import {
   QUALITY_FLAG_LABELS,
-  markRetractedCitations,
+  decorateCitationMarkers,
   parseQualityFlags,
   parseSourceType,
   retractedIndices,
@@ -185,13 +188,46 @@ const retractedEntries = computed(() =>
   )
 );
 
-/** 正文 HTML：在消毒后的产物上把已撤稿角标包红（不能改 markdown 源，ALLOWED_TAGS 不含 span）。 */
+/** 正文 HTML：在消毒后的产物上把 [En] 换成可点击角标（撤稿文献用红色警示样式）。 */
 const renderedMarkdown = computed(() =>
-  markRetractedCitations(
-    baseRenderedMarkdown.value,
-    retractedIndices(retractedEntries.value),
-  )
+  decorateCitationMarkers(baseRenderedMarkdown.value, {
+    retracted: retractedIndices(retractedEntries.value),
+  }),
 );
+
+// ===== 论断级核验抽屉（Issue #31 Phase 2）=====
+
+const claimChecks = computed(() => parseClaimChecks(props.report.claim_checks));
+
+/** 当前打开的引用序号；null = 抽屉关闭 */
+const activeCitation = ref<number | null>(null);
+
+const activeEntry = computed<BibliographyEntry | null>(
+  () => bibliography.value.find((entry) => entry.index === activeCitation.value) ?? null,
+);
+
+/** 同一篇文献可能被多句话引用：抽屉里给出所有相关论断，不能只展示第一条。 */
+const activeClaims = computed(() =>
+  activeCitation.value === null
+    ? []
+    : claimChecks.value.filter((check) => check.cited_ref_ids.includes(`E${activeCitation.value}`)),
+);
+
+/** 事件委托：正文来自 v-html，逐个角标绑事件不现实，按 data-cite 找最近的角标。 */
+function onPaperClick(event: MouseEvent) {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+  const marker = target.closest<HTMLElement>("[data-cite]");
+  if (!marker) {
+    return;
+  }
+  const index = Number(marker.dataset.cite);
+  if (Number.isInteger(index) && index > 0) {
+    activeCitation.value = index;
+  }
+}
 
 const retractedBannerText = computed(() => {
   const items = retractedEntries.value.map((entry) => {
@@ -298,6 +334,7 @@ async function download(kind: "markdown" | "docx") {
         data-test="result-markdown"
         class="md-body max-h-none overflow-visible rounded-lg border border-border bg-card px-5 py-6 font-display sm:px-8 sm:py-8 lg:px-10"
         v-html="renderedMarkdown"
+        @click="onPaperClick"
       />
 
       <pre
@@ -450,5 +487,14 @@ async function download(kind: "markdown" | "docx") {
         </Alert>
       </section>
     </aside>
+
+    <!-- 论断核验抽屉：点正文角标打开，展示该文献的来源质量与逐句判定。 -->
+    <ClaimEvidenceDrawer
+      :open="activeCitation !== null"
+      :index="activeCitation"
+      :entry="activeEntry"
+      :claims="activeClaims"
+      @close="activeCitation = null"
+    />
   </section>
 </template>

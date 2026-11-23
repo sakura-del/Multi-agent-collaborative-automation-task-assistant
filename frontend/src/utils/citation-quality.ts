@@ -37,38 +37,62 @@ export function parseSourceType(value: unknown): SourceType | null {
     : null;
 }
 
-/** 从参考文献条目里收集「已撤稿」的序号（正文角标用）。 */
-export function retractedIndices(entries: readonly { index: number; is_retracted?: boolean | null }[]): number[] {
-  return entries.filter((entry) => entry.is_retracted === true).map((entry) => entry.index);
+/** 从参考文献条目里收集「已撤稿」的序号（正文角标标红用）。 */
+export function retractedIndices(
+  entries: readonly {
+    index: number;
+    is_retracted?: boolean | null;
+    quality_flags?: readonly string[] | null;
+  }[],
+): number[] {
+  return entries
+    .filter(
+      (entry) =>
+        entry.is_retracted === true || Boolean(entry.quality_flags?.includes("retracted")),
+    )
+    .map((entry) => entry.index);
 }
 
 const CITATION_MARKER_RE = /\[E(\d+)\]/g;
 
+export interface CitationMarkerOptions {
+  /** 已撤稿文献的序号集合：这些角标用红色强警示样式 */
+  retracted?: Iterable<number>;
+}
+
 /**
- * 把正文 HTML 里已撤稿文献的 `[En]` 角标包成红色高亮（其余标记原样保留）。
+ * 把正文 HTML 里的 `[En]` 角标换成可点击按钮（Issue #31 Phase 2）。
  *
- * 输入必须是 `renderMarkdown` 消毒后的 HTML：本函数只插入固定 class 的 `<span>`，
- * 不引入任何用户可控的标签/属性。序号只接受纯数字，避免把正文里的
- * `[E9](...)` 之类结构误判成引用。
+ * 输入必须是 `renderMarkdown` 消毒后的 HTML：本函数只插入固定 class 的
+ * `<button>`，不引入任何用户可控的标签/属性（序号只接受纯数字）。
+ * 点击由 `TaskResult` 的事件委托处理，打开右侧「来源核验」抽屉。
+ *
+ * 为什么是按钮而不是 span：键盘用户要能聚焦并用 Enter 打开；
+ * 已撤稿角标复用同一元素、只换配色，避免「红角标不可点、可点角标不红」。
  *
  * @param html 消毒后的正文 HTML
- * @param indices 已撤稿文献的序号集合
+ * @param options 撤稿序号集合
  */
-export function markRetractedCitations(html: string, indices: Iterable<number>): string {
-  const retracted = new Set([...indices].filter((value) => Number.isFinite(value)));
-  if (!html || retracted.size === 0) {
+export function decorateCitationMarkers(html: string, options: CitationMarkerOptions = {}): string {
+  const retracted = new Set([...options.retracted ?? []].filter((value) => Number.isFinite(value)));
+  if (!html) {
     return html;
   }
   return html.replace(CITATION_MARKER_RE, (match, rawIndex: string) => {
     const index = Number(rawIndex);
-    if (!retracted.has(index)) {
-      return match;
-    }
+    const isRetracted = retracted.has(index);
+    const classes =
+      "citation-marker inline cursor-pointer rounded-[2px] px-0.5 font-semibold transition-colors " +
+      (isRetracted ? "bg-destructive/10 text-destructive" : "text-primary hover:bg-primary/10");
+    const title = isRetracted
+      ? "该文献已被撤稿：点击查看来源与论断核验"
+      : `查看 [E${index}] 的来源与论断核验`;
+    const testAttr = isRetracted
+      ? ' data-test="retracted-citation"'
+      : ' data-test="citation-marker"';
     return (
-      '<span class="rounded-[2px] bg-destructive/10 px-0.5 font-semibold text-destructive"' +
-      ' title="该文献已被撤稿" data-test="retracted-citation">' +
-      match +
-      "</span>"
+      `<button type="button" class="${classes}" data-cite="${index}" title="${title}"` +
+      `${testAttr}>${match}</button>`
     );
   });
 }

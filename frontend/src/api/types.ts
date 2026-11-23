@@ -149,12 +149,49 @@ export interface Artifact {
   created_at: string;
 }
 
+/** 论断核验判定（Issue #31 Phase 2）。 */
+export type ClaimVerdict =
+  | "supported"
+  | "weakly_supported"
+  | "overstated"
+  | "misrepresented"
+  | "contradicted"
+  | "unverifiable";
+
+/** 单条论断的核验结论（后端 `ClaimCheckResult`）。 */
+export interface ClaimCheckResult {
+  claim_id: string;
+  sentence_text: string;
+  /** 全局引用编号（`E3` 形式，与正文 `[E3]` 对应） */
+  cited_ref_ids: string[];
+  verdict: ClaimVerdict;
+  confidence: number;
+  /** 原文中最相关的精确子句，用于高亮 */
+  evidence_quote?: string | null;
+  rationale: string;
+  suggested_fix?: string | null;
+  evidence_scope?: "full_text" | "abstract_only" | null;
+  /** 命中 quote 所在的完整片段 */
+  evidence_passage?: string | null;
+}
+
+export interface ClaimStats {
+  total?: number;
+  supported?: number;
+  flagged?: number;
+  supported_rate?: number | null;
+  by_verdict?: Record<string, number>;
+}
+
 export interface ReviewReport {
   final_markdown: string;
   bibliography: Array<Record<string, unknown>>;
   scores: Record<string, number>;
   issues: string[];
   stats: Record<string, unknown>;
+  /** 论断级核验明细（Issue #31 Phase 2）；缺省 = 未执行 */
+  claim_checks?: ClaimCheckResult[];
+  claim_stats?: ClaimStats;
 }
 
 /** 任务创建时选择的模型快照（Issue #15 BYOK）；凭据删除后仍保留。 */

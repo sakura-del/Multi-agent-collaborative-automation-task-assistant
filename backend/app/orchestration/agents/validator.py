@@ -22,12 +22,19 @@ from app.knowledge.services.citation_validator import CitationValidator, Content
 from app.llm.models import Message, MessageRole
 from app.orchestration.base_agent import BaseAgent
 from app.orchestration.contracts import (
+    ClaimCheckResult,
     Evidence,
     ExecutionResult,
     ValidationCheck,
     ValidationReport,
 )
 from app.orchestration.messages import MessageType
+from app.orchestration.validation.citation_consistency import extract_cited_claims
+from app.orchestration.validation.claim_verification import (
+    ClaimVerifier,
+    build_claim_evidence_list,
+    summarize_claim_checks,
+)
 from app.tools.literature.models import ReferenceVerification
 
 logger = get_logger(__name__)
@@ -111,10 +118,29 @@ class ValidatorAgent(BaseAgent):
         )
         semantic_report = None if integrity_failed else await self._check_semantic(title, result)
 
+        # 步骤4：论断级核验（Issue #31 Phase 2）——只对通过校验的作者正文执行
         if citation_report is None:
             report = self._legacy_report(rule_report, semantic_report)
         else:
             report = self._citation_report(rule_report, citation_report, semantic_report)
+
+        # 校验失败会触发重生成：花钱核验一段马上要被丢弃的正文没有意义，
+        # 所以只在本次校验已通过时做论断核验。
+        claim_checks: list[ClaimCheckResult] = []
+        if (
+            self.llm is not None
+            and report["passed"]
+            and citation_report is not None
+            and not integrity_failed
+            and self._is_authored(input_data, content_role=content_role)
+        ):
+            claim_checks = await self._run_claim_checks(input_data)
+
+        report["claim_checks"] = [item.model_dump() for item in claim_checks]
+        claim_stats = summarize_claim_checks(claim_checks)
+        report["supported_rate"] = claim_stats["supported_rate"]
+        report["flagged_claims_count"] = claim_stats["flagged"]
+        report["retracted_refs_count"] = self._count_retracted_refs(input_data)
 
         # 通知复盘 Agent 采集校验结果
         await self._send_message(
@@ -166,6 +192,77 @@ class ValidatorAgent(BaseAgent):
             reference_verifications=self._reference_verifications(input_data),
             content_role=self._content_role(input_data),
         )
+
+    @staticmethod
+    def _evidence_pool(input_data: dict[str, Any]) -> list[Evidence]:
+        """解析 `evidence_pool` 载荷；缺失或类型不符时返回空列表。"""
+        payload = input_data.get("evidence_pool")
+        if not isinstance(payload, list):
+            return []
+        evidence: list[Evidence] = []
+        for item in payload:
+            try:
+                evidence.append(Evidence.model_validate(item))
+            except PydanticValidationError:
+                continue
+        return evidence
+
+    @staticmethod
+    def _is_authored(input_data: dict[str, Any], *, content_role: ContentRole) -> bool:
+        """是否值得做论断级核验（Issue #31 Phase 2）。
+
+        只核验**作者正文**：``search``/``validate``/``review`` 的内容是上游输出
+        的拼接，其中的 ``[E#]`` 已经属于更早的 extract/write 节点——重叠核验会
+        重复扣费、也会让同一句话出现两份互相矛盾的判定。
+
+        没有 ``node_type`` 的历史负载一律跳过：核验是增强项，宁可少核一次，
+        也不要靠推断去猜「这段文字是不是作者正文」。
+        """
+        payload = input_data.get("execution_result")
+        if not isinstance(payload, dict):
+            return False
+        node_type = str(payload.get("node_type") or "")
+        explicit = str(payload.get("content_role") or "")
+        if explicit == "aggregated" or node_type in {"search", "validate", "review"}:
+            return False
+        return node_type in {"extract", "write"} or explicit == "authored"
+
+    async def _run_claim_checks(self, input_data: dict[str, Any]) -> list[ClaimCheckResult]:
+        """抽取带引用的句子 → 绑定证据 → 批量 LLM 判定。
+
+        失败一律降级为「无法核验」，绝不抛出——核验是增强项，不能拖垮任务。
+        """
+        payload = input_data.get("execution_result")
+        if not isinstance(payload, dict):
+            return []
+        try:
+            execution = ExecutionResult.model_validate(payload)
+        except PydanticValidationError:
+            return []
+
+        claims = extract_cited_claims(execution.content, claim_prefix=f"{execution.node_id}:")
+        if not claims:
+            return []
+        items = build_claim_evidence_list(
+            claims,
+            self._evidence_pool(input_data),
+            execution.cited_indices,
+        )
+        try:
+            return await ClaimVerifier(self.llm).verify(items)  # type: ignore[arg-type]
+        except Exception as exc:
+            logger.warning("claim_checks_skipped", error=str(exc))
+            return []
+
+    def _count_retracted_refs(self, input_data: dict[str, Any]) -> int:
+        """统计本节点引用中带撤稿标记的文献条数（Issue #31 Phase 1 的质量标记）。"""
+        verifications = self._reference_verifications(input_data) or []
+        count = 0
+        for item in verifications:
+            flags = getattr(item, "quality_flags", []) or []
+            if item.is_retracted is True or "retracted" in flags:
+                count += 1
+        return count
 
     @staticmethod
     def _content_role(input_data: dict[str, Any]) -> ContentRole:

@@ -105,6 +105,10 @@ class ValidationResult(Base):
     llm_report: Mapped[dict[str, Any] | None] = mapped_column(
         JSON, nullable=True, comment="LLM自检报告"
     )
+    # 论断级核验明细（Issue #31 Phase 2）：[{claim_id, verdict, ...}, ...]
+    claim_results: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, default=list, nullable=False, comment="论断级核验明细"
+    )
     # 完整校验报告文本
     report: Mapped[str | None] = mapped_column(Text, nullable=True, comment="校验报告全文")
 

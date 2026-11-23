@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { mount } from "@vue/test-utils";
+import { nextTick } from "vue";
 
 import TaskResult from "@/components/tasks/TaskResult.vue";
 import ReferenceVerificationPanel from "@/components/tasks/ReferenceVerificationPanel.vue";
@@ -465,5 +466,53 @@ describe("TaskResult · 引用核验集成", () => {
     });
 
     expect(wrapper.find('[data-test="quality-summary"]').exists()).toBe(false);
+  });
+
+  it("opens the claim drawer when a citation marker is clicked", async () => {
+    const wrapper = mountResult({
+      report: report({
+        final_markdown: "# 标题\n\n该文指出方法显著优于基线 [E1]。",
+        claim_checks: [
+          {
+            claim_id: "n2:c1",
+            sentence_text: "该文指出方法显著优于基线 [E1]。",
+            cited_ref_ids: ["E1"],
+            verdict: "overstated",
+            confidence: 0.72,
+            rationale: "原文只说观察到改善，没有「显著」",
+            suggested_fix: "改为「观察到改善」",
+            evidence_scope: "abstract_only",
+            evidence_passage: "We observed an improvement in accuracy.",
+          },
+        ],
+      }),
+    });
+    await nextTick();
+
+    const marker = wrapper.get('[data-test="citation-marker"]');
+    expect(marker.attributes("data-cite")).toBe("1");
+    expect(document.body.querySelector('[data-test="claim-drawer"]')).toBeNull();
+
+    await marker.trigger("click");
+    await nextTick();
+
+    const drawer = document.body.querySelector('[data-test="claim-drawer"]');
+    expect(drawer).not.toBeNull();
+    expect(drawer?.textContent).toContain("该文指出方法显著优于基线");
+    expect(drawer?.textContent).toContain("原文只说观察到改善");
+    expect(drawer?.textContent).toContain("夸大");
+    wrapper.unmount();
+  });
+
+  it("keeps the claim drawer closed for reports without claim checks", async () => {
+    const wrapper = mountResult();
+    await nextTick();
+
+    await wrapper.get('[data-test="citation-marker"]').trigger("click");
+    await nextTick();
+
+    const drawer = document.body.querySelector('[data-test="claim-drawer"]');
+    expect(drawer?.textContent).toContain("还没有论断级核验结论");
+    wrapper.unmount();
   });
 });

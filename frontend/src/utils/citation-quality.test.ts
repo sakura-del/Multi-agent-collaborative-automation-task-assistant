@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   QUALITY_FLAG_LABELS,
-  markRetractedCitations,
+  decorateCitationMarkers,
   parseQualityFlags,
   parseSourceType,
   retractedIndices,
@@ -42,50 +42,60 @@ describe("parseSourceType", () => {
 });
 
 describe("retractedIndices", () => {
-  it("collects only entries explicitly marked retracted", () => {
+  it("collects entries explicitly marked retracted (flag or boolean)", () => {
     expect(
       retractedIndices([
         { index: 1, is_retracted: true },
         { index: 2, is_retracted: false },
         { index: 3, is_retracted: null },
-        { index: 4 },
+        { index: 4, quality_flags: ["retracted"] },
+        { index: 5, quality_flags: ["preprint"] },
       ]),
-    ).toEqual([1]);
+    ).toEqual([1, 4]);
   });
 });
 
-describe("markRetractedCitations", () => {
-  const span = (marker: string) =>
-    '<span class="rounded-[2px] bg-destructive/10 px-0.5 font-semibold text-destructive" ' +
-    'title="该文献已被撤稿" data-test="retracted-citation">' +
-    marker +
-    "</span>";
+describe("decorateCitationMarkers", () => {
+  const marker = (index: number) =>
+    `<button type="button" class="citation-marker inline cursor-pointer rounded-[2px] px-0.5 ` +
+    `font-semibold transition-colors text-primary hover:bg-primary/10" data-cite="${index}" ` +
+    `title="查看 [E${index}] 的来源与论断核验" data-test="citation-marker">[E${index}]</button>`;
 
-  it("wraps only the retracted citation markers", () => {
-    const html = "<p>结论 [E1]，对照 [E2]，另见 [E3]。</p>";
+  const retractedMarker = (index: number) =>
+    `<button type="button" class="citation-marker inline cursor-pointer rounded-[2px] px-0.5 ` +
+    `font-semibold transition-colors bg-destructive/10 text-destructive" data-cite="${index}" ` +
+    `title="该文献已被撤稿：点击查看来源与论断核验" data-test="retracted-citation">[E${index}]</button>`;
 
-    expect(markRetractedCitations(html, [1, 3])).toBe(
-      `<p>结论 ${span("[E1]")}，对照 [E2]，另见 ${span("[E3]")}。</p>`,
+  it("turns every citation marker into a clickable button", () => {
+    const html = "<p>结论 [E1]，对照 [E2]。</p>";
+    expect(decorateCitationMarkers(html)).toBe(`<p>结论 ${marker(1)}，对照 ${marker(2)}。</p>`);
+  });
+
+  it("styles retracted citations with the destructive tone", () => {
+    const html = "<p>[E1] 与 [E2]</p>";
+    expect(decorateCitationMarkers(html, { retracted: [2] })).toBe(
+      `<p>${marker(1)} 与 ${retractedMarker(2)}</p>`,
     );
   });
 
   it("replaces every occurrence of the same marker", () => {
-    const out = markRetractedCitations("<p>[E2] 与 [E2]</p>", [2]);
-    expect(out).toBe(`<p>${span("[E2]")} 与 ${span("[E2]")}</p>`);
+    expect(decorateCitationMarkers("<p>[E2] 与 [E2]</p>", { retracted: [2] })).toBe(
+      `<p>${retractedMarker(2)} 与 ${retractedMarker(2)}</p>`,
+    );
   });
 
-  it("leaves html untouched when nothing is retracted", () => {
-    const html = "<p>[E1] [E2]</p>";
-    expect(markRetractedCitations(html, [])).toBe(html);
-    expect(markRetractedCitations(html, [9])).toBe(html);
-  });
-
-  it("does not touch non-citation brackets or other numbers", () => {
+  it("leaves unrelated brackets and non-citation numbers untouched", () => {
     const html = "<p>[1] 与 [E10] 不是 [E1x]</p>";
-    expect(markRetractedCitations(html, [1])).toBe(`<p>[1] 与 [E10] 不是 [E1x]</p>`);
+    expect(decorateCitationMarkers(html)).toBe(`<p>[1] 与 ${marker(10)} 不是 [E1x]</p>`);
   });
 
-  it("accepts any iterable of indices", () => {
-    expect(markRetractedCitations("<p>[E4]</p>", new Set([4]))).toContain("retracted-citation");
+  it("accepts any iterable of retracted indices", () => {
+    expect(decorateCitationMarkers("<p>[E4]</p>", { retracted: new Set([4]) })).toContain(
+      "retracted-citation",
+    );
+  });
+
+  it("returns empty input unchanged", () => {
+    expect(decorateCitationMarkers("")).toBe("");
   });
 });

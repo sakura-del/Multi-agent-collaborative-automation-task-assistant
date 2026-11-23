@@ -83,6 +83,7 @@ class ValidationRepository(BaseRepository[ValidationResult]):
         llm_report = semantic if isinstance(semantic, dict) and semantic else None
 
         feedback = body.get("feedback")
+        claim_results = body.get("claim_checks")
         row = ValidationResult(
             subtask_id=subtask_id,
             # 缺省从严：报告缺失/形状不对时记为「未通过」，不伪造通过
@@ -90,6 +91,7 @@ class ValidationRepository(BaseRepository[ValidationResult]):
             score=normalize_score(body.get("score")),
             rule_results=rule_results,
             llm_report=llm_report,
+            claim_results=claim_results if isinstance(claim_results, list) else [],
             report=str(feedback) if feedback is not None else None,
             validated_at=datetime.now(UTC),
         )
