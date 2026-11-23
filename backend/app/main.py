@@ -51,6 +51,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger = get_logger(__name__)
     logger.info("应用启动", version=__version__, env=settings.app.env)
 
+    # 平台模型凭据自检（Issue #19/#25）：忘配 key 时功能整体不可用，
+    # 必须在启动日志里显式喊一声，而不是等第一个用户任务 401。
+    from app.llm.health import platform_llm_status
+
+    llm_status = platform_llm_status()
+    if llm_status != "ok":
+        logger.warning(
+            "平台模型凭据未配置，平台模型功能不可用（BYOK 用户不受影响）",
+            status=llm_status,
+        )
+
     # 显式初始化知识库：嵌入/重排按配置选择真实或 Mock（环境变量 RAG_EMBEDDING_MOCK 控制）
     from app.db.session import AsyncSessionLocal
     from app.knowledge.services.document_service import KnowledgeDocumentService
@@ -103,9 +114,26 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as exc:  # 测试库未建表时不阻塞启动
         logger.warning("task_runtime_recover_skipped", error=str(exc))
 
+    # ===== 定时重跑（Issue #27）=====
+    # 单 worker 部署，进程内一个 tick 循环足够；关闭开关时不启动（排期数据保留）。
+    routine_scheduler = None
+    if settings.routine.enabled:
+        from app.db.session import AsyncSessionLocal
+        from app.orchestration.services.routine_scheduler import RoutineScheduler
+
+        routine_scheduler = RoutineScheduler(
+            session_factory=AsyncSessionLocal,
+            starter=task_execution.start_scheduled_refresh,
+            config=settings.routine,
+        )
+        routine_scheduler.start()
+    app.state.routine_scheduler = routine_scheduler
+
     yield
 
     logger.info("应用关闭，释放资源")
+    if routine_scheduler is not None:
+        await routine_scheduler.stop()
     await container.close()
 
     # 关闭兜底：容器只跟踪自己 `track()` 过的协程；工作流/通信层仍可能留下

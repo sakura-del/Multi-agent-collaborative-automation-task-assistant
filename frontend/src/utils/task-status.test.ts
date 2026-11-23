@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
+import type { TaskStatus } from "@/api/types";
 import {
+  canApprovePlan,
   isActive,
   needsUserAction,
   splitTaskTitle,
@@ -88,5 +90,24 @@ describe("isActive", () => {
     expect(isActive("planning")).toBe(true);
     expect(isActive("waiting_approval")).toBe(false);
     expect(isActive("completed")).toBe(false);
+  });
+});
+
+describe("canApprovePlan", () => {
+  it("只有 waiting_approval 允许确认规划（Issue #23）", () => {
+    expect(canApprovePlan("waiting_approval")).toBe(true);
+    const others: TaskStatus[] = [
+      "created",
+      "planning",
+      "running",
+      "waiting_human",
+      "reviewing",
+      "completed",
+      "failed",
+      "cancelled",
+    ];
+    for (const status of others) {
+      expect(canApprovePlan(status)).toBe(false);
+    }
   });
 });

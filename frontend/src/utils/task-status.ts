@@ -44,6 +44,22 @@ export function isActive(status: TaskStatus): boolean {
 }
 
 /**
+ * 是否允许「确认规划」。
+ *
+ * 只有 `waiting_approval` 能确认：后端 `approve_plan` 硬校验状态，
+ * 其它状态一律 422（Issue #23 实测：执行失败转 waiting_human 后，
+ * 旧规划仍留在快照里，面板照常渲染，用户点确认必然失败）。
+ *
+ * `waiting_human` 有两种来源，必须靠「plan 是否存在」区分：
+ * - 规划从未成功（无 plan）→ 只能「重新生成」；
+ * - 执行中节点失败（plan 已确认过）→ 只能去执行页重试节点。
+ * 所以本函数只管状态，plan 的有无由组件层判断。
+ */
+export function canApprovePlan(status: TaskStatus): boolean {
+  return status === "waiting_approval";
+}
+
+/**
  * 把任务标题拆成「主标题 + 次级标记」。
  *
  * ## 为什么需要

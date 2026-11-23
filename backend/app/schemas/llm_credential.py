@@ -51,6 +51,43 @@ def _clean_optional_int(value: Any) -> Any:
     return value
 
 
+class ReasoningTier(BaseModel):
+    """推理等级档位 → API 参数值（参照 DeepSeek Harness 模型目录的设计）。
+
+    例：{"label": "low", "value": "low"} / {"label": "max", "value": "max"}——
+    前端下拉展示 label，调用时把 value 作为推理档位参数下发给模型。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(min_length=1, max_length=24)
+    value: str = Field(min_length=1, max_length=64)
+
+
+class ModelCapabilities(BaseModel):
+    """模型能力声明（凭据级，用户在「我的模型」勾选）。
+
+    ## 为什么要声明而不是自动探测
+
+    中转站的 /models 通常只给 id，不给多模态/推理能力；探测要花钱且不可靠。
+    由用户按厂商文档勾选是唯一诚实做法——勾错只会得到可读的调用错误，
+    而「猜能力」会让 UI 出现假的「支持图片」。
+
+    - ``text``：文本输入（默认 True，几乎所有模型都支持）；
+    - ``image``：图片输入（视觉模型才勾，勾了才允许在聊天里传图）；
+    - ``reasoning_tiers``：可用的推理等级档位；空 = 不支持推理参数；
+    - ``json_mode``：**生成能力探测**的结果（Issue #28）——发过一次最小结构化
+      输出请求并成功解析。这是唯一的非声明字段：它由探测写入，用户勾选无效。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: bool = True
+    image: bool = False
+    json_mode: bool = False
+    reasoning_tiers: list[ReasoningTier] = Field(default_factory=list, max_length=4)
+
+
 class LLMCredentialCreate(BaseModel):
     """新增一把自带凭据。"""
 
@@ -76,6 +113,13 @@ class LLMCredentialCreate(BaseModel):
         description="单次输出上限（token）。非空时作为 max_tokens 真正下发给厂商",
     )
     is_default: bool = Field(default=False, description="是否设为默认；首条会自动成为默认")
+    allow_platform_fallback: bool = Field(
+        default=False,
+        description="凭据不可用（401/402/403）时是否回退平台模型；429 限流不回退",
+    )
+    capabilities: ModelCapabilities = Field(
+        default_factory=ModelCapabilities, description="模型能力声明（文本/图片/推理档位）"
+    )
 
     @field_validator("name", "model", mode="before")
     @classmethod
@@ -135,7 +179,11 @@ class LLMCredentialUpdate(BaseModel):
         default=None, ge=1, le=MAX_OUTPUT_TOKENS, description="传 null 表示清除"
     )
     is_default: bool | None = None
+    allow_platform_fallback: bool | None = None
     status: Literal["active", "disabled"] | None = None
+    capabilities: ModelCapabilities | None = Field(
+        default=None, description="整体替换能力声明；None = 不改"
+    )
 
     @field_validator("name", "model", mode="before")
     @classmethod
@@ -176,12 +224,28 @@ class LLMCredentialOut(BaseModel):
     masked_key: str = Field(description="脱敏回显，如 `sk-…abcd`")
     key_version: int
     is_default: bool
+    allow_platform_fallback: bool
     status: str
     capabilities: dict[str, Any] = Field(default_factory=dict)
     last_verified_at: datetime | None = None
     last_error: str | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class LLMGenerationProbeOut(BaseModel):
+    """生成能力探测结果（Issue #28）。
+
+    成本提示：探测用**用户自己的 key** 发一条 max_tokens=64 的真实请求，
+    UI 必须在按钮旁说明这一点（按钮文案已带「约 100 token」）。
+    """
+
+    ok: bool
+    latency_ms: int
+    json_mode: bool
+    error: str | None = None
+    raw: str | None = Field(default=None, description="模型原始输出（截断到 200 字符）")
+    credential_status: str | None = None
 
 
 class ProviderOut(BaseModel):

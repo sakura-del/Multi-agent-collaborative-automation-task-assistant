@@ -2,11 +2,13 @@ import { createRouter, createWebHistory } from "vue-router";
 
 import AppLayout from "@/layouts/AppLayout.vue";
 import AdminByokView from "@/views/AdminByokView.vue";
+import AdminConsoleView from "@/views/AdminConsoleView.vue";
 import DesignTimelineView from "@/views/DesignTimelineView.vue";
 import ApiKeyView from "@/views/ApiKeyView.vue";
 import PlanView from "@/views/PlanView.vue";
 import KnowledgeView from "@/views/KnowledgeView.vue";
 import LoginView from "@/views/LoginView.vue";
+import ChatView from "@/views/ChatView.vue";
 import ModelSettingsView from "@/views/ModelSettingsView.vue";
 import ObservabilityView from "@/views/ObservabilityView.vue";
 import PasswordResetView from "@/views/PasswordResetView.vue";
@@ -31,6 +33,14 @@ export const router = createRouter({
     {
       path: "/login",
       name: "login",
+      component: LoginView,
+      meta: { public: true },
+    },
+    // 注册页签的独立地址（Issue #26-2）：对外分享的注册链接曾直接落回 /login?redirect=/tasks，
+    // 收件人还要自己找到「注册」页签。两个路由共用同一个组件，页签由路由名决定。
+    {
+      path: "/register",
+      name: "register",
       component: LoginView,
       meta: { public: true },
     },
@@ -61,6 +71,8 @@ export const router = createRouter({
       children: [
         { path: "", redirect: { name: "tasks" } },
         { path: "tasks", name: "tasks", component: TaskListView },
+        // 会话全屏页（Issue #8 P0）：三形态之一，与小窗共用 store
+        { path: "chat", name: "chat", component: ChatView },
         {
           path: "tasks/:taskId",
           name: "task-detail",
@@ -99,6 +111,13 @@ export const router = createRouter({
         { path: "settings/api-keys", name: "api-keys", component: ApiKeyView },
         // 我的套餐（Phase 2 计费套餐）
         { path: "settings/plan", name: "plan", component: PlanView },
+        // 后台管理控制台（Issue #12）：全站 KPI + 跨用户任务/用户
+        {
+          path: "admin",
+          name: "admin-console",
+          component: AdminConsoleView,
+          meta: { requiresAdmin: true },
+        },
         // 管理员侧 BYOK 渗透率看板（Issue #15 P2）：仅 admin
         {
           path: "admin/byok",
@@ -123,7 +142,7 @@ router.beforeEach(async (to) => {
   if (!auth.authenticated && !to.meta.public) {
     return { name: "login", query: { redirect: to.fullPath } };
   }
-  if (auth.authenticated && to.name === "login") {
+  if (auth.authenticated && (to.name === "login" || to.name === "register")) {
     return { name: "tasks" };
   }
   // 管理员页面：非 admin 直接回任务列表，不暴露「有这一页」的错误信息

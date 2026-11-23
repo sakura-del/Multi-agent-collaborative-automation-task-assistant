@@ -22,6 +22,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.orchestration.dag_engine import TaskDAG
 from app.orchestration.retry import RetryExecutor, RetryPolicy, RetryResult
@@ -97,6 +98,14 @@ class NullScheduleObserver:
 
     async def on_result(self, task_id: str, result: NodeResult) -> None:
         return None
+
+
+def _is_timeout_error(exc: Exception) -> bool:
+    """是否「超时类」异常（Issue #18：超时走独立退避预算，不当校验失败）。"""
+    name = type(exc).__name__.lower()
+    if "timeout" in name:
+        return True
+    return "timed out" in str(exc).lower()
 
 
 class TaskScheduler:
@@ -342,16 +351,40 @@ class TaskScheduler:
             if isinstance(exec_output.get("evidence_pool"), list):
                 validation_input["evidence_pool"] = exec_output["evidence_pool"]
 
-            try:
-                validation = await validator_agent.execute(validation_input)
-            except Exception as exc:
-                logger.error("validation_failed", node_id=node_id, error=str(exc))
+            # 校验超时的独立退避预算（Issue #18）：超时不消耗 regeneration、
+            # 不转人工，固定退避后**只重试校验**（不重跑 executor）；预算用尽
+            # 才走原失败路径。非超时异常直接进原 except。
+            validation_retries = max(0, int(get_settings().llm.validation_timeout_retries))
+            validation: dict[str, Any] | None = None
+            validation_error: Exception | None = None
+            for _timeout_attempt in range(validation_retries + 1):
+                try:
+                    validation = await validator_agent.execute(validation_input)
+                    break
+                except Exception as exc:
+                    if not _is_timeout_error(exc) or _timeout_attempt >= validation_retries:
+                        validation_error = exc
+                        break
+                    delay = 5.0 * (_timeout_attempt + 1)
+                    logger.warning(
+                        "validation_timeout_retry",
+                        node_id=node_id,
+                        attempt=_timeout_attempt + 1,
+                        budget=validation_retries,
+                        delay_s=delay,
+                        error=str(exc),
+                    )
+                    await asyncio.sleep(delay)
+            # 校验最终失败（非超时错误，或超时预算耗尽）→ 原失败路径
+            if validation is None:
+                assert validation_error is not None
+                logger.error("validation_failed", node_id=node_id, error=str(validation_error))
                 await self._transition(task_id, node_id, sm, SubtaskStatus.FAILED)
                 await self._transition(task_id, node_id, sm, SubtaskStatus.WAITING_HUMAN)
                 node_result = NodeResult(
                     node_id=node_id,
                     status=SubtaskStatus.WAITING_HUMAN,
-                    error=f"校验异常: {exc}",
+                    error=f"校验异常: {validation_error}",
                     output=exec_output,
                     attempts=attempts,
                 )

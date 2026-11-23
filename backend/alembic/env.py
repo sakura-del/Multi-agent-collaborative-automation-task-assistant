@@ -8,23 +8,24 @@
 from __future__ import annotations
 
 import asyncio
-from logging.config import fileConfig
 
-from alembic import context
+# 让 alembic 能导入应用模块
+import sys
+from logging.config import fileConfig
+from pathlib import Path
+
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-# 让 alembic 能导入应用模块
-import sys
-from pathlib import Path
+from alembic import context
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.db.base import Base  # noqa: E402
-from app.db.engine_options import database_connect_args, database_url_for_alembic  # noqa: E402
 # 触发所有 ORM 模型注册到 Base.metadata，让 autogenerate 能发现
-import app.db.models  # noqa: E402, F401
+import app.db.models  # noqa: F401
+from app.db.base import Base
+from app.db.engine_options import database_connect_args, database_url_for_alembic
 
 # alembic.ini 配置
 config = context.config

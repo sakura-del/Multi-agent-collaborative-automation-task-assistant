@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BeAgentPlan from "@/components/motion/BeAgentPlan.vue";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
 import TaskDag from "@/components/tasks/TaskDag.vue";
@@ -24,11 +25,29 @@ const props = withDefaults(
     blocked?: boolean;
     /** 当前状态是否允许重新规划（与后端白名单一致）；false 时连按钮都不出现。 */
     canReplan?: boolean;
+    /**
+     * 当前状态是否允许确认规划（只有 waiting_approval）。
+     *
+     * false 时按钮不渲染并给出原因：`waiting_human` 下旧规划仍在快照里，
+     * 若照常渲染，用户点了只会拿到 422（Issue #23）。
+     */
+    canApprove?: boolean;
+    /** 节点步骤（beUI Agent Plan 形态，TaskDetailView 组装）；空 = 不渲染卡片 */
+    steps?: import("@/components/motion/BeAgentPlan.vue").AgentPlanStep[];
+    /** 规划面板级状态徽章 */
+    planStatus?: "ready" | "running" | "completed" | "failed" | "draft";
   }>(),
-  { pending: false, error: null, conflict: null, blocked: false, canReplan: true }
+  {
+    pending: false,
+    error: null,
+    conflict: null,
+    blocked: false,
+    canReplan: true,
+    canApprove: true,
+  }
 );
 
-const emit = defineEmits<{ approve: [version: number]; regenerate: [] }>();
+const emit = defineEmits<{ approve: [version: number]; regenerate: []; retry: [stepId: string] }>();
 </script>
 
 <template>
@@ -58,6 +77,7 @@ const emit = defineEmits<{ approve: [version: number]; regenerate: [] }>();
             重新生成
           </Button>
           <Button
+            v-if="props.canApprove"
             data-test="plan-approve"
             type="button"
             :disabled="props.pending"
@@ -67,6 +87,15 @@ const emit = defineEmits<{ approve: [version: number]; regenerate: [] }>();
           </Button>
         </div>
       </header>
+
+      <!-- 只有 waiting_approval 能确认；其它状态给出真实原因，而不是让用户点了报错 -->
+      <p
+        v-if="!props.canApprove"
+        class="text-sm text-muted-foreground"
+        data-test="plan-approve-hint"
+      >
+        该规划已确认，任务已暂停在执行阶段；请到「执行」页重试失败的节点，或点上方「重新生成」换一版规划。
+      </p>
 
       <div class="grid gap-3 md:grid-cols-3">
         <Card class="gap-1.5 p-3">
@@ -92,8 +121,22 @@ const emit = defineEmits<{ approve: [version: number]; regenerate: [] }>();
       </div>
 
       <section class="flex flex-col gap-2">
-        <h3 class="text-sm font-medium">任务 DAG（只读）</h3>
-        <TaskDag :nodes="props.plan.nodes" />
+        <h3 class="text-sm font-medium">执行计划（beUI Agent Plan）</h3>
+        <BeAgentPlan
+          :title="props.plan.topic"
+          :steps="props.steps ?? []"
+          :plan-status="props.planStatus ?? 'ready'"
+          :revision="props.plan.version"
+          :pending="props.pending"
+          :show-actions="false"
+          @retry="emit('retry', $event)"
+        />
+        <details class="mt-1">
+          <summary class="cursor-pointer text-xs text-muted-foreground">查看经典 DAG 视图</summary>
+          <div class="mt-2">
+            <TaskDag :nodes="props.plan.nodes" />
+          </div>
+        </details>
       </section>
     </template>
 

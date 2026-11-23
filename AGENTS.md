@@ -33,7 +33,7 @@
 | 数据库迁移 head | **`a7d3e9b6c1f4`**（`revoked_refresh_token`；前一个 `c4f2a8d7e9b1` = `knowledge_vectors_bge` 影子表） |
 | 后端测试 | **3157 passed**, 21 skipped；覆盖率 **90%**；`mypy` 0 错误（219 文件）；`.csl` 4 红已由 `.gitattributes`（`*.csl -text`）消除 |
 | 前端测试 | Vitest **458 passed**（+6 skipped）；**Playwright E2E 44 场景**（chromium + mobile-chrome 双视口） |
-| 发布方式 | **前端：`git push backup main` 后 Cloudflare Pages 自动构建部署**（Git 集成，无需本机 Node）；**后端：bundle + `deploy/ecs` 目录 `docker compose build backend`** |
+| 发布方式 | **前端：Cloudflare Pages `Direct Upload`**（`node scripts/deploy-pages.mjs`，凭据 `C:/Users/Lenovo/cf-secrets.env`）。⚠️ 2026-11-20 核实：**不是** git 构建——仓库 `main` 落后 78 个提交，线上包却已含 v0.2.0 的 `admin-console`/`我的模型`，`git push` 不会触发任何构建；**后端：bundle + `deploy/ecs` 目录 `docker compose build backend`** |
 | CI | ⚠️ **2026-10-28 起 CI 因 GitHub Actions 账单额度停摆**（报 spending limit），作业 0~2s 就 X，**不是代码问题**。⚠️ **GitHub 直连时通时不通**：不通时走代理（`git -c http.proxy=http://127.0.0.1:7894 ...`，`gh` 需 `$env:HTTPS_PROXY`） |
 | 服务器 | `root@47.253.81.6`，HEAD **`9fceda6`**（CD 自动部署），backend 镜像 `c476209d879c`（1.78 GB，已无 chromadb）；80/443 仅接受 Cloudflare 回源（`DOCKER-USER`，第三方探测 443=0/4）；UFW active；SSH 3 把密钥、X11 关、MaxAuthTries 3；监控两层已上线（站内 2 分钟 / 站外 5 分钟），**webhook 已配置并验证**（`/etc/veripaper/notify.env` + 仓库 secret `WECOM_WEBHOOK_URL`，2026-11-13）（回滚锚点 `shadow-mock`=`79ac91a4374c`），五容器 healthy，公网 `ready`，嵌入 = **SiliconFlow BGE-M3**（1600 RPM / 400k TPM），**user=2（Lingrove=admin + `yanglin125210@gmail.com`=user，**保留作以后的用户测试账号**）/ task 86 / doc_chunk 2835 / 两表各 2835**（2026-11-11 清掉 26 个测试账号后），磁盘 38% |
 
@@ -299,6 +299,318 @@ docker compose up -d backend
 | 2 | **组件源代码可控** | 用**复制源码到仓库**的模式（shadcn 风格），组件代码进 `src/components/ui/`，可随时改，不做黑盒 npm 依赖 |
 | 3 | **统一设计语言** | 只用本节定义的 tokens 与组件；不写一次性颜色/间距/字号；不引入第二套设计体系 |
 | 4 | **严格限制重复依赖** | 同一能力只允许一个库（见 §6.5.2）；新增依赖前先确认现有库能否满足；**禁止**同时引入两个图标库/两个动画库/两个状态库 |
+| 5 | **UI 设计先查 beUI（2026-11-18 用户指令，优先级最高）** | 所有新 UI（页面/组件/交互/动效）**必须先**到 beUI（<https://asharca.github.io/ui/>）找对应设计；找不到才降级到其他平台（Vue 生态成熟实现）；最后才是自己设计。详见 §6.5.1.1 |
+
+### 6.5.1.1 beUI 优先规则（§6.5.1 铁律 5 的展开）
+
+**beUI**（<https://asharca.github.io/ui/>，作者 arsharca，MIT）：React 19 + Next.js +
+Motion（Framer Motion）+ Tailwind 4，经 shadcn CLI 分发。**511 个 Web 组件**（Motion 交互组件
+~80 / Blocks 组合模块 ~108 / AI Agent 组件 ~28 / 图表 ~17）+ 73 个 React Native 组件。
+
+## 技术事实（不要搞错）
+
+beUI 是 **React 生态组件库，本项目是 Vue 3 —— 组件源码无法直接安装**。
+shadcn CLI 的 `@beui/*` 分发同样面向 React。因此「用 beUI」指的是**用它的设计**，
+不是引入 React 运行时（那是 §6.5.2 明令禁止的）。
+
+## 三级查找顺序（新 UI 一律按此执行）
+
+| 优先级 | 来源 | 落地方式 |
+| --- | --- | --- |
+| **① beUI 有对应设计** | 在 <https://asharca.github.io/ui/> 的 Motion 组件 / Blocks / AI Agents / Charts 里找 | **照搬它的交互模式与视觉规格**（动效参数、状态机、布局、CSS tokens——组件页的 Manual 标签可直接读 React 源码作参考），用本项目锁定的 **shadcn-vue + motion-v + Tailwind tokens** 复刻实现 |
+| **② beUI 没有，Vue 生态有成熟实现** | shadcn-vue 官方组件、Aceternity、originui 等开源 Vue/Tailwind 组件 | 直接用/复制源码（仍须遵守 §6.5.2 的栈锁定与 §6.5.3 tokens） |
+| **③ 都没有** | 自己设计 | 必须遵守 §6.5.3 Nova tokens；交互模式仍应先回 beUI 找同类组件作参照 |
+
+## 使用要点
+
+- beUI 组件页均提供源码（Manual 标签页），**先读源码再复刻**：重点提取动效时序（Motion
+  的 spring/时长参数）、状态切换逻辑与响应式断点，而不是像素级照抄；
+- beUI 的 **AI Agents 分类**（Agent Plan / Agent Team / Trace Waterfall / Context Meter /
+  Voice Orb 等）与本产品的 Agent 编排场景高度相关，做编排类 UI 时**必查**；
+- 复刻进项目的新组件放 `src/components/ui/`（基础）或按页面就近放置（组合件），
+  与既有组件同等待遇（可改、可测）；
+- beUI 的主题 tokens 与本项目 Nova 预设（§6.5.3）不同——**Nova 优先**：颜色/间距用
+  本项目 tokens，只借鉴 beUI 的结构与动效。
+
+### 全局 AI 入口（Issue #8 P0，2026-11-19，commit `9b800e16`）
+
+**一句话 → 自动综述**的对话式入口已上线：
+
+- `src/components/layout/GlobalPromptEntry.vue`：侧栏入口——展开态 BePromptInput
+  紧凑版（Enter 直提交）、折叠态 Sparkles 圆按钮（点击展开侧栏）；
+- 提交 → `taskApi.create({ topic, keywords: [句首 30 字] })`（后端契约 keywords
+  min_length=1）→ **平台默认模型**（Qwen 网关）跑规划 → 跳转任务详情页；
+- 付费墙复用既有套餐门禁（创建端点顺序：凭据 → 篇数月配额 → token 日预算）；
+  免费档每月 1 篇即「不付费的额度」；
+- 生产验收（2026-11-19 10:14）：「综述多智能体协作系统在软件工程中的研究进展」
+  一句话 → 78s 规划成功（v1 · 5 节点，研究问题/检索式/验收标准齐全）→
+  待确认规划（Agent Plan 卡片 Awaitng approval）；
+- P1 待办：意图分类（非综述意图的提示与路由）；任务创建后的流式状态回显到入口。
+
+### 联网搜索（2026-11-19 用户决策：Tavily 为默认方案）
+
+- **provider：Tavily**（`SEARCH__PROVIDER=tavily`，`basic` 深度 = 最低 credit 档，
+  `max_results=6`，snippet 截断 500 字控上下文）；
+- **端点**：`GET /api/v1/search/web?q=...`（强制 JWT——搜索按 credit 计费，
+  开放 Key 会被脚本刷爆）；401/429/5xx 分别给可读文案
+  （「搜不到」与「搜索服务挂了」必须可区分）；
+- **定位**：会话内核（P0）工具网关的「联网搜索」工具直接复用该 service；
+- **不启用 DeepSeek 搜索**：用户本地 harness（`127.0.0.1:3425`）生产不可达，
+  官方端点待评估；若后续搜索质量不足，提醒用户提供 DeepSeek 端点/key 后再切
+  （`SearchConfig.provider` 已留切换口子，新增 provider 只需实现
+  `search(query) -> list[WebSearchResult]`）；
+- 生产验收（2026-11-19 11:35）：`q=RAG evaluation benchmark 2025` →
+  6 条（GitHub MIRAGE / ACL Anthology 2025.findings-naacl / DEV 社区），
+  provider=tavily 正确回显。
+
+### 会话内核 P0（Issue #8，2026-11-19，后端 `0f2c884` 起）
+
+**会话式 Agent 界面的地基**，与现有 19 个页面并存（入口是右下 FAB / `/chat` 全屏）：
+
+- **数据模型**：`conversation`（title/archived/message_count/leaf_id）+ `message`
+  （`parent_id` 树、role、status 五态、model/tokens/error），迁移
+  `f5b6c7d8e9a0` → `a7b8c9d0e1f2`（时间戳默认值）→ 循环外键 ALTER；
+- **API**：会话 CRUD + 详情（消息扁平返回，前端建树）+ 发消息（user + assistant 占位）
+  + `GET .../stream`（SSE：start/delta/done/error）+ `POST .../stop`（协同取消）；
+- **中断语义（重要）**：客户端 abort **不会**让生成循环退出（它挂在 LLM await 上），
+  必须走 stop 端点写进程内标志；循环每 delta 检查并落库 `interrupted`；
+  另有周期落库（每 20 delta）与「GET detail 时收敛 >5 分钟僵尸 streaming」；
+- **前端**：Pinia `stores/chat.ts`（扁平建树 + 分支切换 + streamingText 独立存避免
+  整树重渲染）、`ChatShell.vue`（floating FAB / dock / full 三形态，localStorage 记忆）、
+  `ChatMessageItem.vue`（渲染/分支 ‹1/2›/复制/编辑重发/重试/流式光标）；
+  SSE 用**原生 fetch + ReadableStream**（EventSource 不带 JWT），跨 chunk 缓冲到
+  空行再分帧（防中文多字节被切碎）；
+- **渲染**：`utils/chat-markdown.ts`（独立 Marked 实例 + KaTeX inline/block 扩展 +
+  DOMPurify 追加 MathML 白名单；Mermaid 动态 import + strict + 失败保留源码）。
+
+## 三个生产实测事故（都已修复，教训优先）
+
+1. **全站白屏**：`chat-markdown` 在模块加载期 `new Marked()` + `use()` 抛错 →
+   整个 bundle 崩（布局静态 import）。修复：惰性初始化 + 异常降级 +
+   `defineAsyncComponent` 隔离。**教训：任何模块级副作用都必须可失败隔离**；
+2. **流式 0 字符**：`stream_chat()` 漏了 `apply_model_profile`（`chat()` 有）→
+   思考模型把 max_tokens 全花在 reasoning。**教训：成对的 chat/stream 路径必须
+   同源配置**；
+3. **时间戳 500**：手写迁移漏 `server_default=now()`；`Mapped[datetime|None]`
+   默认推导成无时区 TIMESTAMP。**教训：手写迁移对照 Base 约定逐列核对**。
+
+### 会话 E2E 与 Agent 工具网关（Issue #8 P1，2026-11-19）
+
+**E2E**：`frontend/e2e/chat-kernel.spec.ts`（4 用例 × 2 视口）
+
+- 真实链路（`E2E_REAL_LLM=1` 才跑）：FAB → 输入 → Enter → SSE 200
+  （content-type 断言）→ 流式结束 → 助手正文非空 → 刷新后历史恢复；pageerror 为零；
+- SSE 桩状态机（不耗 token、零抖动）：多 delta 流式 + Markdown/KaTeX/Mermaid
+  节点断言；停止生成 → `已中断` 徽章且按钮消失；编辑重发 → 分支 `2/2` 切 `1/2`
+  后仍能看到旧分支的助手回答；
+- 稳定等待：只用 web-first 断言 + 显式超时，无「sleep 等结果」；登录辅助含限流
+  重试与移动端 `nav-mobile-trigger`（Pixel 5 侧栏默认折叠）；
+- **验收**：测试机 10.0.10.2 隔离栈（chromium + mobile-chrome）**8/8 passed**，
+  后端定向用例 **15 passed**。
+- **E2E 抓到的真缺陷**：编辑**首条**消息时 `parent_id=null` 表示「挂回根」，
+  后端把 null 当「未传」→ 接当前叶节点 → 两条分支串成一条链。修复：
+  后端用 `model_fields_set` 区分显式 null；前端 `null` 必须真实下发
+  （`parentId ? ... : {}` 这类真值判断会把 null 丢掉）。
+
+**工具网关**：`backend/app/tools/agent/`（12 个工具，全部复用既有 service 层）
+
+| 域 | 工具 |
+| --- | --- |
+| 任务 6 | `list_tasks` / `get_task` / `create_task` / `approve_task_plan` / `cancel_task` / `retry_task_node` |
+| 引用库 2 | `search_references` / `import_references` |
+| 知识库 2 | `search_knowledge` / `list_knowledge_documents` |
+| 配额 1 | `get_quota` |
+| 搜索 1 | `search_web`（与 `/api/v1/search/web` 同一 Tavily provider） |
+
+- 参数是 Pydantic 模型，目录里的 JSON Schema 由模型生成（与校验永不漂移）；
+- **写操作必须 `confirmed=true`**，否则 409 `TOOL_CONFIRMATION_REQUIRED` 且不执行；
+- 任务创建抽出 `services/task_submission.py::submit_review_task`，HTTP 与工具共用
+  「凭据 → 篇数 → token」门禁顺序；意图分类抽出 `services/intent_service.py`
+  （fail-open），`/tasks/classify-intent` 与 `/agent/route` 同一实现；
+- 端点：`GET /agent/tools`、`POST /agent/tools/{name}/invoke`、`POST /agent/route`
+  （**仅 JWT**：写工具没有 API Key scope 体系，先不开放给开放 API）；
+- 生产验收：目录 12 / 配额 / Tavily 6 条 / route 5 关键词 / 写确认 409 /
+  `create_task → get_task → cancel_task` 闭环（任务 `cancelled`）。
+
+**E2E 隔离栈要点**（不碰 `~/projects` 旧环境）：独立 compose project + 覆盖
+`container_name` 与**卷名**（compose 里是显式 `name: maa-*`，不覆盖会复用旧库）+
+端口；`RATE_LIMIT__ENABLED=false`（8 用例串行会撞 5 次/分钟登录限制）；
+Node 20 + `vite preview`；结束后 `down -v` 并删除含密钥的临时 env/override。
+
+### 会话附件与语音（Issue #8 P2，2026-11-19）
+
+- **附件模型**：`message.attachments` JSONB（迁移 `b8c9d0e1f2a3`），只存
+  `{kind: "document", document_id, title}` 引用 + 标题快照，不复制文件；
+  文档删除后历史消息仍保留可读标题。发送时校验文档归属（越权/不存在 400）。
+- **上下文注入**：`build_context` 把附件标题与 `document_id` 追加到对应用户消息，
+  **不注入正文**（正文检索走知识库工具，全文入上下文会打穿 token 预算）。
+- **能力策略**：`GET /conversations/capabilities` 返回 documents / images /
+  max_attachments / max_file_mb；`images` 由 `LLM__SUPPORTS_IMAGE`（默认 false）
+  决定，当前平台 Qwen 为纯文本 → 前端选择图片时给出明确原因，**不假装能理解**。
+  换视觉模型只需改环境变量，前端不用动。
+- **前端**：ChatShell 附件按钮 + 拖放遮罩 + 上传中状态 + 可移除 chips；
+  上传走知识库管线（PDF/DOCX/MD/TXT，≤30MB），上传中禁止发送；编辑重发/重试
+  保留原附件。语音用浏览器 Web Speech API（zh-CN，本机识别，不上传音频），
+  不支持时隐藏按钮。
+- **验收**：后端定向 18 passed；E2E 双视口 **10/10 passed**（新增「上传 →
+  发送请求带 document_id → 气泡展示附件」）；生产实测 capabilities、附件发送/
+  回读、越权 400 全部符合预期。
+
+### 聊天壳布局事故（2026-11-19，已修复）
+
+症状：点「停靠到右侧」放大聊天栏后，任务页正文被挤成一条竖线（截图事故）。
+
+两层根因：
+
+1. `panelClass` 之后又追加 `relative`：Tailwind 的 `.relative` 声明在 `.fixed`
+   之后，同一元素上两个 position 工具类时 **relative 生效** → 浮层变成布局内
+   flex 子项，直接挤压主内容；
+2. `vp:chat:variant` 把 `full` 也写入 localStorage，普通页初始化直接采纳，
+   `flex h-full w-full` 进一步抢占宽度。
+
+修复：position 工具类互斥（只有 full 形态用 `relative`）；`full` 不落盘，
+普通页只接受 dock/floating；全屏改为直接导航，不再先设 full。
+回归：E2E「持久化 full 形态不影响普通页布局」断言 `position=fixed`、
+壳宽 <500、主区宽 >300，并覆盖点「停靠」的实际路径。
+
+**教训：不要在同一个元素上叠加 fixed/absolute/relative 工具类——CSS 声明顺序
+决定胜者，与 class 书写顺序无关。**
+
+### 会话工具调用（Issue #8 P3，2026-11-19）
+
+**契约**
+
+- `BaseLLM.stream_chat_events()`：流式事件（`delta` / `done` + `tool_calls`）。
+  默认实现降级为一次 `chat()`（语义不变、首 token 延迟变大）；OpenAI 适配器真流式，
+  按 `index` 聚合 `tool_calls` 分片——`id/name/arguments` 会跨多个 chunk 到达，
+  逐片处理会拿到残缺 JSON。
+- 工具循环最多 `MAX_TOOL_ROUNDS = 4` 轮：**只读工具自动执行**并把结果回灌
+  （`role=tool` + `tool_call_id`）；**写工具暂停**为 `waiting_approval`，
+  由 `POST /conversations/{cid}/messages/{mid}/tool-confirm` 决定执行或取消。
+  拒绝也要落库（`rejected`），否则刷新后确认卡会复活。
+- SSE 事件：`start`(tools, resumed) / `delta` / `tool_call`(write) / `tool_result`(ok,preview) /
+  `tool_approval`(arguments) / `done`(status) / `error`；`?tools=1` 才启用工具。
+- **多步连续写操作（确认后续跑）**：`?tools=1&resume=1` 重开同一条消息的流——
+  保留正文与轨迹，把已执行结果按 `assistant(tool_calls)+tool` **成对**回灌，模型继续
+  生成并可提议下一个写工具 → 再暂停 → 再确认。前端 `confirmTool` 确认后自动续跑，
+  拒绝不续跑。**确认摘要/取消说明必须追加到正文**（续跑以正文为基底重建上下文，
+  覆盖会丢提议前文）。
+- 防套娃护栏：单条消息写提议上限 `MAX_WRITE_PROPOSALS = 5`；同一 (工具,参数)
+  被拒绝过 → `_write_blocked` 直接拦下并回灌原因（模型改口，不再弹卡）；
+  空轨迹 resume 显式报 `nothing_to_resume`。
+- `MessageToolCall.write` 字段必须存在（契约 `extra=forbid`）：轨迹记录带 `write`
+  键但契约不认时，确认接口与会话详情回读都会 500——E2E 实测踩过。
+- 持久化：`message.tool_calls` / `message.pending_tool` JSONB（迁移 `c9d0e1f2a3b4`）。
+  存在消息上而不是独立表——它是这一轮回答的「过程」，与内容同生命周期。
+- 前端：输入区「工具开/关」（`vp:chat:tools`）；气泡内「执行过程（N 步）」
+  **默认折叠**（点 summary 展开）；确认卡读 `pending_tool`。
+
+**网关硬约束（踩过）**：平台网关（Qwen）**只允许 system 出现在最前，且不接受
+第二条 system**。工具策略必须**并入** `context[0]` 正文，不能 `insert` 一条新
+system——否则开了工具整轮 400「System message must be at the beginning」。
+
+- **可等待工具（wait_seconds 轮询）**：`get_task` / `approve_task_plan` 带
+  `wait_seconds`（0~180），任务仍在 created/planning/retrying 时**工具内轮询**
+  （5s 间隔）直到就绪/离开过渡态；`approve_task_plan` 就绪即自动确认，
+  超时如实回报 `approved=false`（绝不硬确认）。为什么在工具内轮询而不是让
+  模型反复调 get_task：每轮都要过一次模型（慢、贵、可能跑偏）。
+- **执行期 keepalive**：慢工具执行期间流上每 15s 发 `tool_wait` 帧——Cloudflare
+  约 100s 空闲掐断静默流；等待期间点停止同样生效（循环里检查 `_should_stop`）。
+  前端把 wait 写进时间线预览（「等待任务状态变化…已等 Ns」）。
+- ⚠️ **tool-confirm 必须单独放宽 axios 超时**：写工具在确认请求里执行，
+  `wait_seconds=180` 时服务端轮询可达 180s+，全局 15s 超时会假失败
+  （前端报错但服务端其实已确认）→ 当前 `confirmTool` 单独 240s。
+- ⚠️ **E2E：resume 断言必须先于点击注册**：确认接口一返回前端就发起
+  resume 请求，先点击再 `waitForRequest` 会漏接 → 假超时（实测踩过）。
+
+**移动端可用性（踩过）**：任务页时间线两侧卡片把布局宽度撑到 614px
+（Pixel 5 视口 393px），`position: fixed` 按布局宽度定位 → 聊天 FAB 落在可视区外，
+点击无反应。三道修法：`BeTimeline` 加 `overflow-x-clip`；时间线容器
+`pointer-events-none` + 卡片 `pointer-events-auto`；聊天浮层 `Teleport to body`
+（`full` 形态除外）并提到 `z-200`。**教训：固定定位元素「点不到」先量布局宽度，
+不要只加 z-index。**
+
+**验收**：后端定向 21 passed（含 resume 续跑/回灌成对/空轨迹报错/拒绝防重复）；
+E2E 双视口 **16/16 passed**（写工具用例覆盖 resume=1 请求与多步卡收口）。
+生产实测多步链（2026-11-20）：`create_task(ok)` → 确认 → 续跑 →
+`get_task(ok)` + `approve_task_plan` 提议 → 确认 → 规划未就绪的真实错误回灌 →
+再续跑 → 模型如实总结两步结果；任务可查、可取消，全程无编造。
+**E2E 注意**：第一张确认卡点掉后模型可能立刻提议下一张（多步链路的正常表现），
+不能用 `toHaveCount(0)` 断言「卡没了」，要用循环处理后续卡。
+
+**上游抖动**：平台模型偶发 `Concurrency limit exceeded`，属共享密钥并发限流，
+重试即可（验收脚本已内置 15s×4 重试）。遇到它不要当代码缺陷排查。
+
+### 后台管理控制台（Issue #12，2026-11-20）
+
+- **只读原则**：管理端不提供代用户操作任务的接口（不代取消/重试/改配置）——
+  需要处置时走用户侧已有控制命令，责任边界清晰。唯一写操作在原有
+  BYOK 看板与套餐开通端点里。
+- 端点（均 `get_current_admin_user`，普通用户 403）：
+  - `GET /admin/console/overview?days=7`：用户/任务/失败率/待处理/token/BYOK
+    一次聚合（同快照，避免首屏 6 个请求数字不同步）；
+  - `GET /admin/console/tasks`：跨用户列表（owner、模型快照标签、BYOK 标记、
+    token），状态/关键词/分页下推 SQL，`total` 在 body（不做 X-Total-Count）；
+  - `GET /admin/console/users`：active 订阅 join 套餐名 + 任务数/凭据数。
+- **口径**：窗口按 `created_at` 切（「这周失败率」= 这周提交的任务里失败占比）；
+  失败率分母是**已结束**（completed/failed/cancelled），不是全部任务。
+- 前端 `/admin`（requiresAdmin，侧栏「后台管理」）：6 张 KPI 卡（骨架屏）+
+  任务/用户两表；状态色只表语义且必带文字。
+
+**门禁教训**：前端类型检查必须用 `vue-tsc -b`（deploy 脚本用的就是它）。
+`npx vue-tsc --noEmit` 会漏检部分文件——本次 `AppLayout` 少一个图标导入，
+`--noEmit` 绿、`-b` 红、Pages 构建直接失败。
+
+### 产出落库前校验 / 审计 / 发布纪律（Issue #25，2026-11-20）
+
+- **落库前引用闸门**（关联 #17）：`app/orchestration/validation/citation_consistency.py`
+  做正文 `[E#]` ↔ 参考文献 `index` **双向**审计；`_finish_reviewing` 里
+  `_guard_citation_consistency` 不通过 → 不写 `review_report`/`artifacts`，
+  任务 REVIEWING→FAILED（可 `replan`），事件 `task_failed` 带原因。
+  两边都空视为合法；缺条目/孤儿条目/条目缺 index 都判不通过。
+- **平台凭据探活**：`app/llm/health.py` 只看配置态（不发网络请求）；
+  `/health/ready` 增加 `checks.llm_credentials`，缺 key/占位符 →
+  `status=degraded`（HTTP 200）+ `warnings`，启动日志同步告警。
+  ⚠️ 外部巡检必须按 **status=ready** 判断，否则 degraded 不告警。
+- **审计日志**：`audit_log` 表（迁移 `d0e1f2a3b4c5` + `e1f2a3b4c5d6` 补时间列默认值），
+  凭据创建/更新/删除、计费开通/取消留痕；`GET /admin/console/audit`（admin）。
+  **审计写用 SAVEPOINT**：失败只回滚该条 INSERT——第一版对请求会话整体
+  `rollback()` 导致业务对象过期、`_to_out` 懒加载 `MissingGreenlet`、创建凭据 500
+  （生产实测）。参数只传 `actor_id/actor_name` 快照，不在审计函数里碰 ORM。
+### 定时重跑 / 增量刷新（Issue #27，2026-11-20）
+
+- 表：`task_routine`（每任务 0..1 条排期）+ `task_refresh`（每次运行记录），
+  迁移 `f3c9d2a7b1e8`。
+- 调度跑在**应用进程内**（单 uvicorn worker）：lifespan 起一个 asyncio tick，
+  每分钟 `UPDATE ... WHERE next_run_at <= now` 原子认领 + `SKIP LOCKED`。
+  **不要**在容器里再起一份同样的进程，否则排期会被两个进程同时推进。
+- 刷新**不扣「篇数」**（不是新综述），token 用量记在 `task_refresh.tokens_used`；
+  手动刷新有 10 分钟冷却。
+- 检索相关性靠三层：窗口写进 arXiv 检索式（`submittedDate:[...]`）+ OpenAlex
+  `from_publication_date` + 主题词过滤（题名/摘要命中任一主题词）。只按时间倒序
+  会把「同期上传但与主题无关」的论文当成新证据（验收实测过）。
+- 上游 429/503 是常态：arXiv 429 归为临时错误，全检索式失败会等 20s 重试一次。
+
+- **发布纪律**：版本三处一致（`pyproject.toml` / `package.json` / `__version__`），
+  每次生产部署在 `docs/releases/` 写一条记录（版本、提交、摘要、回滚点）。
+  当前 `0.3.0`。
+- **公开页（登录/注册/重置）两个坑**（Issue #26）：
+  1. Vue 的 `whitespace: condense` 会把模板里**跨行折断的中文文本**压成一个空格
+     （「你负责判断， 系统负责」）。中文正文写在一行里，别为了排版折行。
+     反过来，巡检报告里标题「让每一句论断， 都…」是 `innerText` 把 `<br>` 当换行
+     产生的假阳性——判据要用 `textContent`。
+  2. ALTCHA v3 的 `observedAttributes` 只有
+     `auto/challenge/configuration/display/form/language/name/theme/type/workers`，
+     **`hideFooter` 不在其中**：裸写 `hideFooter`/`hide-footer` 或直接赋同名
+     property 都不生效，页脚会多出一行「由 ALTCHA 保护」。必须走
+     `configuration='{"hideFooter":true}'`。
+
+### 磁盘维护（生产 47.253.81.6）
+
+2026-11-19 清理：`docker builder prune -af` 回收 **18.8GB**（containerd 里的
+构建缓存，均可重建），磁盘 82% → 36%；未动任何数据卷（postgres/uploads/
+artifacts）。**每次部署构建后建议顺手 prune**，否则每次 build 都会累积数 GB。
+不要用 `docker system prune -a --volumes`：会删掉 uploads/artifacts 卷。
 
 ### 6.5.2 技术栈（**已锁定，不得擅自替换**）
 
@@ -316,6 +628,37 @@ docker compose up -d backend
 | 表单校验 | **vee-validate + zod** | 只在复杂表单用；简单表单可直接绑 ref |
 | 通知 | **vue-sonner** | 统一 toast；禁止 `alert()` / 自研 toast |
 | 测试 | Vitest + @vue/test-utils + Playwright | 既有，不变 |
+
+### 已交付的 beUI 复刻（2026-11-18，前端 Pages 已上线）
+
+| 复刻组件 | 文件 | 落点 | beUI 规格 |
+| --- | --- | --- | --- |
+| Agent Plan | `src/components/motion/BeAgentPlan.vue` | 任务详情·规划 Tab（「执行计划」卡片，DAG 降级为折叠详情） | Bot 徽章/状态徽章/分段进度条/竖连线步骤/类型工具徽章/mono 时长/EASE_OUT/reduced-motion |
+| Trace Waterfall | `src/components/motion/BeTraceWaterfall.vue` | 任务详情·执行 Tab（`data-test="trace-waterfall"`） | Header 统计/类型过滤 dimmed/条形按占比定位/失败斜条纹/时间刻度 |
+| Context Meter | `src/components/motion/BeContextMeter.vue` | 我的模型·路由卡片 | 分段覆盖率条（6 段调色板）/大号百分比/分类列表 |
+| Prompt Input | `src/components/motion/BePromptInput.vue` | 导入文献页（attrs 落 textarea，保持 `import-content` E2E 契约） | 自动增高/focus ring/字数统计/Ctrl⌘Enter |
+
+约定：
+
+- 新 beUI 复刻一律放 `src/components/motion/Be*.vue`，规格注释头部写明 beUI 来源页与常量；
+- E2E 的 `data-test` 契约（plan-approve / plan-regenerate / import-content / import-submit /
+  task-dag）**不可破坏**；
+- 动效统一 motion-v + EASE_OUT `[0.16, 1, 0.3, 1]`，全部尊重 reduced-motion。
+
+### beUI 增强（2026-11-18 晚，commit `1ca9c870`）
+
+- **Trace Waterfall 播放头**：Replay/Pause + 40ms tick（2s 全程）+ range scrub +
+  span scaleX 生长 + 越前 span 变暗 + 竖线（left 对齐时间轴列：
+  `calc(14.75rem + P × (100% − 14.75rem))`）；reduced-motion 直达末帧；
+- **Agent Plan 行展开**：running/failed 行可点击（`<component :is>` 动态标签）展开
+  活动区——完整错误 + 「重试节点」（`emit retry` → TaskDetailView `retry_node` 命令，
+  与执行页工具栏同路径）；ChevronDown 旋转；错误折叠态单行截断；
+- **NodeDetail 重做为 span 详情面板**（beUI Trace Waterfall 详情侧栏规格）：
+  Timing 条（兄弟窗口占比）+ started/completed/duration tabular-nums +
+  错误 destructive 卡 + Attributes 列表（span id/kind/依赖/重试/output keys）；
+  新增 `siblings` prop；`data-test="node-detail"` 不变。
+  **遗留**：beUI 详情面板含 Model/Token/Cost 区块——本项目 subtask 快照尚无
+  per-node token 字段，接入后补齐（需后端把 token 用量写进 subtask output）。
 
 **为什么不是用户最初列的库**：`shadcn/ui`、`react-resizable-panels`、`dnd-kit`、`Zustand` 均为
 React 专属，无法在 Vue 项目安装。上表是**逐项对应的 Vue 生态等价物**，设计理念一致

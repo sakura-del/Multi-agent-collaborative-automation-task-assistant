@@ -10,17 +10,23 @@ from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
     admin_byok,
+    admin_console,
+    agent_tools,
     api_keys,
     auth,
     auth_lifecycle,
     billing,
     citation_styles,
+    conversations,
     health,
+    intent,
     llm_credentials,
+    llm_routing,
     observability,
     reference_library,
     references,
     screening,
+    search,
     task_ws,
     tasks,
     templates,
@@ -43,6 +49,11 @@ api_router.include_router(ws.router)
 api_router.include_router(knowledge_router)
 api_router.include_router(citation_styles.router)
 api_router.include_router(templates.router)
+api_router.include_router(agent_tools.router)
+api_router.include_router(conversations.router)
+api_router.include_router(intent.router)
+api_router.include_router(search.router)
+api_router.include_router(llm_routing.router)
 api_router.include_router(references.router)
 # 引用库（2026-10-26）：导入的 BibTeX/RIS 存下来，可作为任务文献源
 api_router.include_router(reference_library.router)
@@ -63,3 +74,4 @@ api_router.include_router(llm_credentials.router)
 api_router.include_router(billing.router)
 # 管理员看板（Issue #15 P2）：BYOK 渗透率，admin only、不走 API Key
 api_router.include_router(admin_byok.router)
+api_router.include_router(admin_console.router)

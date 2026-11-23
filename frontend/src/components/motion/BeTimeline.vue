@@ -326,7 +326,7 @@ const hintId = `be-timeline-hint-${Math.random().toString(36).slice(2, 9)}`;
   <section
     ref="stageRef"
     data-test="be-timeline"
-    class="relative w-full cursor-grab touch-pan-y overscroll-x-contain select-none [clip-path:inset(0)] [-webkit-touch-callout:none] active:cursor-grabbing [mask-image:linear-gradient(to_right,transparent,black_6%,black_94%,transparent)]"
+    class="relative w-full cursor-grab touch-pan-y overflow-x-clip overscroll-x-contain select-none [clip-path:inset(0)] [-webkit-touch-callout:none] active:cursor-grabbing [mask-image:linear-gradient(to_right,transparent,black_6%,black_94%,transparent)]"
     :style="{ height: `${height}px` }"
     :aria-label="ariaLabel"
     :aria-describedby="hintId"
@@ -385,7 +385,7 @@ const hintId = `be-timeline-hint-${Math.random().toString(36).slice(2, 9)}`;
       />
     </template>
 
-    <ul class="absolute inset-0">
+    <ul class="pointer-events-none absolute inset-0">
       <BeTimelineCard
         v-for="(event, index) in events"
         :key="event.id"

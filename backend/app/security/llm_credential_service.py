@@ -166,7 +166,8 @@ class LLMCredentialService:
             api_key_hint=mask_secret(payload.api_key),
             key_fingerprint=cipher.fingerprint(payload.api_key),
             key_version=1,
-            capabilities={},
+            capabilities=payload.capabilities.model_dump(),
+            allow_platform_fallback=payload.allow_platform_fallback,
             is_default=False,
             status="active",
         )
@@ -214,6 +215,11 @@ class LLMCredentialService:
             record.max_output_tokens = data["max_output_tokens"]
         if "status" in data and data["status"] is not None:
             record.status = data["status"]
+        if data.get("allow_platform_fallback") is not None:
+            record.allow_platform_fallback = bool(data["allow_platform_fallback"])
+        if payload.capabilities is not None:
+            # 整体替换语义：前端一次提交完整的（输入类型 + 推理档位）
+            record.capabilities = payload.capabilities.model_dump()
 
         # 跨字段校验必须放在合并之后：只改 max_output 时也要与库里已有的上下文比较
         if (

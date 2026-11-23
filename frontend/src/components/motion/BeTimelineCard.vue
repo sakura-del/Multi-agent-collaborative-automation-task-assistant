@@ -39,7 +39,7 @@ const veilOpacity = useTransform(offset, (o) => SIDE_DIM * Math.min(Math.abs(o),
     :data-index="props.index"
     :data-test="`be-timeline-card-${props.event.id}`"
     :data-active="props.active || undefined"
-    class="absolute left-1/2"
+    class="pointer-events-auto absolute left-1/2"
     :style="{
       top: `${CARD_CENTER * 100}%`,
       x,

@@ -34,6 +34,12 @@ class LiteratureSearch(BaseModel):
     max_results: int = Field(default=10, ge=MIN_SEARCH_RESULTS, le=MAX_SEARCH_RESULTS)
     date_from: date | None = None
     date_to: date | None = None
+    #: 「只要窗口内的新文献」模式（增量刷新用）。
+    #:
+    #: 打开后检索式**限定在 [date_from, date_to] 内**，仍按相关度排序：
+    #: 只按时间倒序取最新，会把「最近上传但完全不相关」的论文当成新证据
+    #: （实测：RAG 评估主题刷新出洪水救援、共聚焦显微镜的论文）。
+    fresh_only: bool = False
 
 
 class LiteratureRecord(BaseModel):

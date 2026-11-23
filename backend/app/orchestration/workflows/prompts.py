@@ -30,6 +30,30 @@ def _render(name: str, filename: str, variables: dict[str, Any]) -> str:
     return manager.render(name, variables)
 
 
+#: 模板中静态规则与动态内容的分隔标记（三份模板统一使用）
+_PROMPT_SEPARATOR = "\n---\n"
+
+
+def split_prompt(rendered: str) -> tuple[str, str]:
+    """把渲染结果拆成（静态规则, 动态内容）。
+
+    ## 为什么要拆（2026-11-18 生产实测，Issue #22）
+
+    DeepSeek/OpenAI 的前缀缓存以 **system message 开头**为锚点：把静态规则
+    全部放进 system，多个节点的 user 消息各不相同也能复用同一段缓存前缀。
+    实测（任务 3ff878f5）：静态规则放在 user 开头时，7 个节点间 cache_hit=0；
+    同一 prompt 重发（规划重试）才命中 128 tokens。
+
+    拆分点与模板对齐：模板用 `---` 分隔，静态块在前、动态块在后。
+    找不到分隔符时**整体作为 user**（system 留空），保证向后兼容旧模板。
+    """
+    text = rendered.replace("\r\n", "\n")
+    if _PROMPT_SEPARATOR not in text:
+        return "", rendered
+    static, dynamic = text.split(_PROMPT_SEPARATOR, 1)
+    return static.strip(), dynamic.strip()
+
+
 def render_planner_prompt(requirement: str, *, repair_section: str = "") -> str:
     """文献规划 Prompt：限定五类节点、无环依赖、write 依赖 extract。"""
     return _render(

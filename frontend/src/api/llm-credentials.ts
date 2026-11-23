@@ -3,6 +3,7 @@ import type {
   LLMCredentialCreate,
   LLMCredentialInfo,
   LLMCredentialUpdate,
+  LLMGenerationProbeResult,
   LLMProbeRequest,
   LLMProbeResult,
   LLMProviderOption,
@@ -63,6 +64,20 @@ export async function deleteLLMCredential(credentialId: string): Promise<void> {
  */
 export async function probeLLMCredential(payload: LLMProbeRequest): Promise<LLMProbeResult> {
   const response = await api.post<LLMProbeResult>("/llm-credentials/probe", payload);
+  return response.data;
+}
+
+/**
+ * 生成能力探测（Issue #28）：验证能否按指令输出可解析 JSON。
+ *
+ * ⚠️ 会用用户的 key 发一次真实请求（max_tokens=64，约 100 token），
+ * UI 必须在按钮旁说明。结果写入 capabilities.json_mode，
+ * planner 路由保存时据此放行。
+ */
+export async function probeGeneration(credentialId: string): Promise<LLMGenerationProbeResult> {
+  const response = await api.post<LLMGenerationProbeResult>(
+    `/llm-credentials/${encodeURIComponent(credentialId)}/probe-generation`
+  );
   return response.data;
 }
 

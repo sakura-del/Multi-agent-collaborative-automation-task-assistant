@@ -75,6 +75,13 @@ _TASK_TOKENS = Counter(
     registry=REGISTRY,
 )
 
+_LLM_TOKENS = Counter(
+    "maa_llm_tokens",
+    "LLM 输入 token 数（按模型与前缀缓存命中情况拆分；cache=none 表示厂商未返回缓存字段）",
+    labelnames=("model", "cache"),
+    registry=REGISTRY,
+)
+
 _TASK_DURATION = Histogram(
     "maa_task_duration_seconds",
     "任务从创建到终态的耗时（秒）",
@@ -118,6 +125,7 @@ _COUNTERS: Final[dict[str, tuple[Counter, frozenset[str]]]] = {
     "maa_http_requests": (_HTTP_REQUESTS, frozenset({"method", "route", "status"})),
     "maa_tasks": (_TASKS, frozenset({"status"})),
     "maa_task_tokens": (_TASK_TOKENS, frozenset()),
+    "maa_llm_tokens": (_LLM_TOKENS, frozenset({"model", "cache"})),
     "maa_task_nodes": (_TASK_NODES, frozenset({"node_type", "status"})),
     "maa_literature_source_errors": (_SOURCE_ERRORS, frozenset({"source"})),
     "maa_rate_limit_rejected": (_RATE_LIMIT_REJECTED, frozenset({"route"})),

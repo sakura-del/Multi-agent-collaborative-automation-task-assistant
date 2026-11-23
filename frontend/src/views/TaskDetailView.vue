@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import BeTraceWaterfall, { type TraceSpan } from "@/components/motion/BeTraceWaterfall.vue";
+import BeAgentPlan, { type AgentPlanStep } from "@/components/motion/BeAgentPlan.vue";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ListFilter, MessageSquare, X } from "lucide-vue-next";
@@ -11,13 +13,18 @@ import AnnotationPanel from "@/components/collaboration/AnnotationPanel.vue";
 import NodeDetail from "@/components/tasks/NodeDetail.vue";
 import PlanPanel from "@/components/tasks/PlanPanel.vue";
 import TaskDag from "@/components/tasks/TaskDag.vue";
+import TaskRefreshPanel from "@/components/tasks/TaskRefreshPanel.vue";
 import TaskLog from "@/components/tasks/TaskLog.vue";
 import TaskResult from "@/components/tasks/TaskResult.vue";
 import TaskToolbar from "@/components/tasks/TaskToolbar.vue";
 import { useAuthStore } from "@/stores/auth";
 import { useTaskStore } from "@/stores/tasks";
 import type { PlanNode, SubtaskStatus, TaskControl, TaskEvent } from "@/api/types";
-import { formatDateTime, needsUserAction } from "@/utils/task-status";
+import {
+  canApprovePlan,
+  formatDateTime,
+  needsUserAction,
+} from "@/utils/task-status";
 import { adviceForWaitingReason, latestWaitingReason } from "@/utils/waiting-reason";
 
 // 任务详情：Tab 由路由 query 驱动（刷新不丢），规划确认与 DAG 联查。
@@ -69,6 +76,114 @@ const needsAction = computed(() => needsUserAction(store.snapshot?.status ?? "cr
  */
 const REPLANNABLE_STATUSES = new Set(["waiting_approval", "waiting_human", "failed"]);
 const canReplan = computed(() => REPLANNABLE_STATUSES.has(store.snapshot?.status ?? ""));
+
+/**
+ * 是否允许「确认规划」：与后端 `approve_plan` 一致，只有 waiting_approval。
+ *
+ * 执行失败转 waiting_human 后旧规划仍在快照里，面板照常渲染——
+ * 若不禁用按钮，用户点击只会拿到 422（Issue #23 实测）。
+ */
+const canApprove = computed(() =>
+  canApprovePlan((store.snapshot?.status ?? "") as Parameters<typeof canApprovePlan>[0]),
+);
+
+/** beUI Agent Plan 形态：plan.nodes × 子任务状态 → 步骤列表（Issue #22 延伸） */
+const planSteps = computed<AgentPlanStep[]>(() => {
+  const subtasks = store.snapshot?.subtasks ?? [];
+  const byNode = new Map(subtasks.map((item) => [item.node_id, item]));
+  return (store.snapshot?.plan?.nodes ?? []).map((node) => {
+    const subtask = byNode.get(node.id);
+    let status: AgentPlanStep["status"] = "pending";
+    let durationMs: number | undefined;
+    let error: string | undefined;
+    if (subtask) {
+      status =
+        subtask.status === "completed"
+          ? "completed"
+          : subtask.status === "failed" || subtask.status === "waiting_human"
+            ? "failed"
+            : subtask.status === "running" || subtask.status === "validating"
+              ? "running"
+              : "pending";
+      if (subtask.started_at && subtask.completed_at) {
+        durationMs = Math.max(
+          0,
+          new Date(subtask.completed_at).getTime() - new Date(subtask.started_at).getTime(),
+        );
+      }
+      error = subtask.error ?? undefined;
+    } else if (store.snapshot?.status === "running") {
+      status = node.dependencies.every((dep) => byNode.get(dep)?.status === "completed")
+        ? "running"
+        : "pending";
+    }
+    return {
+      id: node.id,
+      title: node.title,
+      kind: node.type,
+      status,
+      durationMs,
+      error,
+    };
+  });
+});
+
+/** 任务级规划徽章状态 */
+const agentPlanStatus = computed<AgentPlanStep["status"] extends never ? never : "ready" | "running" | "completed" | "failed" | "draft">(() => {
+  const status = store.snapshot?.status ?? "";
+  if (status === "waiting_approval") return "ready";
+  if (status === "running" || status === "reviewing" || status === "planning") return "running";
+  if (status === "completed") return "completed";
+  if (status === "failed" || status === "waiting_human") return "failed";
+  return "draft";
+});
+
+/** beUI Trace Waterfall：子任务 started/completed → span 列表（Issue #22 延伸） */
+const traceRunName = computed(
+  () => `trace_${(store.snapshot?.task_id ?? "").slice(0, 8)}`,
+);
+
+const traceSpans = computed<TraceSpan[]>(() => {
+  const subtasks = (store.snapshot?.subtasks ?? []).filter(
+    (item) => item.started_at !== null,
+  );
+  if (!subtasks.length) return [];
+  const startBase = Math.min(
+    ...subtasks.map((item) => new Date(item.started_at as string).getTime()),
+  );
+  const kindByNode = new Map(
+    (store.snapshot?.plan?.nodes ?? []).map((node) => [node.id, node.type]),
+  );
+  const now = Date.now();
+  return subtasks.map((item) => {
+    const startMs = new Date(item.started_at as string).getTime() - startBase;
+    const endMs = item.completed_at
+      ? new Date(item.completed_at).getTime()
+      : now;
+    const kind = kindByNode.get(item.node_id) ?? "extract";
+    return {
+      id: item.node_id,
+      name: item.title,
+      kind: kind === "search" ? "search" : kind === "validate" ? "validate" : "extract",
+      startMs: Math.max(0, startMs),
+      durationMs: Math.max(250, endMs - new Date(item.started_at as string).getTime()),
+      status:
+        item.status === "completed"
+          ? "completed"
+          : item.status === "failed"
+            ? "failed"
+            : "running",
+      error: item.error ?? undefined,
+    } satisfies TraceSpan;
+  });
+});
+
+/** Agent Plan 行内「重试节点」：走 retry_node 命令（与执行页工具栏同路径） */
+async function handleRetryStep(stepId: string) {
+  selectedNodeId.value = stepId;
+  await handleControl({ command: "retry_node", node_id: stepId });
+  void refresh();
+}
 
 function selectTab(tab: TabKey) {
   if (tab === "result" && !resultAvailable.value) {
@@ -167,7 +282,9 @@ watch(
  * 后端把失败原因放在 `task_waiting_human` 事件的 payload.reason 里，
  * 页面上此前只显示「任务已暂停，等你介入」——用户不知道要做什么。
  */
-const waitingReason = computed(() => latestWaitingReason(store.events));
+const waitingReason = computed(() =>
+  latestWaitingReason(store.events, store.snapshot?.status ?? ""),
+);
 const waitingAdvice = computed(() => adviceForWaitingReason(waitingReason.value));
 
 // ===== 执行事件时间线（beUI 风格）=====
@@ -277,6 +394,13 @@ onBeforeUnmount(() => {
           {{ waitingAdvice }}
         </p>
       </div>
+
+      <!-- 持续更新（Issue #27）：已完成任务才渲染，手动刷新 + 定时重跑 + 历史摘要 -->
+      <TaskRefreshPanel
+        class="mb-4"
+        :task-id="props.taskId"
+        :status="store.snapshot?.status ?? 'created'"
+      />
 
       <ErrorBanner :message="errorMessage" />
 
@@ -446,6 +570,15 @@ onBeforeUnmount(() => {
           <ListFilter :size="13" aria-hidden="true" />
           <span>PRISMA 筛选</span>
         </RouterLink>
+      </div>
+
+      <!-- 平台回退标注（Issue #28） -->
+      <div
+        v-if="store.snapshot?.actual_provider"
+        data-test="task-platform-fallback"
+        class="rounded-md border border-warning/40 bg-warning/10 px-2.5 py-1.5 text-[11px] leading-snug text-warning"
+      >
+        已回退平台模型（{{ store.snapshot.actual_model ?? "平台" }}）· 本次消耗平台额度
       </div>
     </aside>
 

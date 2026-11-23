@@ -40,6 +40,7 @@ from app.db.repositories.task import TaskRepository
 from app.knowledge.services.citation_validator import CitationValidator, ReferenceCheckMode
 from app.knowledge.services.context_builder import LiteratureContextBuilder
 from app.knowledge.services.screening_service import ScreeningService, source_of
+from app.llm.usage_ledger import UsageLedger, use_usage_ledger
 from app.orchestration.agents.planner import PlannerAgent
 from app.orchestration.agents.validator import ValidatorAgent
 from app.orchestration.contracts import (
@@ -63,6 +64,7 @@ from app.orchestration.services.literature_source import (
     is_offline_literature_task,
     resolve_literature_source,
 )
+from app.orchestration.validation import audit_citation_alignment
 from app.orchestration.workflows.literature_review import (
     LiteratureNodeExecutor,
     LiteratureNodeValidator,
@@ -241,6 +243,7 @@ class TaskExecution:
         *,
         prompt_tokens: int = 0,
         completion_tokens: int = 0,
+        cache_hit_tokens: int = 0,
     ) -> None:
         """累加任务实际消耗的 token（**增量**，不覆盖）。
 
@@ -250,6 +253,9 @@ class TaskExecution:
         输入/输出拆分同时累加（Issue #15 P2）：成本估算要按不同单价计价。
         老调用只传总量时拆分保持 0，导出会标记为「按占比估算」。
 
+        缓存命中 token 同样增量累加（Issue #22）：命中价通常只有未命中的
+        1/10~1/25，落库后成本报表才能算出「优化省了多少钱」。
+
         失败只记 warning：用量记账失败不该让正在执行的任务崩掉
         （最坏情况是少退额度——宁可少退也不多退）。
         """
@@ -258,6 +264,7 @@ class TaskExecution:
             return
         prompt_amount = max(0, int(prompt_tokens))
         completion_amount = max(0, int(completion_tokens))
+        cache_amount = max(0, int(cache_hit_tokens))
         try:
             async with self._session_factory() as session:
                 repo = TaskRepository(session)
@@ -265,6 +272,7 @@ class TaskExecution:
                 task.used_tokens = int(task.used_tokens or 0) + amount
                 task.prompt_tokens = int(task.prompt_tokens or 0) + prompt_amount
                 task.completion_tokens = int(task.completion_tokens or 0) + completion_amount
+                task.cache_hit_tokens = int(task.cache_hit_tokens or 0) + cache_amount
                 await session.commit()
         except LookupError:
             return
@@ -294,7 +302,8 @@ class TaskExecution:
                 task = await repo.lock_for_update(task_id)
                 if task.quota_settled:
                     return  # 已结算：绝不重复退
-                if self._is_byok_task(task):
+                fallback_base = task.fallback_token_base
+                if self._is_byok_task(task) and fallback_base is None:
                     # BYOK 从未预扣平台 token：只置标记，绝不退款
                     task.quota_settled = True
                     await session.commit()
@@ -302,7 +311,14 @@ class TaskExecution:
                     return
                 task.quota_settled = True
                 used = int(task.used_tokens or 0)
-                refund_tokens = ESTIMATED_TOKENS_PER_TASK - used
+                if fallback_base is not None:
+                    # 回退过平台（Issue #28）：预扣在回退时才发生，退款只退
+                    # **平台实际消耗**（总用量 − 回退前基线）。BYOK 阶段花的是
+                    # 用户自己的钱，算进退款等于凭空发额度。
+                    platform_used = max(0, used - int(fallback_base))
+                    refund_tokens = ESTIMATED_TOKENS_PER_TASK - platform_used
+                else:
+                    refund_tokens = ESTIMATED_TOKENS_PER_TASK - used
                 user_id = task.user_id
                 await session.commit()
         except LookupError:
@@ -467,8 +483,14 @@ class TaskExecution:
             task = await self._lock_owned(session, repo, user_id, task_id)
 
             if task.status != TaskStatus.WAITING_APPROVAL.value:
+                # waiting_human 有两种来源，直接说清该怎么办（Issue #23 现场排查耗时）
+                hint = (
+                    "规划已确认过，请到执行页重试失败节点；若规划未生成，请重新规划"
+                    if task.status == TaskStatus.WAITING_HUMAN.value
+                    else "只有等待确认状态才能确认规划"
+                )
                 raise ValidationException(
-                    "任务当前不在等待确认状态",
+                    f"任务当前不在等待确认状态：{hint}",
                     details={"status": task.status},
                 )
             if task.plan_version != revision:
@@ -595,6 +617,363 @@ class TaskExecution:
             self.container.track(task_id, self._execute(task_id))
         logger.info("task_control", task_id=str(task_id), command=request.command.value)
         return snapshot
+
+    # ===== 增量刷新与定时重跑（Issue #27）=====
+
+    async def start_refresh(
+        self,
+        user_id: UUID,
+        task_id: UUID,
+        *,
+        trigger: Literal["manual", "schedule"] = "manual",
+    ) -> Any:
+        """启动一次增量刷新，返回运行记录（`TaskRefresh`）。
+
+        ## 为什么只允许已完成任务
+
+        刷新是「给已经成稿的综述补新证据」。任务还在跑时刷新，会和执行线程争
+        同一批 screening 记录与 reviewer 产出，两条链路互相看不到对方写的东西。
+        等它跑完（哪怕 failed）再说 —— 失败任务本就该先 replan/retry。
+
+        ## 为什么手动刷新要冷却
+
+        检索 + 摘要都是真金白银（平台模型时花平台的钱）。没有冷却的话，
+        用户连点五下就是五次检索 + 五次模型调用，还都是同一批文献。
+        定时刷新不走冷却（周期由排期决定）。
+        """
+        from datetime import UTC, datetime, timedelta
+
+        from app.db.models.routine import TaskRefresh
+        from app.orchestration.services.task_refresh import as_utc
+
+        cfg = get_settings().routine
+        now = datetime.now(UTC)
+        async with self._session_factory() as session:
+            repo = TaskRepository(session)
+            task = await repo.get_for_user(user_id, task_id)
+            if task is None:
+                raise NotFoundException("任务不存在")
+            if TaskStatus(task.status) is not TaskStatus.COMPLETED:
+                raise ValidationException(
+                    "只有已完成的任务可以检索新文献", details={"status": task.status}
+                )
+
+            running = (
+                await session.execute(
+                    select(TaskRefresh)
+                    .where(
+                        TaskRefresh.task_id == task_id,
+                        TaskRefresh.status == "running",
+                    )
+                    .order_by(TaskRefresh.started_at.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if running is not None:
+                # 进程重启会让在跑的刷新永远停在 running（协程没了），
+                # 之后所有刷新都会被这条挡住。超过 15 分钟仍未结束的按「中断」处理。
+                started = as_utc(running.started_at)
+                stale = started is None or (now - started) > timedelta(minutes=15)
+                if not stale:
+                    raise ValidationException(
+                        "上一次检索还在进行中，请稍候", details={"refresh_id": str(running.id)}
+                    )
+                running.status = "failed"
+                running.error = "进程重启导致本次刷新中断"
+                running.finished_at = now
+                await session.flush()
+
+            last = (
+                await session.execute(
+                    select(TaskRefresh)
+                    .where(TaskRefresh.task_id == task_id, TaskRefresh.status == "completed")
+                    .order_by(TaskRefresh.started_at.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+
+            if trigger == "manual" and cfg.manual_cooldown_seconds > 0 and last is not None:
+                anchor = as_utc(last.started_at)
+                if anchor is not None:
+                    earliest = anchor + timedelta(seconds=cfg.manual_cooldown_seconds)
+                    if now < earliest:
+                        raise ValidationException(
+                            "刚检索过，请稍后再试",
+                            details={
+                                "retry_at": earliest.isoformat(),
+                                "cooldown_seconds": cfg.manual_cooldown_seconds,
+                            },
+                        )
+
+            # 窗口左端：上次刷新（没有则任务完成时刻）− 索引延迟的回退天数
+            base = as_utc(last.started_at) if last is not None else as_utc(task.completed_at)
+            window_from = (base or now) - timedelta(days=cfg.overlap_days)
+            refresh = TaskRefresh(
+                task_id=task_id,
+                user_id=user_id,
+                trigger=trigger,
+                status="running",
+                window_from=window_from,
+                window_to=now,
+                queries=[],
+                started_at=now,
+            )
+            session.add(refresh)
+            await session.commit()
+
+        self.container.track(task_id, self._refresh(refresh.id))
+        logger.info(
+            "task_refresh_started",
+            task_id=str(task_id),
+            refresh_id=str(refresh.id),
+            trigger=trigger,
+        )
+        return refresh
+
+    async def _refresh(self, refresh_id: UUID) -> None:
+        """后台刷新协程：绑模型 → 跑（检索/摘要/落库）→ 汇报。"""
+        from app.db.models.routine import TaskRefresh
+        from app.orchestration.services.task_refresh import RefreshRunner, SessionBoundSource
+
+        trigger = "manual"
+        try:
+            async with self._session_factory() as session:
+                refresh = await session.get(TaskRefresh, refresh_id)
+                if refresh is None:
+                    return
+                task = await session.get(Task, refresh.task_id)
+                trigger = refresh.trigger
+            if task is None:
+                return
+
+            # 与执行链路一致：刷新用任务指定的凭据（BYOK 花用户自己的钱）
+            await self._bind_task_llm(task)
+
+            async def source_factory(_context: Any) -> Any:
+                source_session = self._session_factory()
+                try:
+                    source = resolve_literature_source(task, session=source_session)
+                except Exception:
+                    await source_session.close()
+                    raise
+                if source is None:
+                    await source_session.close()
+                    raise ValidationException("任务没有可用的文献源，无法检索新文献")
+                return SessionBoundSource(source, source_session)
+
+            runner = RefreshRunner(
+                session_factory=self._session_factory,
+                source_factory=source_factory,
+            )
+            outcome = await runner.run(refresh_id)
+            await self._notify_refresh(outcome, trigger=trigger)
+        except Exception as exc:  # 后台协程不能把异常抛给事件循环
+            logger.exception("task_refresh_failed", refresh_id=str(refresh_id), error=str(exc))
+            await self._fail_refresh(refresh_id, str(exc))
+
+    async def _fail_refresh(self, refresh_id: UUID, reason: str) -> None:
+        """把刷新记录标失败（协程异常兜底）。"""
+        from datetime import UTC, datetime
+
+        from app.db.models.routine import TaskRefresh
+
+        try:
+            async with self._session_factory() as session:
+                refresh = await session.get(TaskRefresh, refresh_id)
+                if refresh is None or refresh.status != "running":
+                    return
+                refresh.status = "failed"
+                refresh.error = reason[:2000]
+                refresh.finished_at = datetime.now(UTC)
+                await session.commit()
+        except Exception:
+            logger.warning("task_refresh_mark_failed_skipped", refresh_id=str(refresh_id))
+
+    async def _notify_refresh(self, outcome: Any, *, trigger: str) -> None:
+        """定时刷新有新证据时发一封汇报邮件（手动刷新由页面自己展示）。"""
+        from app.db.models.routine import TaskRefresh, TaskRoutine
+
+        if trigger != "schedule" or outcome.status != "completed" or outcome.new_count == 0:
+            return
+        try:
+            async with self._session_factory() as session:
+                routine = (
+                    await session.execute(
+                        select(TaskRoutine).where(TaskRoutine.task_id == outcome.task_id)
+                    )
+                ).scalar_one_or_none()
+                if routine is None or routine.notify != "email":
+                    return
+                refresh = await session.get(TaskRefresh, outcome.refresh_id)
+                if refresh is None or refresh.notified:
+                    return
+                from app.db.models.user import User
+
+                user = await session.get(User, outcome.user_id)
+                email = getattr(user, "email", None)
+                if not email:
+                    return
+                refresh.notified = True
+                await session.commit()
+
+            from app.services.email_sender import get_cached_email_sender
+
+            settings = get_settings()
+            link = f"{settings.email.frontend_base_url.rstrip('/')}/tasks/{outcome.task_id}"
+            titles = "\n".join(f"- {title}" for title in outcome.new_titles[:5])
+            body = (
+                f"《{outcome.task_title}》本期新增 {outcome.new_count} 篇文献。\n\n"
+                f"{titles}\n\n"
+                f"完整摘要与新增文献清单：{link}\n\n"
+                "（这是定时重跑的汇报邮件；可在任务详情页关闭排期或改为不发邮件。）"
+            )
+            await get_cached_email_sender().send(
+                to=email,
+                subject=f"【VeriPaper】《{outcome.task_title}》新增 {outcome.new_count} 篇证据",
+                body=body,
+            )
+        except Exception as exc:
+            # 邮件失败不影响刷新结果本身（与账号邮件同一原则）
+            logger.warning(
+                "refresh_notify_failed",
+                task_id=str(outcome.task_id),
+                refresh_id=str(outcome.refresh_id),
+                error=str(exc),
+            )
+
+    async def start_scheduled_refresh(self, task_id: UUID, user_id: UUID) -> None:
+        """调度器回调：按排期启动刷新。
+
+        任务可能已经被删/被重规划成非 completed，这类情况只记日志不抛错——
+        调度器不该因为一条过期排期而中断整轮扫描。
+        """
+        from app.db.models.routine import TaskRoutine
+
+        try:
+            await self.start_refresh(user_id, task_id, trigger="schedule")
+        except (ValidationException, NotFoundException) as exc:
+            reason = getattr(exc, "message", str(exc))
+            logger.info("routine_refresh_skipped", task_id=str(task_id), reason=reason)
+            # 任务已不是「已完成」（被 replan/取消/删除）：排期不可能再成功，
+            # 留着会每个周期空跑一次。直接停用，让用户在页面上看到状态变化。
+            try:
+                async with self._session_factory() as session:
+                    routine = (
+                        await session.execute(
+                            select(TaskRoutine).where(TaskRoutine.task_id == task_id)
+                        )
+                    ).scalar_one_or_none()
+                    if routine is not None and routine.enabled:
+                        routine.enabled = False
+                        await session.commit()
+                        logger.info("routine_auto_disabled", task_id=str(task_id))
+            except Exception:
+                logger.warning("routine_auto_disable_failed", task_id=str(task_id))
+
+    async def list_refreshes(self, user_id: UUID, task_id: UUID, *, limit: int = 20) -> list[Any]:
+        """列出刷新历史（最新在前）。owner-scoped。"""
+        from app.db.models.routine import TaskRefresh
+
+        async with self._session_factory() as session:
+            task = await TaskRepository(session).get_for_user(user_id, task_id)
+            if task is None:
+                raise NotFoundException("任务不存在")
+            result = await session.execute(
+                select(TaskRefresh)
+                .where(TaskRefresh.task_id == task_id)
+                .order_by(TaskRefresh.created_at.desc())
+                .limit(max(1, min(limit, 50)))
+            )
+            return list(result.scalars())
+
+    async def get_routine(self, user_id: UUID, task_id: UUID) -> Any | None:
+        """读取任务的排期（没有则 None）。owner-scoped。"""
+        from app.db.models.routine import TaskRoutine
+
+        async with self._session_factory() as session:
+            task = await TaskRepository(session).get_for_user(user_id, task_id)
+            if task is None:
+                raise NotFoundException("任务不存在")
+            return (
+                await session.execute(select(TaskRoutine).where(TaskRoutine.task_id == task_id))
+            ).scalar_one_or_none()
+
+    async def save_routine(
+        self,
+        user_id: UUID,
+        task_id: UUID,
+        *,
+        enabled: bool,
+        cadence: str,
+        notify: str,
+    ) -> Any:
+        """新建/更新排期。
+
+        `next_run_at` 每次都从**当前时刻**往后推：用户改了设置就是要按新设置
+        重新计时；沿用旧的下次运行时刻会出现「关了又开，立刻就跑一次」。
+        """
+        from datetime import UTC, datetime
+
+        from app.db.models.routine import TaskRoutine
+        from app.orchestration.services.routine_scheduler import advance
+
+        if cadence not in {"weekly", "monthly"}:
+            raise ValidationException("排期频率只支持 weekly / monthly")
+        if notify not in {"none", "email"}:
+            raise ValidationException("汇报方式只支持 none / email")
+
+        async with self._session_factory() as session:
+            task = await TaskRepository(session).get_for_user(user_id, task_id)
+            if task is None:
+                raise NotFoundException("任务不存在")
+            if TaskStatus(task.status) is not TaskStatus.COMPLETED:
+                raise ValidationException(
+                    "只有已完成的任务可以设置定时重跑", details={"status": task.status}
+                )
+            routine = (
+                await session.execute(select(TaskRoutine).where(TaskRoutine.task_id == task_id))
+            ).scalar_one_or_none()
+            now = datetime.now(UTC)
+            if routine is None:
+                routine = TaskRoutine(
+                    task_id=task_id,
+                    user_id=user_id,
+                    enabled=enabled,
+                    cadence=cadence,
+                    notify=notify,
+                    next_run_at=advance(cadence, now),
+                )
+                session.add(routine)
+            else:
+                routine.enabled = enabled
+                routine.cadence = cadence
+                routine.notify = notify
+                routine.next_run_at = advance(cadence, now)
+            await session.commit()
+            logger.info(
+                "task_routine_saved",
+                task_id=str(task_id),
+                cadence=cadence,
+                enabled=enabled,
+                notify=notify,
+            )
+            return routine
+
+    async def delete_routine(self, user_id: UUID, task_id: UUID) -> None:
+        """删除排期（任务本身不受影响）。"""
+        from app.db.models.routine import TaskRoutine
+
+        async with self._session_factory() as session:
+            task = await TaskRepository(session).get_for_user(user_id, task_id)
+            if task is None:
+                raise NotFoundException("任务不存在")
+            routine = (
+                await session.execute(select(TaskRoutine).where(TaskRoutine.task_id == task_id))
+            ).scalar_one_or_none()
+            if routine is None:
+                return
+            await session.delete(routine)
+            await session.commit()
 
     async def get_snapshot(
         self,
@@ -758,45 +1137,196 @@ class TaskExecution:
         snapshot = getattr(task, "model_snapshot", None)
         return isinstance(snapshot, dict) and bool(snapshot.get("is_byok"))
 
+    async def _load_user_routes(self, session: Any, user_id: UUID) -> list[dict[str, Any]]:
+        """读用户在「我的模型」页配置的节点路由（Issue #22 延伸）。"""
+        from sqlalchemy import select
+
+        from app.db.models.llm_credential import LLMNodeRouting
+
+        result = await session.execute(
+            select(LLMNodeRouting.node_type, LLMNodeRouting.credential_id).where(
+                LLMNodeRouting.user_id == user_id
+            )
+        )
+        return [{"node_type": row.node_type, "credential_id": row.credential_id} for row in result]
+
+    def _platform_llm(self) -> Any | None:
+        """平台主模型客户端（回退目标）；未配置时返回 None。"""
+        try:
+            from app.llm.factory import get_llm_manager
+
+            return get_llm_manager().get_primary()
+        except Exception as exc:
+            logger.warning("platform_llm_unavailable_for_fallback", error=str(exc))
+            return None
+
+    async def _apply_platform_fallback(self, *, task_id: UUID, reason: str) -> bool:
+        """把任务标注为「已回退平台」并完成平台侧计费；只生效一次。
+
+        - 标注 `actual_provider` / `actual_model`（界面据此提示「本次已消耗平台额度」）；
+        - 记 `fallback_token_base`（回退时刻的已用量），结算只退平台实际消耗；
+        - 篇数：BYOK 默认免篇数，回退平台后「照扣」——但提交时若本就按平台扣过
+          （`BILLING__BYOK_CONSUMES_REVIEW_QUOTA=true`），不重复扣；
+        - token：按整任务预估预扣，结算按基线差值退。
+
+        篇数扣减失败**不阻断回退**（call 已经发生，任务不能因为记账失败而崩）；
+        记 warning 留痕，运营可以从 `actual_provider` 反查补账。
+        """
+        from datetime import UTC, datetime
+
+        from app.billing.services.plan_service import PlanService
+
+        marked = False
+        async with self._session_factory() as session:
+            repo = TaskRepository(session)
+            task = await repo.lock_for_update(task_id)
+            if task is None or task.actual_provider is not None:
+                return False  # 已回退过（并发/重复触发）：不重复计费
+
+            platform = self._platform_llm()
+            task.actual_provider = getattr(platform, "provider", None) or "platform"
+            task.actual_model = getattr(platform, "model", None) or "platform"
+            task.fallback_token_base = int(task.used_tokens or 0)
+            if task.is_byok and not get_settings().billing.byok_consumes_review_quota:
+                try:
+                    await PlanService(self._session_factory).check_and_consume_review(task.user_id)
+                except Exception as exc:
+                    logger.warning(
+                        "fallback_review_quota_consume_failed",
+                        task_id=str(task_id),
+                        error=str(exc),
+                    )
+            if self._quota is not None:
+                try:
+                    await self._quota.check_and_consume(
+                        task.user_id, tokens=ESTIMATED_TOKENS_PER_TASK
+                    )
+                except Exception as exc:
+                    # 平台额度不足：不再阻断（调用已经发生），结算时按实际用量校正
+                    logger.warning(
+                        "fallback_token_reserve_failed", task_id=str(task_id), error=str(exc)
+                    )
+            task.updated_at = datetime.now(UTC)
+            await session.commit()
+            marked = True
+        logger.info(
+            "task_platform_fallback_applied",
+            task_id=str(task_id),
+            actual_model=task.actual_model,
+            reason=reason[:200],
+        )
+        return marked
+
     async def _bind_task_llm(self, task: Any | None) -> None:
         """把当前后台协程的 LLM 固定到任务指定的凭据（Issue #15 BYOK）。
 
         必须在 `asyncio.create_task` **之前**执行：子任务会复制当前 context，
         晚于创建就复制不到，会静默回落到平台模型。
 
-        解析失败**不回退平台模型**：那会在用户不知情时花平台的钱。
-        抛 `LLMException`，由调用方按既有路径把任务转人工并给出可读原因。
+        默认**解析失败不回退平台模型**：那会在用户不知情时花平台的钱，
+        抛 `LLMException` 由调用方把任务转人工。用户在凭据上显式开启
+        `allow_platform_fallback`（Issue #28）后才有两条回退路径：
+
+        1. **绑定期失败**（凭据被禁用/停用）：直接改绑平台模型；
+        2. **调用期 401/402/403**：由 `PlatformFallbackClient` 包装，首次失败即
+           粘住平台。429 限流与超时永远不回退。
         """
         if task is None:
             return
         credential_id = getattr(task, "llm_credential_id", None)
+        # 平台任务（无凭据）也允许有用户路由（Issue #22 延伸）：
+        # 主模型走平台默认，但 extract 等节点可路由到用户的本地/免费凭据。
+        client: Any | None = None
+        user_routes: dict[str, Any] = {}
+        allow_fallback = False
         if credential_id is None:
             # 凭据被删除时外键 SET NULL，但快照还在。**不能**因此静默回落到平台模型：
             # 用户以为在用自己的 key，实际花的是平台的钱。直接失败并说明原因。
             snapshot = getattr(task, "model_snapshot", None)
             if isinstance(snapshot, dict) and snapshot.get("is_byok"):
                 raise LLMException("任务指定的模型凭据已被删除，无法继续；请新建任务或改用平台模型")
-            return
 
         from app.core.exceptions import AppException
         from app.llm.byok import get_credential_resolver
-        from app.llm.scope import bind_llm_client
+        from app.llm.scope import bind_llm_client, bind_user_routes
 
         try:
             async with self._session_factory() as session:
-                client = await get_credential_resolver().resolve(
-                    session, task.user_id, credential_id
-                )
+                if credential_id is not None:
+                    from app.db.models.llm_credential import LLMCredential
+
+                    record = (
+                        await session.execute(
+                            select(LLMCredential).where(
+                                LLMCredential.id == credential_id,
+                                LLMCredential.user_id == task.user_id,
+                            )
+                        )
+                    ).scalar_one_or_none()
+                    allow_fallback = bool(record is not None and record.allow_platform_fallback)
+                    try:
+                        client = await get_credential_resolver().resolve(
+                            session, task.user_id, credential_id
+                        )
+                    except AppException as resolve_exc:
+                        if not allow_fallback:
+                            raise
+                        # 绑定期就失败（凭据被停用/状态非 active）：直接回平台，
+                        # 不让任务转人工——这正是用户开这个开关要买的行为。
+                        await self._apply_platform_fallback(
+                            task_id=task.id,
+                            reason=getattr(resolve_exc, "message", str(resolve_exc)),
+                        )
+                        logger.warning(
+                            "task_llm_fallback_at_bind",
+                            task_id=str(task.id),
+                            reason=getattr(resolve_exc, "message", str(resolve_exc)),
+                        )
+                        client = None
+                        allow_fallback = False
+                # 用户级节点路由（Issue #22 延伸）：「我的模型」页配置的
+                # (node_type → 凭据) 逐条解析为客户端；解析失败的路由**跳过并
+                # 留痕**而不是整体失败——路由是省钱优化，不该卡死任务主链路。
+                for route in await self._load_user_routes(session, task.user_id):
+                    try:
+                        user_routes[route["node_type"]] = await get_credential_resolver().resolve(
+                            session, task.user_id, route["credential_id"]
+                        )
+                    except AppException as route_exc:
+                        logger.warning(
+                            "user_route_resolve_failed",
+                            task_id=str(task.id),
+                            node_type=route["node_type"],
+                            error=str(route_exc.message),
+                        )
         except AppException as exc:
             raise LLMException(f"任务指定的模型凭据不可用：{exc.message}") from exc
 
-        bind_llm_client(client)
+        if client is not None and allow_fallback:
+            from app.llm.fallback import PlatformFallbackClient
+
+            client = PlatformFallbackClient(
+                client,
+                platform=self._platform_llm,
+                on_fallback=lambda reason: self._apply_platform_fallback(
+                    task_id=task.id, reason=reason
+                ),
+            )
+        if client is not None:
+            bind_llm_client(client)
+        bind_user_routes(user_routes)
+        if user_routes:
+            logger.info(
+                "user_routes_bound",
+                task_id=str(task.id),
+                routes={k: v.model for k, v in user_routes.items()},
+            )
         logger.info(
             "task_llm_bound",
             task_id=str(task.id),
             credential_id=str(credential_id),
-            provider=client.provider,
-            model=client.model,
+            provider=client.provider if client else "platform",
+            model=client.model if client else "(platform default)",
         )
 
     async def _plan(self, task_id: UUID, *, base_version: int | None = None) -> None:
@@ -997,6 +1527,11 @@ class TaskExecution:
     # ===== 后台流程：执行 =====
 
     async def _execute(self, task_id: UUID) -> None:
+        """后台执行入口：绑定任务级用量账本（Issue #16）。"""
+        with use_usage_ledger() as ledger:
+            await self._execute_with_ledger(task_id, ledger)
+
+    async def _execute_with_ledger(self, task_id: UUID, ledger: UsageLedger) -> None:
         """后台执行：调度未完成节点 → 复盘 → 完成；支持重启后续跑。"""
         try:
             (
@@ -1042,12 +1577,15 @@ class TaskExecution:
             # 先记账再判断成败：转人工 / 失败路径同样要按已用额度结算，
             # 若放在成功分支里就会漏记（「跑了 30k 然后转人工」被当成 0 用量全额退款）。
             node_results = getattr(result, "node_results", {}) or {}
-            usage = sum_actual_usage(node_results)
+            # 用量取自任务账本（Issue #16）：覆盖规划/校验/重试/路由调用，
+            # 不再依赖节点结果里的 usage（旧口径实测漏计 60%+）。
+            usage = ledger.take()
             await self.add_used_tokens(
                 task_id,
-                usage.total,
-                prompt_tokens=usage.prompt,
-                completion_tokens=usage.completion,
+                usage.total_tokens,
+                prompt_tokens=usage.prompt_tokens,
+                completion_tokens=usage.completion_tokens,
+                cache_hit_tokens=usage.cache_hit_tokens,
             )
             # 可观测性：节点维度能回答「卡在哪个环节」，成功率只说成/败
             self._record_node_metrics(node_results, _dag_node_types(dag))
@@ -1058,6 +1596,17 @@ class TaskExecution:
 
             await self._start_reviewing(task_id, result)
             await self._finish_reviewing(task_id, result, dag.topological_order())
+            # 复盘段结算（Issue #16）：review 调用发生在上面的记账之后，
+            # 必须再取一次增量补记，否则复盘用量永久丢失。
+            review_usage = ledger.take()
+            if review_usage.total_tokens > 0:
+                await self.add_used_tokens(
+                    task_id,
+                    review_usage.total_tokens,
+                    prompt_tokens=review_usage.prompt_tokens,
+                    completion_tokens=review_usage.completion_tokens,
+                    cache_hit_tokens=review_usage.cache_hit_tokens,
+                )
         except asyncio.CancelledError:
             logger.info("task_execution_cancelled", task_id=str(task_id))
             raise
@@ -1308,6 +1857,53 @@ class TaskExecution:
             await session.commit()
         await self._publish(event)
 
+    async def _guard_citation_consistency(
+        self, task_id: UUID, review_report: dict[str, Any]
+    ) -> bool:
+        """落库前引用一致性闸门：不通过则任务转 FAILED，返回 False。
+
+        独立成方法是为了可测：直接对「报告 + 任务状态」断言，不用跑完整个
+        调度/复盘流程（那需要 reviewer、容器、证据链的全部替身）。
+        """
+        audit = audit_citation_alignment(
+            str(review_report.get("final_markdown") or ""),
+            list(review_report.get("bibliography") or []),
+        )
+        # to_payload() 已含 ok；再显式传会 TypeError（实测：整条任务失败）
+        logger.info("citation_consistency_audit", task_id=str(task_id), **audit.to_payload())
+        if audit.ok:
+            return True
+        # 不落库不一致产出：review_report/artifacts 都不写，任务可 replan 重试
+        await self._fail_review(task_id, f"引用一致性校验未通过：{audit.reason}")
+        return False
+
+    async def _fail_review(self, task_id: UUID, reason: str) -> None:
+        """复盘阶段校验失败：REVIEWING → FAILED（不落库不一致产出）。
+
+        与 `_mark_waiting_human` 的区别：
+        - 这里的失败**不是缺数据/缺输入**，而是产出不满足硬性一致性要求；
+        - 用 FAILED 而不是 WAITING_HUMAN，是因为用户唯一有效的动作是
+          「换模型或重试」——`replan` 允许 FAILED 状态，且失败率看板应统计到它。
+        """
+        async with self._session_factory() as session:
+            repo = TaskRepository(session)
+            task = await repo.lock_for_update(task_id)
+            if task.status != TaskStatus.REVIEWING.value:
+                return
+            await repo.transition(task, {TaskStatus.REVIEWING}, TaskStatus.FAILED)
+            event = await self._append_event(
+                session,
+                task_id,
+                event_type="task_failed",
+                status=TaskStatus.FAILED.value,
+                payload={"reason": reason[:2000], "stage": "review_validation"},
+            )
+            await session.commit()
+        await self._publish(event)
+        logger.warning("task_review_validation_failed", task_id=str(task_id), reason=reason[:300])
+        await self.settle_quota(task_id)
+        await self._record_task_terminal(task_id, TaskStatus.FAILED.value)
+
     async def _finish_reviewing(
         self,
         task_id: UUID,
@@ -1352,6 +1948,9 @@ class TaskExecution:
                     "event_stats": {"event_count": event_count, "task_id": str(task_id)},
                 }
             )
+            # Issue #25 沉淀项 1：Agent 产出**落库前**强制校验引用一致性。
+            if not await self._guard_citation_consistency(task_id, review_report):
+                return
             artifacts = self._export_literature_artifacts(
                 user_id, task_id, review_report, citation_style=citation_style
             )
@@ -1772,6 +2371,8 @@ class TaskExecution:
             artifacts=list(task.artifacts or []),
             review_report=task.review_report,
             model=model,
+            actual_provider=task.actual_provider,
+            actual_model=task.actual_model,
             # 正文必须随快照下发：MCP/开放 API 的 get_task_output 读的就是它。
             # 曾经漏掉 → MCP 永远返回 markdown: null（tests 用 dict 替身掩盖了）。
             final_output=task.final_output,

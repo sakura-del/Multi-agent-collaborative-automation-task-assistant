@@ -25,7 +25,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 import app.db.models  # noqa: F401
 from app.api.v1.endpoints import tasks as tasks_endpoint
-from app.api.v1.endpoints.tasks import ESTIMATED_TOKENS_PER_TASK
 from app.core import config
 from app.core.exceptions import ForbiddenException, LLMException, NotFoundException
 from app.db.base import Base
@@ -37,6 +36,7 @@ from app.orchestration.base_agent import BaseAgent
 from app.orchestration.contracts import LiteratureReviewRequest, TaskPlan, TaskStatus
 from app.orchestration.runtime import RuntimeContainer
 from app.orchestration.services.task_execution import TaskExecution
+from app.orchestration.services.task_submission import ESTIMATED_TOKENS_PER_TASK
 from app.schemas.llm_credential import LLMCredentialCreate
 from app.schemas.task import TaskCreate
 from app.security.credential_cipher import CredentialCipher

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BePromptInput from "@/components/motion/BePromptInput.vue";
 import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 import { CircleCheck, FileInput, Loader2, RotateCcw, Save } from "lucide-vue-next";
@@ -177,13 +178,13 @@ function metaText(item: ImportedReferenceItem): string {
     <Card as="form" class="mb-3 gap-3 p-4" data-test="import-form" @submit.prevent="handleImport">
       <div class="grid gap-1.5">
         <Label for="import-content">引用文本</Label>
-        <textarea
+        <BePromptInput
           id="import-content"
           v-model="content"
           data-test="import-content"
-          rows="10"
-          class="w-full resize-y rounded-md border border-input bg-background px-3 py-2 font-mono text-xs shadow-xs transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
           placeholder="粘贴 BibTeX（@article{...}）或 RIS（TY  - JOUR ... ER  - ）"
+          hint="支持 @article / @inproceedings 等；RIS 以 TY  - 开头；Ctrl/⌘+Enter 解析"
+          min-height="10rem"
         />
       </div>
       <div class="flex flex-wrap items-end gap-3">

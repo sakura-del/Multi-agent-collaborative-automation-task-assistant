@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -65,10 +65,23 @@ class Usage(BaseModel):
 
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    # 前缀缓存命中/未命中的输入 token（DeepSeek 返回 prompt_cache_hit_tokens /
+    # prompt_cache_miss_tokens；OpenAI 为 prompt_tokens_details.cached_tokens）。
+    # 其他厂商不返回时保持 0 —— 语义是「未观测到」，不是「未命中」。
+    cache_hit_tokens: int = 0
+    cache_miss_tokens: int = 0
 
     @property
     def total_tokens(self) -> int:
         return self.prompt_tokens + self.completion_tokens
+
+    @property
+    def cache_hit_rate(self) -> float:
+        """输入侧缓存命中率；未观测到缓存字段时返回 0.0。"""
+        observed = self.cache_hit_tokens + self.cache_miss_tokens
+        if observed <= 0:
+            return 0.0
+        return self.cache_hit_tokens / observed
 
 
 class LLMResponse(BaseModel):
@@ -89,3 +102,16 @@ class LLMResponse(BaseModel):
         default=None,
         description="原始响应（调试用，生产环境不应依赖此字段）",
     )
+
+
+class StreamEvent(BaseModel):
+    """流式事件：文本增量或最终结果（含工具调用）。
+
+    为什么要事件化：流式与工具调用必须共存——先逐 token 出文本，结束时若模型
+    要求调工具，调用方需要拿到完整 tool_calls。只 yield 字符串无法表达后者。
+    """
+
+    type: Literal["delta", "done"] = "delta"
+    text: str = ""
+    tool_calls: list[ToolCall] | None = None
+    finish_reason: str | None = None

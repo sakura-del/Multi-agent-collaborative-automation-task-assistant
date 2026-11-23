@@ -27,7 +27,7 @@ from __future__ import annotations
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_admin_user, get_current_user_or_api_key
@@ -36,6 +36,7 @@ from app.billing.services.plan_service import DEFAULT_PERIOD_DAYS, PlanService
 from app.db.models.user import User
 from app.db.session import get_db
 from app.schemas.billing import ModelCostOut, PlanOut, SubscribeRequest, SubscriptionOut, UsageOut
+from app.security.audit import record_audit
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
@@ -160,6 +161,7 @@ async def subscribe(
     payload: SubscribeRequest,
     current_admin: AdminDep,
     db: DbDep,
+    request: Request,
 ) -> SubscriptionOut:
     """手工开通或变更套餐（**仅管理员**）。
 
@@ -178,6 +180,21 @@ async def subscribe(
         message = str(exc)
         status = 404 if "不存在" in message else 400
         raise HTTPException(status_code=status, detail=message) from exc
+    await record_audit(
+        db,
+        actor_id=current_admin.id,
+        actor_name=current_admin.username,
+        action="subscription.subscribe",
+        target_type="subscription",
+        target_id=subscription.id,
+        metadata={
+            "user_id": str(payload.user_id),
+            "plan_id": payload.plan_id,
+            "days": payload.days or DEFAULT_PERIOD_DAYS,
+            "seats": payload.seats,
+        },
+        request=request,
+    )
     return SubscriptionOut(
         subscription_id=subscription.id,
         user_id=subscription.user_id,
@@ -192,10 +209,22 @@ async def subscribe(
 
 
 @router.post("/cancel/{user_id}", status_code=204, summary="取消套餐（管理员）")
-async def cancel_subscription(user_id: UUID, current_admin: AdminDep, db: DbDep) -> None:
+async def cancel_subscription(
+    user_id: UUID, current_admin: AdminDep, db: DbDep, request: Request
+) -> None:
     """取消某用户的订阅（回落免费档）。仅管理员。"""
     service = _service(db)
     await service.cancel(user_id)
+    await record_audit(
+        db,
+        actor_id=current_admin.id,
+        actor_name=current_admin.username,
+        action="subscription.cancel",
+        target_type="subscription",
+        target_id=user_id,
+        metadata={"user_id": str(user_id)},
+        request=request,
+    )
 
 
 #: 让 `Any` 导入不被 lint 判为未使用（FastAPI 依赖签名里的 `Any`）

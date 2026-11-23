@@ -6,8 +6,21 @@
  */
 import type { TaskEvent } from "@/api/types";
 
-/** 取最近一次转人工的原因（事件按时间正序，从后往前找）。 */
-export function latestWaitingReason(events: readonly TaskEvent[]): string {
+/**
+ * 取最近一次转人工的原因（事件按时间正序，从后往前找）。
+ *
+ * ## 为什么需要 currentStatus（Issue #21 横幅残留）
+
+ * 事件流是累计的：replan 成功后旧的 `task_waiting_human` 事件仍在流里。
+ * 状态已离开 waiting_human（如 waiting_approval「规划已生成等你确认」）时，
+ * 旧失败原因只剩误导——横幅残留会让用户反复点「重新规划」。
+ */
+export function latestWaitingReason(
+  events: readonly TaskEvent[],
+  currentStatus?: string,
+): string {
+  // 状态门控：只有仍在 waiting_human 时，历史转人工原因才与「当前」相关
+  if (currentStatus && currentStatus !== "waiting_human") return "";
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
     if (event.event_type !== "task_waiting_human") continue;

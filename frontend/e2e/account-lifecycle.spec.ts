@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { demoPassword } from "./credentials";
+import { E2E_DEMO_ACCOUNT, demoPassword } from "./credentials";
 
 // 账号生命周期页面验收（Phase 1 P1-C 前端）
 // 覆盖：登录页「忘记密码」入口 → 申请重置（恒定响应）→ 邮箱验证页重发
@@ -10,7 +10,7 @@ import { demoPassword } from "./credentials";
 //   E2E_BASE_URL=http://10.0.10.2:48080 pnpm exec playwright test e2e/account-lifecycle.spec.ts
 
 const SHOTS = resolve(dirname(fileURLToPath(import.meta.url)), "screenshots");
-const CREDENTIALS = { account: "demo", password: demoPassword() };
+const CREDENTIALS = { account: E2E_DEMO_ACCOUNT, password: demoPassword() };
 
 async function login(page: Page) {
   await page.goto("/login");
@@ -21,13 +21,23 @@ async function login(page: Page) {
   // ⚠️ 登录端点受限流（`rate_limit.rules.auth_login`，默认 10 次/分钟）。
   // 多文件 × 双视口连续跑会命中 429 → 页面停留登录页 → 后续断言全失败。
   // 显式识别并等待窗口恢复后重试，避免把「测试环境限流」误报成产品缺陷。
+  //
+  // ⚠️ 判定「登录成功」不能用侧栏链接：窄屏下导航收进抽屉，`nav-tasks` 不可见
+  // （mobile-chrome 会一直等到 120s 超时）。改成「侧栏链接可见」或「地址栏到 /tasks」
+  // 任一成立即可。
   const loggedIn = page.getByRole("link", { name: /任务/ });
+  const onTasks = () =>
+    page
+      .waitForURL(/\/tasks$/, { timeout: 10_000 })
+      .then(() => "ok" as const)
+      .catch(() => null);
   for (let attempt = 0; attempt < 8; attempt += 1) {
     const settled = await Promise.race([
       loggedIn
         .waitFor({ state: "visible", timeout: 10_000 })
         .then(() => "ok" as const)
         .catch(() => null),
+      onTasks(),
       page
         .locator("text=请求过于频繁")
         .waitFor({ state: "visible", timeout: 10_000 })
@@ -40,7 +50,7 @@ async function login(page: Page) {
     await page.waitForTimeout(8_000);
     await page.locator('form button[type="submit"]').click().catch(() => undefined);
   }
-  await expect(loggedIn).toBeVisible({ timeout: 30_000 });
+  await expect(page).toHaveURL(/\/tasks$/, { timeout: 30_000 });
 }
 
 test.describe("账号生命周期", () => {

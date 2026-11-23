@@ -21,7 +21,7 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_active_user
@@ -30,9 +30,10 @@ from app.core.exceptions import ForbiddenException
 from app.db.models.llm_credential import LLMCredential
 from app.db.models.user import User
 from app.db.session import get_db
-from app.llm.probe import fetch_models
+from app.llm.probe import fetch_models, probe_generation
 from app.llm.providers import PRESET_PROVIDERS, PROVIDER_ORDER, get_provider_spec
 from app.schemas.llm_credential import (
+    LLMGenerationProbeOut,
     LLMCredentialCreate,
     LLMCredentialOut,
     LLMCredentialUpdate,
@@ -40,6 +41,7 @@ from app.schemas.llm_credential import (
     LLMProbeRequest,
     ProviderOut,
 )
+from app.security.audit import record_audit
 from app.security.llm_credential_service import LLMCredentialService
 
 router = APIRouter(prefix="/llm-credentials", tags=["llm-credentials"])
@@ -62,6 +64,7 @@ def _to_out(record: LLMCredential) -> LLMCredentialOut:
         masked_key=record.api_key_hint,
         key_version=record.key_version,
         is_default=record.is_default,
+        allow_platform_fallback=record.allow_platform_fallback,
         status=record.status,
         capabilities=dict(record.capabilities or {}),
         last_verified_at=record.last_verified_at,
@@ -165,10 +168,81 @@ async def list_credentials(current_user: CurrentUserDep, db: DbDep) -> list[LLMC
 
 @router.post("", response_model=LLMCredentialOut, status_code=201, summary="新增模型凭据")
 async def create_credential(
-    payload: LLMCredentialCreate, current_user: CurrentUserDep, db: DbDep
+    payload: LLMCredentialCreate,
+    current_user: CurrentUserDep,
+    db: DbDep,
+    request: Request,
 ) -> LLMCredentialOut:
+    # 先取快照：审计参数不依赖调用后的会话状态
+    actor_id, actor_name = current_user.id, current_user.username
     record = await _service().create(db, current_user.id, payload)
+    await record_audit(
+        db,
+        actor_id=actor_id,
+        actor_name=actor_name,
+        action="credential.create",
+        target_type="credential",
+        target_id=record.id,
+        metadata={"provider": record.provider, "model": record.model, "name": record.name},
+        request=request,
+    )
     return _to_out(record)
+
+
+@router.post(
+    "/{credential_id}/probe-generation",
+    response_model=LLMGenerationProbeOut,
+    summary="生成能力探测（结构化输出，约 100 token）",
+)
+async def probe_generation_capability(
+    credential_id: UUID,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+) -> LLMGenerationProbeOut:
+    """验证该凭据的模型能否**按指令输出可解析 JSON**（Issue #28 planner 门禁）。
+
+    - 用用户自己的 key 发一次最小请求（max_tokens=64），结果写进
+      `capabilities.json_mode`，planner 路由保存时据此放行；
+    - key 被拒（401/402/403）会计入凭据失败计数（可能触发自动停用）；
+      「输出了 JSON 但格式不对」只写 last_error，不计数——那是模型能力问题，
+      不是 key 坏了。
+    """
+    service = _service()
+    record = await service.get(db, current_user.id, credential_id)
+    if record.status == "disabled":
+        raise ForbiddenException("该凭据已停用，请先启用再测试")
+    api_key = service.decrypt_api_key(record)
+
+    result = await probe_generation(
+        base_url=record.base_url,
+        api_key=api_key,
+        model=record.model,
+        allow_private=settings.llm.byok_allow_private_base_url,
+    )
+
+    capabilities = dict(record.capabilities or {})
+    capabilities["json_mode"] = result.ok
+    record.capabilities = capabilities
+
+    credential_status: str | None = record.status
+    if not result.ok and result.auth_error:
+        record = await service.record_failure(
+            db,
+            user_id=current_user.id,
+            credential_id=record.id,
+            error=result.error or "生成能力探测失败",
+        )
+        credential_status = record.status
+    await db.commit()
+
+    return LLMGenerationProbeOut(
+        ok=result.ok,
+        latency_ms=result.latency_ms,
+        json_mode=result.ok,
+        error=result.error,
+        raw=result.raw,
+        credential_status=credential_status,
+    )
 
 
 @router.get("/{credential_id}", response_model=LLMCredentialOut, summary="凭据详情")
@@ -185,14 +259,40 @@ async def update_credential(
     payload: LLMCredentialUpdate,
     current_user: CurrentUserDep,
     db: DbDep,
+    request: Request,
 ) -> LLMCredentialOut:
+    actor_id, actor_name = current_user.id, current_user.username
     record = await _service().update(db, current_user.id, credential_id, payload)
+    await record_audit(
+        db,
+        actor_id=actor_id,
+        actor_name=actor_name,
+        action="credential.update",
+        target_type="credential",
+        target_id=credential_id,
+        # 只记改了哪些字段名；key 轮换标记出来，但绝不记值
+        metadata={
+            "fields": sorted(payload.model_fields_set),
+            "key_rotated": "api_key" in payload.model_fields_set,
+        },
+        request=request,
+    )
     return _to_out(record)
 
 
 @router.delete("/{credential_id}", status_code=204, summary="删除凭据")
 async def delete_credential(
-    credential_id: UUID, current_user: CurrentUserDep, db: DbDep
+    credential_id: UUID, current_user: CurrentUserDep, db: DbDep, request: Request
 ) -> Response:
+    actor_id, actor_name = current_user.id, current_user.username
     await _service().delete(db, current_user.id, credential_id)
+    await record_audit(
+        db,
+        actor_id=actor_id,
+        actor_name=actor_name,
+        action="credential.delete",
+        target_type="credential",
+        target_id=credential_id,
+        request=request,
+    )
     return Response(status_code=204)

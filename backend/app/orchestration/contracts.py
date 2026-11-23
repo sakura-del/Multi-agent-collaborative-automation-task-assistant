@@ -35,6 +35,19 @@ class TaskStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+#: 任务列表的状态分组（**必须与前端 `utils/task-status.ts` 完全一致**）。
+#:
+#: HTTP 列表端点与 Agent 工具共用这一份：两边各写一份会让
+#: 「待我确认 3」与筛出来的条数对不上（历史真实缺陷）。
+STATUS_GROUPS: dict[str, tuple[str, ...] | None] = {
+    "all": None,
+    "needs_me": ("waiting_approval", "waiting_human"),
+    # active = 非终态且不需要用户操作（与前端 isActive 同义）
+    "active": ("created", "planning", "running", "reviewing", "paused", "retrying"),
+    "done": ("completed",),
+}
+
+
 class TaskCommand(StrEnum):
     """人工控制命令。"""
 
@@ -123,6 +136,12 @@ class ExecutionResult(BaseModel):
     node_id: str
     content: str
     evidence: list[Evidence] = Field(default_factory=list)
+    #: 与 ``evidence`` 一一对应的**节点局部**引用编号（Issue #17）。
+    #:
+    #: executor 只保留被正文引用的证据，但正文里的 [E#] 是局部编号——
+    #: 复盘要把它重写成全局编号，就必须知道每条证据在节点证据池里的原编号。
+    #: 空列表 = 历史负载（复盘退化为按列表顺序编号）。
+    cited_indices: list[int] = Field(default_factory=list)
     artifacts: list[dict[str, Any]] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     duration_ms: int = Field(ge=0)
@@ -362,6 +381,10 @@ class TaskSnapshot(BaseModel):
     review_report: dict[str, Any] | None = None
     model: ModelSelectionSnapshot | None = None
     """本任务使用的模型；None = 平台模型（存量任务的默认值）。"""
+    actual_provider: str | None = None
+    """回退平台后实际使用的厂商（Issue #28）；None = 未发生过回退。"""
+    actual_model: str | None = None
+    """回退平台后实际使用的模型名；None = 未发生过回退。"""
     #: 综述正文（Markdown）。**必须随快照下发** —— 开放 API / MCP 直接消费它：
     #: `app/mcp/tools.py::get_task_output` 读 `snapshot["final_output"]`，
     #: `get_task_status` 用 `bool(final_output)` 判断「有没有产出」。

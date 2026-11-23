@@ -44,6 +44,23 @@ def _normalize_text(value: str | None) -> str:
     return " ".join((value or "").split())
 
 
+def _query_with_window(search: LiteratureSearch) -> str:
+    """把日期窗口拼进 arXiv 检索式（`fresh_only` 时）。
+
+    arXiv 的 `sortBy` 只有 relevance / lastUpdatedDate / submittedDate，
+    **没有**「窗口内按相关度」的组合；只按 submittedDate 排序会把最新上传但
+    完全不相关的论文排在前面（实测 RAG 主题刷出洪水救援论文）。所以窗口必须
+    进检索式，排序继续用 relevance。
+    """
+    query = f"all:{search.query}"
+    if not search.fresh_only or search.date_from is None:
+        return query
+    start = f"{search.date_from.strftime('%Y%m%d')}0000"
+    end_date = search.date_to or search.date_from
+    end = f"{end_date.strftime('%Y%m%d')}2359"
+    return f"{query} AND submittedDate:[{start} TO {end}]"
+
+
 class ArxivClient:
     """arXiv API 适配器（可注入 httpx.AsyncClient 以便测试）。"""
 
@@ -76,7 +93,7 @@ class ArxivClient:
     async def search(self, search: LiteratureSearch) -> list[LiteratureRecord]:
         """检索 arXiv 并按请求的日期区间本地过滤。"""
         params = {
-            "search_query": f"all:{search.query}",
+            "search_query": _query_with_window(search),
             "start": "0",
             "max_results": str(search.max_results),
             "sortBy": "relevance",
@@ -89,6 +106,10 @@ class ArxivClient:
         except httpx.TransportError as exc:
             raise UpstreamTemporaryError("arXiv 连接失败") from exc
 
+        if response.status_code == 429:
+            # arXiv 对突发请求直接 429（官方建议 ≥3s 间隔）。按**临时**错误处理：
+            # 判成永久错误会让「刷新时恰好被限流」变成一次确定的失败。
+            raise UpstreamTemporaryError("arXiv 限流（429），请稍后重试")
         if response.status_code >= 500:
             raise UpstreamTemporaryError(f"arXiv 返回 {response.status_code}")
         if response.status_code >= 400:

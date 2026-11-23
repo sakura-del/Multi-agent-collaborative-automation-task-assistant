@@ -60,6 +60,14 @@ const commands = computed<CommandItem[]>(() => {
       run: () => void router.push({ name: "tasks" }),
     },
     {
+      id: "nav-chat",
+      label: "AI 助手对话",
+      group: "页面跳转",
+      keywords: "chat ai assistant 对话 助手",
+      icon: ListChecks,
+      run: () => void router.push({ name: "chat" }),
+    },
+    {
       id: "nav-knowledge",
       label: "知识库",
       group: "页面跳转",
@@ -142,14 +150,24 @@ const commands = computed<CommandItem[]>(() => {
   ];
 
   if (auth.user?.role === "admin") {
-    navItems.push({
-      id: "nav-admin-byok",
-      label: "BYOK 渗透率看板（管理）",
-      group: "管理",
-      keywords: "admin byok dashboard 管理",
-      icon: Gauge,
-      run: () => void router.push({ name: "admin-byok" }),
-    });
+    navItems.push(
+      {
+        id: "nav-admin-console",
+        label: "后台管理控制台（管理）",
+        group: "管理",
+        keywords: "admin console 后台 控制台",
+        icon: Gauge,
+        run: () => void router.push({ name: "admin-console" }),
+      },
+      {
+        id: "nav-admin-byok",
+        label: "BYOK 渗透率看板（管理）",
+        group: "管理",
+        keywords: "admin byok dashboard 管理",
+        icon: Gauge,
+        run: () => void router.push({ name: "admin-byok" }),
+      },
+    );
   }
 
   navItems.push(

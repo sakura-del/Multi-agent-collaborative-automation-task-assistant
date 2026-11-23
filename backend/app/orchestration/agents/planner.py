@@ -177,21 +177,26 @@ class PlannerAgent(BaseAgent):
             return self._degraded_literature_plan(requirement)
 
         # 方法内导入：workflows 包 __init__ 反向依赖 planner，避免导入环
-        from app.orchestration.workflows.prompts import render_planner_prompt
+        from app.core.config import get_settings
+        from app.orchestration.workflows.prompts import render_planner_prompt, split_prompt
 
         prompt = render_planner_prompt(
             requirement,
             repair_section=self._repair_section(repair),
         )
+        # 静态规则进 system：跨任务共享同一缓存前缀（Issue #22，实测必需）
+        system_text, user_text = split_prompt(prompt)
         response = await self.llm.chat(
             [
                 Message(
                     role=MessageRole.SYSTEM,
-                    content="你是文献综述规划专家，只输出满足约束的 JSON。",
+                    content=system_text or "你是文献综述规划专家，只输出满足约束的 JSON。",
                 ),
-                Message(role=MessageRole.USER, content=prompt),
+                Message(role=MessageRole.USER, content=user_text or prompt),
             ],
             temperature=0.2,
+            # 输出上限（Issue #22）：规划 JSON 实测 3.5k tokens，压到配置上限内
+            max_tokens=get_settings().llm.max_tokens_planner,
         )
         content = response.content or ""
         payload = self._safe_parse_json(content)

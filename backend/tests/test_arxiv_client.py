@@ -115,6 +115,29 @@ class TestSearchParsing:
 
         assert [record.source_id for record in records] == ["2401.12345v1"]
 
+    async def test_fresh_only_pins_window_into_query(self) -> None:
+        """增量刷新：窗口进检索式，排序仍是相关度（不能被最新论文淹掉）。"""
+        captured: list[httpx.Request] = []
+        client = _mock_client(_atom_handler(captured))
+        try:
+            await ArxivClient(client=client).search(
+                LiteratureSearch(
+                    query="RAG evaluation",
+                    max_results=5,
+                    date_from=date(2026, 11, 11),
+                    date_to=date(2026, 11, 20),
+                    fresh_only=True,
+                )
+            )
+        finally:
+            await client.aclose()
+
+        params = captured[0].url.params
+        assert params["search_query"] == (
+            "all:RAG evaluation AND submittedDate:[202611110000 TO 202611202359]"
+        )
+        assert params["sortBy"] == "relevance"
+
 
 class TestUpstreamFailures:
     async def test_timeout_raises_temporary_error(self) -> None:

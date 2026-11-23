@@ -24,6 +24,7 @@ interface Crumb {
 
 const ROUTE_CRUMBS: Record<string, Crumb[]> = {
   tasks: [{ label: "研究任务" }],
+  chat: [{ label: "AI 助手" }],
   "task-detail": [{ label: "研究任务", to: { name: "tasks" } }, { label: "任务详情" }],
   "task-screening": [{ label: "研究任务", to: { name: "tasks" } }, { label: "PRISMA 筛选" }],
   knowledge: [{ label: "知识库" }],
@@ -37,6 +38,7 @@ const ROUTE_CRUMBS: Record<string, Crumb[]> = {
   models: [{ label: "设置", to: { name: "models" } }, { label: "我的模型" }],
   "api-keys": [{ label: "设置", to: { name: "api-keys" } }, { label: "API Key" }],
   plan: [{ label: "设置", to: { name: "plan" } }, { label: "我的套餐" }],
+  "admin-console": [{ label: "管理", to: { name: "admin-console" } }, { label: "后台控制台" }],
   "admin-byok": [{ label: "管理", to: { name: "admin-byok" } }, { label: "BYOK 看板" }],
   "account-verify": [{ label: "账号", to: { name: "account-verify" } }, { label: "邮箱验证" }],
 };

@@ -4,6 +4,9 @@ import type {
   TaskCreate,
   TaskCreateOut,
   TaskEventPage,
+  TaskRefreshRun,
+  TaskRoutine,
+  TaskRoutineInput,
   TaskSnapshot,
   TaskSummary,
   WsTicket,
@@ -73,6 +76,26 @@ export const taskApi = {
 
   wsTicket: (taskId: string) =>
     api.post<WsTicket>("/ws-ticket", { task_id: taskId }).then((response) => response.data),
+
+  /** 增量检索新文献（Issue #27，手动触发）；返回 running 记录，结果需轮询 refreshes。 */
+  startRefresh: (taskId: string) =>
+    api.post<TaskRefreshRun>(`/tasks/${taskId}/refresh`).then((response) => response.data),
+
+  /** 刷新历史（最新在前）。 */
+  refreshes: (taskId: string, limit = 20) =>
+    api
+      .get<TaskRefreshRun[]>(`/tasks/${taskId}/refreshes`, { params: { limit } })
+      .then((response) => response.data),
+
+  /** 定时重跑排期（没有则 null）。 */
+  routine: (taskId: string) =>
+    api.get<TaskRoutine | null>(`/tasks/${taskId}/routine`).then((response) => response.data),
+
+  saveRoutine: (taskId: string, payload: TaskRoutineInput) =>
+    api.put<TaskRoutine>(`/tasks/${taskId}/routine`, payload).then((response) => response.data),
+
+  deleteRoutine: (taskId: string) =>
+    api.delete(`/tasks/${taskId}/routine`).then(() => undefined),
 
   /** 下载产物：以 blob 拉取，文件名优先取服务端 Content-Disposition */
   downloadArtifact: (taskId: string, artifactId: string) =>

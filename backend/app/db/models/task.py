@@ -24,6 +24,7 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     DateTime,
     ForeignKey,
@@ -135,6 +136,17 @@ class Task(Base):
     completion_tokens: Mapped[int] = mapped_column(
         Integer, default=0, server_default="0", nullable=False, comment="输出 token（估算成本用）"
     )
+    #: 输入侧前缀缓存命中 token（Issue #22 成本观测，2026-11-18）。
+    #:
+    #: 命中价通常只有未命中的 1/10~1/25，命中率是 prompt 结构优化效果的唯一硬指标；
+    #: 厂商未返回缓存字段时保持 0（语义为「未观测到」，不是「未命中」）。
+    cache_hit_tokens: Mapped[int] = mapped_column(
+        BigInteger,
+        default=0,
+        server_default="0",
+        nullable=False,
+        comment="输入侧前缀缓存命中 token（成本观测用）",
+    )
     #: 配额是否已结算（**幂等保护**）。
     #:
     #: 结算会调 `quota.refund()`，重复调用等于「越退越多」——额度能被刷成正收益。
@@ -142,6 +154,18 @@ class Task(Base):
     quota_settled: Mapped[bool] = mapped_column(
         Boolean, default=False, nullable=False, comment="配额是否已结算（幂等保护）"
     )
+
+    # ===== 平台回退标注（Issue #28）=====
+    # BYOK 任务回退平台后与创建时快照不一致，必须如实标注，
+    # 否则用户看到的是自己 key 的模型名，以为还在花自己的钱。
+    actual_provider: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, comment="实际使用的模型厂商（回退后 ≠ 快照）"
+    )
+    actual_model: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, comment="实际使用的模型名（回退后 ≠ 快照）"
+    )
+    #: 回退时刻的 used_tokens 基线：结算退款只退平台实际消耗（ESTIMATED − (总量 − 基线)）
+    fallback_token_base: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # 任务输出格式要求（如 markdown / pdf / xlsx）
     output_format: Mapped[str | None] = mapped_column(String(32), nullable=True, comment="输出格式")

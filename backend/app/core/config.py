@@ -141,6 +141,49 @@ class LLMConfig(BaseModel):
     # 30s 会直接 "Request timed out."；90s 能覆盖慢模型又不至于无限占用 worker。
     request_timeout: int = 90
     max_retries: int = 3
+    # 校验/复盘专用调用超时（Issue #18）：这两类节点 prompt 大 + JSON 长输出，
+    # 90s 全局值实测不够；0 = 跟随 request_timeout。
+    # per-request 覆盖：openai SDK 的 create(timeout=...) 支持。
+    call_timeout_validation: int = Field(default=180, ge=0)
+    # 校验超时的**外层退避预算**（Issue #18）：超时不消耗 regeneration、不转人工，
+    # 按固定退避重试；预算用尽才转人工。
+    validation_timeout_retries: int = Field(default=2, ge=0)
+    # LLM 层对「超时类错误」的内部重试上限（Issue #18）：90s×3 的确定性等待
+    # 没有意义，超时类降到 1 次重试；429/5xx 仍走 max_retries。
+    timeout_retries: int = Field(default=1, ge=0)
+    # 全局 LLM 调用并发上限（进程级，跨任务/跨实例共享；见 app/llm/throttle.py）。
+    # 任务调度器本身按 DAG 并行（单任务最多 5 个节点），N 个任务并发时
+    # 上游瞬时请求数 = N × 5 —— 必须由这一层兜住，否则任何 key 都会被打爆。
+    # 免费/低配额 key 建议经环境变量 LLM__MAX_CONCURRENCY=1 完全串行。
+    max_concurrency: int = Field(default=3, ge=1)
+    #: 平台模型是否支持图片输入（P2）。默认 False——当前 Qwen 是纯文本；
+    #: 换视觉模型时设 `LLM__SUPPORTS_IMAGE=true`，会话能力端点与前端按钮
+    #: 自动放开，不需要改代码。
+    supports_image: bool = False
+    # ===== 输出上限（按节点类型，Issue #22）=====
+    # 目的：遏制「模型自由发挥」的输出成本（实测单节点峰值 4.2k tokens）。
+    # ⚠️ 部分推理型/融合模型会把思考 token 计入 max_tokens（qiniu conatus 实测
+    # max_tokens=20 时 content 全被 reasoning 吃掉），因此下限不可压太狠。
+    max_tokens_planner: int = Field(default=3600, ge=256)
+    max_tokens_executor: int = Field(default=2600, ge=300)
+    max_tokens_validator: int = Field(default=1200, ge=256)
+    max_tokens_reviewer: int = Field(default=1800, ge=256)
+    # ===== 重试退避（Issue #22 / 低并发共享池兼容）=====
+    # 共享免费池（并发≈1、RPM 极低）的 429 只能靠退避穿过：
+    # 等待 = min(base × factor^(n-1), cap)，且厂商 Retry-After 优先。
+    # 需要更长耐心时可设 LLM__MAX_RETRIES=6、LLM__RETRY_BACKOFF_CAP=60。
+    retry_backoff_base: float = Field(default=3.0, gt=0.0)
+    retry_backoff_factor: float = Field(default=2.0, gt=1.0)
+    retry_backoff_cap: float = Field(default=60.0, gt=0.0)
+    # ===== 节点级模型路由（混合处理，不单靠一个 API）=====
+    # node_routing：节点类型（planner/search/extract/write/validate/review）→ 目标名；
+    # 未命中的节点使用任务选择的模型（默认行为，向后兼容）。
+    # routing_targets：目标名 → {provider, model, base_url, api_key, request_timeout, max_retries}。
+    # .env 用 JSON 字符串配置，避免嵌套键解析歧义：
+    #   LLM__NODE_ROUTING={"extract":"local","validate":"local","review":"local"}
+    #   LLM__ROUTING_TARGETS={"local":{"provider":"custom","model":"...","base_url":"...","api_key":"..."}}
+    node_routing: dict[str, str] = Field(default_factory=dict)
+    routing_targets: dict[str, dict[str, Any]] = Field(default_factory=dict)
     cost_budget: LLMCostBudget = LLMCostBudget()
     fallback_chain: list[LLMFallbackItem] = Field(default_factory=list)
 
@@ -440,6 +483,42 @@ class OrchestrationConfig(BaseModel):
     retry_backoff_factor: int = 3
 
 
+class RoutineConfig(BaseModel):
+    """定时重跑 / 增量刷新（Issue #27）。
+
+    调度跑在**应用进程内**（单 uvicorn worker，见 entrypoint.sh）：
+    每分钟扫一次到期的 routine，用 `UPDATE ... WHERE next_run_at <= now`
+    原子认领，多进程部署也不会重复跑（认领失败即跳过）。
+    """
+
+    enabled: bool = True
+    """关闭后不再扫描排期（已排期的记录保留，重新打开即恢复）。"""
+
+    tick_seconds: int = Field(default=60, ge=5)
+    """扫描间隔。"""
+
+    batch_size: int = Field(default=5, ge=1, le=50)
+    """单次扫描最多认领多少条，避免一次拉起太多任务把模型配额打满。"""
+
+    overlap_days: int = Field(default=7, ge=0, le=90)
+    """窗口左端回退天数：文献源有索引延迟，严格从上次运行时刻切会漏文章。"""
+
+    max_queries: int = Field(default=5, ge=1, le=10)
+    """每次刷新最多用几条检索式（取任务计划的前 N 条）。"""
+
+    max_results_per_query: int = Field(default=20, ge=1, le=50)
+    """单条检索式最多取多少篇。"""
+
+    max_new_per_run: int = Field(default=30, ge=1, le=100)
+    """单次刷新最多纳入多少篇新文献（摘要 prompt 的长度上限，防止爆上下文）。"""
+
+    manual_cooldown_seconds: int = Field(default=600, ge=0)
+    """手动刷新的冷却时间：同一任务两次手动刷新之间至少间隔这么久。"""
+
+    default_cadence: str = "weekly"
+    """新建排期时的默认频率（weekly / monthly）。"""
+
+
 class ReferenceVerificationConfig(BaseModel):
     """引用真实性核验配置（Issue #3 / 计划 §2.5）。
 
@@ -531,6 +610,29 @@ class StorageConfig(BaseModel):
 # ===== 顶层 Settings =====
 
 
+class SearchConfig(BaseModel):
+    """联网搜索配置（会话/Agent 场景，2026-11-19 用户决策）。
+
+    ## 为什么默认 Tavily
+
+    - 一把 key 即可用、返回结构化结果（url/title/content），无需自建索引；
+    - 用户提供的 Tavily 密钥已验证可用，先作为默认；DeepSeek 自带搜索
+      需要额外的公网端点（用户本地 harness 不可达），待需要时再评估切换。
+
+    provider 留口子：后续增加 deepseek / serper 等只需实现 provider 接口。
+    """
+
+    enabled: bool = True
+    provider: str = "tavily"
+    tavily_api_key: str | None = None
+    timeout_s: int = Field(default=20, ge=5, le=60)
+    max_results: int = Field(default=6, ge=1, le=10)
+    #: basic = 1 credit/次；advanced 更贵（用户要求「免费/低成本优先」）
+    search_depth: str = "basic"
+    #: 单条结果 content 截断（控制注入上下文体积）
+    snippet_chars: int = Field(default=500, ge=100, le=2000)
+
+
 class Settings(BaseSettings):
     """全局配置入口。
 
@@ -561,6 +663,7 @@ class Settings(BaseSettings):
     rag: RAGConfig = RAGConfig()
     agent: AgentConfig = AgentConfig()
     orchestration: OrchestrationConfig = OrchestrationConfig()
+    routine: RoutineConfig = RoutineConfig()
     reference_verification: ReferenceVerificationConfig = ReferenceVerificationConfig()
     email: EmailConfig = EmailConfig()
     captcha: CaptchaConfig = CaptchaConfig()
@@ -568,6 +671,7 @@ class Settings(BaseSettings):
     billing: BillingConfig = BillingConfig()
     rate_limit: RateLimitConfig = RateLimitConfig()
     quota: QuotaConfig = QuotaConfig()
+    search: SearchConfig = SearchConfig()
     cors: CORSConfig = CORSConfig()
     storage: StorageConfig = StorageConfig()
 

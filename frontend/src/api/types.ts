@@ -183,8 +183,53 @@ export interface TaskSnapshot {
   review_report: ReviewReport | null;
   /** null = 平台默认模型（存量任务） */
   model?: ModelSelectionSnapshot | null;
+  /** 回退平台后实际使用的厂商；null = 未发生过回退（Issue #28） */
+  actual_provider?: string | null;
+  actual_model?: string | null;
   created_at: string | null;
   updated_at: string | null;
+}
+
+/** 定时重跑排期（Issue #27）：每任务最多一条。 */
+export interface TaskRoutine {
+  task_id: string;
+  enabled: boolean;
+  cadence: "weekly" | "monthly";
+  notify: "none" | "email";
+  next_run_at: string;
+  last_run_at: string | null;
+}
+
+/** 保存排期的入参。 */
+export interface TaskRoutineInput {
+  enabled: boolean;
+  cadence: "weekly" | "monthly";
+  notify: "none" | "email";
+}
+
+/**
+ * 一次增量刷新记录。
+ *
+ * `new_count=0 && status="completed"` 是「本期无新增」，不是失败；
+ * `error` 非空但状态是 completed，说明部分检索式失败（其余照常汇总）。
+ */
+export interface TaskRefreshRun {
+  id: string;
+  trigger: "manual" | "schedule";
+  status: "running" | "completed" | "failed";
+  window_from: string | null;
+  window_to: string | null;
+  hits_total: number;
+  new_count: number;
+  duplicate_count: number;
+  sources: Record<string, number>;
+  summary_markdown: string | null;
+  citation_ok: boolean;
+  tokens_used: number;
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string | null;
 }
 
 export interface TaskEvent {
@@ -863,12 +908,31 @@ export interface LLMCredentialInfo {
   /** 换 key 时 +1（前端不需要用，但可用于排查） */
   key_version: number;
   is_default: boolean;
+  /** 凭据不可用（401/402/403）时是否回退平台模型（Issue #28） */
+  allow_platform_fallback: boolean;
   status: "active" | "invalid" | "disabled";
   capabilities: Record<string, unknown>;
   last_verified_at: string | null;
   last_error: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/** 推理等级档位（label 展示 / value 下发给模型） */
+export interface ReasoningTier {
+  label: string;
+  value: string;
+}
+
+/** 模型能力声明（凭据级，参照 DeepSeek Harness 模型目录的设计） */
+export interface ModelCapabilities {
+  text: boolean;
+  /** 视觉模型才勾选；勾了才允许聊天里传图 */
+  image: boolean;
+  /** 生成能力探测（Issue #28）写入：true = 已验证能按指令输出可解析 JSON */
+  json_mode: boolean;
+  /** 空 = 不支持推理参数 */
+  reasoning_tiers: ReasoningTier[];
 }
 
 export interface LLMCredentialCreate {
@@ -883,6 +947,8 @@ export interface LLMCredentialCreate {
   /** 单次输出上限（token）；不填则沿用厂商默认 */
   max_output_tokens?: number | null;
   is_default?: boolean;
+  allow_platform_fallback?: boolean;
+  capabilities?: ModelCapabilities;
 }
 
 export interface LLMCredentialUpdate {
@@ -895,7 +961,20 @@ export interface LLMCredentialUpdate {
   context_window?: number | null;
   max_output_tokens?: number | null;
   is_default?: boolean;
+  allow_platform_fallback?: boolean;
   status?: "active" | "disabled";
+  /** 整体替换能力声明；不传 = 不改 */
+  capabilities?: ModelCapabilities;
+}
+
+/** 生成能力探测（Issue #28）：用用户 key 发一次 max_tokens=64 的真实请求。 */
+export interface LLMGenerationProbeResult {
+  ok: boolean;
+  latency_ms: number;
+  json_mode: boolean;
+  error: string | null;
+  raw: string | null;
+  credential_status: "active" | "invalid" | "disabled" | null;
 }
 
 /** 测试连接：二选一——已保存凭据 id，或未保存的配置。 */

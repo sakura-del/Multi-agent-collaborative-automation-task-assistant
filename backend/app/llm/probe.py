@@ -18,6 +18,8 @@ DNS 复核，它就是一个现成的 SSRF 探针（`https://evil.com` 指向内
 
 from __future__ import annotations
 
+import json
+import re
 import time
 from dataclasses import dataclass, field
 
@@ -61,6 +63,129 @@ def _extract_models(payload: object) -> list[str]:
         if len(models) >= MAX_MODELS:
             break
     return models
+
+
+@dataclass
+class GenerationProbeResult:
+    """生成能力探测结果（Issue #28）。
+
+    ``ok`` 的含义是「按指令输出了一段**可解析且字段正确**的 JSON」——
+    planner 门禁需要的就是这个能力，而不是「能聊天」。
+    """
+
+    ok: bool
+    latency_ms: int
+    error: str | None = None
+    raw: str | None = None
+    #: 401/402/403（key 无效/欠费/无权限）：这类失败应计入凭据失败计数
+    auth_error: bool = False
+
+
+GENERATION_PROBE_TIMEOUT_SECONDS = 8.0
+GENERATION_PROBE_MAX_TOKENS = 64
+#: 最小结构化输出探针：要求固定键与取值，解析失败的模型不可能产出 TaskPlan。
+GENERATION_PROBE_PROMPT = (
+    "只输出一个 JSON 对象，不要任何解释或代码栏标记。"
+    '要求：{"status": "ok", "count": 2}——status 必须是字符串 ok，count 必须是数字 2。'
+)
+
+
+def _strip_code_fence(text: str) -> str:
+    """剥掉 ```json ... ``` 与首尾空白（很多模型无视「不要代码栏」）。"""
+    stripped = re.sub(r"```(?:json)?", "", text).strip()
+    return stripped
+
+
+async def probe_generation(
+    *,
+    base_url: str,
+    api_key: str,
+    model: str,
+    allow_private: bool = False,
+    timeout: float = GENERATION_PROBE_TIMEOUT_SECONDS,
+) -> GenerationProbeResult:
+    """发一次最小结构化输出请求，验证模型能否按指令产出可解析 JSON。
+
+    ## 成本与副作用（必须在 UI 上事先说明）
+
+    用**用户的 key** 发一条 max_tokens=64 的真实请求（约 100 token）。
+    探针每月被手动触发一两次没有成本问题，但不做定时自动探测。
+
+    ## 为什么不用 response_format
+
+    部分中转/模型对 `response_format={"type":"json_object"}` 直接 400，
+    那会把「支持 JSON 但不支持该参数」误判成不支持。门禁要的是
+    「按指令能出 JSON」，提示词约束就够了。
+    """
+    url = f"{base_url.rstrip('/')}/chat/completions"
+    started = time.monotonic()
+
+    def elapsed() -> int:
+        return int((time.monotonic() - started) * 1000)
+
+    body = {
+        "model": model,
+        "messages": [{"role": "user", "content": GENERATION_PROBE_PROMPT}],
+        "temperature": 0,
+        "max_tokens": GENERATION_PROBE_MAX_TOKENS,
+    }
+    transport = PinnedDNSAsyncHTTPTransport(allow_private=allow_private)
+    try:
+        async with httpx.AsyncClient(transport=transport, timeout=timeout) as client:
+            response = await client.post(
+                url,
+                json=body,
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            )
+    except httpx.TimeoutException:
+        return GenerationProbeResult(
+            False, elapsed(), error=f"探测超时（{timeout:.0f} 秒）——模型响应过慢，不适合做规划"
+        )
+    except httpx.HTTPError as exc:
+        return GenerationProbeResult(False, elapsed(), error=f"连接失败：{type(exc).__name__}")
+    except Exception as exc:
+        return GenerationProbeResult(False, elapsed(), error=str(exc)[:200])
+
+    if response.status_code in (401, 402, 403):
+        return GenerationProbeResult(
+            False,
+            elapsed(),
+            error=f"API Key 被拒绝（HTTP {response.status_code}）",
+            auth_error=True,
+        )
+    if response.status_code == 429:
+        return GenerationProbeResult(False, elapsed(), error="上游限流（429），稍后再试")
+    if response.status_code >= 400:
+        detail = response.text[:160]
+        return GenerationProbeResult(
+            False, elapsed(), error=f"端点返回 HTTP {response.status_code}：{detail}"
+        )
+
+    try:
+        payload = response.json()
+        content = payload["choices"][0]["message"]["content"]
+    except (ValueError, KeyError, IndexError):
+        return GenerationProbeResult(False, elapsed(), error="响应不是预期的 chat.completions 结构")
+
+    raw = str(content or "")
+    cleaned = _strip_code_fence(raw)
+    try:
+        data = json.loads(cleaned)
+    except ValueError:
+        return GenerationProbeResult(
+            False,
+            elapsed(),
+            error="模型没有输出可解析的 JSON（不适合做规划）",
+            raw=raw[:200],
+        )
+    if not isinstance(data, dict) or data.get("status") != "ok" or data.get("count") != 2:
+        return GenerationProbeResult(
+            False,
+            elapsed(),
+            error="JSON 已解析但字段不符合要求（不适合做规划）",
+            raw=raw[:200],
+        )
+    return GenerationProbeResult(True, elapsed(), raw=raw[:200])
 
 
 async def fetch_models(

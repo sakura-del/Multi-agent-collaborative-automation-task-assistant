@@ -16,7 +16,53 @@ from typing import Any
 from openai import AsyncOpenAI
 
 from app.llm.base import BaseLLM
-from app.llm.models import LLMResponse, Message, MessageRole, ToolCall, Usage
+from app.llm.model_profiles import apply_model_profile
+from app.llm.models import (
+    LLMResponse,
+    Message,
+    MessageRole,
+    StreamEvent,
+    ToolCall,
+    ToolSchema,
+    Usage,
+)
+
+
+def _parse_cache_usage(raw_usage: Any) -> dict[str, int]:
+    """从厂商 usage 对象提取前缀缓存命中/未命中 token（容错，缺失即 null）。
+
+    兼容三种写法：
+    - DeepSeek：`prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`
+    - OpenAI：`prompt_tokens_details.cached_tokens`（命中数；未命中 = prompt - cached）
+    - 其他厂商：字段缺失 → 返回 0（语义为「未观测到」）
+
+    为什么必须埋这个点：前缀缓存是输入成本的主导变量（命中价可低至未命中的
+    1/25），不记录就无法验证 prompt 结构优化是否生效（见 Issue #22）。
+    """
+
+    def _as_int(value: Any) -> int:
+        try:
+            return max(0, int(value))
+        except (TypeError, ValueError):
+            return 0
+
+    def _get(obj: Any, key: str) -> Any:
+        if isinstance(obj, dict):
+            return obj.get(key)
+        return getattr(obj, key, None)
+
+    hit = _as_int(_get(raw_usage, "prompt_cache_hit_tokens"))
+    miss = _as_int(_get(raw_usage, "prompt_cache_miss_tokens"))
+
+    if hit == 0 and miss == 0:
+        details = _get(raw_usage, "prompt_tokens_details")
+        cached = _as_int(_get(details, "cached_tokens")) if details is not None else 0
+        if cached > 0:
+            prompt = _as_int(_get(raw_usage, "prompt_tokens"))
+            hit = cached
+            miss = max(0, prompt - cached)
+
+    return {"cache_hit_tokens": hit, "cache_miss_tokens": miss}
 
 
 class OpenAIAdapter(BaseLLM):
@@ -130,6 +176,9 @@ class OpenAIAdapter(BaseLLM):
             payload["tools"] = [self._tool_to_dict(t) for t in tools]
         # 透传额外参数（如 top_p、stop 等），避免接口扩展时频繁改签名
         payload.update(kwargs)
+        # 模型能力画像：思考默认开启且会吃光 max_tokens 的模型（如本地
+        # qwen3.8-27b），必须在请求级显式关闭（见 app/llm/model_profiles.py）
+        apply_model_profile(payload, self.model)
 
         response = await client.chat.completions.create(**payload)
         return self._parse_response(response)
@@ -155,6 +204,7 @@ class OpenAIAdapter(BaseLLM):
             usage = Usage(
                 prompt_tokens=response.usage.prompt_tokens,
                 completion_tokens=response.usage.completion_tokens,
+                **_parse_cache_usage(response.usage),
             )
 
         return LLMResponse(
@@ -189,6 +239,9 @@ class OpenAIAdapter(BaseLLM):
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
         payload.update(kwargs)
+        # ⚠️ 与 chat() 必须一致：漏掉这行会让「思考模型」把 max_tokens 全花在
+        # reasoning 上，content 返回空串（生产实测 2026-11-19：会话流式 0 字符）。
+        apply_model_profile(payload, self.model)
 
         stream = await client.chat.completions.create(**payload)
         async for chunk in stream:
@@ -198,6 +251,78 @@ class OpenAIAdapter(BaseLLM):
             delta = chunk.choices[0].delta
             if delta and delta.content:
                 yield delta.content
+
+    async def stream_chat_events(
+        self,
+        messages: list[Message],
+        *,
+        tools: list[ToolSchema] | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[StreamEvent]:
+        """真流式 + 工具调用累积。
+
+        OpenAI 的 tool_calls 在流里是**按 index 分片**到达的：
+        id/name 可能只在首片，arguments 会拆成多段字符串。必须按 index
+        聚合，最后一次性产出完整 ToolCall，否则参数是残缺 JSON。
+        """
+        client: AsyncOpenAI = self._ensure_client()  # type: ignore[assignment]
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "messages": [self._message_to_dict(m) for m in messages],
+            "stream": True,
+        }
+        if tools:
+            payload["tools"] = [self._tool_to_dict(t) for t in tools]
+        if temperature is not None:
+            payload["temperature"] = temperature
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
+        payload.update(kwargs)
+        apply_model_profile(payload, self.model)
+
+        stream = await client.chat.completions.create(**payload)
+        fragments: dict[int, dict[str, str]] = {}
+        finish_reason: str | None = None
+
+        async for chunk in stream:
+            if not chunk.choices:
+                continue
+            choice = chunk.choices[0]
+            if choice.finish_reason:
+                finish_reason = choice.finish_reason
+            delta = choice.delta
+            if delta is None:
+                continue
+            if delta.content:
+                yield StreamEvent(type="delta", text=delta.content)
+            for call in delta.tool_calls or []:
+                index = call.index if call.index is not None else 0
+                entry = fragments.setdefault(index, {"id": "", "name": "", "arguments": ""})
+                if call.id:
+                    entry["id"] = call.id
+                function = call.function
+                if function is not None:
+                    if function.name:
+                        entry["name"] += function.name
+                    if function.arguments:
+                        entry["arguments"] += function.arguments
+
+        tool_calls = [
+            ToolCall(
+                id=entry["id"] or f"call_{index}",
+                name=entry["name"],
+                arguments=entry["arguments"] or "{}",
+            )
+            for index, entry in sorted(fragments.items())
+            if entry["name"]
+        ]
+        yield StreamEvent(
+            type="done",
+            tool_calls=tool_calls or None,
+            finish_reason=finish_reason or "stop",
+        )
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         """文本向量化：调用 OpenAI Embeddings 接口。"""

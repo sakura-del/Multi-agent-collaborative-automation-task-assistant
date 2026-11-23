@@ -8,6 +8,9 @@
     POST   /api/v1/tasks/{task_id}/plan/approve   确认规划
     POST   /api/v1/tasks/{task_id}/control        人工控制
     GET    /api/v1/tasks/{task_id}/events         事件回放
+    POST   /api/v1/tasks/{task_id}/refresh        增量检索新文献（Issue #27）
+    GET    /api/v1/tasks/{task_id}/refreshes      刷新历史
+    GET/PUT/DELETE /api/v1/tasks/{task_id}/routine 定时重跑排期
 
 鉴权：全部端点要求 Bearer access token；跨用户访问统一 404。
 """
@@ -27,13 +30,15 @@ from app.api.deps import (
     require_scope,
 )
 from app.billing.services.plan_service import PlanService
-from app.core.config import get_settings, settings
-from app.core.exceptions import ForbiddenException, ValidationException
+from app.core.config import get_settings
+from app.core.exceptions import ValidationException
 from app.core.quota import QuotaService
 from app.db.models.user import User
 from app.db.session import get_db
-from app.orchestration.contracts import TaskSnapshot, TaskStatus
+from app.orchestration.contracts import STATUS_GROUPS, TaskSnapshot, TaskStatus
 from app.orchestration.services.task_execution import TaskExecution
+from app.orchestration.services.task_submission import submit_review_task
+from app.schemas.routine import RefreshOut, RoutineIn, RoutineOut
 from app.schemas.task import (
     PlanApproval,
     TaskControl,
@@ -43,7 +48,6 @@ from app.schemas.task import (
     TaskEventPage,
     TaskSummaryOut,
 )
-from app.security.llm_credential_service import LLMCredentialService
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -52,13 +56,7 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 #: 与筛出来的条数对不上（点「待我确认 3」却只列出 2 条）。
 StatusGroup = Literal["all", "needs_me", "active", "done"]
 
-_STATUS_GROUP_STATUSES: dict[str, tuple[str, ...] | None] = {
-    "all": None,
-    "needs_me": ("waiting_approval", "waiting_human"),
-    # active = 非终态且不需要用户操作（与前端 isActive 同义）
-    "active": ("created", "planning", "running", "reviewing", "paused", "retrying"),
-    "done": ("completed",),
-}
+_STATUS_GROUP_STATUSES = STATUS_GROUPS
 
 
 def get_task_execution(request: Request) -> TaskExecution:
@@ -94,13 +92,6 @@ async def get_visible_workspace_ids(
         select(WorkspaceMember.workspace_id).where(WorkspaceMember.user_id == current_user.id)
     )
     return [row[0] for row in rows.all()]
-
-
-#: 单次文献综述任务的 token 预估（提交时先按此扣减，跑完再按实际用量校正）。
-#:
-#: 取值依据：一次综述约 5 类节点 × 若干子任务，历史实测中位数量级在 10 万 token 上下；
-#: 这里取整为 100k 作为**保守预估**——宁可先扣多了再退还，也不要先扣少了超支。
-ESTIMATED_TOKENS_PER_TASK = 100_000
 
 
 def build_quota_service() -> QuotaService | None:
@@ -235,51 +226,14 @@ async def create_task(
     - **篇数：默认免** —— 开关 `BILLING__BYOK_CONSUMES_REVIEW_QUOTA=true`
       时与平台模型一致（适合「服务仍由平台提供」的定价）。
     """
-    credential = None
-    model_snapshot: dict[str, Any] | None = None
-    if payload.llm_credential_id is not None:
-        # 越权/不存在统一 404（服务层保证），停用单独 403
-        credential = await LLMCredentialService().get(
-            db, current_user.id, payload.llm_credential_id
-        )
-        if credential.status != "active":
-            raise ForbiddenException("该模型凭据已停用，请先启用或更换")
-        model_snapshot = {
-            "credential_id": str(credential.id),
-            "name": credential.name,
-            "provider": credential.provider,
-            "model": credential.model,
-            "base_url": credential.base_url,
-            "context_window": credential.context_window,
-            "max_output_tokens": credential.max_output_tokens,
-            "is_byok": True,
-        }
-
-    contract = payload.to_contract()
-    # BYOK（Issue #15）：用户自己的 key，平台不再预扣 token。
-    # 篇数按开关决定：默认免（算力已由用户付费），`billing.byok_consumes_review_quota=true`
-    # 时与平台模型一致。
-    byok = payload.llm_credential_id is not None
-
-    # ① 篇数（数据库原子扣减；超限抛 PLAN_QUOTA_EXCEEDED）
-    if not byok or settings.billing.byok_consumes_review_quota:
-        await plan_service.check_and_consume_review(current_user.id)
-
-    # ② token 成本护栏（Redis；超限抛 TOKEN_BUDGET_EXCEEDED）
-    # BYOK 明确跳过：否则平台会为用户自费的 token 再收一次配额。
-    if quota is not None and not byok:
-        await quota.check_and_consume(current_user.id, tokens=ESTIMATED_TOKENS_PER_TASK)
-
-    # 不带凭据时保持原调用形状：编排层替身（测试/验收）无需感知 BYOK 参数
-    if payload.llm_credential_id is None:
-        task_id = await execution.submit(current_user.id, contract)
-    else:
-        task_id = await execution.submit(
-            current_user.id,
-            contract,
-            llm_credential_id=payload.llm_credential_id,
-            model_snapshot=model_snapshot,
-        )
+    task_id = await submit_review_task(
+        db=db,
+        user_id=current_user.id,
+        payload=payload,
+        execution=execution,
+        plan_service=plan_service,
+        quota=quota,
+    )
     return TaskCreateOut(task_id=task_id, status=TaskStatus.PLANNING.value)
 
 
@@ -409,6 +363,95 @@ async def control_task(
 ) -> TaskSnapshot:
     """pause / resume / cancel / retry_node / supply_input / replan。"""
     return await execution.control(current_user.id, task_id, payload.to_contract())
+
+
+@router.post(
+    "/{task_id}/refresh",
+    response_model=RefreshOut,
+    status_code=202,
+    summary="增量检索新文献（手动刷新）",
+)
+async def start_refresh(
+    task_id: UUID,
+    execution: ExecutionDep,
+    current_user: ApiUserDep,
+    _scope: TasksWriteScope,
+) -> RefreshOut:
+    """对已完成任务重跑检索，只保留新增文献并生成增量摘要（Issue #27）。
+
+    后台执行：立刻返回 `running` 记录，前端轮询 `GET /{task_id}/refreshes`。
+    不扣「篇数」（刷新不是新综述），token 用量记在记录里。
+    """
+    refresh = await execution.start_refresh(current_user.id, task_id, trigger="manual")
+    return RefreshOut.model_validate(refresh)
+
+
+@router.get(
+    "/{task_id}/refreshes",
+    response_model=list[RefreshOut],
+    summary="刷新历史（最新在前）",
+)
+async def list_refreshes(
+    task_id: UUID,
+    execution: ExecutionDep,
+    current_user: ApiUserDep,
+    _scope: TasksReadScope,
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+) -> list[RefreshOut]:
+    rows = await execution.list_refreshes(current_user.id, task_id, limit=limit)
+    return [RefreshOut.model_validate(row) for row in rows]
+
+
+@router.get(
+    "/{task_id}/routine",
+    response_model=RoutineOut | None,
+    summary="读取定时重跑排期",
+)
+async def get_routine(
+    task_id: UUID,
+    execution: ExecutionDep,
+    current_user: ApiUserDep,
+    _scope: TasksReadScope,
+) -> RoutineOut | None:
+    routine = await execution.get_routine(current_user.id, task_id)
+    return RoutineOut.model_validate(routine) if routine is not None else None
+
+
+@router.put(
+    "/{task_id}/routine",
+    response_model=RoutineOut,
+    summary="新建/更新定时重跑排期",
+)
+async def save_routine(
+    task_id: UUID,
+    payload: RoutineIn,
+    execution: ExecutionDep,
+    current_user: ApiUserDep,
+    _scope: TasksWriteScope,
+) -> RoutineOut:
+    routine = await execution.save_routine(
+        current_user.id,
+        task_id,
+        enabled=payload.enabled,
+        cadence=payload.cadence,
+        notify=payload.notify,
+    )
+    return RoutineOut.model_validate(routine)
+
+
+@router.delete(
+    "/{task_id}/routine",
+    status_code=204,
+    summary="删除定时重跑排期",
+)
+async def delete_routine(
+    task_id: UUID,
+    execution: ExecutionDep,
+    current_user: ApiUserDep,
+    _scope: TasksWriteScope,
+) -> Response:
+    await execution.delete_routine(current_user.id, task_id)
+    return Response(status_code=204)
 
 
 @router.get("/{task_id}/events", response_model=TaskEventPage, summary="回放任务事件")

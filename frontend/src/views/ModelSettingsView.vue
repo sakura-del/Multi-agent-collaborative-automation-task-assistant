@@ -1,6 +1,12 @@
 <script setup lang="ts">
+import BeContextMeter from "@/components/motion/BeContextMeter.vue";
+import {
+  ROUTABLE_NODE_TYPES,
+  listNodeRouting,
+  updateNodeRouting,
+} from "@/api/llm-routing";
 import { computed, onMounted, ref } from "vue";
-import { Check, Cpu, Pencil, Plus, Star, Trash2, Wifi } from "lucide-vue-next";
+import { Check, Cpu, FileJson, Pencil, Plus, Star, Trash2, Wifi } from "lucide-vue-next";
 
 import EmptyState from "@/components/common/EmptyState.vue";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
@@ -14,6 +20,7 @@ import {
     deleteLLMCredential,
     listLLMCredentials,
     listLLMProviders,
+    probeGeneration,
     probeLLMCredential,
     testLLMCredential,
     updateLLMCredential,
@@ -45,6 +52,60 @@ import type {
  * `model-search` / `model-count` / `models-no-match`。
  */
 const credentials = ref<LLMCredentialInfo[]>([]);
+
+const routeDraft = ref<Record<string, string>>({});
+const routeSaving = ref(false);
+const routeMessage = ref<string | null>(null);
+
+async function loadRouting() {
+  try {
+    const routes = await listNodeRouting();
+    const draft: Record<string, string> = {};
+    for (const item of ROUTABLE_NODE_TYPES) {
+      draft[item.value] = "";
+    }
+    for (const route of routes) {
+      draft[route.node_type] = route.credential_id;
+    }
+    routeDraft.value = draft;
+  } catch {
+    // 路由加载失败不阻塞凭据页：静默保持「全部跟随任务勾选」
+    routeDraft.value = {};
+  }
+}
+
+const routingMeterCategories = computed(() =>
+    ROUTABLE_NODE_TYPES.map((node) => {
+        const credentialId = routeDraft.value[node.value] || "";
+        const credential = credentials.value.find(
+            (item) => item.credential_id === credentialId,
+        );
+        return {
+            id: node.value,
+            label: node.label,
+            // 展示模型名而不是凭据 ID（ID 只用于提交）
+            model: credential ? `${credential.name} · ${credential.model}` : "",
+        };
+    }),
+);
+
+async function saveRouting() {
+  routeSaving.value = true;
+  routeMessage.value = null;
+  try {
+    const routes = Object.entries(routeDraft.value)
+      .filter(([, credentialId]) => credentialId !== "")
+      .map(([nodeType, credentialId]) => ({ node_type: nodeType, credential_id: credentialId }));
+    const saved = await updateNodeRouting(routes);
+    routeMessage.value = saved.length
+      ? `已保存 ${saved.length} 条节点路由；未配置的节点继续使用任务勾选的模型。`
+      : "已清空全部节点路由；所有节点继续使用任务勾选的模型。";
+  } catch (error) {
+    routeMessage.value = (error as Error).message || "节点路由保存失败";
+  } finally {
+    routeSaving.value = false;
+  }
+}
 const providers = ref<LLMProviderOption[]>([]);
 const loading = ref(false);
 const error = ref<string | null>(null);
@@ -63,6 +124,19 @@ const formDefault = ref(false);
 /** 容量声明：保持字符串原样，提交时再解析（清空要能区分「未填」与 0）。 */
 const formContextWindow = ref("");
 const formMaxOutput = ref("");
+// 能力声明（参照 DeepSeek Harness 模型目录）：输入类型 + 推理等级档位
+const formSupportsText = ref(true);
+const formSupportsImage = ref(false);
+const formTiers = ref<{ label: string; value: string }[]>([]);
+// 失败回退平台（Issue #28）：默认关——静默烧平台钱必须由用户显式选择
+const formAllowFallback = ref(false);
+// json_mode 只由「生成能力探测」写入，表单里不可勾选；编辑时原样带回，避免整体替换把它抹掉
+const formJsonMode = ref(false);
+
+function addTier() {
+    if (formTiers.value.length >= 4) return;
+    formTiers.value.push({ label: "", value: "" });
+}
 
 const busyId = ref<string | null>(null);
 const confirmDeleteId = ref<string | null>(null);
@@ -178,6 +252,7 @@ async function refresh() {
     loading.value = true;
     error.value = null;
     // 两个接口独立失败：厂商目录挂了不该让「已保存的凭据」也消失
+    void loadRouting();
     const [listResult, providerResult] = await Promise.allSettled([
         listLLMCredentials(),
         listLLMProviders(),
@@ -204,6 +279,9 @@ function resetForm() {
     formDefault.value = false;
     formContextWindow.value = "";
     formMaxOutput.value = "";
+    formSupportsText.value = true;
+    formSupportsImage.value = false;
+    formTiers.value = [];
     probeResult.value = null;
     probeError.value = null;
     modelOptions.value = [];
@@ -230,6 +308,22 @@ function openEdit(credential: LLMCredentialInfo) {
     formDefault.value = credential.is_default;
     formContextWindow.value = credential.context_window?.toString() ?? "";
     formMaxOutput.value = credential.max_output_tokens?.toString() ?? "";
+    const caps = (credential.capabilities ?? {}) as {
+        text?: boolean;
+        image?: boolean;
+        json_mode?: boolean;
+        reasoning_tiers?: { label: string; value: string }[];
+    };
+    formSupportsText.value = caps.text !== false;
+    formSupportsImage.value = caps.image === true;
+    formAllowFallback.value = credential.allow_platform_fallback;
+    formJsonMode.value = caps.json_mode === true;
+    formTiers.value = Array.isArray(caps.reasoning_tiers)
+        ? caps.reasoning_tiers.map((tier) => ({
+              label: String(tier.label ?? ""),
+              value: String(tier.value ?? ""),
+          }))
+        : [];
     probeResult.value = null;
     probeError.value = null;
     modelOptions.value = [];
@@ -352,6 +446,51 @@ async function probeSaved(credential: LLMCredentialInfo) {
     }
 }
 
+/**
+ * 生成能力探测（Issue #28）：planner 门禁依赖 capabilities.json_mode。
+ * ⚠️ 用用户 key 发一次真实请求（约 100 token），按钮文案已注明。
+ */
+const probingGenId = ref<string | null>(null);
+const genProbeResult = ref<{ ok: boolean; error: string | null } | null>(null);
+
+async function probeGenerationFor(credential: LLMCredentialInfo) {
+    probingGenId.value = credential.credential_id;
+    genProbeResult.value = null;
+    error.value = null;
+    success.value = null;
+    try {
+        const result = await probeGeneration(credential.credential_id);
+        await refresh();
+        genProbeResult.value = { ok: result.ok, error: result.error };
+        if (result.ok) {
+            success.value = `「${credential.name}」通过结构化输出探测（${result.latency_ms}ms），可固定为规划模型`;
+        } else {
+            error.value = `「${credential.name}」生成探测未通过：${result.error ?? "未知错误"}`;
+        }
+    } catch (err) {
+        error.value = (err as Error).message || "生成探测失败";
+    } finally {
+        probingGenId.value = null;
+    }
+}
+
+/** 能力徽章文案：文本 · 图片 · N 档推理 */
+function capabilitiesLabel(credential: LLMCredentialInfo): string {
+    const caps = (credential.capabilities ?? {}) as {
+        text?: boolean;
+        image?: boolean;
+        json_mode?: boolean;
+        reasoning_tiers?: unknown[];
+    };
+    const parts = [caps.text !== false ? "文本" : "", caps.image ? "图片" : ""].filter(
+        Boolean,
+    );
+    if (caps.json_mode) parts.push("JSON");
+    const tiers = Array.isArray(caps.reasoning_tiers) ? caps.reasoning_tiers.length : 0;
+    if (tiers) parts.push(`${tiers} 档推理`);
+    return parts.length ? parts.join(" · ") : "未声明能力";
+}
+
 async function submitForm() {
     const problem = validate();
     if (problem) {
@@ -364,6 +503,15 @@ async function submitForm() {
     // 空输入 = 清除声明（update 显式传 null，后端按「清除」处理）
     const contextWindow = parseTokens(formContextWindow.value);
     const maxOutput = parseTokens(formMaxOutput.value);
+    // 能力声明：只提交填写完整的档位（空 label/value 行视为未填）
+    const capabilities = {
+        text: formSupportsText.value,
+        image: formSupportsImage.value,
+        json_mode: formJsonMode.value,
+        reasoning_tiers: formTiers.value
+            .map((tier) => ({ label: tier.label.trim(), value: tier.value.trim() }))
+            .filter((tier) => tier.label && tier.value),
+    };
     try {
         if (editingId.value) {
             await updateLLMCredential(editingId.value, {
@@ -371,6 +519,8 @@ async function submitForm() {
                 model: formModel.value.trim(),
                 context_window: contextWindow,
                 max_output_tokens: maxOutput,
+                allow_platform_fallback: formAllowFallback.value,
+                capabilities,
                 ...(formApiKey.value.trim()
                     ? { api_key: formApiKey.value.trim() }
                     : {}),
@@ -387,6 +537,8 @@ async function submitForm() {
                 api_key: formApiKey.value.trim(),
                 context_window: contextWindow,
                 max_output_tokens: maxOutput,
+                allow_platform_fallback: formAllowFallback.value,
+                capabilities,
                 ...(requiresBaseUrl.value
                     ? { base_url: formBaseUrl.value.trim() }
                     : {}),
@@ -628,8 +780,121 @@ function statusOf(credential: LLMCredentialInfo): {
                             {{ preset.label }}
                         </button>
                     </div>
+
+                    <!-- 能力声明（参照 DeepSeek Harness 模型目录）：输入类型 + 推理等级档位 -->
+                    <div class="mt-2.5 grid gap-3 sm:grid-cols-2">
+                        <div>
+                            <span class="text-xs text-muted-foreground">输入类型</span>
+                            <div class="mt-1 flex items-center gap-3 text-sm">
+                                <label class="flex items-center gap-1.5">
+                                    <input
+                                        v-model="formSupportsText"
+                                        data-test="model-cap-text"
+                                        type="checkbox"
+                                        class="size-4 rounded border-input accent-primary"
+                                    />
+                                    <span>文本</span>
+                                </label>
+                                <label class="flex items-center gap-1.5">
+                                    <input
+                                        v-model="formSupportsImage"
+                                        data-test="model-cap-image"
+                                        type="checkbox"
+                                        class="size-4 rounded border-input accent-primary"
+                                    />
+                                    <span>图片</span>
+                                </label>
+                            </div>
+                            <p class="mt-1 text-[10px] leading-4 text-muted-foreground">
+                                勾了「图片」才允许在会话中传图（需视觉模型）
+                            </p>
+                        </div>
+                        <div>
+                            <div class="flex items-center justify-between">
+                                <span class="text-xs text-muted-foreground">结构化输出（生成探测）</span>
+                                <span
+                                    class="rounded-full border px-1.5 py-0.5 text-[10px]"
+                                    :class="
+                                        formJsonMode
+                                            ? 'border-success/40 bg-success/10 text-success'
+                                            : 'border-border bg-muted text-muted-foreground'
+                                    "
+                                    data-test="model-json-mode"
+                                >
+                                    {{ formJsonMode ? "已通过" : "未探测" }}
+                                </span>
+                            </div>
+                            <p class="mt-1 text-[10px] leading-4 text-muted-foreground">
+                                由「探测 JSON」写入，不能手填；不通过的凭据不能固定为规划（planner）
+                            </p>
+                        </div>
+                        <div>
+                            <div class="flex items-center justify-between">
+                                <span class="text-xs text-muted-foreground">推理等级档位</span>
+                                <button
+                                    type="button"
+                                    data-test="model-tier-add"
+                                    class="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:border-primary hover:text-primary disabled:opacity-40"
+                                    :disabled="formTiers.length >= 4"
+                                    @click="addTier"
+                                >
+                                    + 添加档位
+                                </button>
+                            </div>
+                            <div
+                                v-for="(tier, index) in formTiers"
+                                :key="index"
+                                class="mt-1 flex items-center gap-1.5"
+                            >
+                                <Input
+                                    v-model="tier.label"
+                                    :data-test="`model-tier-label-${index}`"
+                                    placeholder="low"
+                                    class="h-7 w-20 px-2 text-xs"
+                                    maxlength="24"
+                                />
+                                <span class="text-xs text-muted-foreground">→</span>
+                                <Input
+                                    v-model="tier.value"
+                                    :data-test="`model-tier-value-${index}`"
+                                    placeholder="low"
+                                    class="h-7 flex-1 px-2 text-xs"
+                                    maxlength="64"
+                                />
+                                <button
+                                    type="button"
+                                    class="text-xs text-muted-foreground hover:text-destructive"
+                                    :aria-label="`删除档位 ${index + 1}`"
+                                    @click="formTiers.splice(index, 1)"
+                                >
+                                    ✕
+                                </button>
+                            </div>
+                            <p
+                                v-if="!formTiers.length"
+                                class="mt-1 text-[10px] leading-4 text-muted-foreground"
+                            >
+                                留空 = 不支持推理参数（会话中不展示思考档位）
+                            </p>
+                        </div>
+                    </div>
                 </div>
                 <div class="grid content-start gap-1.5 sm:col-span-2">
+                    <label class="flex items-start gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2.5">
+                        <input
+                            v-model="formAllowFallback"
+                            data-test="model-allow-fallback"
+                            type="checkbox"
+                            class="mt-0.5 size-4 rounded border-input accent-primary"
+                        />
+                        <span class="text-xs leading-5">
+                            <span class="font-medium">凭据不可用时回退平台模型</span>
+                            <span class="block text-[10px] leading-4 text-muted-foreground">
+                                仅在 key 被拒（401/402/403，欠费或失效）时改走平台模型并**按平台计费**；
+                                限流（429）与超时不会回退。默认关闭：任务失败并提示原因。
+                            </span>
+                        </span>
+                    </label>
                     <Label for="model-key">
                         API Key
                         <span
@@ -800,6 +1065,12 @@ function statusOf(credential: LLMCredentialInfo): {
                                 credential.provider_label
                             }}</span>
                             <span>{{ credential.model }}</span>
+                            <span
+                                data-test="model-capabilities-badge"
+                                class="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                            >
+                                {{ capabilitiesLabel(credential) }}
+                            </span>
                             <code class="rounded bg-muted px-1 py-0.5">{{
                                 credential.masked_key
                             }}</code>
@@ -819,6 +1090,21 @@ function statusOf(credential: LLMCredentialInfo): {
                     </div>
 
                     <div class="flex shrink-0 flex-wrap items-center gap-1">
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            :disabled="probingGenId === credential.credential_id"
+                            :data-test="`model-probe-gen-${credential.credential_id}`"
+                            :title="'用你的 key 发一次约 100 token 的真实请求，验证能否按指令输出 JSON'"
+                            @click="probeGenerationFor(credential)"
+                        >
+                            <FileJson />
+                            {{
+                                probingGenId === credential.credential_id
+                                    ? "探测中…"
+                                    : "探测 JSON"
+                            }}
+                        </Button>
                         <Button
                             variant="ghost"
                             size="sm"
@@ -887,5 +1173,70 @@ function statusOf(credential: LLMCredentialInfo): {
         <p v-if="!isEmpty" class="mt-3 text-xs text-muted-foreground">
             删除凭据不会影响历史任务：任务里保存了当时使用的模型快照。
         </p>
+    </section>
+
+    <!-- ===== 节点级模型路由（混合路由用户化，Issue #22 延伸）===== -->
+    <section
+        data-test="node-routing"
+        class="mt-6 rounded-xl border border-border bg-card p-5"
+    >
+        <div class="flex flex-wrap items-start justify-between gap-2">
+            <div>
+                <h2 class="text-base font-semibold tracking-tight">节点级模型路由</h2>
+                <p class="mt-1 text-xs leading-5 text-muted-foreground">
+                    给不同阶段指定不同的模型（如：证据抽取与校验走本地免费模型，规划与写作走云端强模型）。
+                    不配置的节点继续使用任务勾选的那一个模型。
+                </p>
+            </div>
+            <Button
+                data-test="routing-save"
+                type="button"
+                variant="outline"
+                size="sm"
+                :disabled="routeSaving"
+                @click="saveRouting"
+            >
+                {{ routeSaving ? "保存中…" : "保存路由" }}
+            </Button>
+        </div>
+        <BeContextMeter
+            class="mt-4"
+            :capacity="ROUTABLE_NODE_TYPES.length"
+            :categories="routingMeterCategories"
+            model="节点路由覆盖率"
+        />
+                <p
+            v-if="routeMessage"
+            data-test="routing-message"
+            class="mt-2 text-xs text-muted-foreground"
+        >
+            {{ routeMessage }}
+        </p>
+        <div class="mt-4 grid gap-3 md:grid-cols-2">
+            <label
+                v-for="node in ROUTABLE_NODE_TYPES"
+                :key="node.value"
+                class="flex flex-col gap-1"
+                :data-test="`routing-${node.value}`"
+            >
+                <span class="text-xs font-medium text-foreground">
+                    {{ node.label }}
+                    <span class="ml-1 font-normal text-muted-foreground">· {{ node.hint }}</span>
+                </span>
+                <select
+                    v-model="routeDraft[node.value]"
+                    class="h-9 rounded-md border border-border bg-background px-2 text-sm"
+                >
+                    <option value="">跟随任务勾选的模型</option>
+                    <option
+                        v-for="cred in credentials"
+                        :key="cred.credential_id"
+                        :value="cred.credential_id"
+                    >
+                        {{ cred.name }}（{{ cred.model }}）
+                    </option>
+                </select>
+            </label>
+        </div>
     </section>
 </template>

@@ -33,6 +33,9 @@ os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-not-for-production")
 # 用户自带模型凭据的加密主密钥（BYOK，Issue #15）：32 字节的 base64。
 # 与 JWT 密钥**必须是两个**——轮换签名密钥不该让所有用户的 key 变成不可解。
 os.environ.setdefault("SECRETS__ENCRYPTION_KEY", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+# 定时重跑调度（Issue #27）：单测不启动常驻 tick 循环（它有自己的后台会话，
+# 会去打真实 engine）。需要验证调度逻辑的用例直接构造 RoutineScheduler.tick()。
+os.environ.setdefault("ROUTINE__ENABLED", "false")
 
 # 存储根目录指到临时目录。
 # 生产配置里 `upload_root` / `artifact_root` 是**容器内绝对路径** `/app/data/...`，

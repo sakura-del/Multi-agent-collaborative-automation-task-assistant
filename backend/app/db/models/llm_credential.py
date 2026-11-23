@@ -30,6 +30,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    false,
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -116,6 +117,13 @@ class LLMCredential(Base):
     is_default: Mapped[bool] = mapped_column(
         Boolean, default=False, nullable=False, comment="是否该用户的默认模型凭据"
     )
+    allow_platform_fallback: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default=false(),
+        nullable=False,
+        comment="凭据不可用（401/402/403）时是否允许回退平台模型（Issue #28）",
+    )
     status: Mapped[str] = mapped_column(
         String(16), default="active", nullable=False, comment="active/invalid/disabled"
     )
@@ -130,6 +138,49 @@ class LLMCredential(Base):
     )
     last_error: Mapped[str | None] = mapped_column(
         String(512), nullable=True, comment="最近一次自检/调用的可读错误（不含密钥）"
+    )
+
+    # Base 已提供 created_at / updated_at
+
+
+class LLMNodeRouting(Base):
+    """节点级模型路由（Issue #22 延伸：混合路由的用户级配置）。
+
+    ## 为什么做成用户配置
+
+    混合路由最初只在平台 `.env` 里（`LLM__NODE_ROUTING` + `LLM__ROUTING_TARGETS`），
+    用户看不到也改不了。但「哪个节点用哪把模型」本质是**每个用户的取舍**：
+    长输入抽取走本地零成本模型、规划/写作走云端强模型——只有用户自己知道。
+
+    ## 语义
+
+    - 每个 `(user_id, node_type)` 至多一条：该节点固定用 `credential_id` 那把模型；
+    - **未配置的节点 = 跟随任务勾选的模型**（创建任务时选的那把），默认行为不变；
+    - 凭据删除时级联清理（FK ondelete=CASCADE），不留悬空路由。
+    """
+
+    __tablename__ = "llm_node_routing"
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "node_type", name="uq_llm_node_routing_user_node"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4, comment="路由ID")
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("user.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+        comment="归属用户ID",
+    )
+    node_type: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        comment="节点类型：planner/search/extract/write/validate/review",
+    )
+    credential_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("llm_credential.id", ondelete="CASCADE"),
+        nullable=False,
+        comment="该节点固定使用的凭据",
     )
 
     # Base 已提供 created_at / updated_at

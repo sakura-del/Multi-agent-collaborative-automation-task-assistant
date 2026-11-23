@@ -16,12 +16,17 @@
 
 from __future__ import annotations
 
+import asyncio
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from typing import Any
 
 from app.core.logging import get_logger
-from app.llm.models import LLMResponse, Message, ToolSchema
+from app.core.metrics import inc_counter
+from app.llm.models import LLMResponse, Message, StreamEvent, ToolSchema
+from app.llm.router import current_node_type, get_model_router
+from app.llm.throttle import llm_slot
+from app.llm.usage_ledger import record_usage
 
 logger = get_logger(__name__)
 
@@ -58,6 +63,16 @@ class BaseLLM(ABC):
         self.max_retries = max_retries
         self.default_temperature = default_temperature
         self.default_max_tokens = default_max_tokens
+        # 并发组（Issue #22 路由感知并发）：路由目标是独立组，默认组为 "default"
+        self.concurrency_group = "default"
+        # 超时类错误的内部重试上限（Issue #18）：90s×3 的确定性等待毫无意义；
+        # 429/5xx 仍走 max_retries。配置损坏/读取失败时保守取 1。
+        try:
+            from app.core.config import get_settings
+
+            self.timeout_retries = max(1, int(get_settings().llm.timeout_retries))
+        except Exception:  # pragma: no cover - 防御性兜底
+            self.timeout_retries = 1
         # 延迟初始化：客户端在首次调用时才创建
         self._client: Any = None
         self._initialized = False
@@ -110,6 +125,31 @@ class BaseLLM(ABC):
 
         上层 Agent 应调用此方法，而非 _raw_chat。
         """
+        # 节点级模型路由（混合处理）：命中配置时委派给目标客户端。
+        # 目标客户端再次进入时 target is self，不会递归（见 app/llm/router.py）。
+        node_type = current_node_type()
+        if node_type:
+            routed = get_model_router().resolve(node_type)
+            if routed is not None and routed is not self:
+                logger.info(
+                    "llm_routed",
+                    node_type=node_type,
+                    target_model=getattr(routed, "model", ""),
+                    target_provider=getattr(routed, "provider", ""),
+                )
+                # 屏蔽块内委派：目标内部（可能包着另一个 BaseLLM）不再二次路由，
+                # 否则 BYOKClient→adapter→router→BYOKClient 无限递归（生产实证）。
+                from app.llm.scope import suppress_routing
+
+                with suppress_routing():
+                    return await routed.chat(
+                        messages,
+                        tools=tools,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        **kwargs,
+                    )
+
         # 确保客户端已初始化（延迟创建）
         self._ensure_client()
 
@@ -120,13 +160,20 @@ class BaseLLM(ABC):
         # 手动重试循环：便于区分可恢复与不可恢复异常
         for attempt in range(1, self.max_retries + 1):
             try:
-                response = await self._raw_chat(
-                    messages,
-                    tools=tools,
-                    temperature=temp,
-                    max_tokens=tokens,
-                    **kwargs,
-                )
+                # 全局闸门：跨任务/跨实例共享的进程级并发上限（见 app/llm/throttle.py）。
+                # 只包住单次原始调用——重试间隔不占槽，避免排队的请求被无效请求堵住。
+                async with llm_slot(
+                    provider=self.provider,
+                    model=self.model,
+                    group=self.concurrency_group,
+                ):
+                    response = await self._raw_chat(
+                        messages,
+                        tools=tools,
+                        temperature=temp,
+                        max_tokens=tokens,
+                        **kwargs,
+                    )
                 # 记录用量与调用元信息，供成本追踪
                 logger.info(
                     "llm_chat_ok",
@@ -135,14 +182,57 @@ class BaseLLM(ABC):
                     attempt=attempt,
                     prompt_tokens=response.usage.prompt_tokens,
                     completion_tokens=response.usage.completion_tokens,
+                    cache_hit_tokens=response.usage.cache_hit_tokens,
+                    cache_miss_tokens=response.usage.cache_miss_tokens,
+                    cache_hit_rate=round(response.usage.cache_hit_rate, 4),
                     finish_reason=response.finish_reason,
                     has_tool_calls=bool(response.tool_calls),
                 )
+                # 任务级账本（Issue #16）：规划/校验/复盘/重试/路由调用统一入账
+                record_usage(response.usage)
+                # 前缀缓存可观测（Issue #22）：按模型拆 hit / miss / 未返回
+                model_label = response.model or self.model
+                usage = response.usage
+                if usage.cache_hit_tokens or usage.cache_miss_tokens:
+                    inc_counter(
+                        "maa_llm_tokens",
+                        amount=usage.cache_hit_tokens,
+                        model=model_label,
+                        cache="hit",
+                    )
+                    inc_counter(
+                        "maa_llm_tokens",
+                        amount=usage.cache_miss_tokens,
+                        model=model_label,
+                        cache="miss",
+                    )
+                else:
+                    inc_counter(
+                        "maa_llm_tokens",
+                        amount=usage.prompt_tokens,
+                        model=model_label,
+                        cache="none",
+                    )
+                # 截断留痕：finish_reason=length 说明输出被 max_tokens 砍断，
+                # 会导致 JSON 解析失败/校验不通过，必须显式可观测（Issue #22）
+                if response.finish_reason == "length":
+                    logger.warning(
+                        "llm_chat_truncated",
+                        provider=self.provider,
+                        model=response.model or self.model,
+                        max_tokens=tokens,
+                        completion_tokens=response.usage.completion_tokens,
+                    )
                 return response
             except Exception as exc:
                 last_exc = exc
-                # 判断是否可重试：超时/限流类异常可重试，其余直接抛出
-                if not self._is_retryable(exc) or attempt >= self.max_retries:
+                # 判断是否可重试：超时/限流类异常可重试，其余直接抛出。
+                # 超时类用更小的重试预算（timeout_retries）：对「确定性超时」
+                # 连等 3×90s 只会拉长人工等待（Issue #18 实测 4.5 分钟无效重试）。
+                # timeout_retries 语义与 max_retries 对齐（= 总尝试次数）：
+                # 它是「额外重试次数」，总尝试 = 1 + timeout_retries。
+                retry_cap = self.timeout_retries + 1 if self._is_timeout(exc) else self.max_retries
+                if not self._is_retryable(exc) or attempt >= retry_cap:
                     logger.error(
                         "llm_chat_failed",
                         provider=self.provider,
@@ -151,13 +241,19 @@ class BaseLLM(ABC):
                         error=str(exc),
                     )
                     raise
+                # 指数退避 + 尊重 Retry-After：共享免费池/低配额 key 的 429
+                # 只能靠退避穿过（实测「Too many concurrent requests」并发≈1），
+                # 立即重试等于连撞三次墙（2026-11-18 生产实证：1 秒内 3 连 429）。
+                delay = self._backoff_delay(attempt, exc)
                 logger.warning(
                     "llm_chat_retry",
                     provider=self.provider,
                     model=self.model,
                     attempt=attempt,
+                    sleep_seconds=round(delay, 2),
                     error=str(exc),
                 )
+                await asyncio.sleep(delay)
 
         # 理论不可达（循环内必 return 或 raise），保险起见
         assert last_exc is not None
@@ -178,6 +274,36 @@ class BaseLLM(ABC):
         """
         # yield 让此方法成为 async generator；子类需覆盖实现
         yield ""  # pragma: no cover
+
+    async def stream_chat_events(
+        self,
+        messages: list[Message],
+        *,
+        tools: list[ToolSchema] | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[StreamEvent]:
+        """流式事件：默认降级为一次非流式调用。
+
+        适配器能真正边流边收集工具调用时覆盖本方法（OpenAI 已覆盖）；
+        其余适配器退回 `chat()`，把完整文本作为单个 delta 发出——
+        语义正确，只是首个 token 延迟变大。
+        """
+        response = await self.chat(
+            messages,
+            tools=tools,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs,
+        )
+        if response.content:
+            yield StreamEvent(type="delta", text=response.content)
+        yield StreamEvent(
+            type="done",
+            tool_calls=response.tool_calls,
+            finish_reason=response.finish_reason,
+        )
 
     @abstractmethod
     async def embed(self, texts: list[str]) -> list[list[float]]:
@@ -206,6 +332,51 @@ class BaseLLM(ABC):
         )
 
     # ===== 辅助 =====
+
+    def _backoff_delay(self, attempt: int, exc: Exception) -> float:
+        """计算第 `attempt` 次失败后的退避秒数。
+
+        优先级：厂商 `Retry-After` 头 > 指数退避（base × factor^(n-1)），
+        统一受 `retry_backoff_cap` 封顶。共享免费池（并发≈1、RPM 极低）只能
+        靠退避穿过 429，配置见 `llm.retry_backoff_*`。
+        """
+        base, factor, cap = 3.0, 2.0, 60.0
+        try:
+            from app.core.config import get_settings
+
+            llm_cfg = get_settings().llm
+            base = float(llm_cfg.retry_backoff_base)
+            factor = float(llm_cfg.retry_backoff_factor)
+            cap = float(llm_cfg.retry_backoff_cap)
+        except Exception:  # pragma: no cover - 配置异常时用保守默认值
+            pass
+
+        delay = min(base * (factor ** (attempt - 1)), cap)
+        retry_after = self._retry_after_seconds(exc)
+        if retry_after is not None:
+            delay = min(max(delay, retry_after), cap)
+        return max(0.0, delay)
+
+    @staticmethod
+    def _retry_after_seconds(exc: Exception) -> float | None:
+        """从异常响应里取 Retry-After 头（秒）；取不到返回 None。"""
+        response = getattr(exc, "response", None)
+        headers = getattr(response, "headers", None) or getattr(exc, "headers", None)
+        if not headers:
+            return None
+        try:
+            raw = headers.get("retry-after") or headers.get("Retry-After")
+            return float(raw) if raw is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _is_timeout(exc: Exception) -> bool:
+        """是否为「超时类」异常（决定内部重试预算，见 timeout_retries）。"""
+        name = type(exc).__name__.lower()
+        if "timeout" in name:
+            return True
+        return "timed out" in str(exc).lower()
 
     @staticmethod
     def _is_retryable(exc: Exception) -> bool:

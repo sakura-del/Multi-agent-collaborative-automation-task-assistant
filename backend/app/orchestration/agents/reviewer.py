@@ -92,6 +92,40 @@ def _verification_line(summary: Mapping[str, Any]) -> str:
     )
 
 
+def _renumber_citations(
+    content: str,
+    node_id: str,
+    local_to_global: dict[tuple[str, int], int],
+) -> str:
+    """把节点正文的局部 [E#] 重写成全局编号（Issue #17）。
+
+    ## 为什么必须重写
+
+    每个节点的证据池各自从 [E1] 编号，正文拼接后 [E18] 可能与参考文献
+    第 18 条毫无关系——结果页「引用可追溯性 100」与「暂无/对不上参考文献」
+    同屏出现，就是这里的编号语义断裂。
+
+    ## 映射怎么建
+
+    executor 现在随 ExecutionResult 返回 `cited_indices`（正文引用的
+    节点证据池原编号，与 `evidence` 一一对应）。第一次遇到某个 URL 时
+    分配全局编号；同一节点再次引用同一 URL 保持一致。
+
+    历史负载没有 `cited_indices`：退化按 evidence 列表顺序当局部编号。
+    正文引用了映射里不存在的编号（跨节点幻觉，正常流程会被校验拦下）
+    时保留原编号——诚实优于静默篡改。
+    """
+    mapping = {n: g for (nid, n), g in local_to_global.items() if nid == node_id}
+    if not mapping:
+        return content
+
+    def _replace(match: re.Match[str]) -> str:
+        number = int(match.group(1))
+        return f"[E{mapping.get(number, number)}]"
+
+    return re.sub(r"\[E(\d+)\]", _replace, content)
+
+
 def _contributes_to_body(result: Any) -> bool:
     """该节点内容是否应进入复盘正文（Issue #7）。
 
@@ -339,32 +373,89 @@ class ReviewerAgent(BaseAgent):
         topic = str(input_data.get("topic") or "文献综述")
         event_stats = dict(input_data.get("event_stats") or {})
 
+        # 证据形状留痕（Issue #17）：search 节点 ev=0（走 artifacts）、
+        # write 节点的 chunk 证据 URL 可能为空——这是排查「编号脱节」的关键观测点
+        logger.info(
+            "reviewer_results_shape",
+            shapes=[
+                {
+                    "node_id": r.node_id,
+                    "ev": len(r.evidence),
+                    "ci": len(r.cited_indices or []),
+                    "urls": [
+                        str(getattr(i, "source_url", None) or "")[:40] for i in r.evidence[:3]
+                    ],
+                }
+                for r in results
+            ],
+        )
+
         body_parts: list[str] = []
         citations: dict[str, dict[str, Any]] = {}
+        #: (node_id, 局部编号) → 全局编号（Issue #17）。
+        #: 各节点的 [E#] 是**节点局部编号**，正文拼接后 [E18] 在 bibliography 里
+        #: 可能不存在——必须把正文引用重写成全局编号，才能与参考文献一一对应。
+        local_to_global: dict[tuple[str, int], int] = {}
+        url_to_global: dict[str, int] = {}
+
+        def _register_evidence(url: str, entry: dict[str, Any]) -> None:
+            # 首次登记即分配全局编号（dict 插入序 = 全局序）；重复 URL 保持一致
+            if url and url not in citations:
+                citations[url] = entry
+                url_to_global[url] = len(citations)
+
         for result in results:
             content = (result.content or "").strip()
-            if content and _contributes_to_body(result):
-                body_parts.append(content)
-            for item in result.evidence:
-                url = str(item.source_url) if item.source_url else ""
-                if url and url not in citations:
-                    citations[url] = {
+            node_id = str(result.node_id)
+
+            # ① 先登记本节点证据 → 建立局部编号 → 全局编号映射
+            evidence_items = list(result.evidence)
+            cited_numbers = [int(n) for n in (result.cited_indices or [])]
+            pairs = (
+                list(zip(cited_numbers, evidence_items, strict=False))
+                if cited_numbers
+                else list(enumerate(evidence_items, start=1))
+            )
+            for local_no, item in pairs:
+                url = str(item.source_url) if getattr(item, "source_url", None) else ""
+                # 登记键不能只认 URL：知识库 chunk 证据往往没有 URL（离线任务尤其如此），
+                # 用 doc_id:chunk_id 兜底——否则这些证据的局部编号拿不到全局映射，
+                # 正文 [E#] 重写不生效（Issue #17 三次实测：[E1]~[E16] vs 8 条）。
+                key = (
+                    url or f"doc:{item.doc_id}:chunk:{item.chunk_id}" or f"text:{item.excerpt[:40]}"
+                )
+                if key and key not in citations:
+                    # 首次出现：登记并分配全局编号
+                    citations[key] = {
                         "title": item.excerpt[:60],
-                        "source_url": url,
+                        "source_url": url or None,
                         "doc_id": str(item.doc_id) if item.doc_id else None,
                         "chunk_id": str(item.chunk_id) if item.chunk_id else None,
                     }
+                    url_to_global[key] = len(citations)
+                # 同一文献的多个 chunk 共享 URL——**每个**局部编号都要映射到
+                # 全局号，否则这些 chunk 的 [E#] 重写不生效
+                if key:
+                    local_to_global[(node_id, local_no)] = url_to_global[key]
+            # search 节点的 artifacts 带完整文献元数据（title/authors/DOI）
             for artifact in result.artifacts:
                 url = str(artifact.get("source_url") or "")
                 if url and url not in citations:
-                    citations[url] = {
-                        "title": str(artifact.get("title") or artifact.get("source_id") or ""),
-                        "source_url": url,
-                        "source_id": artifact.get("source_id"),
-                    }
+                    _register_evidence(
+                        url,
+                        {
+                            "title": str(artifact.get("title") or artifact.get("source_id") or ""),
+                            "source_url": url,
+                            "source_id": artifact.get("source_id"),
+                        },
+                    )
                 if url:
                     # Issue #4：补齐 CSL 渲染所需的元数据（作者/年份/语言/DOI/类型）
                     _enrich_reference_entry(citations[url], artifact)
+
+            # ② 再重写正文：局部 [E#] → 全局 [E#]（映射缺号保留原编号，诚实优于篡改）
+            if content and _contributes_to_body(result):
+                body_parts.append(_renumber_citations(content, node_id, local_to_global))
 
         bibliography = [
             {"index": index, **entry} for index, entry in enumerate(citations.values(), start=1)
@@ -521,6 +612,35 @@ class ReviewerAgent(BaseAgent):
             reindexed.append({"index": position, **rest})
         return reindexed
 
+    @staticmethod
+    def _trim_review_items(items: list[Any], *, per_item: int, total: int) -> list[dict[str, Any]]:
+        """裁剪复盘输入：单项截断 + 总量预算（Issue #22）。
+
+        节点结果全量拼接会把 review prompt 顶到 4.8 万 tokens；复盘只需要
+        结论级信息，超出预算的条目降级为占位说明，避免无意义的长输入成本。
+        """
+        trimmed: list[dict[str, Any]] = []
+        used = 0
+        for item in items:
+            payload = item.model_dump(mode="json") if hasattr(item, "model_dump") else dict(item)
+            for key in ("content", "result"):
+                value = payload.get(key)
+                if isinstance(value, str) and len(value) > per_item:
+                    payload[key] = value[:per_item] + "…（已截断）"
+            size = len(json.dumps(payload, ensure_ascii=False))
+            if used + size > total:
+                trimmed.append(
+                    {
+                        "node_id": str(payload.get("node_id") or ""),
+                        "truncated": True,
+                        "note": "复盘输入超预算，该条仅保留占位（正文见任务产物）",
+                    }
+                )
+                continue
+            used += size
+            trimmed.append(payload)
+        return trimmed
+
     async def _polish_literature_review(
         self,
         topic: str,
@@ -530,33 +650,49 @@ class ReviewerAgent(BaseAgent):
     ) -> dict[str, Any]:
         """可选 LLM 润色：失败时静默回退到确定性组装。"""
         # 方法内导入：避免 agents 包与 workflows 包互相导入
-        from app.orchestration.workflows.prompts import render_reviewer_prompt
+        from app.orchestration.workflows.prompts import render_reviewer_prompt, split_prompt
 
         llm = self.llm
         if llm is None:  # 无 LLM 时直接跳过润色（调用方已做确定性组装）
             return {}
 
+        # 输入裁剪（Issue #22）：节点结果全量拼接实测 47,954 tokens，
+        # 单项截断 + 总量预算把复盘输入压到可控范围（正文已在 final_output 里，
+        # 复盘只需要结论级信息）。
         prompt = render_reviewer_prompt(
             topic=topic,
             results_json=json.dumps(
-                [item.model_dump(mode="json") for item in results], ensure_ascii=False
+                self._trim_review_items(results, per_item=1200, total=24000),
+                ensure_ascii=False,
             ),
             validations_json=json.dumps(
-                [item.model_dump(mode="json") for item in validations], ensure_ascii=False
+                self._trim_review_items(validations, per_item=500, total=6000),
+                ensure_ascii=False,
             ),
             event_stats_json=json.dumps(event_stats, ensure_ascii=False),
         )
+        # 静态规则进 system：跨任务共享复盘缓存前缀（Issue #22）
+        system_text, user_text = split_prompt(prompt)
         try:
-            response = await llm.chat(
-                [
-                    Message(
-                        role=MessageRole.SYSTEM,
-                        content="你是文献综述复盘专家，只输出 JSON。",
-                    ),
-                    Message(role=MessageRole.USER, content=prompt),
-                ],
-                temperature=0.2,
-            )
+            from app.core.config import get_settings
+            from app.llm.router import node_type_scope
+
+            # 节点级模型路由（混合处理）：复盘按 "review" 选路
+            with node_type_scope("review"):
+                response = await llm.chat(
+                    [
+                        Message(
+                            role=MessageRole.SYSTEM,
+                            content=system_text or "你是文献综述复盘专家，只输出 JSON。",
+                        ),
+                        Message(role=MessageRole.USER, content=user_text or prompt),
+                    ],
+                    temperature=0.2,
+                    # 输出上限（Issue #22）：摘要+局限性 JSON，防止长篇复述
+                    max_tokens=get_settings().llm.max_tokens_reviewer,
+                    # 复盘同样是长输入 + JSON 输出，走专用超时（Issue #18）
+                    timeout=get_settings().llm.call_timeout_validation or None,
+                )
             payload = json.loads(response.content or "{}")
         except Exception as exc:
             logger.warning("reviewer_polish_failed", error=str(exc))
@@ -649,6 +785,8 @@ class ReviewerAgent(BaseAgent):
 
         # 仅传入错误相关日志，减少 token 消耗（计算优化）
         error_logs = [e for e in logs if e.get("message_type") == "error"]
+        from app.core.config import get_settings
+
         response = await self.llm.chat(
             [
                 Message(role=MessageRole.SYSTEM, content="你是根因分析专家，只输出 JSON。"),
@@ -660,6 +798,7 @@ class ReviewerAgent(BaseAgent):
                 ),
             ],
             temperature=0.3,
+            max_tokens=get_settings().llm.max_tokens_reviewer,
         )
         try:
             return json.loads(response.content or "{}")

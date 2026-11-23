@@ -1,4 +1,7 @@
 <script setup lang="ts">
+// 异步加载：聊天模块（marked 扩展/katex/mermaid）任何加载期异常
+// 都不得拖垮全站（2026-11-19 白屏事故的直接加固）
+const ChatShell = defineAsyncComponent(() => import("@/components/chat/ChatShell.vue"));
 import {
   Activity,
   BookMarked,
@@ -10,13 +13,14 @@ import {
   Gauge,
   KeyRound,
   Library,
+  LayoutDashboard,
   ListChecks,
   LogOut,
   Palette,
   Settings2,
   Users,
 } from "lucide-vue-next";
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import AppSidebar from "@/components/layout/AppSidebar.vue";
@@ -139,6 +143,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { name: "models", label: "我的模型", icon: Cpu },
       { name: "api-keys", label: "API Key", icon: KeyRound },
       { name: "plan", label: "我的套餐", icon: CreditCard },
+      { name: "admin-console", label: "后台管理", icon: LayoutDashboard, adminOnly: true },
       { name: "admin-byok", label: "BYOK 看板", icon: Gauge, adminOnly: true },
     ],
   },
@@ -187,5 +192,8 @@ function handleLogout() {
       v-model:open="commandOpen"
       @logout="handleLogout"
     />
+
+    <!-- 全局会话小窗（Issue #8 P0）：/chat 全屏页由页面自己渲染，避免双壳 -->
+    <ChatShell v-if="$route.name !== 'chat'" />
   </div>
 </template>

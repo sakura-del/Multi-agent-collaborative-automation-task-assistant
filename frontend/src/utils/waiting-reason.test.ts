@@ -56,3 +56,25 @@ describe("adviceForWaitingReason", () => {
     expect(adviceForWaitingReason("")).toBe("");
   });
 });
+
+describe("latestWaitingReason 的状态门控（Issue #21）", () => {
+  const failure = { event_id: 1, event_type: "task_waiting_human", payload: { reason: "规划失败: 429" } };
+  const planReady = { event_id: 2, event_type: "plan_ready", payload: { revision: 2 } };
+
+  function ev(id: number, type: string, payload: Record<string, unknown> = {}) {
+    return { event_id: id, event_type: type, payload } as never;
+  }
+
+  it("状态已离开 waiting_human：旧失败原因不再显示", () => {
+    const events = [ev(1, "task_waiting_human", { reason: "规划失败: 429" }), ev(2, "plan_ready", { revision: 2 })];
+    expect(latestWaitingReason(events, "waiting_approval")).toBe("");
+    expect(latestWaitingReason(events, "running")).toBe("");
+    expect(latestWaitingReason(events, "completed")).toBe("");
+  });
+
+  it("仍在 waiting_human：原因照常显示", () => {
+    const events = [ev(1, "task_waiting_human", { reason: "规划失败: 429" })];
+    expect(latestWaitingReason(events, "waiting_human")).toBe("规划失败: 429");
+    expect(latestWaitingReason(events)).toBe("规划失败: 429");
+  });
+});
