@@ -86,7 +86,11 @@ def executor_content(user_prompt: str) -> str:
     if not evidence_numbers:
         evidence_numbers = sorted({int(number) for number in MARKER_RE.findall(user_prompt)})
     if evidence_numbers:
-        citations = "".join(f"[E{number}]" for number in evidence_numbers[:3])
+        # 引用**全部**证据编号（Issue #30）：复盘会把每个证据条目登记进参考文献，
+        # 而 #25 的引用一致性闸门要求「参考文献里的每一条都在正文出现」。
+        # 这里只取前 3 个会造成 E4/E5 成为孤儿条目 → 任务被判 failed；
+        # 真实写作模型被要求逐条引用，确定性适配器必须做同样的合规示范。
+        citations = "".join(f"[E{number}]" for number in evidence_numbers)
         return (
             "## 证据梳理\n"
             f"上传文档指出检索增强生成通过外部知识降低事实性错误{citations}。\n\n"

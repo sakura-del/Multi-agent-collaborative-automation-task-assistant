@@ -22,7 +22,27 @@ os.environ.setdefault("APP_DEBUG", "false")
 os.environ.setdefault("APP_LOG_FORMAT", "console")
 # pydantic-settings 嵌套分隔符为 __ ，故 DATABASE__URL 映射到 settings.database.url
 os.environ.setdefault("DATABASE__URL", "sqlite+aiosqlite:///:memory:")
-os.environ.setdefault("REDIS__URL", "redis://localhost:6379/0")
+# 测试专用 Redis DB（Issue #30）：此前指 db 0，与本地开发/巡检脚本共用——
+# 限流桶（`ratelimit:*`）被测间累积，跑十几个"注册+登录"的用例就撞 429，
+# 整批 task_api / recovery 用例长期红，看着像功能坏了。db 15 由本文件负责清空。
+os.environ.setdefault("REDIS__URL", "redis://localhost:6379/15")
+# HTTP 限流是**按 IP** 计数的部署态能力，测试客户端只有一个 IP：
+# `auth_register` 默认 5 次/小时、`auth_login` 5 次/60 秒，一个文件里注册
+# 十几个用户就撞 429（Issue #30：`test_task_api.py` 18 例全红、
+# `test_login_lockout` 的「成功清零」用例也红）。
+#
+# 不关中间件（`test_rate_limit_middleware.py` 要测它），只把**高频动作**的
+# 限额放大到不可能触发；账号维度的失败退避（`login_throttle`）是另一套机制，
+# 不受影响，`test_login_lockout.py` 仍然测真实阈值。
+for _rule in (
+    "AUTH_LOGIN",
+    "AUTH_REGISTER",
+    "TASK_CREATE",
+    "TASK_CONTROL",
+    "SEARCH",
+    "UPLOAD",
+):
+    os.environ.setdefault(f"RATE_LIMIT__RULES__{_rule}__LIMIT", "100000")
 # 单测的向量后端固定走 chroma 内存模式（`chromadb` 是可选依赖 [chroma]，CI 装了它）：
 # 生产默认是 pgvector，需要真实 PostgreSQL + pgvector，而测试库是 SQLite —— 不显式指定
 # 会让每个 `init_kb()` 调用在构造 pgvector 后端时直接报「不能用 sqlite DSN」。
@@ -62,6 +82,35 @@ from sqlalchemy.ext.asyncio import (  # noqa: E402
 )
 
 from app.db.base import Base  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limit_buckets():
+    """每条用例前清空测试 Redis 的限流桶（best-effort，无 Redis 时静默跳过）。
+
+    为什么必须做：限流桶是**跨用例共享**的外部状态，而触发限流的路径
+    （注册 + 登录）在 `test_task_api.py` 里要跑十几次。不清就会在文件内部
+    撞 429（实测 18 例里 18 例红），而单独跑一条又过——这类「只在文件级复现」
+    的红最容易长期没人管（Issue #30）。
+
+    用**同步**客户端：本夹具可能在事件循环之外运行，`asyncio.run` 在已有
+    loop 时会抛错并被静默跳过（等于没清）。只 FLUSH 测试库（conftest 固定的
+    db 15）；连不上说明本机没有 Redis，限流本身 fail-open，跳过即可。
+    """
+    try:
+        from redis import Redis
+
+        client = Redis.from_url(
+            os.environ.get("REDIS__URL", ""),
+            socket_connect_timeout=0.2,
+            socket_timeout=0.2,
+        )
+        try:
+            client.flushdb()
+        finally:
+            client.close()
+    except Exception:  # 无 Redis / 连不上：限流 fail-open，不需要清理
+        pass
 
 
 @pytest.fixture(scope="session")

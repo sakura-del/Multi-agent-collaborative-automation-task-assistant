@@ -385,7 +385,18 @@ def _build_agents() -> tuple[Any, dict[str, Any]]:
             return "executor"
 
         async def _run(self, input_data: dict[str, Any]) -> dict[str, Any]:
-            # 每个节点报告 1000 prompt + 500 completion token
+            # 每个节点报告 1000 prompt + 500 completion token。
+            #
+            # ⚠️ 必须**经任务账本**记账（Issue #30）：Issue #16 之后
+            # `used_tokens` 的唯一来源是 `BaseLLM.chat → record_usage`，
+            # 节点结果里的 prompt_tokens/completion_tokens 早就不参与结算。
+            # 真实 executor 会调模型所以自动入账；替身不调模型，就得显式记账，
+            # 否则 `used_tokens` 恒为 0，结算退全额——测试就变成「白嫖路径」的
+            # 假阳性（这正是本文件此前长期红的原因）。
+            from app.llm.models import Usage
+            from app.llm.usage_ledger import record_usage
+
+            record_usage(Usage(prompt_tokens=1000, completion_tokens=500))
             return {"result": "ok", "prompt_tokens": 1000, "completion_tokens": 500}
 
     class _Validator(BaseAgent):

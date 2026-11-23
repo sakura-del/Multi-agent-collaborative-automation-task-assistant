@@ -2371,8 +2371,9 @@ class TaskExecution:
             artifacts=list(task.artifacts or []),
             review_report=task.review_report,
             model=model,
-            actual_provider=task.actual_provider,
-            actual_model=task.actual_model,
+            # 用 getattr：历史任务对象/测试替身可能没有这两列（Issue #28 新增）
+            actual_provider=getattr(task, "actual_provider", None),
+            actual_model=getattr(task, "actual_model", None),
             # 正文必须随快照下发：MCP/开放 API 的 get_task_output 读的就是它。
             # 曾经漏掉 → MCP 永远返回 markdown: null（tests 用 dict 替身掩盖了）。
             final_output=task.final_output,

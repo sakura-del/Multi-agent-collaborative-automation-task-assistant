@@ -164,10 +164,15 @@ class TestInMemoryThrottleUnit:
 
 class TestLoginLimitTightened:
     def test_login_rule_is_five_per_minute(self) -> None:
-        """原 10 次/60 秒实测「10 次失败都不触发 429」，慢速爆破成本太低。"""
-        from app.core.config import settings
+        """原 10 次/60 秒实测「10 次失败都不触发 429」，慢速爆破成本太低。
 
-        rule = settings.rate_limit.rules.auth_login
+        断言的是**代码默认值**（`RateLimitRules()`），不是运行时 `settings`：
+        conftest 会把登录/注册等高频规则的限额放大（测试只有一个客户端 IP，
+        不放大就自己把自己限死），读 settings 会读到 100000（Issue #30）。
+        """
+        from app.core.config import RateLimitRules
+
+        rule = RateLimitRules().auth_login
         assert rule.limit == 5
         assert rule.window_seconds == 60
 

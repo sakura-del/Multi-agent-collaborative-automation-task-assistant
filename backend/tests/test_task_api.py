@@ -119,9 +119,12 @@ class _StaticReviewer(BaseAgent):
     async def _run(self, input_data: dict[str, Any]) -> dict[str, Any]:
         return {
             "summary": "任务执行成功。",
+            # ⚠️ 正文必须带 `[E1]`（Issue #30）：Issue #25 起 `_finish_reviewing`
+            # 会跑引用一致性闸门，正文没有任何 [E#] 而参考文献有 1 条 → 任务
+            # 直接判 failed。这个替身此前长期让整批 task_api / recovery 用例红。
             "final_markdown": (
                 "# 检索增强生成证据核验\n\n"
-                "## 摘要\n确定性测试复盘。\n\n"
+                "## 摘要\n确定性测试复盘，证据见 [E1]。\n\n"
                 "## 参考文献\n- [1] 测试文献 — https://arxiv.org/abs/2401.12341v1"
             ),
             "bibliography": [
