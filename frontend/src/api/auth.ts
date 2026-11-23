@@ -9,6 +9,14 @@ export const authApi = {
   login: (data: LoginInput) =>
     api.post<TokenOut>("/auth/login", data).then((response) => response.data),
 
+  requestEmailOtp: (email: string) =>
+    api
+      .post<{ message: string; cooldown_seconds: number }>("/auth/email-otp/request", { email })
+      .then((response) => response.data),
+
+  verifyEmailOtp: (payload: { email?: string; code?: string; magic_token?: string }) =>
+    api.post<TokenOut>("/auth/email-otp/verify", payload).then((response) => response.data),
+
   refresh: (refreshToken: string) =>
     api
       .post<TokenOut>("/auth/refresh", { refresh_token: refreshToken })

@@ -3,16 +3,33 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { createMemoryHistory, createRouter } from "vue-router";
 
-// ALTCHA 是 Web Component（自带 fetch 挑战、注册自定义元素）；单测只关心文案与路由，
-// 不加载真实实现，否则 happy-dom 里会去打网络。
-vi.mock("altcha", () => ({}));
-vi.mock("altcha/i18n/zh-cn", () => ({}));
+const mocks = vi.hoisted(() => ({
+  requestEmailOtp: vi.fn(),
+  verifyEmailOtp: vi.fn(),
+  login: vi.fn(),
+  me: vi.fn(),
+}));
 
-const state = vi.hoisted(() => ({ captchaEnabled: false }));
+vi.mock("@/api/auth", () => ({
+  authApi: {
+    requestEmailOtp: mocks.requestEmailOtp,
+    verifyEmailOtp: mocks.verifyEmailOtp,
+    login: mocks.login,
+    me: mocks.me,
+    register: vi.fn(),
+    refresh: vi.fn(),
+  },
+  default: {
+    requestEmailOtp: mocks.requestEmailOtp,
+    verifyEmailOtp: mocks.verifyEmailOtp,
+    login: mocks.login,
+    me: mocks.me,
+  },
+}));
 
 vi.mock("@/api/client", () => ({
   default: {
-    get: () => Promise.resolve({ data: { enabled: state.captchaEnabled } }),
+    get: vi.fn(),
     defaults: { baseURL: "http://api.test" },
   },
   getAccessToken: () => null,
@@ -22,17 +39,8 @@ vi.mock("@/api/client", () => ({
   setUnauthorizedHandler: vi.fn(),
 }));
 
-vi.mock("@/api/account", () => ({ requestEmailVerification: vi.fn() }));
-
 import LoginView from "@/views/LoginView.vue";
 
-/**
- * 公开页 UI 打磨（Issue #26）的前端契约：
- * - 顶部文案随页签切换（注册态不能显示登录引导）；
- * - `/register` 可直达，页签与地址栏是同一个事实来源；
- * - Logo 是链接、「证据可回溯」是标签不是假链接；
- * - 中文文案里没有「， 系统」这种逗号后空格。
- */
 function buildRouter() {
   const stub = { template: "<div />" };
   return createRouter({
@@ -60,64 +68,79 @@ async function mountLogin(path = "/login") {
   return { wrapper, router };
 }
 
-const title = (wrapper: Awaited<ReturnType<typeof mountLogin>>["wrapper"]) =>
-  wrapper.get('[data-test="auth-title"]').text();
-
 beforeEach(() => {
-  state.captchaEnabled = false;
+  vi.clearAllMocks();
+  mocks.requestEmailOtp.mockResolvedValue({
+    message: "验证码已发送至你的邮箱，请查收。",
+    cooldown_seconds: 60,
+  });
+  mocks.verifyEmailOtp.mockResolvedValue({
+    access_token: "acc-123",
+    refresh_token: "ref-123",
+    token_type: "bearer",
+    expires_in: 1800,
+  });
+  mocks.me.mockResolvedValue({
+    id: "u1",
+    username: "alice_1234",
+    email: "alice@example.com",
+    role: "user",
+    is_active: true,
+    email_verified: true,
+  });
 });
 
-describe("登录/注册页", () => {
-  it("登录态：顶部是登录引导（已移除英文眉标）", async () => {
+describe("登录/注册一体流（Email OTP + Magic Link）", () => {
+  it("首屏展示统一邮箱输入，不再区分登录/注册 Tab", async () => {
     const { wrapper } = await mountLogin();
 
-    expect(wrapper.find('[data-test="auth-eyebrow"]').exists()).toBe(false);
-    expect(title(wrapper)).toBe("回到工作台");
-    expect(wrapper.get('[data-test="auth-hint"]').text()).toContain("访问你的文献库");
+    expect(wrapper.get('[data-test="auth-title"]').text()).toBe("登录或创建账号");
+    expect(wrapper.find('[data-test="otp-email-input"]').exists()).toBe(true);
+    expect(wrapper.find('[role="tab"]').exists()).toBe(false);
   });
 
-  it("切到注册页签：文案改成注册，地址栏同步成 /register", async () => {
+  it("提交邮箱后发送验证码并进入 6 位验证码输入态，验证通过跳转工作台", async () => {
     const { wrapper, router } = await mountLogin();
 
-    await wrapper.findAll('[role="tab"]')[1].trigger("click");
+    await wrapper.get('[data-test="otp-email-input"]').setValue("alice@example.com");
+    await wrapper.get("form").trigger("submit.prevent");
     await flushPromises();
 
-    expect(router.currentRoute.value.name).toBe("register");
-    expect(title(wrapper)).toBe("创建研究账号");
-    expect(wrapper.get('[data-test="auth-hint"]').text()).toContain("第一篇可核验文献综述");
-    // 注册不再自动登录（邮箱验证是门禁），按钮不能再说「注册并登录」
-    expect(wrapper.get('form button[type="submit"]').text()).toBe("创建账号");
-  });
+    expect(mocks.requestEmailOtp).toHaveBeenCalledWith("alice@example.com");
+    expect(wrapper.get('[data-test="auth-title"]').text()).toBe("输入邮箱验证码");
+    expect(wrapper.get('[data-test="otp-sent-notice"]').text()).toContain("验证码已发送");
 
-  it("直接访问 /register：落地即注册表单，字段有占位提示", async () => {
-    const { wrapper, router } = await mountLogin("/register");
-
-    expect(router.currentRoute.value.name).toBe("register");
-    expect(title(wrapper)).toBe("创建研究账号");
-    expect(wrapper.get("#username").attributes("placeholder")).toBeTruthy();
-    expect(wrapper.get("#email").attributes("placeholder")).toBeTruthy();
-    expect(wrapper.get("#password").attributes("placeholder")).toBe("至少 8 位");
-  });
-
-  it("从注册页签切回登录：地址栏也回到 /login", async () => {
-    const { wrapper, router } = await mountLogin("/register");
-
-    await wrapper.findAll('[role="tab"]')[0].trigger("click");
+    await wrapper.get('[data-test="otp-code-input"]').setValue("123456");
+    await wrapper.get("form").trigger("submit.prevent");
     await flushPromises();
 
-    expect(router.currentRoute.value.name).toBe("login");
-    expect(title(wrapper)).toBe("回到工作台");
+    expect(mocks.verifyEmailOtp).toHaveBeenCalledWith({
+      email: "alice@example.com",
+      code: "123456",
+    });
+    expect(router.currentRoute.value.name).toBe("tasks");
   });
 
-  it("左侧双层溯源卡支持点击 [1]/[2] 角标切换出处", async () => {
+  it("URL 带 magic_token 时自动核验并跳转工作台", async () => {
+    const { router } = await mountLogin("/login?magic_token=token-abc-1234567890");
+    expect(mocks.verifyEmailOtp).toHaveBeenCalledWith({
+      magic_token: "token-abc-1234567890",
+    });
+    expect(router.currentRoute.value.name).toBe("tasks");
+  });
+
+  it("点击底部「使用账号密码登录」可展开密码表单（兼容管理员与忘记密码）", async () => {
     const { wrapper } = await mountLogin();
 
-    expect(wrapper.get('[data-test="login-proof-footer"]').text()).toContain("ACL Findings 2025");
-    await wrapper.get('[data-test="login-proof-marker-2"]').trigger("click");
-    expect(wrapper.get('[data-test="login-proof-footer"]').text()).toContain("J. Biomed. Inform. 2025");
+    await wrapper.get('[data-test="toggle-password-login"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find("#account").exists()).toBe(true);
+    expect(wrapper.find("#password").exists()).toBe(true);
+    expect(wrapper.find('[data-test="forgot-password"]').exists()).toBe(true);
   });
 
-  it("Logo 是可点的首页链接，「证据可回溯」只是标签", async () => {
+  it("Logo 是可点的首页链接，左侧双层溯源卡支持 [1]/[2] 切换", async () => {
     const { wrapper } = await mountLogin();
 
     const brand = wrapper.get('[data-test="brand-home"]');
@@ -127,31 +150,10 @@ describe("登录/注册页", () => {
     const tag = wrapper.get('[data-test="proof-traceable-tag"]');
     expect(tag.element.tagName).toBe("SPAN");
     expect(tag.element.closest("a")).toBeNull();
-  });
 
-  it("中文正文没有逗号后空格（Vue 会把源码换行压成空格）", async () => {
-    const { wrapper } = await mountLogin();
-
-    expect(wrapper.text()).not.toMatch(/[\u4e00-\u9fa5]，\s/);
+    expect(wrapper.get('[data-test="login-proof-footer"]').text()).toContain("ACL Findings 2025");
+    await wrapper.get('[data-test="login-proof-marker-2"]').trigger("click");
+    expect(wrapper.get('[data-test="login-proof-footer"]').text()).toContain("J. Biomed. Inform. 2025");
     expect(wrapper.text()).toContain("你负责判断，系统负责");
-  });
-
-  it("注册态渲染人机验证时，保护文案只有一处且大小写统一", async () => {
-    state.captchaEnabled = true;
-    const { wrapper } = await mountLogin("/register");
-
-    const caption = wrapper.get('[data-test="captcha-caption"]');
-    expect(caption.text()).toBe("由 Altcha 保护");
-    expect(wrapper.text().match(/Altcha/gi)?.length).toBe(1);
-    // widget 自带页脚必须真的关掉：v3 不认 hideFooter 属性，只能走 configuration
-    const configuration = JSON.parse(wrapper.get("altcha-widget").attributes("configuration") ?? "{}");
-    expect(configuration).toEqual({ hideFooter: true });
-  });
-
-  it("登录态不渲染人机验证", async () => {
-    state.captchaEnabled = true;
-    const { wrapper } = await mountLogin("/login");
-
-    expect(wrapper.find('[data-test="captcha-caption"]').exists()).toBe(false);
   });
 });

@@ -32,6 +32,16 @@ export const useAuthStore = defineStore("auth", () => {
     user.value = await authApi.me();
   }
 
+  async function loginWithEmailOtp(email: string, code: string): Promise<void> {
+    persistTokens(await authApi.verifyEmailOtp({ email, code }));
+    user.value = await authApi.me();
+  }
+
+  async function loginWithMagicToken(magicToken: string): Promise<void> {
+    persistTokens(await authApi.verifyEmailOtp({ magic_token: magicToken }));
+    user.value = await authApi.me();
+  }
+
   async function register(input: RegisterInput): Promise<void> {
     // 2026-11-13：不再自动登录——邮箱未验证就被门禁挡住（403 EMAIL_NOT_VERIFIED），
     // 这里的静默失败曾让用户「没验证邮箱也进了系统」。注册成功即返回，
@@ -55,5 +65,16 @@ export const useAuthStore = defineStore("auth", () => {
     user.value = null;
   }
 
-  return { user, ready, authenticated, bootstrap, login, register, refresh, logout };
+  return {
+    user,
+    ready,
+    authenticated,
+    bootstrap,
+    login,
+    loginWithEmailOtp,
+    loginWithMagicToken,
+    register,
+    refresh,
+    logout,
+  };
 });

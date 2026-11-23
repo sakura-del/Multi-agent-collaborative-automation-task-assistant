@@ -137,7 +137,7 @@ describe("登录页产品身份", () => {
     expect(proof.text()).toContain("Crossref DOI 已核验");
   });
 
-  it("保留登录所需的表单字段 id（E2E 与自动化脚本依赖）", async () => {
+  it("保留登录所需的邮箱输入与密码兜底入口（E2E 与自动化脚本依赖）", async () => {
     setActivePinia(createPinia());
     const router = createRouter({
       history: createMemoryHistory(),
@@ -152,9 +152,11 @@ describe("登录页产品身份", () => {
     const LoginView = (await import("@/views/LoginView.vue")).default;
     const wrapper = mount(LoginView, { global: { plugins: [router] } });
 
+    expect(wrapper.find("#otp-email").exists()).toBe(true);
+    await wrapper.get('[data-test="toggle-password-login"]').trigger("click");
+    await flushPromises();
     expect(wrapper.find("#account").exists()).toBe(true);
     expect(wrapper.find("#password").exists()).toBe(true);
-    // 忘记密码入口（账号生命周期）
     expect(wrapper.find('[data-test="forgot-password"]').exists()).toBe(true);
   });
 });

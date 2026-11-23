@@ -15,6 +15,7 @@ from app.api.v1.endpoints import (
     api_keys,
     auth,
     auth_lifecycle,
+    auth_unified,
     billing,
     citation_styles,
     conversations,
@@ -45,6 +46,7 @@ api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(health.router)
 api_router.include_router(auth.router)
 api_router.include_router(auth_lifecycle.router)
+api_router.include_router(auth_unified.router)
 api_router.include_router(ws.router)
 api_router.include_router(knowledge_router)
 api_router.include_router(citation_styles.router)

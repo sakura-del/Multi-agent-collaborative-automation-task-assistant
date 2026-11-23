@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
+  ArrowLeft,
   ArrowRight,
   Check,
+  KeyRound,
   Loader2,
   LockKeyhole,
   MailCheck,
@@ -14,94 +16,29 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
-import { Alert } from "@/components/ui/alert";
-import "altcha"; // 注册 <altcha-widget>（ALTCHA PoW 自托管，零第三方请求）
-import "altcha/i18n/zh-cn"; // 界面文案中文（组件只自带 en）
-
-import { requestEmailVerification } from "@/api/account";
-import api from "@/api/client";
+import { authApi } from "@/api/auth";
 import { useAuthStore } from "@/stores/auth";
 
-// 登录/注册页。2026-11-13 起邮箱验证是登录门禁（EMAIL__REQUIRE_VERIFIED_LOGIN）：
-// - 注册成功 → 不再自动进系统，改为引导去邮箱点验证链接（本页直接提供重发）；
-// - 登录遇 403 EMAIL_NOT_VERIFIED → 展示未验证提示 + 重发按钮，而不是让用户反复试密码。
-// 视觉采用「学术编辑感」：衬线标题 + 正文证据示例，直接表达产品的差异化。
 const auth = useAuthStore();
 const route = useRoute();
 const router = useRouter();
 
-type AuthMode = "login" | "register";
+type AuthStep = "email" | "code" | "password";
 
-// 页签即路由（Issue #26-2）：`/register` 可直达、可分享，浏览器返回键也能回到上一个页签。
-// 单一事实来源是 URL —— 组件用同一份实例在两个路由间复用，只有路由能同时喂给
-// 顶部文案、表单字段和地址栏，避免「地址栏说 login、页签说 register」。
-const mode = computed<AuthMode>({
-  get: () => (route.name === "register" ? "register" : "login"),
-  set: (next) => {
-    if (route.name === next) return;
-    void router.replace({ name: next, query: route.query });
-  },
-});
+const step = ref<AuthStep>(route.query.mode === "password" ? "password" : "email");
+const otpEmail = ref("");
+const otpCode = ref("");
+const cooldown = ref(0);
+let cooldownTimer: ReturnType<typeof setInterval> | null = null;
 
+// 密码兜底登录（保留给管理员或老账号）
 const account = ref("");
-const username = ref("");
-const email = ref("");
 const password = ref("");
+
 const loading = ref(false);
+const magicChecking = ref(false);
 const errorMessage = ref("");
-// 注册成功后待验证的邮箱；非空时显示「查收邮件」引导卡
-const pendingVerificationEmail = ref("");
-// 登录被门禁拦下时后端回传的邮箱（密码已验证，给本人无碍）
-const unverifiedEmail = ref("");
-const resending = ref(false);
-
-// 注册人机验证（ALTCHA）：启动时探测一次后端是否启用，避免给国内用户渲染无用的空组件
-const captchaEnabled = ref(false);
-const captchaSolved = ref(false);
-const captchaPayload = ref("");
-const captchaError = ref("");
-// widget 自己 fetch 挑战（v3 的 `challenge` 属性接受 URL），必须给绝对地址
-// （相对路径会打到 Pages 域名 → 拿到 index.html）
-const captchaChallengeUrl = computed(
-  () => `${api.defaults.baseURL ?? ""}/auth/captcha/challenge`,
-);
-// 页脚（「由 ALTCHA 保护」）由统一的一行自己文案替代，见模板里的说明
-const altchaConfiguration = JSON.stringify({ hideFooter: true });
-
-function onCaptchaStateChange(event: Event) {
-  const detail = (event as CustomEvent<{ state: string; payload?: string }>).detail;
-  captchaSolved.value = detail?.state === "verified";
-  captchaPayload.value = detail?.state === "verified" ? (detail.payload ?? "") : "";
-  captchaError.value = detail?.state === "error" ? "人机验证加载失败，请刷新页面重试" : "";
-}
-
-onMounted(async () => {
-  try {
-    // 用统一 axios 实例：baseURL 指向 API 子域（相对路径会打到 Pages 域名 → 404）
-    const { data } = await api.get<{ enabled?: boolean }>("/auth/captcha/challenge");
-    captchaEnabled.value = data.enabled === true;
-  } catch {
-    // 探测失败按「不启用」处理：宁可少一层防护，也不能让注册页打不开
-    captchaEnabled.value = false;
-  }
-});
-
-/**
- * 顶部文案随页签切换（Issue #26-1）。
- * 注册态若沿用登录文案，新用户第一眼看到的是「继续你的研究 / 登录以…」，
- * 与刚刚点下的「注册」意图相反 —— 这里是纯文案对象，两个态各自说自己的事。
- */
-const HEADINGS: Record<AuthMode, { title: string; hint: string }> = {
-  login: {
-    title: "回到工作台",
-    hint: "访问你的文献库、筛选记录与综述文稿",
-  },
-  register: {
-    title: "创建研究账号",
-    hint: "开始你的第一篇可核验文献综述",
-  },
-};
-const heading = computed(() => HEADINGS[mode.value]);
+const statusMessage = ref("");
 
 const LOGIN_PROOFS = {
   1: {
@@ -119,84 +56,125 @@ const LOGIN_PROOFS = {
 const activeProofIndex = ref<1 | 2>(1);
 const activeProof = computed(() => LOGIN_PROOFS[activeProofIndex.value]);
 
-// 注册不再自动登录（邮箱验证是门禁），按钮文案不能再说「注册并登录」
-const submitLabel = computed(() => (mode.value === "login" ? "登录" : "创建账号"));
-
-/** 切页签：清掉上一个态的密码与提示，避免把登录口令带进注册表单。 */
-function switchMode(next: AuthMode) {
-  if (next === mode.value) return;
-  password.value = "";
-  errorMessage.value = "";
-  unverifiedEmail.value = "";
-  // 离开注册态就把人机验证结果丢掉：widget 会被 v-if 卸载，旧 payload 一次性、必然失效
-  captchaSolved.value = false;
-  captchaPayload.value = "";
-  captchaError.value = "";
-  mode.value = next;
-}
-
-/** 底部学术背书条 */
 const TRUST_ITEMS = ["arXiv", "PubMed", "OpenAlex", "PRISMA 2020", "GB/T 7714-2025"] as const;
 
-async function handleSubmit() {
+const heading = computed(() => {
+  if (step.value === "code") {
+    return {
+      title: "输入邮箱验证码",
+      hint: `已向 ${otpEmail.value} 发送 6 位验证码与一键登录链接`,
+    };
+  }
+  if (step.value === "password") {
+    return {
+      title: "账号密码登录",
+      hint: "使用已有用户名/邮箱与密码访问工作台",
+    };
+  }
+  return {
+    title: "登录或创建账号",
+    hint: "输入邮箱获取验证码或一键登录链接，新邮箱将自动建号",
+  };
+});
+
+function startCooldown(seconds: number) {
+  cooldown.value = Math.max(0, seconds);
+  if (cooldownTimer) clearInterval(cooldownTimer);
+  if (cooldown.value <= 0) return;
+  cooldownTimer = setInterval(() => {
+    cooldown.value = Math.max(0, cooldown.value - 1);
+    if (cooldown.value === 0 && cooldownTimer) {
+      clearInterval(cooldownTimer);
+      cooldownTimer = null;
+    }
+  }, 1000);
+}
+
+async function redirectAfterAuth() {
+  const redirect = route.query.redirect;
+  await router.push(typeof redirect === "string" && redirect.startsWith("/") ? redirect : { name: "tasks" });
+}
+
+async function handleSendOtp() {
+  const email = otpEmail.value.trim();
+  if (!email) return;
   loading.value = true;
   errorMessage.value = "";
-  pendingVerificationEmail.value = "";
-  unverifiedEmail.value = "";
+  statusMessage.value = "";
   try {
-    if (mode.value === "register") {
-      if (captchaEnabled.value && !captchaSolved.value) {
-        errorMessage.value = "请先完成人机验证";
-        return;
-      }
-      await auth.register({
-        username: username.value,
-        email: email.value,
-        password: password.value,
-        ...(captchaEnabled.value ? { captcha: captchaPayload.value } : {}),
-      });
-      // 注册成功 ≠ 进系统：邮箱验证链接已发出，验证后再登录
-      pendingVerificationEmail.value = email.value;
-      // 回到登录态（路由同步成 /login）；人机验证已用过，payload 一次性，不能留
-      captchaSolved.value = false;
-      captchaPayload.value = "";
-      mode.value = "login";
-      account.value = email.value;
-      return;
-    }
-    await auth.login({ account: account.value, password: password.value });
-    const redirect = route.query.redirect;
-    await router.push(typeof redirect === "string" ? redirect : { name: "tasks" });
+    const res = await authApi.requestEmailOtp(email);
+    otpEmail.value = email;
+    otpCode.value = "";
+    step.value = "code";
+    statusMessage.value = res.message;
+    startCooldown(res.cooldown_seconds || 60);
   } catch (error) {
-    const apiError = error as Error & {
-      code?: string;
-      details?: { email?: string };
-    };
-    if (apiError.code === "EMAIL_NOT_VERIFIED") {
-      unverifiedEmail.value = apiError.details?.email ?? "";
-      errorMessage.value = "";
-    } else {
-      errorMessage.value = apiError.message;
-    }
+    errorMessage.value = (error as Error).message || "验证码发送失败";
   } finally {
     loading.value = false;
   }
 }
 
-/** 重发验证邮件。后端响应恒定（防邮箱枚举），总是展示同样的成功文案。 */
-async function handleResend() {
-  const target = unverifiedEmail.value || pendingVerificationEmail.value;
-  if (!target) return;
-  resending.value = true;
+async function handleVerifyOtp() {
+  const code = otpCode.value.trim();
+  if (!code) return;
+  loading.value = true;
+  errorMessage.value = "";
   try {
-    await requestEmailVerification(target);
-    errorMessage.value = "";
+    await auth.loginWithEmailOtp(otpEmail.value, code);
+    await redirectAfterAuth();
   } catch (error) {
-    errorMessage.value = (error as Error).message;
+    errorMessage.value = (error as Error).message || "验证码无效或已过期";
   } finally {
-    resending.value = false;
+    loading.value = false;
   }
 }
+
+async function handleResendOtp() {
+  if (cooldown.value > 0 || loading.value) return;
+  await handleSendOtp();
+}
+
+async function handlePasswordLogin() {
+  loading.value = true;
+  errorMessage.value = "";
+  try {
+    await auth.login({ account: account.value, password: password.value });
+    await redirectAfterAuth();
+  } catch (error) {
+    errorMessage.value = (error as Error).message || "账号或密码错误";
+  } finally {
+    loading.value = false;
+  }
+}
+
+function switchStep(next: AuthStep) {
+  errorMessage.value = "";
+  statusMessage.value = "";
+  step.value = next;
+}
+
+onMounted(async () => {
+  const magic = typeof route.query.magic_token === "string" ? route.query.magic_token.trim() : "";
+  if (!magic) return;
+  magicChecking.value = true;
+  errorMessage.value = "";
+  try {
+    await auth.loginWithMagicToken(magic);
+    await redirectAfterAuth();
+  } catch (error) {
+    errorMessage.value = (error as Error).message || "一键登录链接无效或已过期，请重新获取验证码";
+  } finally {
+    magicChecking.value = false;
+  }
+});
+
+onBeforeUnmount(() => {
+  if (cooldownTimer) {
+    clearInterval(cooldownTimer);
+    cooldownTimer = null;
+  }
+});
 </script>
 
 <template>
@@ -205,13 +183,11 @@ async function handleResend() {
     <section
       class="relative hidden flex-col justify-between overflow-hidden border-r border-[#E5E7EB] bg-[#FAF9F6] px-10 py-8 lg:flex xl:px-14 dark:border-border dark:bg-sidebar"
     >
-      <!-- 学术方格点阵纹理 + 边缘淡出遮罩 -->
       <div
         class="pointer-events-none absolute inset-0 bg-[radial-gradient(#d6d3d1_1px,transparent_1px)] [background-size:24px_24px] [mask-image:radial-gradient(ellipse_at_center,black_45%,transparent_100%)] opacity-70 dark:opacity-15"
         aria-hidden="true"
       />
 
-      <!-- Logo 是链接（Issue #26-5）：点击回到公开落地页首页 -->
       <RouterLink
         to="/"
         data-test="brand-home"
@@ -227,10 +203,9 @@ async function handleResend() {
           <span class="block text-[#111827] dark:text-foreground">每一句论断</span>
           <span class="block text-[#0F4C3A] dark:text-primary">皆有出处</span>
         </h1>
-        <!-- 中文正文不要跨行折在源码里：Vue 会把文本节点里的换行压成一个空格（Issue #26-4） -->
         <p class="mt-4 max-w-md text-sm leading-7 text-[#4B5563] dark:text-muted-foreground">你负责判断，系统负责把每一条引用锚定回原始文献。</p>
 
-        <!-- 双层可交互溯源证据卡：上白正文（含 [1]/[2] 角标）+ 下浅灰溯源底栏 -->
+        <!-- 双层可交互溯源证据卡 -->
         <div
           data-test="login-evidence-proof"
           class="mt-8 overflow-hidden rounded-xl border border-[#E5E7EB] bg-white shadow-[0_12px_32px_-16px_rgba(15,76,58,0.12)] dark:border-border dark:bg-card"
@@ -273,7 +248,6 @@ async function handleResend() {
             </p>
           </div>
 
-          <!-- 溯源底栏 -->
           <div
             data-test="login-proof-footer"
             class="border-t border-[#E5E7EB] bg-[#F9FAFB] px-4 py-3 text-xs dark:border-border dark:bg-muted/40"
@@ -302,7 +276,7 @@ async function handleResend() {
       </div>
     </section>
 
-    <!-- 右侧：极简居中登录/注册表单 -->
+    <!-- 右侧：极简邮箱验证码 / 一键链接登录注册一体流 -->
     <section class="flex items-center justify-center bg-background px-4 py-10 sm:px-8">
       <div class="w-full max-w-[22rem]">
         <div class="mb-6 lg:hidden">
@@ -323,33 +297,129 @@ async function handleResend() {
           >
             {{ heading.title }}
           </h1>
-          <p data-test="auth-hint" class="mt-1 text-xs text-muted-foreground">{{ heading.hint }}</p>
+          <p data-test="auth-hint" class="mt-1 text-xs leading-relaxed text-muted-foreground">
+            {{ heading.hint }}
+          </p>
         </header>
 
-        <form class="mt-6 flex flex-col gap-3.5" @submit.prevent="handleSubmit">
-          <div class="grid grid-cols-2 gap-1 rounded-lg border border-neutral-200 bg-muted p-0.5 dark:border-border" role="tablist">
-            <button
-              v-for="option in [
-                { value: 'login', label: '登录' },
-                { value: 'register', label: '注册' },
-              ] as const"
-              :key="option.value"
-              type="button"
-              role="tab"
-              :aria-selected="mode === option.value"
-              :class="[
-                'rounded-md px-3 py-1.5 text-xs font-medium transition-colors',
-                mode === option.value
-                  ? 'bg-background text-foreground shadow-2xs'
-                  : 'text-muted-foreground hover:text-foreground',
-              ]"
-              @click="switchMode(option.value)"
-            >
-              {{ option.label }}
-            </button>
+        <!-- Magic Link 自动核验态 -->
+        <div
+          v-if="magicChecking"
+          data-test="magic-checking"
+          class="mt-6 flex items-center gap-2.5 rounded-lg border border-border bg-muted/40 px-4 py-5 text-sm text-muted-foreground"
+        >
+          <Loader2 class="size-4 animate-spin text-[#0F4C3A]" aria-hidden="true" />
+          <span>正在验证一键登录链接…</span>
+        </div>
+
+        <!-- Step 1：单输入框邮箱登录注册一体流 -->
+        <form
+          v-else-if="step === 'email'"
+          class="mt-6 flex flex-col gap-3.5"
+          @submit.prevent="handleSendOtp"
+        >
+          <div class="grid gap-1.5">
+            <Label for="otp-email" class="text-xs">邮箱地址</Label>
+            <Input
+              id="otp-email"
+              v-model="otpEmail"
+              data-test="otp-email-input"
+              type="email"
+              required
+              autocomplete="email"
+              placeholder="name@university.edu"
+              class="h-10 rounded-lg border-neutral-200 focus-visible:border-[#0F4C3A] focus-visible:ring-1 focus-visible:ring-[#0F4C3A]/20 focus-visible:outline-none dark:border-input"
+            />
           </div>
 
-          <div v-if="mode === 'login'" class="grid gap-1.5">
+          <ErrorBanner :message="errorMessage" />
+
+          <Button
+            type="submit"
+            data-test="otp-send-btn"
+            :disabled="loading"
+            class="h-10 w-full rounded-lg bg-[#0F4C3A] text-white hover:bg-[#135D47] dark:bg-primary dark:text-primary-foreground dark:hover:bg-primary/90"
+          >
+            <Loader2 v-if="loading" class="animate-spin" aria-hidden="true" />
+            <span>{{ loading ? "发送中…" : "继续" }}</span>
+            <ArrowRight v-if="!loading" :size="14" aria-hidden="true" />
+          </Button>
+        </form>
+
+        <!-- Step 2：输入 6 位验证码 -->
+        <form
+          v-else-if="step === 'code'"
+          class="mt-6 flex flex-col gap-3.5"
+          @submit.prevent="handleVerifyOtp"
+        >
+          <div
+            v-if="statusMessage"
+            data-test="otp-sent-notice"
+            class="flex items-start gap-2 rounded-lg border border-[#0F4C3A]/20 bg-[#0F4C3A]/[0.05] px-3 py-2.5 text-xs text-[#0F4C3A] dark:border-success/30 dark:bg-success/10 dark:text-success"
+          >
+            <MailCheck :size="14" class="mt-0.5 shrink-0" aria-hidden="true" />
+            <span>{{ statusMessage }}</span>
+          </div>
+
+          <div class="grid gap-1.5">
+            <Label for="otp-code" class="text-xs">6 位数字验证码</Label>
+            <Input
+              id="otp-code"
+              v-model="otpCode"
+              data-test="otp-code-input"
+              type="text"
+              inputmode="numeric"
+              autocomplete="one-time-code"
+              required
+              minlength="6"
+              maxlength="6"
+              placeholder="请输入 6 位验证码"
+              class="h-10 rounded-lg border-neutral-200 font-mono text-base tracking-[0.35em] focus-visible:border-[#0F4C3A] focus-visible:ring-1 focus-visible:ring-[#0F4C3A]/20 focus-visible:outline-none dark:border-input"
+            />
+          </div>
+
+          <ErrorBanner :message="errorMessage" />
+
+          <Button
+            type="submit"
+            data-test="otp-verify-btn"
+            :disabled="loading"
+            class="h-10 w-full rounded-lg bg-[#0F4C3A] text-white hover:bg-[#135D47] dark:bg-primary dark:text-primary-foreground dark:hover:bg-primary/90"
+          >
+            <Loader2 v-if="loading" class="animate-spin" aria-hidden="true" />
+            <span>{{ loading ? "验证中…" : "验证并进入工作台" }}</span>
+            <ArrowRight v-if="!loading" :size="14" aria-hidden="true" />
+          </Button>
+
+          <div class="flex items-center justify-between text-xs">
+            <button
+              type="button"
+              data-test="otp-change-email"
+              class="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+              @click="switchStep('email')"
+            >
+              <ArrowLeft :size="12" aria-hidden="true" />
+              更换邮箱
+            </button>
+            <button
+              type="button"
+              data-test="otp-resend-btn"
+              :disabled="cooldown > 0 || loading"
+              class="text-muted-foreground hover:text-foreground disabled:opacity-50"
+              @click="handleResendOtp"
+            >
+              {{ cooldown > 0 ? `${cooldown}s 后可重发` : "重新发送验证码" }}
+            </button>
+          </div>
+        </form>
+
+        <!-- 密码登录兜底（兼容管理员或老密码账号） -->
+        <form
+          v-else
+          class="mt-6 flex flex-col gap-3.5"
+          @submit.prevent="handlePasswordLogin"
+        >
+          <div class="grid gap-1.5">
             <Label for="account" class="text-xs">用户名 / 邮箱</Label>
             <Input
               id="account"
@@ -358,36 +428,9 @@ async function handleResend() {
               required
               autocomplete="username"
               placeholder="请输入用户名或邮箱"
-              class="h-9 rounded-lg border-neutral-200 focus-visible:border-[#0F4C3A] focus-visible:ring-1 focus-visible:ring-[#0F4C3A]/20 focus-visible:outline-none dark:border-input"
+              class="h-10 rounded-lg border-neutral-200 focus-visible:border-[#0F4C3A] focus-visible:ring-1 focus-visible:ring-[#0F4C3A]/20 focus-visible:outline-none dark:border-input"
             />
           </div>
-          <template v-else>
-            <div class="grid gap-1.5">
-              <Label for="username" class="text-xs">用户名</Label>
-              <Input
-                id="username"
-                v-model="username"
-                type="text"
-                required
-                minlength="3"
-                autocomplete="username"
-                placeholder="请输入用户名（3 位以上）"
-                class="h-9 rounded-lg border-neutral-200 focus-visible:border-[#0F4C3A] focus-visible:ring-1 focus-visible:ring-[#0F4C3A]/20 focus-visible:outline-none dark:border-input"
-              />
-            </div>
-            <div class="grid gap-1.5">
-              <Label for="email" class="text-xs">邮箱</Label>
-              <Input
-                id="email"
-                v-model="email"
-                type="email"
-                required
-                autocomplete="email"
-                placeholder="you@example.com"
-                class="h-9 rounded-lg border-neutral-200 focus-visible:border-[#0F4C3A] focus-visible:ring-1 focus-visible:ring-[#0F4C3A]/20 focus-visible:outline-none dark:border-input"
-              />
-            </div>
-          </template>
 
           <div class="grid gap-1.5">
             <Label for="password" class="text-xs">密码</Label>
@@ -398,88 +441,33 @@ async function handleResend() {
               required
               minlength="8"
               placeholder="至少 8 位"
-              :autocomplete="mode === 'login' ? 'current-password' : 'new-password'"
-              class="h-9 rounded-lg border-neutral-200 focus-visible:border-[#0F4C3A] focus-visible:ring-1 focus-visible:ring-[#0F4C3A]/20 focus-visible:outline-none dark:border-input"
+              autocomplete="current-password"
+              class="h-10 rounded-lg border-neutral-200 focus-visible:border-[#0F4C3A] focus-visible:ring-1 focus-visible:ring-[#0F4C3A]/20 focus-visible:outline-none dark:border-input"
             />
-          </div>
-
-          <Alert
-            v-if="pendingVerificationEmail"
-            variant="success"
-            class="mb-1"
-            data-test="register-pending-verification"
-          >
-            <MailCheck />
-            <span>
-              验证邮件已发送至
-              <strong>{{ pendingVerificationEmail }}</strong>
-              。请点击邮件里的链接完成验证，再回来登录。
-            </span>
-          </Alert>
-          <div
-            v-if="unverifiedEmail"
-            class="rounded-md border border-warning/40 bg-warning/10 p-3 text-xs"
-            data-test="login-unverified"
-          >
-            <p class="font-medium">邮箱还没验证</p>
-            <p class="mt-1 text-muted-foreground">
-              我们已向
-              <strong>{{ unverifiedEmail }}</strong>
-              发送了验证邮件，点击邮件里的链接后即可登录。
-            </p>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              class="mt-2"
-              data-test="resend-verification"
-              :disabled="resending"
-              @click="handleResend"
-            >
-              <Loader2 v-if="resending" class="size-3.5 animate-spin" aria-hidden="true" />
-              <MailCheck v-else :size="13" aria-hidden="true" />
-              {{ resending ? "发送中…" : "重新发送验证邮件" }}
-            </Button>
-          </div>
-
-          <div v-if="mode === 'register' && captchaEnabled" class="grid gap-1.5">
-            <!--
-              ⚠️ v3 的属性是 `challenge`（URL 或 JSON），关页脚只能走 `configuration`。
-            -->
-            <altcha-widget
-              :challenge="captchaChallengeUrl"
-              :configuration="altchaConfiguration"
-              auto="onload"
-              language="zh-cn"
-              @statechange="onCaptchaStateChange"
-            />
-            <!--
-              统一由这一行给文案（Issue #26-6）：widget 自带页脚走语言包，
-              中文包里是「由 ALTCHA 保护」，和别处大小写不一致；hideFooter 后只剩这一处。
-            -->
-            <p
-              data-test="captcha-caption"
-              class="flex items-center gap-1 text-[11px] text-muted-foreground"
-            >
-              <ShieldCheck :size="12" aria-hidden="true" />
-              由 Altcha 保护
-            </p>
-            <p v-if="captchaError" class="text-xs text-destructive">{{ captchaError }}</p>
           </div>
 
           <ErrorBanner :message="errorMessage" />
 
           <Button
             type="submit"
-            :disabled="loading || (mode === 'register' && captchaEnabled && !captchaSolved)"
-            class="h-9 w-full bg-[#0F4C3A] text-white hover:bg-[#135D47] dark:bg-primary dark:text-primary-foreground dark:hover:bg-primary/90"
+            :disabled="loading"
+            class="h-10 w-full rounded-lg bg-[#0F4C3A] text-white hover:bg-[#135D47] dark:bg-primary dark:text-primary-foreground dark:hover:bg-primary/90"
           >
             <Loader2 v-if="loading" class="animate-spin" aria-hidden="true" />
-            <span>{{ loading ? "处理中…" : submitLabel }}</span>
+            <span>{{ loading ? "登录中…" : "登录" }}</span>
             <ArrowRight v-if="!loading" :size="14" aria-hidden="true" />
           </Button>
 
-          <p v-if="mode === 'login'" class="text-center text-xs">
+          <div class="flex items-center justify-between text-xs">
+            <button
+              type="button"
+              data-test="back-to-otp"
+              class="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+              @click="switchStep('email')"
+            >
+              <ArrowLeft :size="12" aria-hidden="true" />
+              返回邮箱验证码登录
+            </button>
             <RouterLink
               :to="{ name: 'password-reset' }"
               data-test="forgot-password"
@@ -487,13 +475,26 @@ async function handleResend() {
             >
               忘记密码？
             </RouterLink>
-          </p>
+          </div>
         </form>
 
-        <p class="mt-8 flex items-center justify-center gap-1.5 text-[11px] text-muted-foreground">
-          <LockKeyhole :size="12" aria-hidden="true" />
-          你的研究数据仅对当前工作空间可见
-        </p>
+        <!-- 底部密码登录切换与安全声明 -->
+        <div class="mt-6 border-t border-border pt-4 text-center">
+          <button
+            v-if="step !== 'password'"
+            type="button"
+            data-test="toggle-password-login"
+            class="inline-flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+            @click="switchStep('password')"
+          >
+            <KeyRound :size="12" aria-hidden="true" />
+            使用账号密码登录
+          </button>
+          <p class="mt-3 flex items-center justify-center gap-1.5 text-[11px] text-muted-foreground">
+            <LockKeyhole :size="12" aria-hidden="true" />
+            你的研究数据仅对当前工作空间可见
+          </p>
+        </div>
       </div>
     </section>
   </div>

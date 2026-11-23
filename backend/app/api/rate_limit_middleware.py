@@ -52,6 +52,8 @@ _ROUTE_RULES: tuple[tuple[str, str, str], ...] = (
     # ===== 认证（含账号生命周期：验证/重置都发信，必须限流）=====
     ("auth_login", "POST", "/api/v1/auth/login"),
     ("auth_register", "POST", "/api/v1/auth/register"),
+    ("auth_register", "POST", "/api/v1/auth/email-otp/request"),
+    ("auth_login", "POST", "/api/v1/auth/email-otp/verify"),
     ("auth_register", "POST", "/api/v1/auth/password-reset/request"),
     ("auth_register", "POST", "/api/v1/auth/password-reset/confirm"),
     ("auth_register", "POST", "/api/v1/auth/verify-email/request"),
