@@ -301,6 +301,24 @@ def create_app() -> FastAPI:
     # 路由挂载
     app.include_router(api_router)
 
+    # ===== 根路径存活探针别名（Issue #29）=====
+    # `veripaper.me/api/health` 曾经被 Pages 的 SPA 兜底（`/* /index.html 200`）
+    # 吞成 200 HTML：后端挂了外部探针照样绿。前端 `_redirects` 已把 `/api/*`
+    # 反代到后端，这里再给一个**不带版本前缀**的稳定存活地址，
+    # 让 `curl https://veripaper.me/api/health` 直接拿到 JSON。
+    #
+    # 与 `/api/v1/health` 的差别：只验进程存活，不查 DB/Redis/向量库；
+    # 需要依赖级判定请用 `/api/v1/health/ready`（watchdog 用的就是它）。
+    from app.api.v1.endpoints.health import health_check as _liveness_check
+
+    app.add_api_route(
+        "/api/health",
+        _liveness_check,
+        methods=["GET"],
+        include_in_schema=False,
+        tags=["health"],
+    )
+
     # ===== 可观测性：Prometheus 抓取端点（Phase 2）=====
     # 为什么在根路径而不在 /api/v1：Prometheus 生态的默认约定就是 `/metrics`，
     # 换路径要在抓取配置里额外指定，没有必要。

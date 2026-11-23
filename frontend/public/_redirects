@@ -1,1 +1,13 @@
+# Cloudflare Pages 路由规则（Issue #29）
+#
+# 顺序敏感：Pages 按**首个匹配**的规则处理，所以 API 反代必须排在
+# SPA 兜底之前。之前只有 `/* /index.html 200`，导致
+# `https://veripaper.me/api/health` 返回 200 + 首页 HTML——
+# 后端挂了外部探针照样绿（假阳性）。
+#
+# 反代到 api 子域（同 zone，Pages 支持 200 代理）：路径原样透传，
+# 后端的状态码（401/404/502）也原样返回，探针才能看出后端死活。
+/api/* https://api.veripaper.me/api/:splat 200
+
+# SPA 兜底：前端路由（/tasks/xxx 等）刷新不 404
 /* /index.html 200
