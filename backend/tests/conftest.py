@@ -37,6 +37,7 @@ os.environ.setdefault("REDIS__URL", "redis://localhost:6379/15")
 for _rule in (
     "AUTH_LOGIN",
     "AUTH_REGISTER",
+    "AUTH_OTP_REQUEST",
     "TASK_CREATE",
     "TASK_CONTROL",
     "SEARCH",

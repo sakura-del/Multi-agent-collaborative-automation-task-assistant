@@ -365,6 +365,15 @@ class RateLimitRules(BaseModel):
     收紧到 5 次后配合账号维度的失败退避（见 `login_failure_limit`）才形成两层防护。
     """
     auth_register: RateLimitRule = RateLimitRule(limit=5, window_seconds=3600)
+    auth_otp_request: RateLimitRule = RateLimitRule(limit=30, window_seconds=3600)
+    """验证码发送：独立于 `auth_register` 的桶（2026-11-23 用户决定放宽）。
+
+    原先把 `email-otp/request` 挂在注册桶（5 次/小时/IP）上，与注册、密码重置、
+    邮箱验证共用；校园/公司共享出口下，几个人正常登录就能耗光整栋楼的配额
+    （本仓库 E2E 自己撞过两次）。放宽 IP 维度不等于放弃防护——单邮箱 60 秒冷却、
+    单码 5 次尝试、600 秒过期仍逐条生效，那才是防刷码/防撞库的主防线。
+    """
+
     task_create: RateLimitRule = RateLimitRule(limit=30, window_seconds=3600)
     task_control: RateLimitRule = RateLimitRule(limit=60, window_seconds=3600)
     """任务确认/人工控制/WS ticket：高频交互操作，限额相对宽松。"""

@@ -46,6 +46,10 @@ class TestAllWriteEndpointsAreCovered:
             # 认证
             ("POST", "/api/v1/auth/login", "auth_login"),
             ("POST", "/api/v1/auth/register", "auth_register"),
+            # 验证码发送走独立桶：注册/重置共用 5 次/小时/IP，在共享出口会被正常用户撞到
+            ("POST", "/api/v1/auth/email-otp/request", "auth_otp_request"),
+            ("POST", "/api/v1/auth/email-otp/verify", "auth_login"),
+            ("POST", "/api/v1/auth/oauth/exchange", "auth_login"),
             ("POST", "/api/v1/auth/password-reset/request", "auth_register"),
             ("POST", "/api/v1/auth/password-reset/confirm", "auth_register"),
             ("POST", "/api/v1/auth/verify-email/request", "auth_register"),
@@ -93,6 +97,24 @@ class TestAllWriteEndpointsAreCovered:
         assert route_rule_label("GET", "/api/v1/tasks") is None
         assert route_rule_label("GET", "/api/v1/templates") is None
         assert route_rule_label("GET", "/api/v1/knowledge/documents") is None
+
+
+class TestOtpRequestBucket:
+    """验证码发送必须有独立、更宽松的 IP 桶（2026-11-23 用户决定）。
+
+    原先把 `email-otp/request` 挂在 `auth_register`（5 次/小时/IP）上，与注册、
+    密码重置、邮箱验证共用：校园/公司共享出口下，几个人正常登录就能把整栋楼的
+    配额耗光（本仓库 E2E 自己就撞过两次）。放宽 IP 维度不等于放弃防护——
+    单邮箱 60 秒冷却、单码 5 次尝试、600 秒过期仍逐条生效。
+    """
+
+    def test_otp_request_bucket_is_separate_and_looser(self) -> None:
+        from app.core.config import RateLimitRules
+
+        rules = RateLimitRules()
+        assert rules.auth_otp_request.window_seconds == 3600
+        assert rules.auth_otp_request.limit >= 30
+        assert rules.auth_otp_request.limit > rules.auth_register.limit
 
 
 class _FakeQuota:
