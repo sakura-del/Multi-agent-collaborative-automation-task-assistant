@@ -577,6 +577,20 @@ E2E 双视口 **16/16 passed**（写工具用例覆盖 resume=1 请求与多步�
   **审计写用 SAVEPOINT**：失败只回滚该条 INSERT——第一版对请求会话整体
   `rollback()` 导致业务对象过期、`_to_out` 懒加载 `MissingGreenlet`、创建凭据 500
   （生产实测）。参数只传 `actor_id/actor_name` 快照，不在审计函数里碰 ORM。
+### 主域 `/api/*` 的边缘路由（Issue #29，2026-11-23）
+
+- `veripaper.me` 是 **Cloudflare Pages** 静态站；Pages 的 `_redirects`
+  **只能代理站内相对路径**（官方："You cannot proxy external domains"）。
+  写跨域代理不报错、也不生效，请求会静默落到 `/* /index.html 200`——
+  `/api/health` 因此曾返回 200 HTML（假阳性）。
+- 现在 `/api/*` 由 **zone 级 Worker 路由**接管：
+  `ops/cf-api-proxy.worker.js` + 幂等部署脚本 `ops/cloudflare-api-proxy.mjs`
+  （`CF_SECRETS_FILE=... node ops/cloudflare-api-proxy.mjs`）。
+  改 worker 代码后**必须重跑脚本**，否则线上还是旧代码。
+- 后端另有 `GET /api/health`（存活别名，无版本前缀）；依赖级判定用
+  `/api/v1/health/ready`。回源 8s 超时 → 504 JSON，不可达 → 502 JSON。
+- `APP__ENV=production`（**双下划线**）才生效；写 `APP_ENV` 是静默无效的。
+
 ### 定时重跑 / 增量刷新（Issue #27，2026-11-20）
 
 - 表：`task_routine`（每任务 0..1 条排期）+ `task_refresh`（每次运行记录），
