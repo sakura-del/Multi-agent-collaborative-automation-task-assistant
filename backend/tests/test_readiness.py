@@ -58,6 +58,9 @@ def _stub(monkeypatch, *, database: bool, redis: bool, vector: bool) -> None:
     monkeypatch.setattr(health, "probe_database", _probe_returning(database))
     monkeypatch.setattr(health, "probe_redis", _probe_returning(redis))
     monkeypatch.setattr(health, "probe_vector", _probe_returning(vector))
+    # readiness 还报告平台模型凭据配置态（#19/#25）；本文件只验证依赖探针语义，
+    # 凭据缺失导致的 degraded 分支由 test_health.py 覆盖。
+    monkeypatch.setattr(health, "platform_llm_status", lambda: "ok")
 
 
 class TestReadinessProbes:

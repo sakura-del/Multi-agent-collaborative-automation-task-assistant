@@ -48,9 +48,11 @@ class TestBackwardCompat:
 
 class TestRenumberRegex:
     def test_only_citation_markers_replaced(self) -> None:
-        """其他方括号内容（如 markdown 链接文本）不受影响。"""
-        local_to_global = {("n1", 1): 5}
+        """其他方括号内容（wikilink、markdown 链接文本）不受影响。"""
+        local_to_global = {("n1", 1): 5, ("n1", 2): 6}
         content = "看 [E1] 和 [E2](不是引用) 与 [[E1]]。"
         out = _renumber_citations(content, "n1", local_to_global)
         assert "[E5]" in out
+        # 链接文本 [E2](…) 与 wikilink [[E1]] 不是引用语义：保持原样。
+        assert "[E2](不是引用)" in out, "markdown 链接文本不应被重写"
         assert re.search(r"\[E1\]\]", out), "嵌套标记只替换最内层一次出现"

@@ -123,7 +123,9 @@ def _renumber_citations(
         number = int(match.group(1))
         return f"[E{mapping.get(number, number)}]"
 
-    return re.sub(r"\[E(\d+)\]", _replace, content)
+    # 只替换「独立」的引用标记：`[[E1]]`（wikilink）与 `[E2](url)`（markdown 链接）
+    # 里的方括号不是引用语义，重写会静默改掉链接文本 → 保留原样。
+    return re.sub(r"(?<!\[)\[E(\d+)\](?!\]|\()", _replace, content)
 
 
 def _contributes_to_body(result: Any) -> bool:

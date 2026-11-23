@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import re
 
-import pytest
-from httpx import AsyncClient
+from fastapi.testclient import TestClient
 
 from app.api.v1.endpoints.auth_lifecycle import get_email_sender
 from app.main import app
@@ -34,14 +33,13 @@ def _extract_magic_token(body: str) -> str:
     return match.group(1)
 
 
-@pytest.mark.asyncio
-async def test_email_otp_auto_register_and_relogin(client: AsyncClient) -> None:
-    """新邮箱通过 6 位验证码自动建号并登录；同一邮箱再次验证直接登录同一账号。"""
+def test_email_otp_auto_register_and_replay_rejected(client: TestClient) -> None:
+    """新邮箱通过 6 位验证码自动建号并登录；同一验证码不可重放。"""
     sender = _CaptureSender()
     app.dependency_overrides[get_email_sender] = lambda: sender
     try:
         # 1) 新邮箱请求验证码
-        resp = await client.post(
+        resp = client.post(
             "/api/v1/auth/email-otp/request",
             json={"email": "Researcher.New@Example.com"},
         )
@@ -50,7 +48,7 @@ async def test_email_otp_auto_register_and_relogin(client: AsyncClient) -> None:
         code = _extract_code(sender.messages[0]["body"])
 
         # 2) 验证通过 → 自动建号并直接返回 JWT
-        verify_resp = await client.post(
+        verify_resp = client.post(
             "/api/v1/auth/email-otp/verify",
             json={"email": "researcher.new@example.com", "code": code},
         )
@@ -60,17 +58,19 @@ async def test_email_otp_auto_register_and_relogin(client: AsyncClient) -> None:
         assert tokens["refresh_token"]
 
         # 3) 用拿到的 token 调 /auth/me，邮箱与已验证状态完整
-        me_resp = await client.get(
+        me_resp = client.get(
             "/api/v1/auth/me",
             headers={"Authorization": f"Bearer {tokens['access_token']}"},
         )
         assert me_resp.status_code == 200
         me = me_resp.json()
         assert me["email"] == "researcher.new@example.com"
-        assert me["email_verified"] is True
+        assert me["is_active"] is True
+        # 契约（UserOut）不暴露 email_verified；自动建号的账号以「验证码验证通过」
+        # 为已核验，这里只确认账号确实落库并可被后续请求读到。
 
         # 4) 二次使用同一验证码失败（单次消费）
-        replay_resp = await client.post(
+        replay_resp = client.post(
             "/api/v1/auth/email-otp/verify",
             json={"email": "researcher.new@example.com", "code": code},
         )
@@ -79,13 +79,12 @@ async def test_email_otp_auto_register_and_relogin(client: AsyncClient) -> None:
         app.dependency_overrides.pop(get_email_sender, None)
 
 
-@pytest.mark.asyncio
-async def test_email_otp_magic_link_and_cooldown(client: AsyncClient) -> None:
+def test_email_otp_magic_link_and_cooldown(client: TestClient) -> None:
     """邮件内的一键登录链接可直接换取 JWT，且 60 秒内重复请求触发限流。"""
     sender = _CaptureSender()
     app.dependency_overrides[get_email_sender] = lambda: sender
     try:
-        resp = await client.post(
+        resp = client.post(
             "/api/v1/auth/email-otp/request",
             json={"email": "magic.user@example.com"},
         )
@@ -93,14 +92,14 @@ async def test_email_otp_magic_link_and_cooldown(client: AsyncClient) -> None:
         magic_token = _extract_magic_token(sender.messages[0]["body"])
 
         # 冷却期内重复发送被拒
-        cooldown_resp = await client.post(
+        cooldown_resp = client.post(
             "/api/v1/auth/email-otp/request",
             json={"email": "magic.user@example.com"},
         )
         assert cooldown_resp.status_code == 429
 
         # 点链接直接登录
-        verify_resp = await client.post(
+        verify_resp = client.post(
             "/api/v1/auth/email-otp/verify",
             json={"magic_token": magic_token},
         )
@@ -110,13 +109,12 @@ async def test_email_otp_magic_link_and_cooldown(client: AsyncClient) -> None:
         app.dependency_overrides.pop(get_email_sender, None)
 
 
-@pytest.mark.asyncio
-async def test_email_otp_locks_after_five_wrong_attempts(client: AsyncClient) -> None:
+def test_email_otp_locks_after_five_wrong_attempts(client: TestClient) -> None:
     """连续输错 5 次验证码后销毁该验证码，防止 6 位数字被爆破。"""
     sender = _CaptureSender()
     app.dependency_overrides[get_email_sender] = lambda: sender
     try:
-        await client.post(
+        client.post(
             "/api/v1/auth/email-otp/request",
             json={"email": "bruteforce.test@example.com"},
         )
@@ -124,14 +122,14 @@ async def test_email_otp_locks_after_five_wrong_attempts(client: AsyncClient) ->
         wrong_code = "000000" if real_code != "000000" else "999999"
 
         for _ in range(5):
-            r = await client.post(
+            r = client.post(
                 "/api/v1/auth/email-otp/verify",
                 json={"email": "bruteforce.test@example.com", "code": wrong_code},
             )
             assert r.status_code == 401
 
         # 即使第 6 次输入正确验证码也已被销毁
-        final_resp = await client.post(
+        final_resp = client.post(
             "/api/v1/auth/email-otp/verify",
             json={"email": "bruteforce.test@example.com", "code": real_code},
         )

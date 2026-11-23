@@ -299,6 +299,10 @@ async def verify_email_otp(
             user.email_verified_at = now
             await db.flush()
 
+    # `get_db` 关闭 session 时会回滚未提交事务：只 flush 不 commit，新账号会在
+    # 请求结束时消失，签发的 JWT 指向不存在的用户（/auth/me 401）。必须落库。
+    await db.commit()
+
     return _issue_tokens(user)
 
 
@@ -550,6 +554,9 @@ async def oauth_callback(
             )
         )
         await db.flush()
+        # 同上：不 commit 则自动建号与 OAuth 关联都会在请求结束时回滚，
+        # exchange 阶段按 user_id 查库直接 401（「账号不存在或已被禁用」）。
+        await db.commit()
 
     exchange_code = secrets.token_urlsafe(32)
     await store.setex(

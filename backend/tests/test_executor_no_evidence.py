@@ -47,7 +47,9 @@ class _FakeLLM:
         self.prompts: list[str] = []
 
     async def chat(self, messages, **kwargs):  # type: ignore[no-untyped-def]
-        self.prompts.append(messages[-1].content)
+        # Issue #22 起静态规则进 system、动态内容进 user；引用格式说明在 system，
+        # 只记录最后一条会漏掉它 —— 这里记录完整 prompt。
+        self.prompts.append("\n".join(str(message.content) for message in messages))
         return _FakeResponse(self._content)
 
 
@@ -95,8 +97,9 @@ class TestNoEvidenceAllowsCitations:
 
         prompt = llm.prompts[0]
         assert "[E" in prompt, "提示词应提到引用标记格式（说明不要用）"
+        assert "无检索证据" in prompt, "无证据时必须让模型知道证据区为空"
         assert (
-            "不要" in prompt or "禁止" in prompt or "无需" in prompt
+            "不要" in prompt or "禁止" in prompt or "无需" in prompt or "不使用" in prompt
         ), f"提示词应明确要求不引用，实际片段：{prompt[:300]}"
 
 

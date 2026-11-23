@@ -77,11 +77,17 @@ class Usage(BaseModel):
 
     @property
     def cache_hit_rate(self) -> float:
-        """输入侧缓存命中率；未观测到缓存字段时返回 0.0。"""
+        """输入侧缓存命中率；未观测到缓存字段时返回 0.0。
+
+        分母优先用 `prompt_tokens`：OpenAI 只回报 `cached_tokens`（命中数），
+        不回报未命中数，若用 `hit + miss` 作分母会把命中率算成 100%。
+        DeepSeek 同时回报 hit/miss 且二者之和等于 prompt_tokens，两种口径在
+        正常数据下结果一致；`hit + miss` 仅用于兜底（prompt_tokens 未填）。
+        """
         observed = self.cache_hit_tokens + self.cache_miss_tokens
-        if observed <= 0:
+        if observed <= 0 or self.cache_hit_tokens <= 0:
             return 0.0
-        return self.cache_hit_tokens / observed
+        return self.cache_hit_tokens / max(self.prompt_tokens, observed)
 
 
 class LLMResponse(BaseModel):
