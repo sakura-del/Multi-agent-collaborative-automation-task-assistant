@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { demoPassword, E2E_DEMO_ACCOUNT } from "./credentials";
+import { gotoPasswordLogin } from "./support/auth";
 
 /**
  * 会话内核 E2E（Issue #8 P0 收尾，2026-11-19）。
@@ -34,7 +35,7 @@ const FIXTURE = resolve(dirname(fileURLToPath(import.meta.url)), "fixtures/sampl
 
 /** 登录（含限流重试：命中 429 时等待窗口恢复再提交）。 */
 async function login(page: Page): Promise<void> {
-  await page.goto("/login");
+  await gotoPasswordLogin(page);
   await page.locator("#account").fill(E2E_DEMO_ACCOUNT);
   await page.locator("#password").fill(demoPassword());
   await page.locator('form button[type="submit"]').click();

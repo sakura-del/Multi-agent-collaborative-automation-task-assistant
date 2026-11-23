@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { E2E_DEMO_ACCOUNT, demoPassword } from "./credentials";
+import { gotoPasswordLogin } from "./support/auth";
 
 // 账号生命周期页面验收（Phase 1 P1-C 前端）
 // 覆盖：登录页「忘记密码」入口 → 申请重置（恒定响应）→ 邮箱验证页重发
@@ -13,7 +14,7 @@ const SHOTS = resolve(dirname(fileURLToPath(import.meta.url)), "screenshots");
 const CREDENTIALS = { account: E2E_DEMO_ACCOUNT, password: demoPassword() };
 
 async function login(page: Page) {
-  await page.goto("/login");
+  await gotoPasswordLogin(page);
   await page.locator("#account").fill(CREDENTIALS.account);
   await page.locator("#password").fill(CREDENTIALS.password);
   await page.locator('form button[type="submit"]').click();
@@ -55,7 +56,7 @@ async function login(page: Page) {
 
 test.describe("账号生命周期", () => {
   test("登录页有「忘记密码」入口，点击进入重置页", async ({ page }) => {
-    await page.goto("/login");
+    await gotoPasswordLogin(page);
     const link = page.locator('[data-test="forgot-password"]');
     await expect(link).toBeVisible();
     await link.click();
@@ -94,9 +95,14 @@ test.describe("账号生命周期", () => {
     const unknown = await probe(`nobody-${Date.now()}@example.com`);
 
     if (existing.text === null || unknown.text === null) {
-      // 被限流：断言两条都是「请求过于频繁」，同样不泄漏账号存在性
-      expect(existing.status).toContain("请求过于频繁");
-      expect(unknown.status).toContain("请求过于频繁");
+      // 被限流：只要求**被限流的那一条**明确说「请求过于频繁」。
+      // 另一条可能是正常横幅——双视口串行跑时，先跑的视口会把配额用掉，
+      // 不能要求两条都 429（那样测试会因环境依赖而假红）。
+      for (const result of [existing, unknown]) {
+        if (result.text === null) {
+          expect(result.status).toContain("请求过于频繁");
+        }
+      }
       test.info().annotations.push({
         type: "skipped-constant-response",
         description: "该端点已被限流（429），恒定响应改由后端单测覆盖",

@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { demoPassword } from "./credentials";
+import { gotoPasswordLogin } from "./support/auth";
 
 // 用量看板「结构取证」（替代肉眼读图）。
 //
@@ -10,7 +11,7 @@ import { demoPassword } from "./credentials";
 const SHOTS = "e2e/screenshots";
 
 async function login(page: Page) {
-  await page.goto("/login");
+  await gotoPasswordLogin(page);
   await page.locator("#account").fill("demo");
   await page.locator("#password").fill(demoPassword());
   await page.locator('form button[type="submit"]').click();

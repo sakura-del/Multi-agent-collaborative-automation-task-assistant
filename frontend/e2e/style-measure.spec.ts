@@ -1,11 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 import { demoPassword } from "./credentials";
+import { gotoPasswordLogin } from "./support/auth";
 
 // 样式页「修复后量数值」验收（AGENTS §6.5.7）：与修复前取证逐项对照。
 const API = "http://10.0.10.2:48080/api/v1";
 
 async function loginAs(page: Page, account: string, password: string) {
-  await page.goto("/login");
+  await gotoPasswordLogin(page);
   await page.locator("#account").fill(account);
   await page.locator("#password").fill(password);
   await page.locator('form button[type="submit"]').click();

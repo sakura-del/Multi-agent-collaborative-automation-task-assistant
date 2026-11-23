@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { demoPassword, secondaryPassword } from "./credentials";
+import { gotoPasswordLogin } from "./support/auth";
 
 // 套餐页 E2E（2026-10-26 重设计）：
 // 数字必须与真实接口一致；权益/到期日/警示色/升级入口/加载态/局部失败都要验。
@@ -7,7 +8,7 @@ const API = "http://10.0.10.2:48080/api/v1";
 const SHOTS = "e2e/screenshots";
 
 async function loginAs(page: Page, account: string, password: string) {
-  await page.goto("/login");
+  await gotoPasswordLogin(page);
   await page.locator("#account").fill(account);
   await page.locator("#password").fill(password);
   await page.locator('form button[type="submit"]').click();

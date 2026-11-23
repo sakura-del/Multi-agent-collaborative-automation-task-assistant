@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { demoPassword } from "./credentials";
+import { gotoPasswordLogin } from "./support/auth";
 
 /**
  * 引用库条目编辑的真实浏览器验证（2026-10-27）。
@@ -76,7 +77,7 @@ async function seedItem(page: Page, title: string): Promise<string> {
 }
 
 async function login(page: Page) {
-  await page.goto("/login");
+  await gotoPasswordLogin(page);
   await page.locator("#account").fill(CREDENTIALS.account);
   await page.locator("#password").fill(CREDENTIALS.password);
   await page.locator('button[type="submit"]').click();

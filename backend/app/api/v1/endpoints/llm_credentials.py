@@ -33,10 +33,10 @@ from app.db.session import get_db
 from app.llm.probe import fetch_models, probe_generation
 from app.llm.providers import PRESET_PROVIDERS, PROVIDER_ORDER, get_provider_spec
 from app.schemas.llm_credential import (
-    LLMGenerationProbeOut,
     LLMCredentialCreate,
     LLMCredentialOut,
     LLMCredentialUpdate,
+    LLMGenerationProbeOut,
     LLMProbeOut,
     LLMProbeRequest,
     ProviderOut,

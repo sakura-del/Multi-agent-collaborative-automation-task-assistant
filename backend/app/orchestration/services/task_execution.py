@@ -1305,12 +1305,14 @@ class TaskExecution:
         if client is not None and allow_fallback:
             from app.llm.fallback import PlatformFallbackClient
 
+            async def _on_fallback(reason: str) -> None:
+                # 回调契约只要求通知，计费结果由 `_apply_platform_fallback` 自己留痕
+                await self._apply_platform_fallback(task_id=task.id, reason=reason)
+
             client = PlatformFallbackClient(
                 client,
                 platform=self._platform_llm,
-                on_fallback=lambda reason: self._apply_platform_fallback(
-                    task_id=task.id, reason=reason
-                ),
+                on_fallback=_on_fallback,
             )
         if client is not None:
             bind_llm_client(client)

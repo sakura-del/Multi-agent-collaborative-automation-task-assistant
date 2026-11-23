@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { demoPassword } from "./credentials";
+import { gotoPasswordLogin } from "./support/auth";
 
 // PRISMA 筛选工作台视觉验收：真实后端造数据 → 走完决策流 → 截图
 const SHOTS = resolve(dirname(fileURLToPath(import.meta.url)), "screenshots");
@@ -15,7 +16,7 @@ async function shot(page: Page, name: string) {
 }
 
 async function login(page: Page) {
-  await page.goto("/login");
+  await gotoPasswordLogin(page);
   await page.locator("#account").fill("demo");
   await page.locator("#password").fill(demoPassword());
   await page.locator('form button[type="submit"]').click();

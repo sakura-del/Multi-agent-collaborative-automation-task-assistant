@@ -13,13 +13,13 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
+from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -200,7 +200,11 @@ async def factory():
 async def _user(factory, name: str = "byok-user") -> User:
     async with factory() as session:
         user = User(
-            username=name, email=f"{name}@example.com", password_hash="x", role="user", is_active=True
+            username=name,
+            email=f"{name}@example.com",
+            password_hash="x",
+            role="user",
+            is_active=True,
         )
         session.add(user)
         await session.commit()
@@ -211,9 +215,7 @@ async def _user(factory, name: str = "byok-user") -> User:
 async def _seed_plan(factory) -> None:
     """free 套餐缺种子时服务会内存兜底；这里显式建一份，便于断言扣减。"""
     async with factory() as session:
-        session.add(
-            Plan(id="free", name="免费版", monthly_reviews=5, is_active=True)
-        )
+        session.add(Plan(id="free", name="免费版", monthly_reviews=5, is_active=True))
         await session.commit()
 
 
@@ -228,7 +230,12 @@ async def _task(factory, user: User, *, status: str = "running") -> Task:
             config={},
             is_byok=True,
             llm_credential_id=None,
-            model_snapshot={"is_byok": True, "name": "用户 key", "provider": "deepseek", "model": "deepseek-chat"},
+            model_snapshot={
+                "is_byok": True,
+                "name": "用户 key",
+                "provider": "deepseek",
+                "model": "deepseek-chat",
+            },
             used_tokens=50_000,
         )
         session.add(task)
@@ -260,9 +267,7 @@ async def test_apply_platform_fallback_marks_and_bills(factory) -> None:
         assert row.actual_model == "glm-5.3"
         assert row.fallback_token_base == 50_000
         # 篇数：BYOK 默认免篇数，回退平台后照扣
-        counter = (
-            await session.execute(select(UsageCounter.reviews_used))
-        ).scalar_one()
+        counter = (await session.execute(select(UsageCounter.reviews_used))).scalar_one()
 
     assert counter == 1
     assert quota.reserved == [100_000]
@@ -343,8 +348,6 @@ async def _credential(
 
 
 def _client(factory) -> TestClient:
-    from fastapi.testclient import TestClient
-
     application = FastAPI()
     application.include_router(llm_credentials.router, prefix="/api/v1")
     application.include_router(llm_routing.router, prefix="/api/v1")
@@ -377,12 +380,15 @@ async def api(factory):
 def test_allow_fallback_persists(api) -> None:
     client, user, credential = api["client"], api["user"], api["credential"]
 
-    assert client.get(
-        f"/api/v1/llm-credentials/{str(credential.id)}", headers=_auth(user)
-    ).json()["allow_platform_fallback"] is False
+    assert (
+        client.get(f"/api/v1/llm-credentials/{credential.id!s}", headers=_auth(user)).json()[
+            "allow_platform_fallback"
+        ]
+        is False
+    )
 
     patched = client.patch(
-        f"/api/v1/llm-credentials/{str(credential.id)}",
+        f"/api/v1/llm-credentials/{credential.id!s}",
         headers=_auth(user),
         json={"allow_platform_fallback": True},
     )
@@ -403,6 +409,7 @@ def test_planner_gate_rejects_without_generation_probe(api) -> None:
 
 def test_planner_gate_allows_probed_credential(api) -> None:
     client, user, credential = api["client"], api["user"], api["credential"]
+
     # 探测写入 json_mode（模拟探测成功）
     async def _mark():
         async with api["factory"]() as session:
@@ -447,7 +454,7 @@ def test_generation_probe_endpoint_writes_json_mode(api, monkeypatch) -> None:
     )
 
     response = client.post(
-        f"/api/v1/llm-credentials/{str(credential.id)}/probe-generation",
+        f"/api/v1/llm-credentials/{credential.id!s}/probe-generation",
         headers=_auth(user),
     )
     assert response.status_code == 200
@@ -477,7 +484,7 @@ def test_generation_probe_auth_failure_counts(api, monkeypatch) -> None:
     )
 
     response = client.post(
-        f"/api/v1/llm-credentials/{str(credential.id)}/probe-generation",
+        f"/api/v1/llm-credentials/{credential.id!s}/probe-generation",
         headers=_auth(user),
     )
     assert response.status_code == 200
@@ -507,5 +514,3 @@ def test_probe_endpoint_requires_ownership(api) -> None:
         headers=_auth(stranger),
     )
     assert response.status_code == 404
-
-

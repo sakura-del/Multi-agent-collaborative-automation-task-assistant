@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { demoPassword } from "./credentials";
+import { gotoPasswordLogin } from "./support/auth";
 
 /**
  * 引用库页 + 导入页保存入口的真实浏览器验证（2026-10-26 引用库计划 §3.6）。
@@ -18,7 +19,7 @@ import { demoPassword } from "./credentials";
 const CREDENTIALS = { account: "demo", password: demoPassword() };
 
 async function login(page: Page) {
-  await page.goto("/login");
+  await gotoPasswordLogin(page);
   await page.locator("#account").fill(CREDENTIALS.account);
   await page.locator("#password").fill(CREDENTIALS.password);
   await page.locator('button[type="submit"]').click();

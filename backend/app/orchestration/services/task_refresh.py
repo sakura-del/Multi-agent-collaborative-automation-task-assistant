@@ -369,7 +369,7 @@ def extract_bullets(content: str) -> str:
     return "\n".join(lines[:8])
 
 
-def audit_bullets(bullets: str, *, index_count: int) -> tuple[bool, str]:
+def audit_bullets(bullets: str, *, index_count: int) -> tuple[bool, str | None]:
     """用与正文同一把尺子校验要点。
 
     只校验「要点」而不是整篇摘要：清单是确定性拼装的，必然自洽；要点才是模型

@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { demoPassword } from "./credentials";
+import { gotoPasswordLogin } from "./support/auth";
 
 // 团队工作区 + 席位 + 导师批注走查（Phase 2）
 //
@@ -24,7 +25,7 @@ async function shot(page: Page, name: string) {
 }
 
 async function login(page: Page, account: string, password: string) {
-  await page.goto("/login");
+  await gotoPasswordLogin(page);
   await page.locator("#account").fill(account);
   await page.locator("#password").fill(password);
   await page.locator('form button[type="submit"]').click();

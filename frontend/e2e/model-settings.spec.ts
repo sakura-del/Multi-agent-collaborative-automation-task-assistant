@@ -1,6 +1,7 @@
 import { expect, test, type Page, type APIRequestContext } from "@playwright/test";
 
 import { demoPassword, E2E_DEMO_ACCOUNT } from "./credentials";
+import { gotoPasswordLogin } from "./support/auth";
 
 // 我的模型页 E2E（Issue #15 BYOK）。
 //
@@ -17,11 +18,12 @@ const NAME_PREFIX = "E2E 模型凭据";
 const PLAINTEXT = "sk-e2e-0123456789abcdefghij";
 
 async function login(page: Page) {
-  await page.goto("/login");
+  await gotoPasswordLogin(page);
   await page.locator("#account").fill(E2E_DEMO_ACCOUNT);
   await page.locator("#password").fill(demoPassword());
   await page.locator('form button[type="submit"]').click();
-  await page.getByRole("link", { name: /任务/ }).waitFor({ timeout: 30_000 });
+  // 不能用「任务」链接判断登录完成：移动端侧栏是抽屉，登录后链接不可见。
+  await page.waitForURL(/\/tasks/, { timeout: 30_000 });
 }
 
 async function bearer(request: APIRequestContext): Promise<string> {
@@ -92,6 +94,8 @@ test("我的模型：接入 / 脱敏 / 测试失败不伪装 / 二次确认删�
 });
 
 test("侧栏：折叠成图标轨，图标可切页", async ({ page }) => {
+  // 移动端侧栏是抽屉（nav-mobile-trigger 打开），没有「折叠成图标轨」这个形态
+  test.skip(test.info().project.name === "mobile-chrome", "移动端侧栏为抽屉，无折叠轨");
   await login(page);
 
   const sidebar = page.locator('[data-test="app-sidebar"]');

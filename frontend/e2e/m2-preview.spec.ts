@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { demoPassword } from "./credentials";
+import { gotoPasswordLogin } from "./support/auth";
 
 // M2 迁移后的视觉验收截图
 const SHOTS = resolve(dirname(fileURLToPath(import.meta.url)), "screenshots");
@@ -14,7 +15,7 @@ async function shot(page: Page, name: string) {
 }
 
 async function login(page: Page) {
-  await page.goto("/login");
+  await gotoPasswordLogin(page);
   await page.locator("#account").fill("demo");
   await page.locator("#password").fill(demoPassword());
   await page.locator('form button[type="submit"]').click();
@@ -39,6 +40,7 @@ async function login(page: Page) {
 }
 
 test("M2 视觉验收：登录 + 任务列表", async ({ page }) => {
+  // 截「登录页」要的是默认入口（邮箱验证码一体流），不是密码兜底态
   await page.goto("/login");
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
   await shot(page, "login");

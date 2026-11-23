@@ -2,13 +2,14 @@ import { expect, test, type Page } from "@playwright/test";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { demoPassword } from "./credentials";
+import { gotoPasswordLogin } from "./support/auth";
 
 // 用量看板「量数值」验收（AGENTS §6.5.7 第 2/3 条）：
 // 不靠推理判断「看起来没问题」，而是把关键几何与文本全量取出来打印。
 const SHOTS = resolve(dirname(fileURLToPath(import.meta.url)), "screenshots");
 
 async function login(page: Page) {
-  await page.goto("/login");
+  await gotoPasswordLogin(page);
   await page.locator("#account").fill("demo");
   await page.locator("#password").fill(demoPassword());
   await page.locator('form button[type="submit"]').click();

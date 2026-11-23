@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { E2E_DEMO_ACCOUNT, demoPassword } from "./credentials";
+import { gotoPasswordLogin } from "./support/auth";
 
 // Phase 1 前端页面验收：Word 模板管理 + 参考文献导入
 // 覆盖：登录 → 导航到新页面 → 上传模板（真实后端）→ 看到占位符 → 渲染下载
@@ -14,11 +15,11 @@ const SHOTS = resolve(dirname(fileURLToPath(import.meta.url)), "screenshots");
 const CREDENTIALS = { account: E2E_DEMO_ACCOUNT, password: demoPassword() };
 
 async function login(page: Page) {
-  await page.goto("/login");
+  await gotoPasswordLogin(page);
   // 登录页的账号输入框有「用户名 / 邮箱」标签（id=account）
   await page.locator("#account").fill(CREDENTIALS.account);
   await page.locator("#password").fill(CREDENTIALS.password);
-  // 提交按钮文案随模式变化（登录/注册），用 form 的 submit 按钮定位
+  // 密码态只有一个「登录」提交按钮，但用 form 的 submit 定位更抗文案变化
   await page.locator('form button[type="submit"]').click();
 
   // ⚠️ 登录端点受限流保护（`rate_limit.rules.auth_login`，默认 10 次/分钟）。
