@@ -44,5 +44,21 @@ export default defineConfig({
     // 构建产物输出到 dist/，Nginx 容器会挂载此目录
     outDir: "dist",
     sourcemap: false,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return;
+          if (id.includes("vue-router") || id.includes("pinia") || id.includes("/vue/") || id.includes("@vue/")) {
+            return "vendor-vue";
+          }
+          if (id.includes("lucide-vue-next")) {
+            return "vendor-icons";
+          }
+          if (id.includes("reka-ui") || id.includes("clsx") || id.includes("tailwind-merge") || id.includes("class-variance-authority")) {
+            return "vendor-ui";
+          }
+        },
+      },
+    },
   },
 });

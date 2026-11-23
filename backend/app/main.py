@@ -248,6 +248,8 @@ def create_app() -> FastAPI:
         allow_headers=settings.cors.allow_headers,
         # 跨域下载要读 Content-Disposition 取文件名
         expose_headers=settings.cors.expose_headers,
+        # 缓存 OPTIONS 预检结果 24 小时，减少高延迟链路下的重复预检往返
+        max_age=86400,
     )
     # 限流中间件（Phase 1 P1-D）。
     # ⚠️ Starlette 的 add_middleware 是**后注册者先执行**（洋葱模型外层先跑），

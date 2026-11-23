@@ -5,6 +5,20 @@ import { authApi } from "@/api/auth";
 import { clearTokens, getAccessToken, getRefreshToken, persistTokens } from "@/api/client";
 import type { LoginInput, RegisterInput, UserOut } from "@/api/types";
 
+/** 判断 JWT 是否已过期（或将在 30 秒内过期），用于启动时提前静默刷新 */
+function isJwtExpired(token: string): boolean {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return false;
+    const base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const payload = JSON.parse(atob(base64)) as { exp?: number };
+    if (typeof payload.exp !== "number") return false;
+    return payload.exp * 1000 <= Date.now() + 30_000;
+  } catch {
+    return false;
+  }
+}
+
 // 鉴权状态：token 存 localStorage，用户信息每次启动通过 /auth/me 校验
 export const useAuthStore = defineStore("auth", () => {
   const user = ref<UserOut | null>(null);
@@ -12,9 +26,14 @@ export const useAuthStore = defineStore("auth", () => {
 
   const authenticated = computed(() => user.value !== null);
 
-  /** 应用启动时恢复会话：有 token 才请求 /auth/me */
+  /** 应用启动时恢复会话：若 Access Token 已过期且有 Refresh Token，先静默刷新再请求 /auth/me */
   async function bootstrap(): Promise<void> {
     try {
+      const accessToken = getAccessToken();
+      const refreshToken = getRefreshToken();
+      if (refreshToken && (!accessToken || isJwtExpired(accessToken))) {
+        persistTokens(await authApi.refresh(refreshToken));
+      }
       if (getAccessToken()) {
         user.value = await authApi.me();
       }

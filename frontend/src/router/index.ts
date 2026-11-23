@@ -1,30 +1,31 @@
 import { createRouter, createWebHistory } from "vue-router";
 
 import AppLayout from "@/layouts/AppLayout.vue";
-import AdminByokView from "@/views/AdminByokView.vue";
-import AdminConsoleView from "@/views/AdminConsoleView.vue";
-import DesignTimelineView from "@/views/DesignTimelineView.vue";
-import ApiKeyView from "@/views/ApiKeyView.vue";
-import PlanView from "@/views/PlanView.vue";
-import KnowledgeView from "@/views/KnowledgeView.vue";
-import LandingView from "@/views/LandingView.vue";
-import LoginView from "@/views/LoginView.vue";
-import ChatView from "@/views/ChatView.vue";
-import ModelSettingsView from "@/views/ModelSettingsView.vue";
-import OAuthCallbackView from "@/views/OAuthCallbackView.vue";
-import ObservabilityView from "@/views/ObservabilityView.vue";
-import PasswordResetView from "@/views/PasswordResetView.vue";
-import ReferenceImportView from "@/views/ReferenceImportView.vue";
-import ReferenceLibraryView from "@/views/ReferenceLibraryView.vue";
-import ScreeningView from "@/views/ScreeningView.vue";
-import StyleView from "@/views/StyleView.vue";
-import TaskDetailView from "@/views/TaskDetailView.vue";
-import TaskListView from "@/views/TaskListView.vue";
-import TemplateView from "@/views/TemplateView.vue";
-import VerifyEmailView from "@/views/VerifyEmailView.vue";
-import WorkspaceDetailView from "@/views/WorkspaceDetailView.vue";
-import WorkspaceView from "@/views/WorkspaceView.vue";
 import { useAuthStore } from "@/stores/auth";
+
+const AdminByokView = () => import("@/views/AdminByokView.vue");
+const AdminConsoleView = () => import("@/views/AdminConsoleView.vue");
+const DesignTimelineView = () => import("@/views/DesignTimelineView.vue");
+const ApiKeyView = () => import("@/views/ApiKeyView.vue");
+const PlanView = () => import("@/views/PlanView.vue");
+const KnowledgeView = () => import("@/views/KnowledgeView.vue");
+const LandingView = () => import("@/views/LandingView.vue");
+const LoginView = () => import("@/views/LoginView.vue");
+const ChatView = () => import("@/views/ChatView.vue");
+const ModelSettingsView = () => import("@/views/ModelSettingsView.vue");
+const OAuthCallbackView = () => import("@/views/OAuthCallbackView.vue");
+const ObservabilityView = () => import("@/views/ObservabilityView.vue");
+const PasswordResetView = () => import("@/views/PasswordResetView.vue");
+const ReferenceImportView = () => import("@/views/ReferenceImportView.vue");
+const ReferenceLibraryView = () => import("@/views/ReferenceLibraryView.vue");
+const ScreeningView = () => import("@/views/ScreeningView.vue");
+const StyleView = () => import("@/views/StyleView.vue");
+const TaskDetailView = () => import("@/views/TaskDetailView.vue");
+const TaskListView = () => import("@/views/TaskListView.vue");
+const TemplateView = () => import("@/views/TemplateView.vue");
+const VerifyEmailView = () => import("@/views/VerifyEmailView.vue");
+const WorkspaceDetailView = () => import("@/views/WorkspaceDetailView.vue");
+const WorkspaceView = () => import("@/views/WorkspaceView.vue");
 
 // 页面：登录、任务列表、任务详情、知识库、引用样式、Word 模板、参考文献导入，
 // 以及账号生命周期两页（邮箱验证 / 密码重置）；工作台页面统一挂在 AppLayout 下。

@@ -1007,7 +1007,11 @@ function statusOf(credential: LLMCredentialInfo): {
             </div>
         </form>
 
-        <p v-if="loading" class="text-sm text-muted-foreground">加载中…</p>
+        <div v-if="loading" class="min-h-[14rem] space-y-3" aria-busy="true" aria-label="加载中">
+            <div class="h-9 w-64 animate-pulse rounded-md bg-muted/60" />
+            <div class="h-16 animate-pulse rounded-lg border border-border bg-muted/40" />
+            <div class="h-16 animate-pulse rounded-lg border border-border bg-muted/40" />
+        </div>
 
         <EmptyState
             v-else-if="isEmpty && !error"

@@ -30,7 +30,11 @@
 #   object-src 'none'       不用 <object>/<embed>
 #   base-uri   'self'       防 <base> 注入改写相对路径
 #   form-action 'self'      表单只能提交回本站
-#   frame-ancestors 'none'  与 X-Frame-Options: DENY 双保险
+#   frame-ancestors 'none'
+
+# 带内容哈希的构建产物长效不可变缓存，避免 Cloudflare 边缘节点回源校验（REVALIDATED）
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable  与 X-Frame-Options: DENY 双保险
 #
 # 验证方式见 docs/runbooks/ecs-deployment.md §16.6：本地用同一份 CSP 起静态服务，
 # 真实浏览器断言「零 securitypolicyviolation + 登录页正常渲染」，再发生产。

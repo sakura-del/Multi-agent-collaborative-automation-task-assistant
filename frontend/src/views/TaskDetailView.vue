@@ -350,8 +350,12 @@ onBeforeUnmount(() => {
   <section class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_17.5rem] lg:items-start">
     <!-- 左侧主工作区：标题、行动提示、Tab 与内容 -->
     <div class="min-w-0">
-      <header class="mb-4">
-        <h1 class="text-xl leading-snug font-semibold tracking-tight text-foreground">
+      <header class="mb-4 min-h-[1.75rem]">
+        <div
+          v-if="!store.snapshot && !errorMessage"
+          class="h-7 w-72 animate-pulse rounded-md bg-muted/60"
+        />
+        <h1 v-else class="text-xl leading-snug font-semibold tracking-tight text-foreground">
           {{ store.snapshot?.title ?? "任务详情" }}
         </h1>
       </header>
@@ -435,7 +439,13 @@ onBeforeUnmount(() => {
         @command="handleControl"
       />
 
-      <div v-if="activeTab === 'plan'">
+      <div v-if="!store.snapshot && !errorMessage" class="min-h-[24rem] space-y-3" aria-busy="true">
+        <div class="h-24 animate-pulse rounded-lg border border-border bg-muted/40" />
+        <div class="h-36 animate-pulse rounded-lg border border-border bg-muted/40" />
+        <div class="h-24 animate-pulse rounded-lg border border-border bg-muted/40" />
+      </div>
+
+      <div v-else-if="activeTab === 'plan'">
         <PlanPanel
           :plan="store.snapshot?.plan ?? null"
           :pending="pending"
