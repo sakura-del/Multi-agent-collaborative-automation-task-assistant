@@ -23,8 +23,8 @@ from alembic.script import ScriptDirectory
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 NEW_REVISION = "d5a8c1e3f7b2"
-# 迁移链单一 head 的守卫：新增迁移后更新这里（当前 head = 凭据容量字段，2026-11-17）
-EXPECTED_HEAD = "b4e7f6a9c2d5"
+#: 本文件关心的「老迁移」：它必须仍然在链上（`down_revision` 不能被人改掉）
+ANCHOR_REVISION = "d5a8c1e3f7b2"
 MIGRATION_FILE = BACKEND_DIR / "alembic" / "versions" / f"{NEW_REVISION}_add_knowledge_vectors.py"
 
 
@@ -42,7 +42,19 @@ def _migration_module() -> ModuleType:
 
 class TestMigrationChain:
     def test_single_head(self) -> None:
-        assert _script().get_heads() == [EXPECTED_HEAD]
+        """只有一个 head，且本文件关心的老迁移仍在链上。
+
+        **不要**把当前 head 写死成常量：每加一个迁移就要改一次，忘了就红
+        （Issue #30 实测连续两个迁移都没同步，这条用例白红了三天）。这里断言
+        的是「单 head + 老迁移可达」这两个真正关心的不变量。
+        """
+        script = _script()
+        heads = script.get_heads()
+        assert len(heads) == 1, f"迁移链出现多个 head：{heads}"
+
+        # 从 head 往下走到 base，确认锚点迁移没有被摘掉
+        chain = {rev.revision for rev in script.walk_revisions("base", heads[0])}
+        assert ANCHOR_REVISION in chain
 
     def test_new_revision_follows_reference_library(self) -> None:
         revision = _script().get_revision(NEW_REVISION)
