@@ -187,53 +187,53 @@ async function handleResend() {
 
 <template>
   <div class="grid min-h-dvh bg-background text-foreground lg:grid-cols-[1.05fr_1fr]">
-    <!-- 左侧：Notion / Linear 极简产品声明与单卡证据示例（窄屏隐藏） -->
+    <!-- 左侧：Elicit 风格暖白学术声明与证据示例（窄屏隐藏） -->
     <section
-      class="hidden flex-col justify-between border-r border-border bg-sidebar px-10 py-8 lg:flex xl:px-14"
+      class="hidden flex-col justify-between border-r border-[#E5E7EB] bg-[#FAF9F6] px-10 py-8 lg:flex xl:px-14 dark:border-border dark:bg-sidebar"
     >
-      <!-- Logo 是链接（Issue #26-5） -->
+      <!-- Logo 是链接（Issue #26-5）：点击回到公开落地页首页 -->
       <RouterLink
         to="/"
         data-test="brand-home"
         aria-label="VeriPaper 首页"
-        class="flex w-fit items-center gap-2.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        class="flex w-fit items-center gap-2.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-[#0F4C3A]"
       >
         <img src="/logo.svg" alt="" aria-hidden="true" class="size-7" />
-        <span class="text-sm font-semibold tracking-tight text-foreground">VeriPaper</span>
+        <span class="text-sm font-semibold tracking-tight text-[#111827] dark:text-foreground">VeriPaper</span>
       </RouterLink>
 
       <div class="my-auto max-w-lg py-8">
-        <p class="text-[11px] font-medium tracking-wider text-muted-foreground uppercase">
+        <p class="inline-flex items-center gap-1.5 rounded-full border border-[#E5E7EB] bg-white px-3 py-0.5 text-[11px] font-medium text-[#374151] dark:border-border dark:bg-card dark:text-muted-foreground">
+          <span class="size-1.5 rounded-full bg-[#0F4C3A] dark:bg-success" aria-hidden="true" />
           Evidence-led Research Workspace
         </p>
-        <h1 class="mt-3 text-3xl leading-tight font-semibold tracking-tight text-foreground xl:text-4xl">
+        <p class="mt-4 font-display text-3xl leading-[1.3] font-semibold tracking-tight text-[#111827] xl:text-4xl dark:text-foreground">
           让每一句论断，都有迹可循。
-        </h1>
-        <!-- 中文正文不要跨行折在源码里：Vue 会把文本节点里的换行压成一个空格，
-             「你负责判断， 系统负责…」的逗号后空格就是这么来的（Issue #26-4） -->
-        <p class="mt-6 max-w-lg text-sm leading-7 text-muted-foreground">从文献检索、证据筛选到综述成稿，多智能体协同完成研究流程。你负责判断，系统负责让每条引用都能回到原始证据。</p>
+        </p>
+        <!-- 中文正文不要跨行折在源码里：Vue 会把文本节点里的换行压成一个空格（Issue #26-4） -->
+        <p class="mt-5 max-w-lg text-sm leading-7 text-[#4B5563] dark:text-muted-foreground">从文献检索、证据筛选到综述成稿，多智能体协同完成研究流程。你负责判断，系统负责让每条引用都能回到原始证据。</p>
 
-        <!-- 静态产品示例卡片：1px 极简边框，无斜置层叠 -->
+        <!-- 静态产品示例卡片：与落地页同款暖白 + 学术深墨绿质感 -->
         <div
           data-test="login-evidence-proof"
-          class="mt-8 rounded-lg border border-border bg-card p-4"
+          class="mt-8 rounded-xl border border-[#E5E7EB] bg-white p-4 shadow-[0_12px_32px_-16px_rgba(15,76,58,0.12)] dark:border-border dark:bg-card"
         >
-          <div class="flex items-center justify-between gap-2 border-b border-border pb-2.5 text-xs">
-            <span class="font-medium text-muted-foreground">正文证据片段 · 示例</span>
-            <span class="inline-flex items-center gap-1 font-medium text-success">
+          <div class="flex items-center justify-between gap-2 border-b border-[#E5E7EB] pb-2.5 text-xs dark:border-border">
+            <span class="font-medium text-[#6B7280] dark:text-muted-foreground">正文证据片段 · 示例</span>
+            <span class="inline-flex items-center gap-1 rounded-full bg-[#0F4C3A]/10 px-2 py-0.5 font-medium text-[#0F4C3A] dark:bg-success/15 dark:text-success">
               <Check :size="12" :stroke-width="2.2" aria-hidden="true" />
               引用核验通过
             </span>
           </div>
-          <p class="mt-3 font-display text-sm leading-7 text-card-foreground">
+          <p class="mt-3 font-display text-sm leading-7 text-[#1F2937] dark:text-card-foreground">
             检索增强生成的评估正从单一答案准确率，转向对忠实度、证据完整性与上下文利用效率的综合判断。
           </p>
-          <div class="mt-3 flex items-center justify-between gap-3 text-[11px] text-muted-foreground">
+          <div class="mt-3 flex items-center justify-between gap-3 text-[11px] text-[#6B7280] dark:text-muted-foreground">
             <span>GB/T 7714—2025 · 顺序编码制</span>
-            <!-- 只是标签，不是入口（Issue #26-5）：原先用 text-primary 长得像链接，点了没反应 -->
+            <!-- 只是标签，不是入口（Issue #26-5） -->
             <span
               data-test="proof-traceable-tag"
-              class="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-[10px] text-muted-foreground"
+              class="inline-flex items-center gap-1 rounded-full border border-[#E5E7EB] bg-[#FAF9F6] px-2 py-0.5 text-[10px] text-[#4B5563] dark:border-border dark:bg-muted dark:text-muted-foreground"
             >
               <ShieldCheck :size="11" aria-hidden="true" />
               证据可回溯
@@ -242,7 +242,7 @@ async function handleResend() {
         </div>
       </div>
 
-      <div class="flex flex-wrap gap-x-5 gap-y-2 text-[11px] text-muted-foreground">
+      <div class="flex flex-wrap gap-x-5 gap-y-2 text-[11px] text-[#6B7280] dark:text-muted-foreground">
         <span v-for="item in CAPABILITIES" :key="item">{{ item }}</span>
         <span>Markdown / DOCX</span>
       </div>
@@ -424,7 +424,7 @@ async function handleResend() {
           <Button
             type="submit"
             :disabled="loading || (mode === 'register' && captchaEnabled && !captchaSolved)"
-            class="h-9 w-full"
+            class="h-9 w-full bg-[#0F4C3A] text-white hover:bg-[#135D47] dark:bg-primary dark:text-primary-foreground dark:hover:bg-primary/90"
           >
             <Loader2 v-if="loading" class="animate-spin" aria-hidden="true" />
             <span>{{ loading ? "处理中…" : submitLabel }}</span>

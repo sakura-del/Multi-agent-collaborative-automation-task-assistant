@@ -7,6 +7,7 @@ import DesignTimelineView from "@/views/DesignTimelineView.vue";
 import ApiKeyView from "@/views/ApiKeyView.vue";
 import PlanView from "@/views/PlanView.vue";
 import KnowledgeView from "@/views/KnowledgeView.vue";
+import LandingView from "@/views/LandingView.vue";
 import LoginView from "@/views/LoginView.vue";
 import ChatView from "@/views/ChatView.vue";
 import ModelSettingsView from "@/views/ModelSettingsView.vue";
@@ -30,6 +31,20 @@ import { useAuthStore } from "@/stores/auth";
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
+    // 公开产品落地页（Elicit 风格）：未登录访问 / 展示交互式落地页；已登录访问 / 直达 /tasks
+    // /landing 始终可访问，便于登录态下随时预览落地页
+    {
+      path: "/",
+      name: "landing",
+      component: LandingView,
+      meta: { public: true },
+    },
+    {
+      path: "/landing",
+      name: "landing-preview",
+      component: LandingView,
+      meta: { public: true },
+    },
     {
       path: "/login",
       name: "login",
@@ -65,11 +80,12 @@ export const router = createRouter({
       props: (route) => ({ token: typeof route.query.token === "string" ? route.query.token : "" }),
       meta: { public: true },
     },
+    // 工作台布局路由：必须保持 path: "/"（不能写 ""，否则 Vue Router 4 评分高于 "/" 会抢占首页）
+    // 且排在 landing 之后，保证访问 "/" 精确命中公开落地页，访问 "/tasks" 等命中对应子路由
     {
       path: "/",
       component: AppLayout,
       children: [
-        { path: "", redirect: { name: "tasks" } },
         { path: "tasks", name: "tasks", component: TaskListView },
         // 会话全屏页（Issue #8 P0）：三形态之一，与小窗共用 store
         { path: "chat", name: "chat", component: ChatView },
@@ -142,7 +158,7 @@ router.beforeEach(async (to) => {
   if (!auth.authenticated && !to.meta.public) {
     return { name: "login", query: { redirect: to.fullPath } };
   }
-  if (auth.authenticated && (to.name === "login" || to.name === "register")) {
+  if (auth.authenticated && (to.name === "landing" || to.name === "login" || to.name === "register")) {
     return { name: "tasks" };
   }
   // 管理员页面：非 admin 直接回任务列表，不暴露「有这一页」的错误信息
