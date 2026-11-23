@@ -224,3 +224,64 @@ export const TRUST_SOURCES = [
   "PRISMA 2020",
   "CSL 1.0",
 ] as const;
+
+export interface DemoFullReport {
+  taskId: string;
+  title: string;
+  model: string;
+  durationText: string;
+  searchedCount: number;
+  includedCount: number;
+  verification: {
+    verified: number;
+    partial: number;
+    dubious: number;
+    unverified: number;
+  };
+  sections: {
+    heading: string;
+    paragraphs: string[];
+  }[];
+}
+
+/** 真实示范任务脱敏快照：用于落地页「阅读示范报告」右侧抽屉展示 */
+export const DEMO_FULL_REPORT: DemoFullReport = {
+  taskId: "demo-rag-faithfulness-2025",
+  title: "检索增强生成（RAG）在学术文献综述中的引文忠实度与自动化筛选研究进展",
+  model: "DeepSeek-V4.1 · 混合路由",
+  durationText: "11 分 42 秒",
+  searchedCount: 1248,
+  includedCount: 18,
+  verification: {
+    verified: 16,
+    partial: 2,
+    dubious: 0,
+    unverified: 0,
+  },
+  sections: [
+    {
+      heading: "摘要",
+      paragraphs: [
+        "本综述系统梳理了 2023—2025 年间检索增强生成（RAG）技术在学术文献综述自动化中的应用进展，重点评估引文忠实度约束机制与 PRISMA 2020 标准化筛选流程的协同效能。基于 arXiv、PubMed、OpenAlex 与 Semantic Scholar 四个数据库共检索 1,248 篇候选文献，经跨库 DOI 去重与双阶段纳排后最终纳入 18 篇核心研究。",
+      ],
+    },
+    {
+      heading: "1. 引言与研究动机",
+      paragraphs: [
+        "通用大语言模型在长文本综述生成中普遍存在“幻觉引用”问题，即生成不存在的题录或将真实文献错配至无关论断。现有研究表明，仅依赖参数化记忆的生成方式在学术写作场景中的引用错误率高达 18% 以上 [1]。因此，如何将每一句生成论断严格锚定至可回溯的原始文献片段，成为严肃科研工作台的核心工程命题。",
+      ],
+    },
+    {
+      heading: "2. 多智能体 PRISMA 2020 筛选架构",
+      paragraphs: [
+        "在系统综述的数据准备阶段，传统人工初筛面临候选集庞大与标准漂移的挑战。通过引入分工明确的多智能体审议协议与主动学习优先级排序，系统能够在保持 97.4% 召回率的同时将人工审阅工时降低 68.2% [2]。每条纳入或排除决策均附带可审计的理由摘要，满足 PRISMA 2020 透明报告规范。",
+      ],
+    },
+    {
+      heading: "3. 证据绑定与跨库引文核验",
+      paragraphs: [
+        "在成稿阶段，四阶段协同流水线（Planner → Executor → Reviewer → Validator）先基于结构化提取矩阵组织论点，再由独立核验器向 Crossref 与 OpenAlex 发起 DOI 与题录一致性校验 [1]。实证结果显示，引入后置跨库核验与句级证据绑定后，不可追溯引用率降至 1.2%，显著提升了综述产出的学术可信度。",
+      ],
+    },
+  ],
+};

@@ -68,12 +68,12 @@ beforeEach(() => {
 });
 
 describe("登录/注册页", () => {
-  it("登录态：顶部是登录引导", async () => {
+  it("登录态：顶部是登录引导（已移除英文眉标）", async () => {
     const { wrapper } = await mountLogin();
 
-    expect(wrapper.get('[data-test="auth-eyebrow"]').text()).toBe("Welcome back");
-    expect(title(wrapper)).toBe("继续你的研究");
-    expect(wrapper.get('[data-test="auth-hint"]').text()).toContain("登录以访问");
+    expect(wrapper.find('[data-test="auth-eyebrow"]').exists()).toBe(false);
+    expect(title(wrapper)).toBe("回到工作台");
+    expect(wrapper.get('[data-test="auth-hint"]').text()).toContain("访问你的文献库");
   });
 
   it("切到注册页签：文案改成注册，地址栏同步成 /register", async () => {
@@ -83,9 +83,8 @@ describe("登录/注册页", () => {
     await flushPromises();
 
     expect(router.currentRoute.value.name).toBe("register");
-    expect(wrapper.get('[data-test="auth-eyebrow"]').text()).toBe("Create account");
-    expect(title(wrapper)).toBe("创建你的账号");
-    expect(wrapper.get('[data-test="auth-hint"]').text()).toContain("第一篇综述");
+    expect(title(wrapper)).toBe("创建研究账号");
+    expect(wrapper.get('[data-test="auth-hint"]').text()).toContain("第一篇可核验文献综述");
     // 注册不再自动登录（邮箱验证是门禁），按钮不能再说「注册并登录」
     expect(wrapper.get('form button[type="submit"]').text()).toBe("创建账号");
   });
@@ -94,7 +93,7 @@ describe("登录/注册页", () => {
     const { wrapper, router } = await mountLogin("/register");
 
     expect(router.currentRoute.value.name).toBe("register");
-    expect(title(wrapper)).toBe("创建你的账号");
+    expect(title(wrapper)).toBe("创建研究账号");
     expect(wrapper.get("#username").attributes("placeholder")).toBeTruthy();
     expect(wrapper.get("#email").attributes("placeholder")).toBeTruthy();
     expect(wrapper.get("#password").attributes("placeholder")).toBe("至少 8 位");
@@ -107,7 +106,15 @@ describe("登录/注册页", () => {
     await flushPromises();
 
     expect(router.currentRoute.value.name).toBe("login");
-    expect(title(wrapper)).toBe("继续你的研究");
+    expect(title(wrapper)).toBe("回到工作台");
+  });
+
+  it("左侧双层溯源卡支持点击 [1]/[2] 角标切换出处", async () => {
+    const { wrapper } = await mountLogin();
+
+    expect(wrapper.get('[data-test="login-proof-footer"]').text()).toContain("ACL Findings 2025");
+    await wrapper.get('[data-test="login-proof-marker-2"]').trigger("click");
+    expect(wrapper.get('[data-test="login-proof-footer"]').text()).toContain("J. Biomed. Inform. 2025");
   });
 
   it("Logo 是可点的首页链接，「证据可回溯」只是标签", async () => {

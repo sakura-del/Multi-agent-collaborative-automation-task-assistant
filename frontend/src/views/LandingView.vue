@@ -3,6 +3,7 @@ import { ref } from "vue";
 import { useRouter } from "vue-router";
 import { ArrowRight, BookOpenCheck, Github, Moon, Sun } from "lucide-vue-next";
 
+import LandingReportDrawer from "@/components/landing/LandingReportDrawer.vue";
 import LandingShowcase, { type ShowcaseTab } from "@/components/landing/LandingShowcase.vue";
 import { TRUST_SOURCES } from "@/components/landing/landing-demo-data";
 import { useTheme } from "@/composables/useTheme";
@@ -14,6 +15,7 @@ const router = useRouter();
 const { isDark, toggleTheme } = useTheme();
 
 const activeTab = ref<ShowcaseTab>("prisma");
+const reportOpen = ref(false);
 const showcaseAnchor = ref<HTMLElement | null>(null);
 
 function goRegister() {
@@ -119,7 +121,7 @@ function jumpToShowcase(tab: ShowcaseTab) {
     </header>
 
     <main class="mx-auto max-w-[1160px] px-4 pt-12 pb-16 sm:px-6 sm:pt-16 sm:pb-20">
-      <!-- ==================== HERO 四段式 ==================== -->
+      <!-- ==================== HERO 四段式（定稿文案） ==================== -->
       <section class="mx-auto max-w-3xl text-center">
         <!-- 1. Eyebrow Badge -->
         <p
@@ -127,22 +129,23 @@ function jumpToShowcase(tab: ShowcaseTab) {
           class="inline-flex flex-wrap items-center justify-center gap-1.5 rounded-full border border-[#E5E7EB] bg-white px-3.5 py-1 text-xs font-medium text-[#374151] shadow-2xs dark:border-border dark:bg-card dark:text-muted-foreground"
         >
           <span class="size-1.5 rounded-full bg-[#0F4C3A] dark:bg-success" aria-hidden="true" />
-          支持 arXiv · PubMed · OpenAlex · Semantic Scholar · GB/T 7714-2025
+          arXiv · PubMed · OpenAlex · Semantic Scholar · GB/T 7714-2025
         </p>
 
-        <!-- 2. 主标题（思源宋体，居中，两行） -->
+        <!-- 2. 主标题（思源宋体，无标点，两行双色） -->
         <h1
           data-test="landing-title"
-          class="mt-6 font-display text-3xl leading-[1.28] font-semibold tracking-tight text-[#111827] sm:text-5xl sm:leading-[1.22] dark:text-foreground"
+          class="mt-6 font-display text-4xl leading-[1.24] font-semibold tracking-tight sm:text-5xl sm:leading-[1.2]"
         >
-          让多智能体协作完成文献综述，<br />每一处引用都可溯源核验。
+          <span class="block text-[#111827] dark:text-foreground">每一句综述</span>
+          <span class="block text-[#0F4C3A] dark:text-primary">皆有出处</span>
         </h1>
 
-        <!-- 3. 副标题（2 行以内） -->
+        <!-- 3. 副标题 -->
         <p
           class="mx-auto mt-5 max-w-2xl text-sm leading-7 text-[#4B5563] sm:text-base sm:leading-7 dark:text-muted-foreground"
         >
-          从多库聚合检索、PRISMA 2020 自动初筛，到四阶段 Agent 协同撰写与学校 Word 模板导出——把数周的文献调研压缩至数十分钟。
+          面向严肃研究的文献综述工作台。从多库检索、PRISMA 初筛到模板成稿，每一处引用均锚定原文。
         </p>
 
         <!-- 4. CTA + 信任小字 -->
@@ -152,7 +155,7 @@ function jumpToShowcase(tab: ShowcaseTab) {
             data-test="landing-cta-primary"
             class="inline-flex h-10 items-center gap-2 rounded-lg bg-[#0F4C3A] px-5 text-sm font-medium text-white shadow-xs transition-colors hover:bg-[#135D47] dark:bg-primary dark:text-primary-foreground dark:hover:bg-primary/90"
           >
-            <span>免费开始一次综述</span>
+            <span>开始综述</span>
             <ArrowRight :size="15" aria-hidden="true" />
           </RouterLink>
 
@@ -160,15 +163,15 @@ function jumpToShowcase(tab: ShowcaseTab) {
             type="button"
             data-test="landing-cta-demo"
             class="inline-flex h-10 items-center gap-2 rounded-lg border border-[#E5E7EB] bg-white px-5 text-sm font-medium text-[#111827] transition-colors hover:border-[#D1D5DB] hover:bg-[#F8F9FA] dark:border-border dark:bg-card dark:text-foreground dark:hover:bg-muted"
-            @click="jumpToShowcase('review')"
+            @click="reportOpen = true"
           >
             <BookOpenCheck :size="15" class="text-[#0F4C3A] dark:text-primary" aria-hidden="true" />
-            <span>查看完整示范报告</span>
+            <span>阅读示范报告</span>
           </button>
         </div>
 
         <p class="mt-3.5 text-xs text-[#6B7280] dark:text-muted-foreground">
-          无需信用卡 · 支持自带 OpenAI / Qwen / GLM 密钥 · 100% 真实文献防幻觉核验
+          免费试用 · 支持自带 API Key · 全文引文防幻觉核验
         </p>
       </section>
 
@@ -197,7 +200,7 @@ function jumpToShowcase(tab: ShowcaseTab) {
     <!-- 极简页脚 -->
     <footer class="border-t border-[#E5E7EB]/80 py-6 dark:border-border">
       <div class="mx-auto flex max-w-[1160px] flex-wrap items-center justify-between gap-3 px-4 text-xs text-[#6B7280] sm:px-6 dark:text-muted-foreground">
-        <span>VeriPaper · 证据驱动的多智能体文献综述工作台</span>
+        <span>VeriPaper · 证据驱动的文献综述工作台</span>
         <div class="flex items-center gap-4">
           <a
             :href="GITHUB_REPO_URL"
@@ -217,5 +220,7 @@ function jumpToShowcase(tab: ShowcaseTab) {
         </div>
       </div>
     </footer>
+
+    <LandingReportDrawer v-model:open="reportOpen" @start="goRegister" />
   </div>
 </template>

@@ -27,9 +27,13 @@ describe("LandingView（Elicit 风格落地页）", () => {
   it("渲染四段式 Hero 文案与学术数据源信任条", async () => {
     const { wrapper } = await mountLanding();
 
-    expect(wrapper.get('[data-test="landing-eyebrow"]').text()).toContain("GB/T 7714-2025");
-    expect(wrapper.get('[data-test="landing-title"]').text()).toContain("让多智能体协作完成文献综述");
-    expect(wrapper.get('[data-test="landing-title"]').text()).toContain("每一处引用都可溯源核验");
+    const eyebrow = wrapper.get('[data-test="landing-eyebrow"]').text();
+    expect(eyebrow).toContain("arXiv");
+    expect(eyebrow).toContain("GB/T 7714-2025");
+    expect(eyebrow).not.toContain("支持");
+    expect(wrapper.get('[data-test="landing-title"]').text()).toContain("每一句综述");
+    expect(wrapper.get('[data-test="landing-title"]').text()).toContain("皆有出处");
+    expect(wrapper.get('[data-test="landing-cta-primary"]').text()).toContain("开始综述");
     expect(wrapper.get('[data-test="landing-cta-primary"]').attributes("href")).toBe("/register");
 
     const trust = wrapper.get('[data-test="landing-trust-bar"]').text();
@@ -70,8 +74,7 @@ describe("LandingView（Elicit 风格落地页）", () => {
   it("Tab 3 可溯源综述：支持切换引用角标与实时重渲染 CSL 格式", async () => {
     const { wrapper } = await mountLanding();
 
-    // 点击次按钮「查看完整示范报告」直接切到 Tab 3
-    await wrapper.get('[data-test="landing-cta-demo"]').trigger("click");
+    await wrapper.get('[data-test="showcase-tab-review"]').trigger("click");
     expect(wrapper.find('[data-test="showcase-panel-review"]').exists()).toBe(true);
 
     // 默认高亮 [1] + GB/T 7714-2025
@@ -85,5 +88,25 @@ describe("LandingView（Elicit 风格落地页）", () => {
     // 点击正文 [2] 切换右侧核验文献
     await wrapper.get('[data-test="citation-marker-2"]').trigger("click");
     expect(wrapper.get('[data-test="citation-verifier-panel"]').text()).toContain("10.1016/j.jbi.2025.104612");
+  });
+
+  it("点击「阅读示范报告」打开真实示范报告抽屉，支持播放流程演示", async () => {
+    const { wrapper } = await mountLanding();
+
+    // 播放流程演示可启动与暂停
+    const replayBtn = wrapper.get('[data-test="showcase-replay-toggle"]');
+    expect(replayBtn.text()).toContain("播放流程演示");
+    await replayBtn.trigger("click");
+    expect(replayBtn.attributes("aria-pressed")).toBe("true");
+    await replayBtn.trigger("click");
+    expect(replayBtn.attributes("aria-pressed")).toBe("false");
+
+    // 点击次按钮「阅读示范报告」打开右侧抽屉
+    await wrapper.get('[data-test="landing-cta-demo"]').trigger("click");
+    await flushPromises();
+    const drawer = document.body.querySelector('[data-test="landing-report-drawer"]');
+    expect(drawer).not.toBeNull();
+    expect(drawer?.textContent).toContain("Crossref / OpenAlex 四态引文核验报告");
+    wrapper.unmount();
   });
 });

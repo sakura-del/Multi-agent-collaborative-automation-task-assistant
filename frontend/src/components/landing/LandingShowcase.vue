@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onBeforeUnmount, ref } from "vue";
 import {
   ArrowRight,
   Check,
@@ -9,6 +9,8 @@ import {
   FileCheck2,
   HelpCircle,
   Loader2,
+  Pause,
+  Play,
   Quote,
   Sparkles,
   Table2,
@@ -65,6 +67,7 @@ const includedCount = computed(() => {
 });
 
 function setVerdict(paperId: string, next: DemoVerdict) {
+  stopReplay();
   verdicts.value = { ...verdicts.value, [paperId]: next };
 }
 
@@ -78,6 +81,7 @@ interface SelectedCell {
 const selectedCell = ref<SelectedCell | null>(null);
 
 function inspectCell(paperTitle: string, columnLabel: string, cell: { section: string; quote: string }) {
+  stopReplay();
   selectedCell.value = {
     paperTitle,
     columnLabel,
@@ -96,8 +100,92 @@ const activeCitation = computed(
 );
 
 function triggerExportHint() {
+  stopReplay();
   exportNotice.value = true;
 }
+
+// ===== 自动流程回放（真实研究流程 4 步演示，用户随时可接管） =====
+const replaying = ref(false);
+const replayStep = ref(0);
+let replayTimer: ReturnType<typeof setInterval> | null = null;
+
+const REPLAY_STEPS: { label: string; apply: () => void }[] = [
+  {
+    label: "1/4 · PRISMA 多库初筛纳入文献",
+    apply: () => {
+      currentTab.value = "prisma";
+      verdicts.value = {
+        ...verdicts.value,
+        p3: "include",
+      };
+    },
+  },
+  {
+    label: "2/4 · 四阶段 Agent 提取结构化证据",
+    apply: () => {
+      currentTab.value = "matrix";
+      const row = DEMO_MATRIX_ROWS[0];
+      selectedCell.value = {
+        paperTitle: row.title,
+        columnLabel: "主要结论",
+        section: row.finding.section,
+        quote: row.finding.quote,
+      };
+    },
+  },
+  {
+    label: "3/4 · 句级引用绑定与 Crossref 核验",
+    apply: () => {
+      currentTab.value = "review";
+      activeCitationIndex.value = 1;
+      selectedCsl.value = "gbt7714";
+    },
+  },
+  {
+    label: "4/4 · 切换引用标准并锚定第 [2] 条证据",
+    apply: () => {
+      currentTab.value = "review";
+      activeCitationIndex.value = 2;
+      selectedCsl.value = "apa";
+    },
+  },
+];
+
+function stopReplay() {
+  if (!replaying.value) return;
+  replaying.value = false;
+  if (replayTimer) {
+    clearInterval(replayTimer);
+    replayTimer = null;
+  }
+}
+
+function toggleReplay() {
+  if (replaying.value) {
+    stopReplay();
+    return;
+  }
+  replaying.value = true;
+  replayStep.value = 0;
+  REPLAY_STEPS[0].apply();
+  replayTimer = setInterval(() => {
+    const next = (replayStep.value + 1) % REPLAY_STEPS.length;
+    replayStep.value = next;
+    REPLAY_STEPS[next].apply();
+  }, 2800);
+}
+
+function selectTabManual(tab: ShowcaseTab) {
+  stopReplay();
+  currentTab.value = tab;
+}
+
+onBeforeUnmount(() => {
+  if (replayTimer) {
+    clearInterval(replayTimer);
+    replayTimer = null;
+  }
+});
 </script>
 
 <template>
@@ -120,29 +208,48 @@ function triggerExportHint() {
         </span>
       </div>
 
-      <div
-        class="flex flex-wrap items-center gap-1 rounded-full border border-[#E5E7EB] bg-white/80 p-1 dark:border-border dark:bg-background/80"
-        role="tablist"
-        aria-label="产品能力交互预览"
-      >
+      <div class="flex flex-wrap items-center gap-2">
         <button
-          v-for="tab in TABS"
-          :key="tab.id"
           type="button"
-          role="tab"
-          :data-test="`showcase-tab-${tab.id}`"
-          :aria-selected="currentTab === tab.id"
-          class="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors"
+          data-test="showcase-replay-toggle"
+          :aria-pressed="replaying"
+          class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors"
           :class="
-            currentTab === tab.id
-              ? 'bg-[#0F4C3A] text-white dark:bg-primary dark:text-primary-foreground'
-              : 'text-[#4B5563] hover:text-[#111827] dark:text-muted-foreground dark:hover:text-foreground'
+            replaying
+              ? 'border-[#0F4C3A] bg-[#0F4C3A]/10 text-[#0F4C3A] dark:border-primary dark:bg-primary/15 dark:text-primary'
+              : 'border-[#E5E7EB] bg-white text-[#374151] hover:border-[#0F4C3A]/40 hover:text-[#0F4C3A] dark:border-border dark:bg-background dark:text-foreground'
           "
-          @click="currentTab = tab.id"
+          @click="toggleReplay"
         >
-          <component :is="tab.icon" :size="13" aria-hidden="true" />
-          <span>{{ tab.label }}</span>
+          <Pause v-if="replaying" :size="12" aria-hidden="true" />
+          <Play v-else :size="12" aria-hidden="true" />
+          <span>{{ replaying ? REPLAY_STEPS[replayStep].label : "播放流程演示" }}</span>
         </button>
+
+        <div
+          class="flex flex-wrap items-center gap-1 rounded-full border border-[#E5E7EB] bg-white/80 p-1 dark:border-border dark:bg-background/80"
+          role="tablist"
+          aria-label="产品能力交互预览"
+        >
+          <button
+            v-for="tab in TABS"
+            :key="tab.id"
+            type="button"
+            role="tab"
+            :data-test="`showcase-tab-${tab.id}`"
+            :aria-selected="currentTab === tab.id"
+            class="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors"
+            :class="
+              currentTab === tab.id
+                ? 'bg-[#0F4C3A] text-white dark:bg-primary dark:text-primary-foreground'
+                : 'text-[#4B5563] hover:text-[#111827] dark:text-muted-foreground dark:hover:text-foreground'
+            "
+            @click="selectTabManual(tab.id)"
+          >
+            <component :is="tab.icon" :size="13" aria-hidden="true" />
+            <span>{{ tab.label }}</span>
+          </button>
+        </div>
       </div>
     </div>
 

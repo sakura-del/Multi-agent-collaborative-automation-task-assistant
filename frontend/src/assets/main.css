@@ -194,6 +194,33 @@
     outline-offset: 2px;
   }
 
+  /* 消除 Chrome/Edge 自动填充的淡蓝底色，保持输入框与画布一致的克制感 */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus,
+  textarea:-webkit-autofill,
+  select:-webkit-autofill {
+    -webkit-box-shadow: 0 0 0 1000px var(--background) inset;
+    -webkit-text-fill-color: var(--foreground);
+    caret-color: var(--foreground);
+    transition: background-color 5000s ease-in-out 0s;
+  }
+
+  /* ALTCHA 人机校验框样式变量：与表单输入框 rounded-lg + neutral-200 精密对齐 */
+  altcha-widget {
+    --altcha-border-radius: 0.5rem;
+    --altcha-border-width: 1px;
+    --altcha-color-border: #e5e7eb;
+    --altcha-color-base: var(--card);
+    --altcha-color-text: var(--foreground);
+    --altcha-max-width: 100%;
+    width: 100%;
+  }
+
+  .dark altcha-widget {
+    --altcha-color-border: var(--border);
+  }
+
   /* 尊重系统的减少动效偏好（无障碍硬要求） */
   @media (prefers-reduced-motion: reduce) {
     *,

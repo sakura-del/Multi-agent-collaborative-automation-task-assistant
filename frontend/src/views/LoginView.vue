@@ -91,19 +91,33 @@ onMounted(async () => {
  * 注册态若沿用登录文案，新用户第一眼看到的是「继续你的研究 / 登录以…」，
  * 与刚刚点下的「注册」意图相反 —— 这里是纯文案对象，两个态各自说自己的事。
  */
-const HEADINGS: Record<AuthMode, { eyebrow: string; title: string; hint: string }> = {
+const HEADINGS: Record<AuthMode, { title: string; hint: string }> = {
   login: {
-    eyebrow: "Welcome back",
-    title: "继续你的研究",
-    hint: "登录以访问任务、证据与引用库。",
+    title: "回到工作台",
+    hint: "访问你的文献库、筛选记录与综述文稿",
   },
   register: {
-    eyebrow: "Create account",
-    title: "创建你的账号",
-    hint: "注册以开始你的第一篇综述。",
+    title: "创建研究账号",
+    hint: "开始你的第一篇可核验文献综述",
   },
 };
 const heading = computed(() => HEADINGS[mode.value]);
+
+const LOGIN_PROOFS = {
+  1: {
+    source: "ACL Findings 2025 · Section 5.1",
+    badge: "Crossref DOI 已核验",
+    citation: "GB/T 7714—2025 · LIN Y, CHEN W, PATEL R. Evaluating faithfulness and citation grounding...",
+  },
+  2: {
+    source: "J. Biomed. Inform. 2025 · Section 3.3",
+    badge: "PubMed / Crossref 已核验",
+    citation: "GB/T 7714—2025 · ZHOU H, MILLER K, SATO T. Automated PRISMA 2020 screening...",
+  },
+} as const;
+
+const activeProofIndex = ref<1 | 2>(1);
+const activeProof = computed(() => LOGIN_PROOFS[activeProofIndex.value]);
 
 // 注册不再自动登录（邮箱验证是门禁），按钮文案不能再说「注册并登录」
 const submitLabel = computed(() => (mode.value === "login" ? "登录" : "创建账号"));
@@ -121,8 +135,8 @@ function switchMode(next: AuthMode) {
   mode.value = next;
 }
 
-/** 页脚能力点：三条都对应系统里真实存在的功能，不是营销词。 */
-const CAPABILITIES = ["证据约束", "引用可核验", "人机协同"] as const;
+/** 底部学术背书条 */
+const TRUST_ITEMS = ["arXiv", "PubMed", "OpenAlex", "PRISMA 2020", "GB/T 7714-2025"] as const;
 
 async function handleSubmit() {
   loading.value = true;
@@ -187,64 +201,104 @@ async function handleResend() {
 
 <template>
   <div class="grid min-h-dvh bg-background text-foreground lg:grid-cols-[1.05fr_1fr]">
-    <!-- 左侧：Elicit 风格暖白学术声明与证据示例（窄屏隐藏） -->
+    <!-- 左侧：Elicit 风格学术点阵底纹 + 双层可交互溯源卡（窄屏隐藏） -->
     <section
-      class="hidden flex-col justify-between border-r border-[#E5E7EB] bg-[#FAF9F6] px-10 py-8 lg:flex xl:px-14 dark:border-border dark:bg-sidebar"
+      class="relative hidden flex-col justify-between overflow-hidden border-r border-[#E5E7EB] bg-[#FAF9F6] px-10 py-8 lg:flex xl:px-14 dark:border-border dark:bg-sidebar"
     >
+      <!-- 学术方格点阵纹理 + 边缘淡出遮罩 -->
+      <div
+        class="pointer-events-none absolute inset-0 bg-[radial-gradient(#d6d3d1_1px,transparent_1px)] [background-size:24px_24px] [mask-image:radial-gradient(ellipse_at_center,black_45%,transparent_100%)] opacity-70 dark:opacity-15"
+        aria-hidden="true"
+      />
+
       <!-- Logo 是链接（Issue #26-5）：点击回到公开落地页首页 -->
       <RouterLink
         to="/"
         data-test="brand-home"
         aria-label="VeriPaper 首页"
-        class="flex w-fit items-center gap-2.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-[#0F4C3A]"
+        class="relative flex w-fit items-center gap-2.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-[#0F4C3A]"
       >
         <img src="/logo.svg" alt="" aria-hidden="true" class="size-7" />
         <span class="text-sm font-semibold tracking-tight text-[#111827] dark:text-foreground">VeriPaper</span>
       </RouterLink>
 
-      <div class="my-auto max-w-lg py-8">
-        <p class="inline-flex items-center gap-1.5 rounded-full border border-[#E5E7EB] bg-white px-3 py-0.5 text-[11px] font-medium text-[#374151] dark:border-border dark:bg-card dark:text-muted-foreground">
-          <span class="size-1.5 rounded-full bg-[#0F4C3A] dark:bg-success" aria-hidden="true" />
-          Evidence-led Research Workspace
-        </p>
-        <p class="mt-4 font-display text-3xl leading-[1.3] font-semibold tracking-tight text-[#111827] xl:text-4xl dark:text-foreground">
-          让每一句论断，都有迹可循。
-        </p>
+      <div class="relative my-auto max-w-lg py-8">
+        <h1 class="font-display text-4xl leading-[1.24] font-semibold tracking-tight xl:text-[2.75rem]">
+          <span class="block text-[#111827] dark:text-foreground">每一句论断</span>
+          <span class="block text-[#0F4C3A] dark:text-primary">皆有出处</span>
+        </h1>
         <!-- 中文正文不要跨行折在源码里：Vue 会把文本节点里的换行压成一个空格（Issue #26-4） -->
-        <p class="mt-5 max-w-lg text-sm leading-7 text-[#4B5563] dark:text-muted-foreground">从文献检索、证据筛选到综述成稿，多智能体协同完成研究流程。你负责判断，系统负责让每条引用都能回到原始证据。</p>
+        <p class="mt-4 max-w-md text-sm leading-7 text-[#4B5563] dark:text-muted-foreground">你负责判断，系统负责把每一条引用锚定回原始文献。</p>
 
-        <!-- 静态产品示例卡片：与落地页同款暖白 + 学术深墨绿质感 -->
+        <!-- 双层可交互溯源证据卡：上白正文（含 [1]/[2] 角标）+ 下浅灰溯源底栏 -->
         <div
           data-test="login-evidence-proof"
-          class="mt-8 rounded-xl border border-[#E5E7EB] bg-white p-4 shadow-[0_12px_32px_-16px_rgba(15,76,58,0.12)] dark:border-border dark:bg-card"
+          class="mt-8 overflow-hidden rounded-xl border border-[#E5E7EB] bg-white shadow-[0_12px_32px_-16px_rgba(15,76,58,0.12)] dark:border-border dark:bg-card"
         >
-          <div class="flex items-center justify-between gap-2 border-b border-[#E5E7EB] pb-2.5 text-xs dark:border-border">
-            <span class="font-medium text-[#6B7280] dark:text-muted-foreground">正文证据片段 · 示例</span>
-            <span class="inline-flex items-center gap-1 rounded-full bg-[#0F4C3A]/10 px-2 py-0.5 font-medium text-[#0F4C3A] dark:bg-success/15 dark:text-success">
-              <Check :size="12" :stroke-width="2.2" aria-hidden="true" />
-              引用核验通过
-            </span>
+          <div class="p-4 sm:p-5">
+            <div class="flex items-center justify-between gap-2 text-[11px] text-[#6B7280] dark:text-muted-foreground">
+              <span class="font-medium">综述正文片段 · 点击角标切换溯源</span>
+              <span
+                data-test="proof-traceable-tag"
+                class="inline-flex items-center gap-1 rounded-full border border-[#E5E7EB] bg-[#FAF9F6] px-2 py-0.5 text-[10px] text-[#4B5563] dark:border-border dark:bg-muted dark:text-muted-foreground"
+              >
+                <ShieldCheck :size="11" aria-hidden="true" />
+                证据可回溯
+              </span>
+            </div>
+            <p class="mt-3 font-display text-sm leading-7 text-[#1F2937] dark:text-card-foreground">
+              检索增强生成的评估正从单一答案准确率，转向对忠实度、证据完整性与上下文利用效率的综合判断<button
+                type="button"
+                data-test="login-proof-marker-1"
+                :aria-pressed="activeProofIndex === 1"
+                class="mx-0.5 inline-flex items-center rounded px-1.5 py-0.2 align-baseline font-sans text-xs font-semibold transition-colors"
+                :class="
+                  activeProofIndex === 1
+                    ? 'bg-[#0F4C3A] text-white dark:bg-primary dark:text-primary-foreground'
+                    : 'bg-[#0F4C3A]/10 text-[#0F4C3A] hover:bg-[#0F4C3A]/20 dark:bg-primary/15 dark:text-primary'
+                "
+                @click="activeProofIndex = 1"
+              >[1]</button>；而在多智能体筛选阶段，结构化审议协议将人工复核工时降低了 68.2%<button
+                type="button"
+                data-test="login-proof-marker-2"
+                :aria-pressed="activeProofIndex === 2"
+                class="mx-0.5 inline-flex items-center rounded px-1.5 py-0.2 align-baseline font-sans text-xs font-semibold transition-colors"
+                :class="
+                  activeProofIndex === 2
+                    ? 'bg-[#0F4C3A] text-white dark:bg-primary dark:text-primary-foreground'
+                    : 'bg-[#0F4C3A]/10 text-[#0F4C3A] hover:bg-[#0F4C3A]/20 dark:bg-primary/15 dark:text-primary'
+                "
+                @click="activeProofIndex = 2"
+              >[2]</button>。
+            </p>
           </div>
-          <p class="mt-3 font-display text-sm leading-7 text-[#1F2937] dark:text-card-foreground">
-            检索增强生成的评估正从单一答案准确率，转向对忠实度、证据完整性与上下文利用效率的综合判断。
-          </p>
-          <div class="mt-3 flex items-center justify-between gap-3 text-[11px] text-[#6B7280] dark:text-muted-foreground">
-            <span>GB/T 7714—2025 · 顺序编码制</span>
-            <!-- 只是标签，不是入口（Issue #26-5） -->
-            <span
-              data-test="proof-traceable-tag"
-              class="inline-flex items-center gap-1 rounded-full border border-[#E5E7EB] bg-[#FAF9F6] px-2 py-0.5 text-[10px] text-[#4B5563] dark:border-border dark:bg-muted dark:text-muted-foreground"
-            >
-              <ShieldCheck :size="11" aria-hidden="true" />
-              证据可回溯
-            </span>
+
+          <!-- 溯源底栏 -->
+          <div
+            data-test="login-proof-footer"
+            class="border-t border-[#E5E7EB] bg-[#F9FAFB] px-4 py-3 text-xs dark:border-border dark:bg-muted/40"
+          >
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <span class="font-medium text-[#374151] dark:text-foreground">
+                [{{ activeProofIndex }}] {{ activeProof.source }}
+              </span>
+              <span class="inline-flex items-center gap-1 rounded-full bg-[#0F4C3A]/10 px-2 py-0.5 text-[11px] font-medium text-[#0F4C3A] dark:bg-success/15 dark:text-success">
+                <Check :size="11" :stroke-width="2.4" aria-hidden="true" />
+                {{ activeProof.badge }}
+              </span>
+            </div>
+            <p class="mt-1.5 truncate font-mono text-[10.5px] text-[#6B7280] dark:text-muted-foreground">
+              {{ activeProof.citation }}
+            </p>
           </div>
         </div>
       </div>
 
-      <div class="flex flex-wrap gap-x-5 gap-y-2 text-[11px] text-[#6B7280] dark:text-muted-foreground">
-        <span v-for="item in CAPABILITIES" :key="item">{{ item }}</span>
-        <span>Markdown / DOCX</span>
+      <div class="relative flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-neutral-500 dark:text-muted-foreground">
+        <template v-for="(item, idx) in TRUST_ITEMS" :key="item">
+          <span>{{ item }}</span>
+          <span v-if="idx < TRUST_ITEMS.length - 1" aria-hidden="true">·</span>
+        </template>
       </div>
     </section>
 
@@ -255,7 +309,7 @@ async function handleResend() {
           <RouterLink
             to="/"
             aria-label="VeriPaper 首页"
-            class="flex w-fit items-center gap-2 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            class="flex w-fit items-center gap-2 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-[#0F4C3A]"
           >
             <img src="/logo.svg" alt="" aria-hidden="true" class="size-7" />
             <span class="text-sm font-semibold tracking-tight">VeriPaper</span>
@@ -263,15 +317,9 @@ async function handleResend() {
         </div>
 
         <header>
-          <p
-            data-test="auth-eyebrow"
-            class="text-[11px] font-medium tracking-wider text-muted-foreground uppercase"
-          >
-            {{ heading.eyebrow }}
-          </p>
           <h1
             data-test="auth-title"
-            class="mt-1.5 text-xl font-semibold tracking-tight"
+            class="text-xl font-semibold tracking-tight text-foreground"
           >
             {{ heading.title }}
           </h1>
@@ -279,7 +327,7 @@ async function handleResend() {
         </header>
 
         <form class="mt-6 flex flex-col gap-3.5" @submit.prevent="handleSubmit">
-          <div class="grid grid-cols-2 gap-1 rounded-md border border-border bg-muted p-0.5" role="tablist">
+          <div class="grid grid-cols-2 gap-1 rounded-lg border border-neutral-200 bg-muted p-0.5 dark:border-border" role="tablist">
             <button
               v-for="option in [
                 { value: 'login', label: '登录' },
@@ -290,9 +338,9 @@ async function handleResend() {
               role="tab"
               :aria-selected="mode === option.value"
               :class="[
-                'rounded-sm px-3 py-1.5 text-xs font-medium transition-colors',
+                'rounded-md px-3 py-1.5 text-xs font-medium transition-colors',
                 mode === option.value
-                  ? 'bg-background text-foreground'
+                  ? 'bg-background text-foreground shadow-2xs'
                   : 'text-muted-foreground hover:text-foreground',
               ]"
               @click="switchMode(option.value)"
@@ -310,7 +358,7 @@ async function handleResend() {
               required
               autocomplete="username"
               placeholder="请输入用户名或邮箱"
-              class="h-9"
+              class="h-9 rounded-lg border-neutral-200 focus-visible:border-[#0F4C3A] focus-visible:ring-1 focus-visible:ring-[#0F4C3A]/20 focus-visible:outline-none dark:border-input"
             />
           </div>
           <template v-else>
@@ -324,7 +372,7 @@ async function handleResend() {
                 minlength="3"
                 autocomplete="username"
                 placeholder="请输入用户名（3 位以上）"
-                class="h-9"
+                class="h-9 rounded-lg border-neutral-200 focus-visible:border-[#0F4C3A] focus-visible:ring-1 focus-visible:ring-[#0F4C3A]/20 focus-visible:outline-none dark:border-input"
               />
             </div>
             <div class="grid gap-1.5">
@@ -336,7 +384,7 @@ async function handleResend() {
                 required
                 autocomplete="email"
                 placeholder="you@example.com"
-                class="h-9"
+                class="h-9 rounded-lg border-neutral-200 focus-visible:border-[#0F4C3A] focus-visible:ring-1 focus-visible:ring-[#0F4C3A]/20 focus-visible:outline-none dark:border-input"
               />
             </div>
           </template>
@@ -351,7 +399,7 @@ async function handleResend() {
               minlength="8"
               placeholder="至少 8 位"
               :autocomplete="mode === 'login' ? 'current-password' : 'new-password'"
-              class="h-9"
+              class="h-9 rounded-lg border-neutral-200 focus-visible:border-[#0F4C3A] focus-visible:ring-1 focus-visible:ring-[#0F4C3A]/20 focus-visible:outline-none dark:border-input"
             />
           </div>
 
