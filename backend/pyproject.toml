@@ -29,7 +29,11 @@ dependencies = [
     "asyncpg>=0.29.0",
     "alembic>=1.13.0",
     "aioredis>=2.0.1",
-    "redis>=5.0.0",
+    # 上限 <8.2：redis 8.2.0 给 __init__ 加了新的弃用参数包装，fakeredis 2.40.0
+    # 在 _get_args_to_warn 里递归其签名时命中 method_descriptor（无 __closure__）而
+    # 抛 AttributeError，所有用 fakeredis 的用例在 fixture 阶段就报错。
+    # fakeredis 修好后抬掉这个上限。
+    "redis>=5.0.0,<8.2",
 
     # 日志与追踪
     "structlog>=24.1.0",
