@@ -34,9 +34,12 @@ export const useTaskStore = defineStore("tasks", () => {
 
   let session: TaskEventSession | null = null;
   let watchedTaskId: string | null = null;
+  const inFlightList = new Map<string, Promise<void>>();
+  const inFlightCounts = new Map<string, Promise<void>>();
+  const inFlightDetail = new Map<string, Promise<TaskSnapshot>>();
 
   /**
-   * 加载指定页（从 1 开始）。
+   * 加载指定页（从 1 开始，相同筛选参数在飞期间自动去重合并）。
    *
    * 默认第 1 页：创建任务、从详情返回等既有调用点都不传参，行为不变。
    * 分页必须走服务端 skip/limit —— 后端默认只回 20 条，前端切片切不出
@@ -46,51 +49,93 @@ export const useTaskStore = defineStore("tasks", () => {
     page = 1,
     options?: { group?: TaskStatusGroup; query?: string },
   ): Promise<void> {
+    const target = Math.max(1, Math.floor(page));
+    const group = options?.group ?? listGroup.value;
+    const query = (options?.query ?? listQuery.value).trim();
+    const key = `${target}|${group}|${query}`;
+    const existing = inFlightList.get(key);
+    if (existing) return existing;
+
     listLoading.value = true;
-    try {
-      const target = Math.max(1, Math.floor(page));
-      const group = options?.group ?? listGroup.value;
-      const query = (options?.query ?? listQuery.value).trim();
-      const result = await taskApi.list({
-        skip: (target - 1) * PAGE_SIZE,
-        limit: PAGE_SIZE,
-        status_group: group,
-        // 空串不发：后端把 q="" 也当过滤条件时会导致 SQL 里多一个 %% 匹配
-        q: query || undefined,
-      });
-      items.value = result.items;
-      listTotal.value = result.total;
-      listPage.value = target;
-      listGroup.value = group;
-      listQuery.value = query;
-    } finally {
-      listLoading.value = false;
-    }
+    const job = (async () => {
+      try {
+        const result = await taskApi.list({
+          skip: (target - 1) * PAGE_SIZE,
+          limit: PAGE_SIZE,
+          status_group: group,
+          // 空串不发：后端把 q="" 也当过滤条件时会导致 SQL 里多一个 %% 匹配
+          q: query || undefined,
+        });
+        items.value = result.items;
+        listTotal.value = result.total;
+        listPage.value = target;
+        listGroup.value = group;
+        listQuery.value = query;
+      } finally {
+        inFlightList.delete(key);
+        listLoading.value = false;
+      }
+    })();
+    inFlightList.set(key, job);
+    return job;
   }
 
-  /** 分组计数（不受分页影响；带当前搜索词，保证数字与列表同口径）。 */
+  /** 分组计数（不受分页影响；带当前搜索词，并发去重）。 */
   async function loadCounts(query = listQuery.value): Promise<void> {
-    counts.value = await taskApi.counts({ q: query.trim() || undefined });
+    const clean = query.trim();
+    const existing = inFlightCounts.get(clean);
+    if (existing) return existing;
+
+    const job = (async () => {
+      try {
+        counts.value = await taskApi.counts({ q: clean || undefined });
+      } finally {
+        inFlightCounts.delete(clean);
+      }
+    })();
+    inFlightCounts.set(clean, job);
+    return job;
   }
 
   async function create(payload: TaskCreate): Promise<TaskCreateOut> {
     return taskApi.create(payload);
   }
 
-  /** 加载快照：整体替换，避免旧状态残留 */
+  /** 加载快照：切换任务时清掉旧快照避免误展示，同 taskId 并发去重 */
   async function load(taskId: string): Promise<TaskSnapshot> {
-    detailLoading.value = true;
-    try {
-      const fresh = await taskApi.get(taskId);
-      snapshot.value = fresh;
-      if (watchedTaskId !== taskId) {
-        events.value = [];
-        lastEventId.value = 0;
-      }
-      return fresh;
-    } finally {
-      detailLoading.value = false;
+    const existing = inFlightDetail.get(taskId);
+    if (existing) return existing;
+
+    if (snapshot.value && snapshot.value.task_id !== taskId) {
+      snapshot.value = null;
     }
+    detailLoading.value = true;
+    const job = (async () => {
+      try {
+        const fresh = await taskApi.get(taskId);
+        snapshot.value = fresh;
+        if (watchedTaskId !== taskId) {
+          events.value = [];
+          lastEventId.value = 0;
+        }
+        return fresh;
+      } finally {
+        inFlightDetail.delete(taskId);
+        detailLoading.value = false;
+      }
+    })();
+    inFlightDetail.set(taskId, job);
+    return job;
+  }
+
+  /** 路由预取：静默发起请求并与页面 chunk 下载并行，组件挂载时通过 inFlight 复用 */
+  function prefetchList(): void {
+    void loadList(1, { group: "all", query: "" }).catch(() => undefined);
+    void loadCounts("").catch(() => undefined);
+  }
+
+  function prefetchDetail(taskId: string): void {
+    void load(taskId).catch(() => undefined);
   }
 
   async function approve(taskId: string, revision?: number): Promise<TaskSnapshot> {
@@ -220,6 +265,8 @@ export const useTaskStore = defineStore("tasks", () => {
     counts,
     loadList,
     loadCounts,
+    prefetchList,
+    prefetchDetail,
     create,
     load,
     approve,

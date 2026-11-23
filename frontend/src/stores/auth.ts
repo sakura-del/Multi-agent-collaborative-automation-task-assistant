@@ -5,6 +5,27 @@ import { authApi } from "@/api/auth";
 import { clearTokens, getAccessToken, getRefreshToken, persistTokens } from "@/api/client";
 import type { LoginInput, RegisterInput, UserOut } from "@/api/types";
 
+const USER_CACHE_KEY = "veripaper_user";
+
+function readCachedUser(): UserOut | null {
+  try {
+    const raw = localStorage.getItem(USER_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as UserOut;
+    return parsed && typeof parsed.id === "string" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedUser(value: UserOut | null): void {
+  if (value) {
+    localStorage.setItem(USER_CACHE_KEY, JSON.stringify(value));
+  } else {
+    localStorage.removeItem(USER_CACHE_KEY);
+  }
+}
+
 /** 判断 JWT 是否已过期（或将在 30 秒内过期），用于启动时提前静默刷新 */
 function isJwtExpired(token: string): boolean {
   try {
@@ -19,27 +40,53 @@ function isJwtExpired(token: string): boolean {
   }
 }
 
-// 鉴权状态：token 存 localStorage，用户信息每次启动通过 /auth/me 校验
+// 鉴权状态：token 与轻量用户信息缓存存 localStorage，支持零阻塞乐观恢复 + 后台校验
 export const useAuthStore = defineStore("auth", () => {
   const user = ref<UserOut | null>(null);
   const ready = ref(false);
 
   const authenticated = computed(() => user.value !== null);
 
-  /** 应用启动时恢复会话：若 Access Token 已过期且有 Refresh Token，先静默刷新再请求 /auth/me */
+  async function fetchAndCacheMe(): Promise<UserOut> {
+    const me = await authApi.me();
+    user.value = me;
+    writeCachedUser(me);
+    return me;
+  }
+
+  /** 应用启动时恢复会话：有缓存且令牌有效时零阻塞放行并在后台校验，否则走串行恢复 */
   async function bootstrap(): Promise<void> {
     try {
-      const accessToken = getAccessToken();
+      let accessToken = getAccessToken();
       const refreshToken = getRefreshToken();
       if (refreshToken && (!accessToken || isJwtExpired(accessToken))) {
-        persistTokens(await authApi.refresh(refreshToken));
+        const rotated = await authApi.refresh(refreshToken);
+        persistTokens(rotated);
+        accessToken = rotated.access_token;
       }
-      if (getAccessToken()) {
-        user.value = await authApi.me();
+      if (!accessToken) {
+        writeCachedUser(null);
+        return;
       }
+
+      const cached = readCachedUser();
+      if (cached) {
+        // 乐观恢复：立即放行路由让页面业务请求与 /auth/me 完全并发
+        user.value = cached;
+        ready.value = true;
+        void fetchAndCacheMe().catch(() => {
+          clearTokens();
+          writeCachedUser(null);
+          user.value = null;
+        });
+        return;
+      }
+
+      await fetchAndCacheMe();
     } catch {
       // token 失效/网络异常：清空本地会话，交由路由守卫跳转登录
       clearTokens();
+      writeCachedUser(null);
       user.value = null;
     } finally {
       ready.value = true;
@@ -48,22 +95,22 @@ export const useAuthStore = defineStore("auth", () => {
 
   async function login(input: LoginInput): Promise<void> {
     persistTokens(await authApi.login(input));
-    user.value = await authApi.me();
+    await fetchAndCacheMe();
   }
 
   async function loginWithEmailOtp(email: string, code: string): Promise<void> {
     persistTokens(await authApi.verifyEmailOtp({ email, code }));
-    user.value = await authApi.me();
+    await fetchAndCacheMe();
   }
 
   async function loginWithMagicToken(magicToken: string): Promise<void> {
     persistTokens(await authApi.verifyEmailOtp({ magic_token: magicToken }));
-    user.value = await authApi.me();
+    await fetchAndCacheMe();
   }
 
   async function loginWithOAuthCode(code: string): Promise<void> {
     persistTokens(await authApi.exchangeOAuthCode(code));
-    user.value = await authApi.me();
+    await fetchAndCacheMe();
   }
 
   async function register(input: RegisterInput): Promise<void> {
@@ -79,6 +126,7 @@ export const useAuthStore = defineStore("auth", () => {
       persistTokens(await authApi.refresh(getRefreshToken() ?? ""));
     } catch (error) {
       clearTokens();
+      writeCachedUser(null);
       user.value = null;
       throw error;
     }
@@ -86,6 +134,7 @@ export const useAuthStore = defineStore("auth", () => {
 
   function logout(): void {
     clearTokens();
+    writeCachedUser(null);
     user.value = null;
   }
 

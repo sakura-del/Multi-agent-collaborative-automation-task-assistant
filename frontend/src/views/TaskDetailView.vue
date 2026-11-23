@@ -399,13 +399,6 @@ onBeforeUnmount(() => {
         </p>
       </div>
 
-      <!-- 持续更新（Issue #27）：已完成任务才渲染，手动刷新 + 定时重跑 + 历史摘要 -->
-      <TaskRefreshPanel
-        class="mb-4"
-        :task-id="props.taskId"
-        :status="store.snapshot?.status ?? 'created'"
-      />
-
       <ErrorBanner :message="errorMessage" />
 
       <!-- 选项卡：Linear 极简下划线式 -->
@@ -525,6 +518,13 @@ onBeforeUnmount(() => {
           description="任务执行完成后，这里会展示复盘结论、引用核验与导出入口。"
         />
       </div>
+
+      <!-- 持续更新（Issue #27）：放在主体内容区下方，避免异步加载完成后将 Tab 与内容区向下推挤导致 CLS -->
+      <TaskRefreshPanel
+        class="mt-6"
+        :task-id="props.taskId"
+        :status="store.snapshot?.status ?? 'created'"
+      />
     </div>
 
     <!-- 右侧属性检查器（Linear Inspector）：窄屏置顶紧凑展示，宽屏吸顶固定 -->
@@ -548,14 +548,17 @@ onBeforeUnmount(() => {
           <dt class="text-muted-foreground">更新于</dt>
           <dd class="text-right tabular-nums">{{ formatDateTime(store.snapshot?.updated_at) }}</dd>
         </div>
-        <div v-if="store.snapshot" class="flex flex-col gap-1 border-t border-border pt-2.5">
+        <div class="flex flex-col gap-1 border-t border-border pt-2.5">
           <dt class="text-muted-foreground">使用模型</dt>
           <dd class="font-medium break-words" data-test="task-model">
-            {{
-              store.snapshot.model
-                ? `${store.snapshot.model.name}（${store.snapshot.model.model}）`
-                : "平台默认"
-            }}
+            <span v-if="!store.snapshot" class="inline-block h-4 w-24 animate-pulse rounded bg-muted/60" />
+            <template v-else>
+              {{
+                store.snapshot.model
+                  ? `${store.snapshot.model.name}（${store.snapshot.model.model}）`
+                  : "平台默认"
+              }}
+            </template>
           </dd>
         </div>
       </dl>

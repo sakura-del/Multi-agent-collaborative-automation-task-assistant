@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from "vue-router";
 
 import AppLayout from "@/layouts/AppLayout.vue";
 import { useAuthStore } from "@/stores/auth";
+import { useTaskStore } from "@/stores/tasks";
 
 const AdminByokView = () => import("@/views/AdminByokView.vue");
 const AdminConsoleView = () => import("@/views/AdminConsoleView.vue");
@@ -172,6 +173,14 @@ router.beforeEach(async (to) => {
   // 管理员页面：非 admin 直接回任务列表，不暴露「有这一页」的错误信息
   if (to.meta.requiresAdmin && auth.user?.role !== "admin") {
     return { name: "tasks" };
+  }
+  // 路由级并行业务预取：在下载懒加载页面 JS chunk 的同时启动接口请求
+  if (auth.authenticated) {
+    if (to.name === "tasks") {
+      useTaskStore().prefetchList();
+    } else if (to.name === "task-detail" && typeof to.params.taskId === "string") {
+      useTaskStore().prefetchDetail(to.params.taskId);
+    }
   }
   return true;
 });
