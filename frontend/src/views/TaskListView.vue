@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
-import { ChevronRight, Plus, Search } from "lucide-vue-next";
+import { ChevronRight, Clock, List, Plus, Search } from "lucide-vue-next";
 
 import BeTimeline from "@/components/motion/BeTimeline.vue";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
@@ -41,6 +41,7 @@ const store = useTaskStore();
 const router = useRouter();
 
 const showForm = ref(false);
+const viewMode = ref<"list" | "timeline">("list");
 const submitting = ref(false);
 const errorMessage = ref<string | null>(null);
 const keyword = ref("");
@@ -247,107 +248,137 @@ const rows = computed(() =>
 
 <template>
   <section>
-    <header class="mb-5 flex flex-wrap items-start justify-between gap-3">
-      <div>
-        <p class="mb-2 text-[10px] font-semibold tracking-[0.16em] text-primary uppercase">
-          Research workspace
-        </p>
-        <h1 class="font-display text-3xl font-medium tracking-[-0.035em]">研究任务</h1>
-        <p class="mt-2 text-sm text-muted-foreground">检索、核验与写作，都从证据开始。</p>
+    <header class="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div class="min-w-0">
+        <h1 class="text-lg font-semibold tracking-tight text-foreground">研究任务</h1>
+        <p class="mt-0.5 text-xs text-muted-foreground">检索、核验与综述生成任务队列</p>
       </div>
-      <Button data-test="new-task" @click="showForm = !showForm">
-        <Plus :size="16" aria-hidden="true" />
-        <span>{{ showForm ? "收起" : "新建任务" }}</span>
-      </Button>
+      <div class="flex items-center gap-2">
+        <div
+          v-if="timelineTasks.length && store.listPage === 1"
+          class="inline-flex rounded-md border border-border bg-muted/60 p-0.5"
+          role="group"
+          aria-label="切换任务视图"
+        >
+          <button
+            type="button"
+            data-test="view-mode-list"
+            :aria-pressed="viewMode === 'list'"
+            class="inline-flex h-7 items-center gap-1.5 rounded-sm px-2.5 text-xs font-medium transition-colors"
+            :class="
+              viewMode === 'list'
+                ? 'bg-background text-foreground'
+                : 'text-muted-foreground hover:text-foreground'
+            "
+            @click="viewMode = 'list'"
+          >
+            <List :size="13" aria-hidden="true" />
+            <span>列表</span>
+          </button>
+          <button
+            type="button"
+            data-test="view-mode-timeline"
+            :aria-pressed="viewMode === 'timeline'"
+            class="inline-flex h-7 items-center gap-1.5 rounded-sm px-2.5 text-xs font-medium transition-colors"
+            :class="
+              viewMode === 'timeline'
+                ? 'bg-background text-foreground'
+                : 'text-muted-foreground hover:text-foreground'
+            "
+            @click="viewMode = 'timeline'"
+          >
+            <Clock :size="13" aria-hidden="true" />
+            <span>时间线</span>
+          </button>
+        </div>
+        <Button size="sm" data-test="new-task" @click="showForm = !showForm">
+          <Plus :size="14" aria-hidden="true" />
+          <span>{{ showForm ? "收起" : "新建任务" }}</span>
+        </Button>
+      </div>
     </header>
 
     <ErrorBanner :message="errorMessage" />
 
     <TaskCreateForm
       v-if="showForm"
-      class="mb-6"
+      class="mb-5"
       :pending="submitting"
       :error="errorMessage"
       @submit="handleCreate"
     />
 
-    <!-- 轻量汇总带：保留全部真实计数与快捷筛选，不再用四张等宽卡重复抢占视线。 -->
+    <!-- 紧凑统计与待办条（Linear 风格：不占大块高度，直奔列表） -->
     <div
       v-if="store.items.length"
-      class="mb-5 grid grid-cols-2 gap-y-4 border-b border-border pb-5 sm:grid-cols-4"
+      class="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2"
     >
+      <div class="flex flex-wrap items-center gap-3 text-xs">
+        <button
+          type="button"
+          data-test="stat-needs-me"
+          class="inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 transition-colors hover:bg-muted"
+          @click="filter = filter === 'needs-me' ? 'all' : 'needs-me'"
+        >
+          <span
+            class="font-semibold tabular-nums"
+            :class="counts.needs_me > 0 ? 'text-warning' : 'text-muted-foreground'"
+            >{{ counts.needs_me }}</span
+          >
+          <span class="text-muted-foreground">待我确认</span>
+        </button>
+        <span class="h-3 w-px bg-border" aria-hidden="true" />
+        <button
+          type="button"
+          data-test="stat-active"
+          class="inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 transition-colors hover:bg-muted"
+          @click="filter = filter === 'active' ? 'all' : 'active'"
+        >
+          <span class="font-semibold text-foreground tabular-nums">{{ counts.active }}</span>
+          <span class="text-muted-foreground">进行中</span>
+        </button>
+        <span class="h-3 w-px bg-border" aria-hidden="true" />
+        <button
+          type="button"
+          data-test="stat-done"
+          class="inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 transition-colors hover:bg-muted"
+          @click="filter = filter === 'done' ? 'all' : 'done'"
+        >
+          <span class="font-semibold text-foreground tabular-nums">{{ counts.done }}</span>
+          <span class="text-muted-foreground">已完成</span>
+        </button>
+        <span class="h-3 w-px bg-border" aria-hidden="true" />
+        <div data-test="stat-total" class="inline-flex items-center gap-1.5 px-1.5 py-0.5">
+          <span class="font-semibold text-foreground tabular-nums">{{ counts.all }}</span>
+          <span class="text-muted-foreground">全部</span>
+        </div>
+      </div>
+
       <button
         type="button"
-        data-test="stat-needs-me"
-        class="flex items-baseline gap-2 border-r border-border pr-4 text-left"
+        data-test="attention-needs-me"
+        class="inline-flex items-center gap-2 rounded-md border px-2.5 py-1 text-xs transition-colors"
+        :class="
+          counts.needs_me > 0
+            ? 'border-warning/35 bg-warning/10 text-warning hover:bg-warning/15'
+            : 'border-border bg-background text-muted-foreground hover:text-foreground'
+        "
+        :aria-pressed="filter === 'needs-me'"
         @click="filter = filter === 'needs-me' ? 'all' : 'needs-me'"
       >
-        <span
-          :class="[
-            'font-display text-3xl leading-none tabular-nums',
-            counts.needs_me > 0 ? 'text-warning' : 'text-muted-foreground',
-          ]"
-          >{{ counts.needs_me }}</span
-        >
-        <span class="text-xs text-muted-foreground">待我确认</span>
+        <span class="font-medium">
+          {{ counts.needs_me > 0 ? `${counts.needs_me} 项等待你的判断` : "暂无待处理任务" }}
+        </span>
+        <span class="opacity-80">{{ filter === "needs-me" ? "查看全部" : "筛选待办" }} →</span>
       </button>
-      <button
-        type="button"
-        data-test="stat-active"
-        class="flex items-baseline gap-2 border-border px-4 text-left sm:border-r"
-        @click="filter = filter === 'active' ? 'all' : 'active'"
-      >
-        <span class="font-display text-3xl leading-none tabular-nums">{{ counts.active }}</span>
-        <span class="text-xs text-muted-foreground">进行中</span>
-      </button>
-      <button
-        type="button"
-        data-test="stat-done"
-        class="flex items-baseline gap-2 border-r border-border px-4 text-left"
-        @click="filter = filter === 'done' ? 'all' : 'done'"
-      >
-        <span class="font-display text-3xl leading-none tabular-nums">{{ counts.done }}</span>
-        <span class="text-xs text-muted-foreground">已完成</span>
-      </button>
-      <div data-test="stat-total" class="flex items-baseline gap-2 px-4 text-left">
-        <span class="font-display text-3xl leading-none tabular-nums">{{ counts.all }}</span>
-        <span class="text-xs text-muted-foreground">全部任务</span>
-      </div>
     </div>
 
-    <!-- 唯一需要用户行动的状态集中成一个入口；数量与行为都来自现有 filter/counts。 -->
-    <button
-      v-if="store.items.length"
-      type="button"
-      data-test="attention-needs-me"
-      class="mb-6 flex w-full items-center gap-4 rounded-xl border border-primary/15 bg-accent/45 px-4 py-4 text-left transition-colors hover:bg-accent/70 sm:px-5"
-      :aria-pressed="filter === 'needs-me'"
-      @click="filter = filter === 'needs-me' ? 'all' : 'needs-me'"
+    <!-- 可选时间线视图（默认收起，切换到时间线模式时展示） -->
+    <div
+      v-if="viewMode === 'timeline' && timelineTasks.length && store.listPage === 1"
+      class="mb-5 rounded-lg border border-border bg-card p-2"
     >
-      <span class="min-w-10 font-display text-4xl leading-none text-primary tabular-nums">
-        {{ counts.needs_me }}
-      </span>
-      <span class="min-w-0 flex-1">
-        <span class="block text-sm font-semibold">
-          {{ counts.needs_me > 0 ? `有 ${counts.needs_me} 项任务等待你的判断` : "当前没有待处理任务" }}
-        </span>
-        <span class="mt-1 block text-xs leading-5 text-muted-foreground">
-          {{
-            counts.needs_me > 0
-              ? "确认规划或处理暂停原因后，任务才会继续推进。"
-              : "可以从下方研究索引继续查看已有成果。"
-          }}
-        </span>
-      </span>
-      <span class="shrink-0 text-xs font-medium text-primary">
-        {{ filter === "needs-me" ? "查看全部" : "查看待办" }} →
-      </span>
-    </button>
-
-    <!-- beUI 时间线：最近 8 个任务（左旧右新）。点击进详情；列表保留完整浏览与 E2E 契约。 -->
-    <div v-if="timelineTasks.length && store.listPage === 1"
-      class="mb-8 rounded-3xl border border-border bg-card p-2">
-      <p class="px-4 pt-2 pb-1 text-xs text-muted-foreground">
+      <p class="px-3 pt-1 pb-1 text-xs text-muted-foreground">
         最近 {{ timelineTasks.length }} 个任务 · 点击卡片打开，拖拽 / 滚轮 / ←→ 浏览
       </p>
       <BeTimeline
@@ -476,22 +507,22 @@ const rows = computed(() =>
       </Button>
     </div>
 
-    <div v-else class="overflow-hidden rounded-xl border border-border bg-card/85">
-      <!-- 桌面：表格。窄屏：卡片式（thead 隐藏，每行用 data-label 打标签） -->
-      <table class="w-full border-collapse text-sm max-md:block">
+    <div v-else class="overflow-hidden rounded-lg border border-border bg-card">
+      <!-- 桌面：Linear 高密度表格。窄屏：卡片式 -->
+      <table class="w-full border-collapse text-[13px] max-md:block">
         <thead class="max-md:hidden">
-          <tr class="border-b border-border text-left">
-            <th scope="col" class="px-3 py-2 text-xs font-medium text-muted-foreground">标题</th>
-            <th scope="col" class="w-24 px-3 py-2 text-xs font-medium text-muted-foreground">
+          <tr class="border-b border-border bg-muted/35 text-left">
+            <th scope="col" class="px-3 py-1.5 text-[11px] font-medium text-muted-foreground">标题</th>
+            <th scope="col" class="w-28 px-3 py-1.5 text-[11px] font-medium text-muted-foreground">
               状态
             </th>
             <th
               scope="col"
-              class="w-32 px-3 py-2 text-xs font-medium text-muted-foreground max-lg:hidden"
+              class="w-36 px-3 py-1.5 text-[11px] font-medium text-muted-foreground max-lg:hidden"
             >
               更新时间
             </th>
-            <th scope="col" class="w-8 px-2 py-2">
+            <th scope="col" class="w-16 px-2 py-1.5">
               <span class="sr-only">进入</span>
             </th>
           </tr>

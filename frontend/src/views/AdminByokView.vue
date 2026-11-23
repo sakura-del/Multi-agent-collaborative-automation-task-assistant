@@ -23,6 +23,8 @@ import { RefreshCw, ShieldCheck } from "lucide-vue-next";
 
 import { getByokOverview } from "@/api/admin";
 import type { ByokOverview } from "@/api/types";
+import BarTrendChart, { type BarTrendItem } from "@/components/charts/BarTrendChart.vue";
+import DonutChart, { type DonutSegment } from "@/components/charts/DonutChart.vue";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle, StatCard } from "@/components/ui/card";
 import EmptyState from "@/components/common/EmptyState.vue";
@@ -40,9 +42,41 @@ const isEmpty = computed(() => (overview.value?.totals.tasks ?? 0) === 0);
 
 /** 趋势只画最近 14 天：90 天全画在行内会变成噪音，完整数据在接口里。 */
 const trend = computed(() => (overview.value?.trend ?? []).slice(-14));
-const maxTrendTokens = computed(() =>
-  Math.max(1, ...trend.value.map((point) => point.tokens))
+
+const trendBars = computed<BarTrendItem[]>(() =>
+  trend.value.map((point) => ({
+    key: point.date,
+    label: point.date.slice(5),
+    total: point.tokens,
+    primary: point.byok_tokens,
+    meta: `${point.byok_tasks}/${point.tasks} 任务`,
+    testid: `byok-trend-row-${point.date}`,
+  })),
 );
+
+const costSegments = computed<DonutSegment[]>(() => {
+  const c = overview.value?.cost;
+  if (!c) return [];
+  const byok = Number(c.byok ?? 0);
+  const platform = Number(c.platform ?? 0);
+  if (!Number.isFinite(byok + platform) || byok + platform <= 0) return [];
+  return [
+    {
+      id: "byok",
+      label: "用户自费 (BYOK)",
+      value: byok,
+      color: "var(--primary)",
+      hint: formatUsd(c.byok),
+    },
+    {
+      id: "platform",
+      label: "平台承担",
+      value: platform,
+      color: "var(--muted-foreground)",
+      hint: formatUsd(c.platform),
+    },
+  ];
+});
 
 function percent(value: number | undefined): string {
   return `${((value ?? 0) * 100).toFixed(1)}%`;
@@ -68,15 +102,6 @@ function formatDate(value: string | null): string {
   if (!value) return "—";
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? "—" : parsed.toLocaleDateString("zh-CN");
-}
-
-function trendWidth(tokens: number): number {
-  return Math.max(2, Math.round((tokens / maxTrendTokens.value) * 100));
-}
-
-function byokWidth(point: { tokens: number; byok_tokens: number }): number {
-  if (point.tokens <= 0) return 0;
-  return Math.round((point.byok_tokens / point.tokens) * 100);
 }
 
 async function load(): Promise<void> {
@@ -146,7 +171,7 @@ onMounted(load);
 
     <div
       v-if="loading && !overview"
-      class="mt-3 flex items-center gap-2 rounded-2xl border border-border bg-card px-4 py-8 text-sm text-muted-foreground"
+      class="mt-3 flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-8 text-sm text-muted-foreground"
     >
       <RefreshCw :size="15" class="animate-spin motion-reduce:animate-none" aria-hidden="true" />
       正在统计…
@@ -194,7 +219,7 @@ onMounted(load);
       <!-- 凭据健康：接入不等于可用，invalid 要能看见 -->
       <div
         data-test="byok-credentials"
-        class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-2xl border border-border bg-card px-3 py-2 text-xs text-muted-foreground"
+        class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-lg border border-border bg-card px-3 py-2 text-xs text-muted-foreground"
       >
         <span class="inline-flex items-center gap-1 font-medium text-foreground">
           <ShieldCheck :size="13" aria-hidden="true" />
@@ -210,87 +235,83 @@ onMounted(load);
         </span>
       </div>
 
-      <!-- 成本估算：用户自费 vs 平台承担（公开标价，不是结算账单） -->
-      <div data-test="byok-cost" class="mt-3 grid gap-2 sm:grid-cols-3">
-        <StatCard
-          label="用户自费成本（估算）"
-          size="md"
-          :value="formatUsd(overview.cost.byok)"
-          value-testid="byok-cost-byok"
-          hint="BYOK 任务的等值成本"
-        />
-        <StatCard
-          label="平台承担成本（估算）"
-          size="md"
-          :value="formatUsd(overview.cost.platform)"
-          value-testid="byok-cost-platform"
-          hint="平台模型任务"
-        />
-        <StatCard
-          label="合计"
-          size="md"
-          :value="formatUsd(overview.cost.total)"
-          value-testid="byok-cost-total"
-        >
-          <template #hint>
-            <p
-              v-if="overview.cost.unpriced_byok_tokens + overview.cost.unpriced_platform_tokens > 0"
-              class="mt-0.5 text-[11px] text-warning"
-            >
-              有
-              {{
-                formatTokens(
-                  overview.cost.unpriced_byok_tokens + overview.cost.unpriced_platform_tokens,
-                )
-              }}
-              tokens 未收录单价
-            </p>
-            <p v-else class="mt-0.5 text-[11px] text-muted-foreground">USD · 公开标价估算</p>
-          </template>
-        </StatCard>
+      <!-- 成本估算与分摊环形图 -->
+      <div class="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-stretch">
+        <div data-test="byok-cost" class="grid gap-2 sm:grid-cols-3">
+          <StatCard
+            label="用户自费成本（估算）"
+            size="md"
+            :value="formatUsd(overview.cost.byok)"
+            value-testid="byok-cost-byok"
+            hint="BYOK 任务的等值成本"
+          />
+          <StatCard
+            label="平台承担成本（估算）"
+            size="md"
+            :value="formatUsd(overview.cost.platform)"
+            value-testid="byok-cost-platform"
+            hint="平台模型任务"
+          />
+          <StatCard
+            label="合计"
+            size="md"
+            :value="formatUsd(overview.cost.total)"
+            value-testid="byok-cost-total"
+          >
+            <template #hint>
+              <p
+                v-if="overview.cost.unpriced_byok_tokens + overview.cost.unpriced_platform_tokens > 0"
+                class="mt-0.5 text-[11px] text-warning"
+              >
+                有
+                {{
+                  formatTokens(
+                    overview.cost.unpriced_byok_tokens + overview.cost.unpriced_platform_tokens,
+                  )
+                }}
+                tokens 未收录单价
+              </p>
+              <p v-else class="mt-0.5 text-[11px] text-muted-foreground">USD · 公开标价估算</p>
+            </template>
+          </StatCard>
+        </div>
+
+        <Card v-if="costSegments.length" size="compact" class="justify-center px-3.5 py-2.5">
+          <DonutChart
+            :segments="costSegments"
+            :center-value="formatUsd(overview.cost.total)"
+            center-label="估算总成本"
+            :size="108"
+            :stroke-width="12"
+          />
+        </Card>
       </div>
       <p class="mt-1 text-[11px] text-muted-foreground">
         按厂商公开标价估算，不含折扣、缓存命中与批处理优惠；平台任务按默认模型估算。
       </p>
 
       <div class="mt-4 grid gap-4 lg:grid-cols-2">
-        <!-- 趋势：最近 14 天。外层宽度=总量，内层深色=BYOK 部分 -->
-        <Card class="rounded-3xl">
+        <!-- 趋势：最近 14 天 SVG 堆叠柱状图 -->
+        <Card class="rounded-lg">
           <CardHeader>
             <CardTitle class="flex items-baseline justify-between gap-2 text-base">
               <span>最近 14 天趋势</span>
               <span class="text-xs font-normal text-muted-foreground">按 token</span>
             </CardTitle>
           </CardHeader>
-          <CardContent class="space-y-2">
-            <div
-              v-for="point in trend"
-              :key="point.date"
-              :data-test="`byok-trend-row-${point.date}`"
-              class="grid grid-cols-[4.2rem_1fr_5.5rem] items-center gap-2 text-xs"
-            >
-              <span class="tabular-nums text-muted-foreground">{{ point.date.slice(5) }}</span>
-              <div class="h-2 w-full rounded-full bg-muted">
-                <div
-                  class="h-full rounded-full bg-primary/25"
-                  :style="{ width: `${trendWidth(point.tokens)}%` }"
-                  :title="`总量 ${formatTokens(point.tokens)} tokens`"
-                >
-                  <div
-                    class="h-full rounded-full bg-primary"
-                    :style="{ width: `${byokWidth(point)}%` }"
-                  />
-                </div>
-              </div>
-              <span class="text-right tabular-nums text-muted-foreground">
-                {{ point.byok_tasks }}/{{ point.tasks }} 任务
-              </span>
-            </div>
+          <CardContent>
+            <BarTrendChart
+              v-if="trendBars.length"
+              :items="trendBars"
+              total-label="总 Token"
+              primary-label="BYOK Token"
+            />
+            <p v-else class="text-sm text-muted-foreground">暂无趋势数据。</p>
           </CardContent>
         </Card>
 
         <!-- 厂商分布：只统计 BYOK 任务 -->
-        <Card class="rounded-3xl">
+        <Card class="rounded-lg">
           <CardHeader>
             <CardTitle class="text-base">BYOK 厂商 / 模型</CardTitle>
           </CardHeader>
@@ -335,7 +356,7 @@ onMounted(load);
       </div>
 
       <!-- 配了但没用：推动切换的靶子名单（全站历史口径） -->
-      <Card class="mt-4 rounded-3xl" data-test="byok-dormant">
+      <Card class="mt-4 rounded-lg" data-test="byok-dormant">
         <CardHeader>
           <CardTitle class="flex flex-wrap items-baseline justify-between gap-2 text-base">
             <span class="flex items-center gap-2">
@@ -395,7 +416,7 @@ onMounted(load);
       </Card>
 
       <!-- Top 用户：按 BYOK token 排序，没有 BYOK 的用户不在表里 -->
-      <Card class="mt-4 rounded-3xl">
+      <Card class="mt-4 rounded-lg">
         <CardHeader>
           <CardTitle class="flex items-baseline justify-between gap-2 text-base">
             <span>BYOK Top 用户</span>

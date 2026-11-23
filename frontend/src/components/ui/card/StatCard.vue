@@ -31,7 +31,7 @@ const props = withDefaults(
 </script>
 
 <template>
-  <div :class="cn('rounded-2xl border border-border bg-card px-3 py-2.5', props.class)">
+  <div :class="cn('rounded-lg border border-border bg-card px-3 py-2.5', props.class)">
     <p class="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
       <slot name="label">{{ props.label }}</slot>
     </p>

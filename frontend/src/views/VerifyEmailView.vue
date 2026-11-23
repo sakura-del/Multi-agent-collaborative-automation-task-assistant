@@ -70,9 +70,9 @@ async function handleRequest() {
 </script>
 
 <template>
-  <section class="mx-auto mt-10 w-full max-w-md rounded-xl border border-border bg-card p-5 shadow-xs sm:p-7">
+  <section class="mx-auto mt-10 w-full max-w-md rounded-lg border border-border bg-card p-5 sm:p-6">
     <header class="mb-4">
-      <h1 class="font-display text-2xl font-medium tracking-[-0.025em]">邮箱验证</h1>
+      <h1 class="text-lg font-semibold tracking-tight">邮箱验证</h1>
       <p class="mt-0.5 text-sm text-muted-foreground">
         验证邮箱后即可完整使用账号功能。邮件里的链接有效期 24 小时，过期可重新发送。
       </p>

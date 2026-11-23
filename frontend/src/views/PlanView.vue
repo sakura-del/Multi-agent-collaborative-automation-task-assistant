@@ -32,6 +32,7 @@
  */
 import { computed, onMounted, ref } from "vue";
 import { ArrowUpRight, Check, Download, Loader2, X } from "lucide-vue-next";
+import DonutChart, { type DonutSegment } from "@/components/charts/DonutChart.vue";
 import PageHeader from "@/components/common/PageHeader.vue";
 
 import {
@@ -215,6 +216,27 @@ function formatPrice(cents: number | undefined): string {
   return Number.isInteger(yuan) ? `¥${yuan}` : `¥${yuan.toFixed(2)}`;
 }
 
+const modelUsageSegments = computed<DonutSegment[]>(() => {
+  const m = modelUsage.value;
+  if (!m || m.platform.tokens + m.byok.tokens <= 0) return [];
+  return [
+    {
+      id: "platform",
+      label: "平台模型",
+      value: m.platform.tokens,
+      color: "var(--primary)",
+      hint: `${formatTokens(m.platform.tokens)} (${platformPercent.value}%)`,
+    },
+    {
+      id: "byok",
+      label: "我的模型",
+      value: m.byok.tokens,
+      color: "var(--success)",
+      hint: `${formatTokens(m.byok.tokens)} (${byokPercent.value}%)`,
+    },
+  ];
+});
+
 function formatReviews(reviews: number): string {
   return reviews === UNLIMITED ? "不限" : `${reviews} 篇/月`;
 }
@@ -304,7 +326,7 @@ onMounted(load);
 
     <template v-else>
       <!-- 当前套餐：名字 + 月费 + 用量 + **权益** + 到期日 -->
-      <Card v-if="usage" class="rounded-3xl" data-test="plan-current">
+      <Card v-if="usage" class="rounded-lg" data-test="plan-current">
         <CardHeader>
           <CardTitle class="flex flex-wrap items-center gap-2 text-base">
             <span>{{ usage.plan_name }}</span>
@@ -420,7 +442,7 @@ onMounted(load);
       />
 
       <!-- 模型用量分账（Issue #15 P2）：平台模型 vs 自带模型 -->
-      <Card v-if="usage && modelUsage" class="rounded-3xl" data-test="plan-model-usage">
+      <Card v-if="usage && modelUsage" class="rounded-lg" data-test="plan-model-usage">
         <CardHeader>
           <CardTitle class="flex flex-wrap items-baseline justify-between gap-2 text-base">
             <span>模型用量（本月）</span>
@@ -484,6 +506,16 @@ onMounted(load);
             />
           </div>
 
+          <DonutChart
+            v-if="modelUsageSegments.length"
+            class="border-t border-border pt-3"
+            :segments="modelUsageSegments"
+            :center-value="formatTokens(modelTotalTokens)"
+            center-label="本月总 Token"
+            :size="112"
+            :stroke-width="12"
+          />
+
           <p class="text-xs text-muted-foreground">
             合计 {{ formatTokens(modelTotalTokens) }} tokens / {{ modelUsage.total.tasks }}
             个任务。自带模型的消耗不占平台 token 配额。
@@ -492,7 +524,7 @@ onMounted(load);
       </Card>
 
       <!-- 按模型单价估算成本（Issue #15 P2）：估算值，不是结算账单 -->
-      <Card v-if="cost" class="rounded-3xl" data-test="plan-model-cost">
+      <Card v-if="cost" class="rounded-lg" data-test="plan-model-cost">
         <CardHeader>
           <CardTitle class="flex flex-wrap items-baseline justify-between gap-2 text-base">
             <span class="flex items-center gap-2">

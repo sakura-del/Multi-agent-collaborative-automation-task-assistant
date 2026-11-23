@@ -1,117 +1,119 @@
 /* ============================================================
-   全局样式：设计 tokens（beUI 视觉语言 · Tailwind v4）
+   全局样式：设计 tokens（Linear / Notion 极简风 · Tailwind v4）
    ------------------------------------------------------------
    规则（见 AGENTS.md §6.5）：
    - 本文件只定义 tokens 与极小量的全局基础样式；
    - 业务样式一律用 Tailwind 原子类，**不要**在这里加新类；
    - 颜色用 oklch（Tailwind v4 原生支持），便于统一明度/彩度。
-
-   设计语言参考 https://asharca.github.io/ui/（beUI，同为 Tailwind 4 + shadcn）。
-   取它的**视觉语言**而非其代码（它是 React + Framer Motion；
-   本项目是 Vue，动效统一走 motion-v，见 AGENTS.md §6.5.2）。
-
-   beUI 的三个关键特征（也是与旧 Nova 预设的主要差异）：
-   1. **6% 发丝边框**——不是实色灰线，而是极低不透明度；这是它最鲜明的辨识点；
-   2. **卡片比底色略亮**——反常规（通常卡片更白），产生极微妙的层次而不靠阴影；
-   3. **高对比文字 + 低对比线条**——用文字层级而非线条层级组织信息。
    ============================================================ */
 
 @import "tailwindcss";
 
-/* 深色模式基于 class（不用 media），便于将来做主题切换 */
+/* 深色模式基于 class（支持浅色 / 深色 / 跟随系统手动切换） */
 @custom-variant dark (&:is(.dark *));
 
 /* ============================================================
-   设计 tokens
-   工作台是读文献写综述的地方：安静、克制、信息密度优先。
+   设计 tokens（Linear / Notion 极简工作台）
+   克制中性灰阶 + 1px 微边框 + 紧凑微圆角 + 高对比文本
    ============================================================ */
 :root {
-  --radius: 0.625rem; /* 10px：工作台保持紧凑，标题与正文用衬线建立编辑气质 */
+  --radius: 0.5rem; /* 8px：Linear/Notion 紧凑微圆角 */
   --font-family-display: "Noto Serif SC", "Source Han Serif SC", "Songti SC", STSong, SimSun, serif;
 
-  /* 纯白底 + 墨色文字；卡片与底同色，靠发丝边框分层（beUI 浅色做法）。 */
+  /* 浅色画布（Notion 风）：主画布纯白 + 侧栏微暖灰，靠 1px 细线分层 */
   --background: oklch(1 0 0);
-  --foreground: oklch(0.21 0 0);
+  --foreground: oklch(0.175 0.004 260);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.21 0 0);
+  --card-foreground: oklch(0.175 0.004 260);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.21 0 0);
+  --popover-foreground: oklch(0.175 0.004 260);
+
+  /* 侧栏专用底色 */
+  --sidebar: oklch(0.974 0.002 90);
+  --sidebar-foreground: oklch(0.32 0.005 260);
+  --sidebar-border: oklch(0 0 0 / 7%);
+  --sidebar-accent: oklch(0.935 0.003 90);
+  --sidebar-accent-foreground: oklch(0.175 0.004 260);
 
   /* 次要/弱化 */
-  --muted: oklch(0.965 0 0);
-  --muted-foreground: oklch(0.46 0 0);
+  --muted: oklch(0.965 0.002 90);
+  --muted-foreground: oklch(0.47 0.006 260);
 
-  /* 唯一品牌强调：钴蓝；状态色仍只表达语义，不与品牌色混用。 */
-  --primary: oklch(0.55 0.22 266);
+  /* 克制单一点缀色：Linear 专业靛蓝 */
+  --primary: oklch(0.51 0.165 262);
   --primary-foreground: oklch(0.99 0 0);
 
   /* 次要按钮 */
-  --secondary: oklch(0.968 0 0);
-  --secondary-foreground: oklch(0.21 0 0);
+  --secondary: oklch(0.965 0.002 90);
+  --secondary-foreground: oklch(0.2 0.004 260);
 
-  /* 强调（选中态/当前项底色）：与品牌同色相的浅青灰 */
-  --accent: oklch(0.945 0.035 266);
-  --accent-foreground: oklch(0.44 0.19 266);
+  /* 选中态/当前项底色 */
+  --accent: oklch(0.945 0.015 262);
+  --accent-foreground: oklch(0.41 0.14 262);
 
   /* 危险/错误 */
-  --destructive: oklch(0.48 0.19 27.325);
-  --destructive-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.52 0.19 25);
+  --destructive-foreground: oklch(0.99 0 0);
 
-  /* 边框与输入：中性墨色发丝线 */
-  --border: oklch(0.21 0 0 / 12%);
-  --input: oklch(0.21 0 0 / 15%);
-  --ring: oklch(0.55 0.22 266);
+  /* 1px 极细边框 */
+  --border: oklch(0 0 0 / 8%);
+  --input: oklch(0 0 0 / 12%);
+  --ring: oklch(0.51 0.165 262);
+  --border-strong: oklch(0 0 0 / 14%);
 
-  /* 需要明确分割时用（表格外框、模态边界）；日常用 --border */
-  --border-strong: oklch(0.21 0 0 / 18%);
-
-  /* 语义状态（beUI 药丸徽标：淡底 + 同色文字） */
-  --success: oklch(0.46 0.12 155);
+  /* 语义状态 */
+  --success: oklch(0.48 0.13 155);
   --success-foreground: oklch(0.99 0 0);
-  --warning: oklch(0.47 0.12 70);
+  --warning: oklch(0.52 0.13 70);
   --warning-foreground: oklch(0.99 0 0);
 
-  /* 层次阴影：只在"浮起"的层用（弹层/下拉），卡片不用阴影 */
-  --shadow-raised: 0 1px 2px oklch(0.15 0 0 / 4%), 0 4px 12px oklch(0.15 0 0 / 6%);
+  /* 层次阴影：仅用于弹层/命令面板，卡片保持扁平无阴影 */
+  --shadow-raised: 0 2px 6px oklch(0 0 0 / 6%), 0 10px 28px oklch(0 0 0 / 8%);
 
-  /* 品牌面板底色：登录页左栏等"要区别于工作区"的大面积区域。
-     极浅的蓝调中性色 —— 只够形成分区，不抢内容注意力。 */
-  --surface-brand: oklch(0.975 0 0);
+  /* 登录页品牌面板底色 */
+  --surface-brand: oklch(0.974 0.002 90);
 }
 
 .dark {
-  --background: oklch(0.16 0 0);
-  --foreground: oklch(0.96 0 0);
-  --card: oklch(0.205 0 0); /* 深色下反过来：卡片略亮于底 */
-  --card-foreground: oklch(0.96 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.96 0 0);
-  --muted: oklch(0.24 0 0);
-  --muted-foreground: oklch(0.62 0 0);
-  --primary: oklch(0.7 0.16 266);
-  --primary-foreground: oklch(0.16 0 0);
-  --secondary: oklch(0.24 0 0);
-  --secondary-foreground: oklch(0.96 0 0);
-  --accent: oklch(0.3 0.06 266);
-  --accent-foreground: oklch(0.86 0.08 266);
-  --destructive: oklch(0.65 0.22 27.325);
+  --background: oklch(0.145 0.004 260);
+  --foreground: oklch(0.945 0.002 260);
+  --card: oklch(0.18 0.004 260);
+  --card-foreground: oklch(0.945 0.002 260);
+  --popover: oklch(0.195 0.005 260);
+  --popover-foreground: oklch(0.945 0.002 260);
+
+  --sidebar: oklch(0.125 0.004 260);
+  --sidebar-foreground: oklch(0.76 0.006 260);
+  --sidebar-border: oklch(1 0 0 / 8%);
+  --sidebar-accent: oklch(0.205 0.005 260);
+  --sidebar-accent-foreground: oklch(0.96 0.002 260);
+
+  --muted: oklch(0.22 0.005 260);
+  --muted-foreground: oklch(0.64 0.008 260);
+  --primary: oklch(0.65 0.16 262);
+  --primary-foreground: oklch(0.145 0.004 260);
+  --secondary: oklch(0.22 0.005 260);
+  --secondary-foreground: oklch(0.945 0.002 260);
+  --accent: oklch(0.26 0.03 262);
+  --accent-foreground: oklch(0.84 0.08 262);
+  --destructive: oklch(0.64 0.2 25);
   --destructive-foreground: oklch(0.985 0 0);
-  /* 深色下边框要略亮（beUI 深色用的是白 5%） */
-  --border: oklch(1 0 0 / 6%);
-  --input: oklch(1 0 0 / 10%);
-  --ring: oklch(0.72 0.15 266);
-  --border-strong: oklch(1 0 0 / 12%);
+
+  --border: oklch(1 0 0 / 8%);
+  --input: oklch(1 0 0 / 12%);
+  --ring: oklch(0.65 0.16 262);
+  --border-strong: oklch(1 0 0 / 14%);
+
   --success: oklch(0.68 0.14 155);
-  --success-foreground: oklch(0.16 0 0);
-  --warning: oklch(0.75 0.14 70);
-  --warning-foreground: oklch(0.16 0 0);
-  --shadow-raised: 0 1px 2px oklch(0 0 0 / 30%), 0 4px 12px oklch(0 0 0 / 40%);
-  --surface-brand: oklch(0.2 0 0);
+  --success-foreground: oklch(0.145 0.004 260);
+  --warning: oklch(0.74 0.14 70);
+  --warning-foreground: oklch(0.145 0.004 260);
+  --shadow-raised: 0 4px 12px oklch(0 0 0 / 40%), 0 16px 36px oklch(0 0 0 / 50%);
+  --surface-brand: oklch(0.125 0.004 260);
 }
 
 /* ============================================================
    把 tokens 映射成 Tailwind 的 @theme（v4 写法）
-   → 这样可以用 bg-background / text-foreground / border-border 等语义类
    ============================================================ */
 @theme inline {
   --font-display: var(--font-family-display);
@@ -121,6 +123,11 @@
   --color-card-foreground: var(--card-foreground);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
   --color-primary: var(--primary);
@@ -140,13 +147,13 @@
   --color-warning: var(--warning);
   --color-warning-foreground: var(--warning-foreground);
 
-  /* 圆角：统一派生，避免各处写不同值 */
+  /* 圆角：Linear/Notion 紧凑微圆角体系 */
   --radius-sm: calc(var(--radius) - 0.25rem);
   --radius-md: calc(var(--radius) - 0.125rem);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 0.25rem);
 
-  /* 阴影：只暴露"浮起"这一档，避免各处随手写 */
+  /* 阴影：只暴露"浮起"这一档 */
   --shadow-raised: var(--shadow-raised);
 
   /* 品牌面板底色（登录页左栏） */

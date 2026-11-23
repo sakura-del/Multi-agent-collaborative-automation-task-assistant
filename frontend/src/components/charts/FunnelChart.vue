@@ -114,7 +114,7 @@ const summary = computed(() =>
 </script>
 
 <template>
-  <div :class="cn('relative isolate overflow-hidden rounded-2xl bg-muted/70 p-3', props.class)">
+  <div :class="cn('relative isolate overflow-hidden rounded-lg border border-border bg-muted/40 p-3', props.class)">
     <!-- 点阵底：给漏斗一个落点，纯白卡里直接放图形会显得飘 -->
     <div
       aria-hidden="true"

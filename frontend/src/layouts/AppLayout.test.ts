@@ -196,5 +196,36 @@ describe("AppLayout 侧栏折叠", () => {
   });
 });
 
+describe("Linear / Notion 顶栏与命令面板", () => {
+  it("展示顶栏面包屑与主题切换按钮，点击可切换 dark 类", async () => {
+    document.documentElement.classList.remove("dark");
+    localStorage.clear();
+    const wrapper = await mountLayout();
+
+    const breadcrumb = wrapper.get('nav[aria-label="面包屑"]');
+    expect(breadcrumb.text()).toContain("研究任务");
+
+    const toggle = wrapper.get('[data-test="theme-toggle"]');
+    await toggle.trigger("click");
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
+    expect(localStorage.getItem("vp:theme")).toBe("dark");
+
+    await toggle.trigger("click");
+    expect(document.documentElement.classList.contains("dark")).toBe(false);
+    expect(localStorage.getItem("vp:theme")).toBe("light");
+  });
+
+  it("点击顶栏命令按钮可打开命令面板（Teleport 到 body）", async () => {
+    const wrapper = await mountLayout();
+    await wrapper.get('[data-test="open-command-palette"]').trigger("click");
+    await flushPromises();
+
+    const dialog = document.body.querySelector('[data-test="command-palette"]');
+    expect(dialog).not.toBeNull();
+    expect(dialog?.textContent).toContain("知识库");
+    wrapper.unmount();
+  });
+});
+
 // 避免未使用告警（vi 在 watch 版断言时会用到）
 void vi;

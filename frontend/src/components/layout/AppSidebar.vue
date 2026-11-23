@@ -12,6 +12,7 @@ import {
   LogOut,
   PanelLeftClose,
   PanelLeftOpen,
+  Search,
   X,
 } from "lucide-vue-next";
 
@@ -32,6 +33,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (event: "update:collapsed", value: boolean): void;
   (event: "update:mobileOpen", value: boolean): void;
+  (event: "openCommand"): void;
   (event: "logout"): void;
 }>();
 
@@ -122,83 +124,103 @@ function onSheetKeydown(event: KeyboardEvent) {
   }
 }
 
-const width = computed(() => (props.collapsed ? "4.25rem" : "16rem"));
+const width = computed(() => (props.collapsed ? "3.75rem" : "14.5rem"));
 </script>
 
 <template>
-  <!-- 桌面侧栏 -->
+  <!-- 桌面侧栏（Linear / Notion 极简侧栏） -->
   <Motion
     as="aside"
     :initial="false"
-    :animate="{ width: reduced ? (props.collapsed ? '4.25rem' : '16rem') : width }"
+    :animate="{ width: reduced ? (props.collapsed ? '3.75rem' : '14.5rem') : width }"
     :transition="reduced ? { duration: 0 } : SPRING_MORPH"
-    class="sticky top-0 hidden h-svh shrink-0 flex-col overflow-hidden border-r border-border bg-card md:flex"
+    class="sticky top-0 hidden h-svh shrink-0 flex-col overflow-hidden border-r border-sidebar-border bg-sidebar text-sidebar-foreground md:flex"
     :data-state="props.collapsed ? 'collapsed' : 'expanded'"
     data-test="app-sidebar"
   >
-    <!-- 品牌头：折叠态 logo 即展开按钮（悬停浮现展开图标，仿 ChatGPT / Gemini） -->
-    <div data-test="nav-brand" class="flex min-h-16 items-center gap-2.5 px-3">
+    <!-- 品牌头：h-11 与 TopBar 等高对齐 -->
+    <div data-test="nav-brand" class="flex h-11 shrink-0 items-center gap-2 border-b border-sidebar-border px-3">
       <button
         v-if="props.collapsed"
         type="button"
         data-test="nav-expand"
         aria-label="展开侧栏"
         title="展开侧栏"
-        class="group/brand relative size-8 shrink-0 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        class="group/brand relative mx-auto size-7 shrink-0 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring"
         @click="emit('update:collapsed', false)"
       >
         <img
           src="/logo.svg"
           alt=""
           aria-hidden="true"
-          class="size-8 transition-opacity duration-150 group-hover/brand:opacity-0 group-focus-visible/brand:opacity-0"
+          class="size-7 transition-opacity duration-150 group-hover/brand:opacity-0 group-focus-visible/brand:opacity-0"
         />
         <span
-          class="absolute inset-0 grid place-items-center rounded-lg text-muted-foreground opacity-0 transition-opacity duration-150 group-hover/brand:bg-muted group-hover/brand:opacity-100 group-focus-visible/brand:bg-muted group-focus-visible/brand:opacity-100"
+          class="absolute inset-0 grid place-items-center rounded-md text-muted-foreground opacity-0 transition-opacity duration-150 group-hover/brand:bg-sidebar-accent group-hover/brand:opacity-100 group-focus-visible/brand:bg-sidebar-accent group-focus-visible/brand:opacity-100"
         >
-          <PanelLeftOpen :size="16" aria-hidden="true" />
+          <PanelLeftOpen :size="15" aria-hidden="true" />
         </span>
       </button>
-      <img v-else src="/logo.svg" alt="" aria-hidden="true" class="size-8 shrink-0" />
+      <img v-else src="/logo.svg" alt="" aria-hidden="true" class="size-6 shrink-0" />
       <div
-        class="min-w-0 flex-1 overflow-hidden transition-opacity duration-200"
-        :class="props.collapsed ? 'pointer-events-none opacity-0' : 'opacity-100'"
+        v-if="!props.collapsed"
+        class="min-w-0 flex-1 overflow-hidden"
       >
-        <p class="truncate text-sm font-semibold tracking-tight">VeriPaper</p>
-        <p class="truncate text-[8px] tracking-[0.16em] text-muted-foreground">
-          EVIDENCE-LED WRITING
-        </p>
+        <p class="truncate text-[13px] font-semibold tracking-tight text-foreground">VeriPaper</p>
       </div>
       <button
         v-if="!props.collapsed"
         type="button"
         data-test="nav-collapse"
         aria-label="收起侧栏"
-        title="收起侧栏"
-        class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        title="收起侧栏 (⌘B)"
+        class="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
         @click="emit('update:collapsed', true)"
       >
-        <PanelLeftClose :size="15" aria-hidden="true" />
+        <PanelLeftClose :size="14" aria-hidden="true" />
+      </button>
+    </div>
+
+    <!-- 快速搜索触发条 -->
+    <div class="px-2 pt-2.5 pb-1">
+      <button
+        type="button"
+        aria-label="快速跳转或搜索命令"
+        :title="props.collapsed ? '命令面板 (⌘K)' : undefined"
+        class="flex h-7 w-full items-center gap-2 rounded-md border border-sidebar-border bg-background/70 px-2 text-xs text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+        :class="props.collapsed ? 'justify-center px-0' : 'justify-between'"
+        @click="emit('openCommand')"
+      >
+        <span class="flex min-w-0 items-center gap-1.5">
+          <Search :size="12" aria-hidden="true" class="shrink-0" />
+          <span v-if="!props.collapsed" class="truncate">快速跳转…</span>
+        </span>
+        <kbd
+          v-if="!props.collapsed"
+          class="shrink-0 font-mono text-[10px] text-muted-foreground/80"
+        >
+          ⌘K
+        </kbd>
       </button>
     </div>
 
     <!-- 菜单 -->
-    <nav class="app-nav__links flex min-w-0 flex-1 flex-col gap-1 overflow-x-hidden overflow-y-auto px-2 py-2" aria-label="主导航">
+    <nav class="app-nav__links flex min-w-0 flex-1 flex-col gap-0.5 overflow-x-hidden overflow-y-auto px-2 py-2" aria-label="主导航">
       <RouterLink
         v-for="item in props.leaves"
         :key="item.name"
         :to="{ name: item.name }"
         :data-test="`nav-${item.name}`"
         :title="props.collapsed ? item.label : undefined"
-        class="relative flex min-h-9 w-full items-center gap-2.5 overflow-hidden rounded-xl px-3 text-left text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring"
+        class="relative flex min-h-8 w-full items-center gap-2.5 overflow-hidden rounded-md px-2.5 text-left text-[13px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring"
         :class="
           props.current === item.name
-            ? 'bg-accent text-accent-foreground'
-            : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+            ? 'bg-sidebar-accent font-medium text-sidebar-accent-foreground'
+            : 'text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground'
         "
         @click="closeMobileIfOpen"
       >
-        <component :is="item.icon" :size="16" aria-hidden="true" class="shrink-0" />
+        <component :is="item.icon" :size="15" aria-hidden="true" class="shrink-0" />
         <span
           class="truncate whitespace-nowrap transition-all duration-200"
           :class="props.collapsed ? 'pointer-events-none max-w-0 opacity-0' : 'max-w-full opacity-100'"
@@ -209,22 +231,22 @@ const width = computed(() => (props.collapsed ? "4.25rem" : "16rem"));
       <div
         v-for="group in props.groups"
         :key="group.label"
-        class="min-w-0"
+        class="mt-1 min-w-0"
         :data-test="`nav-group-${group.label}`"
       >
         <button
           type="button"
           :aria-expanded="!props.collapsed && openGroup === group.label"
           :title="props.collapsed ? group.label : undefined"
-          class="relative flex min-h-9 w-full items-center gap-2.5 overflow-hidden rounded-xl px-3 text-left text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring"
+          class="relative flex min-h-8 w-full items-center gap-2.5 overflow-hidden rounded-md px-2.5 text-left text-[13px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring"
           :class="
             currentInGroup(group)
               ? 'text-foreground'
-              : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+              : 'text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground'
           "
           @click="toggleGroup(group)"
         >
-          <component :is="group.icon" :size="16" aria-hidden="true" class="shrink-0" />
+          <component :is="group.icon" :size="15" aria-hidden="true" class="shrink-0" />
           <span
             class="flex-1 truncate whitespace-nowrap transition-all duration-200"
             :class="props.collapsed ? 'pointer-events-none max-w-0 opacity-0' : 'max-w-full opacity-100'"
@@ -234,10 +256,10 @@ const width = computed(() => (props.collapsed ? "4.25rem" : "16rem"));
             v-if="!props.collapsed"
             as="span"
             :animate="{ rotate: openGroup === group.label ? 90 : 0 }"
-            :transition="reduced ? { duration: 0 } : { duration: 0.18 }"
+            :transition="reduced ? { duration: 0 } : { duration: 0.15 }"
             class="shrink-0 text-muted-foreground"
           >
-            <ChevronRight :size="13" aria-hidden="true" />
+            <ChevronRight :size="12" aria-hidden="true" />
           </Motion>
         </button>
 
@@ -245,29 +267,29 @@ const width = computed(() => (props.collapsed ? "4.25rem" : "16rem"));
           <Motion
             v-if="!props.collapsed && openGroup === group.label"
             as="ul"
-            :initial="{ opacity: 0, clipPath: 'inset(0 0 100% 0 round 8px)' }"
-            :animate="{ opacity: 1, clipPath: 'inset(0 0 0% 0 round 8px)' }"
-            :exit="{ opacity: 0, clipPath: 'inset(0 0 100% 0 round 8px)' }"
-            :transition="{ duration: reduced ? 0.12 : 0.2 }"
-            class="mt-1 ml-5 flex flex-col gap-0.5 border-l border-border pl-3"
+            :initial="{ opacity: 0, clipPath: 'inset(0 0 100% 0 round 6px)' }"
+            :animate="{ opacity: 1, clipPath: 'inset(0 0 0% 0 round 6px)' }"
+            :exit="{ opacity: 0, clipPath: 'inset(0 0 100% 0 round 6px)' }"
+            :transition="{ duration: reduced ? 0.1 : 0.16 }"
+            class="mt-0.5 ml-4 flex flex-col gap-0.5 border-l border-sidebar-border pl-2.5"
           >
             <Motion
               v-for="(item, index) in group.items"
               :key="item.name"
               as="li"
-              :initial="{ opacity: 0, y: -6 }"
+              :initial="{ opacity: 0, y: -4 }"
               :animate="{ opacity: 1, y: 0 }"
-              :exit="{ opacity: 0, y: -6 }"
-              :transition="{ duration: 0.18, delay: reduced ? 0 : index * 0.035 }"
+              :exit="{ opacity: 0, y: -4 }"
+              :transition="{ duration: 0.14, delay: reduced ? 0 : index * 0.025 }"
             >
               <RouterLink
                 :to="{ name: item.name }"
                 :data-test="`nav-${item.name}`"
-                class="flex min-h-8 w-full items-center gap-2 overflow-hidden rounded-lg px-2 text-left text-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring"
+                class="flex min-h-7 w-full items-center gap-2 overflow-hidden rounded-md px-2 text-left text-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring"
                 :class="
                   props.current === item.name
-                    ? 'bg-muted/70 font-medium text-foreground'
-                    : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+                    ? 'bg-sidebar-accent font-medium text-sidebar-accent-foreground'
+                    : 'text-sidebar-foreground/85 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground'
                 "
                 @click="closeMobileIfOpen"
               >
@@ -280,10 +302,10 @@ const width = computed(() => (props.collapsed ? "4.25rem" : "16rem"));
       </div>
     </nav>
 
-    <!-- 用户尾：折叠态只留头像（与图标列同一中线），避免登出按钮被挤出侧栏 -->
+    <!-- 用户尾 -->
     <div
-      class="flex items-center gap-2 border-t border-border py-3"
-      :class="props.collapsed ? 'px-3' : 'px-2'"
+      class="flex items-center gap-2 border-t border-sidebar-border py-2.5"
+      :class="props.collapsed ? 'justify-center px-2' : 'px-2.5'"
     >
       <button
         v-if="props.collapsed"
@@ -291,14 +313,14 @@ const width = computed(() => (props.collapsed ? "4.25rem" : "16rem"));
         data-test="nav-avatar"
         :aria-label="`${props.username} · 展开侧栏`"
         :title="`${props.username} · 展开侧栏`"
-        class="grid size-8 shrink-0 place-items-center rounded-full bg-foreground font-display text-xs text-background outline-none transition-transform hover:scale-105 focus-visible:ring-2 focus-visible:ring-ring"
+        class="grid size-7 shrink-0 place-items-center rounded-md bg-foreground text-xs font-medium text-background outline-none focus-visible:ring-2 focus-visible:ring-ring"
         @click="emit('update:collapsed', false)"
       >
         {{ props.username.slice(0, 1) || "V" }}
       </button>
       <span
         v-else
-        class="grid size-8 shrink-0 place-items-center rounded-full bg-foreground font-display text-xs text-background"
+        class="grid size-7 shrink-0 place-items-center rounded-md bg-foreground text-xs font-medium text-background"
         aria-hidden="true"
       >
         {{ props.username.slice(0, 1) || "V" }}
@@ -307,7 +329,7 @@ const width = computed(() => (props.collapsed ? "4.25rem" : "16rem"));
         v-if="!props.collapsed"
         class="min-w-0 flex-1 overflow-hidden"
       >
-        <p class="truncate text-xs font-medium" :title="props.email">{{ props.username }}</p>
+        <p class="truncate text-xs font-medium text-foreground" :title="props.email">{{ props.username }}</p>
         <p class="truncate text-[10px] text-muted-foreground" :title="props.email">{{ props.email }}</p>
       </div>
       <button
@@ -315,10 +337,10 @@ const width = computed(() => (props.collapsed ? "4.25rem" : "16rem"));
         type="button"
         aria-label="退出登录"
         title="退出登录"
-        class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        class="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
         @click="emit('logout')"
       >
-        <LogOut :size="14" aria-hidden="true" />
+        <LogOut :size="13" aria-hidden="true" />
       </button>
     </div>
 

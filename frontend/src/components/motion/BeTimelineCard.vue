@@ -50,7 +50,7 @@ const veilOpacity = useTransform(offset, (o) => SIDE_DIM * Math.min(Math.abs(o),
     }"
   >
     <div class="relative -translate-y-1/2">
-      <div class="relative overflow-hidden rounded-3xl border border-border bg-card">
+      <div class="relative overflow-hidden rounded-lg border border-border bg-card">
         <div class="px-3.5 pt-3 pb-2">
           <p class="text-xs tabular-nums text-muted-foreground">{{ props.dateLabel }}</p>
           <h3 class="truncate text-base font-medium tracking-tight text-foreground">
@@ -58,7 +58,7 @@ const veilOpacity = useTransform(offset, (o) => SIDE_DIM * Math.min(Math.abs(o),
           </h3>
         </div>
         <div class="px-2">
-          <div class="aspect-[16/10] overflow-hidden rounded-2xl border border-border bg-background">
+          <div class="aspect-[16/10] overflow-hidden rounded-md border border-border bg-background">
             <slot name="media" />
           </div>
         </div>
@@ -75,7 +75,7 @@ const veilOpacity = useTransform(offset, (o) => SIDE_DIM * Math.min(Math.abs(o),
       </div>
       <button
         type="button"
-        class="absolute inset-0 cursor-pointer rounded-3xl outline-none focus-visible:ring-2 focus-visible:ring-foreground"
+        class="absolute inset-0 cursor-pointer rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-foreground"
         :tabindex="props.active ? 0 : -1"
         :aria-current="props.active ? 'step' : undefined"
         :aria-label="`${props.dateLabel} ${props.event.title}`"

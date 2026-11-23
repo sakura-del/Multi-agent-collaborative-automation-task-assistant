@@ -52,8 +52,8 @@ const VARIANT_CLASS: Record<CardVariant, string> = {
 };
 
 const ROOT_SIZE_CLASS: Record<CardSize, string> = {
-  default: "gap-5 py-5",
-  compact: "gap-4 py-4",
+  default: "gap-4 py-4",
+  compact: "gap-3 py-3",
 };
 
 const tag = computed(() => props.as);
@@ -67,13 +67,13 @@ provide(CARD_SIZE_KEY, computed(() => props.size));
 
 const classes = computed(() =>
   cn(
-    "relative flex flex-col rounded-2xl border text-card-foreground",
+    "relative flex flex-col rounded-lg border text-card-foreground",
     // 只过渡这三个属性：transform 交给 motion，避免和按压动画打架
-    "transition-[border-color,box-shadow,background-color] duration-200",
+    "transition-[border-color,box-shadow,background-color] duration-150",
     VARIANT_CLASS[props.variant],
     ROOT_SIZE_CLASS[props.size],
     props.interactive &&
-      "cursor-pointer hover:border-border-strong has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-foreground",
+      "cursor-pointer hover:border-border-strong hover:bg-muted/35 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-foreground",
     props.selected && "border-primary shadow-[0_0_0_1px_var(--primary)] hover:border-primary",
     props.class,
   ),

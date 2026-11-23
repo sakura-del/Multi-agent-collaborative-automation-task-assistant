@@ -71,9 +71,9 @@ async function handleConfirm() {
 </script>
 
 <template>
-  <section class="mx-auto mt-10 w-full max-w-md rounded-xl border border-border bg-card p-5 shadow-xs sm:p-7">
+  <section class="mx-auto mt-10 w-full max-w-md rounded-lg border border-border bg-card p-5 sm:p-6">
     <header class="mb-4">
-      <h1 class="font-display text-2xl font-medium tracking-[-0.025em]">重置密码</h1>
+      <h1 class="text-lg font-semibold tracking-tight">重置密码</h1>
       <p class="mt-0.5 text-sm text-muted-foreground">
         <template v-if="isConfirmPhase">
           设置新密码后，此前签发的登录令牌会全部失效，需要重新登录。

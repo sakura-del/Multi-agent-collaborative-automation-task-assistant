@@ -13,7 +13,6 @@ import {
   ListChecks,
   LogOut,
   Palette,
-  PanelLeftOpen,
   Settings2,
   Users,
 } from "lucide-vue-next";
@@ -21,7 +20,8 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import AppSidebar from "@/components/layout/AppSidebar.vue";
-import { Button } from "@/components/ui/button";
+import CommandPalette from "@/components/layout/CommandPalette.vue";
+import TopBar from "@/components/layout/TopBar.vue";
 import { useAuthStore } from "@/stores/auth";
 
 // 工作台布局：安静侧栏 + 分组导航（beUI 视觉语言，见 main.css 头注释）。
@@ -47,6 +47,7 @@ const route = useRoute();
 const COLLAPSE_KEY = "vp:nav-collapsed";
 const navCollapsed = ref(localStorage.getItem(COLLAPSE_KEY) === "1");
 const mobileOpen = ref(false);
+const commandOpen = ref(false);
 
 watch(navCollapsed, (value) => {
   localStorage.setItem(COLLAPSE_KEY, value ? "1" : "0");
@@ -77,6 +78,13 @@ function toggleCollapse() {
 function onGlobalKeydown(event: KeyboardEvent) {
   if (event.key === "Escape") {
     mobileOpen.value = false;
+    commandOpen.value = false;
+  }
+  // Ctrl/Cmd+K：打开命令面板
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+    event.preventDefault();
+    commandOpen.value = !commandOpen.value;
+    return;
   }
   // Ctrl/Cmd+B：桌面折叠侧栏，移动端开关 sheet
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") {
@@ -148,7 +156,7 @@ function handleLogout() {
 </script>
 
 <template>
-  <div class="flex min-h-dvh bg-background">
+  <div class="flex min-h-dvh bg-background text-foreground">
     <AppSidebar
       :leaves="leafItems"
       :groups="sidebarGroups"
@@ -159,24 +167,25 @@ function handleLogout() {
       :email="auth.user?.email ?? ''"
       @update:collapsed="navCollapsed = $event"
       @update:mobile-open="mobileOpen = $event"
+      @open-command="commandOpen = true"
       @logout="handleLogout"
     />
 
-    <main class="min-w-0 flex-1 px-4 py-5 md:px-8 md:py-7 lg:px-10">
-      <div class="mb-4 flex items-center gap-2 md:hidden">
-        <button
-          type="button"
-          data-test="nav-mobile-trigger"
-          aria-label="打开导航"
-          class="inline-flex size-9 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground"
-          @click="mobileOpen = true"
-        >
-          <PanelLeftOpen :size="16" aria-hidden="true" />
-        </button>
-        <span class="text-sm font-semibold tracking-tight">VeriPaper</span>
-      </div>
-      <RouterView />
-    </main>
+    <div class="flex min-w-0 flex-1 flex-col bg-background">
+      <TopBar
+        @open-mobile="mobileOpen = true"
+        @open-command="commandOpen = true"
+      />
+      <main class="min-w-0 flex-1 px-4 py-5 md:px-8 md:py-6">
+        <div class="mx-auto w-full max-w-[1440px]">
+          <RouterView />
+        </div>
+      </main>
+    </div>
 
+    <CommandPalette
+      v-model:open="commandOpen"
+      @logout="handleLogout"
+    />
   </div>
 </template>

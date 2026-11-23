@@ -10,19 +10,13 @@ defineProps<{
 </script>
 
 <template>
-  <header class="mb-5 flex flex-wrap items-start justify-between gap-3">
+  <header class="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3">
     <div class="min-w-0">
-      <p
-        v-if="eyebrow"
-        class="mb-2 text-[10px] font-semibold tracking-[0.16em] text-primary uppercase"
-      >
-        {{ eyebrow }}
-      </p>
-      <h1 class="font-display text-3xl font-medium tracking-[-0.035em]">{{ title }}</h1>
+      <h1 class="text-lg font-semibold tracking-tight text-foreground">{{ title }}</h1>
       <p
         v-if="description"
         :data-test="descriptionTestid"
-        class="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground"
+        class="mt-0.5 max-w-3xl text-xs leading-5 text-muted-foreground"
       >
         {{ description }}
       </p>

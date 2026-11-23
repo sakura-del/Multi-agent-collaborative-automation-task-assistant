@@ -129,90 +129,75 @@ async function handleResend() {
 </script>
 
 <template>
-  <div class="grid min-h-dvh bg-background lg:grid-cols-[1.15fr_1fr]">
-    <!-- 左侧：产品身份与一张明确标注的证据示例。窄屏整栏隐藏，避免挤压表单。 -->
+  <div class="grid min-h-dvh bg-background text-foreground lg:grid-cols-[1.05fr_1fr]">
+    <!-- 左侧：Notion / Linear 极简产品声明与单卡证据示例（窄屏隐藏） -->
     <section
-      class="relative hidden flex-col overflow-hidden border-r border-border bg-surface-brand px-10 py-8 lg:flex xl:px-14 xl:py-10"
+      class="hidden flex-col justify-between border-r border-border bg-sidebar px-10 py-8 lg:flex xl:px-14"
     >
-      <div
-        class="pointer-events-none absolute top-32 right-12 h-28 w-px bg-primary/25"
-        aria-hidden="true"
-      />
-      <div class="relative flex items-center gap-2.5">
-        <img src="/logo.svg" alt="" aria-hidden="true" class="size-9" />
-        <div>
-          <p class="text-sm font-semibold tracking-tight">VeriPaper</p>
-          <p class="mt-0.5 text-[8px] tracking-[0.18em] text-muted-foreground">
-            EVIDENCE-LED WRITING
-          </p>
-        </div>
+      <div class="flex items-center gap-2.5">
+        <img src="/logo.svg" alt="" aria-hidden="true" class="size-7" />
+        <span class="text-sm font-semibold tracking-tight text-foreground">VeriPaper</span>
       </div>
 
-      <div class="relative my-auto max-w-2xl py-10">
-        <p class="text-[10px] font-semibold tracking-[0.2em] text-primary uppercase">
-          Research, grounded in evidence
+      <div class="my-auto max-w-lg py-8">
+        <p class="text-[11px] font-medium tracking-wider text-muted-foreground uppercase">
+          Evidence-led Research Workspace
         </p>
-        <h1 class="mt-5 font-display text-5xl leading-[1.3] font-medium tracking-[-0.045em] xl:text-6xl">
-          让每一句论断，<br />都<span class="text-primary">有迹可循</span>。
+        <h1 class="mt-3 text-3xl leading-tight font-semibold tracking-tight text-foreground xl:text-4xl">
+          让每一句论断，都有迹可循。
         </h1>
-        <p class="mt-6 max-w-lg text-sm leading-7 text-muted-foreground">
-          从文献检索、证据筛选到综述成稿，多智能体协同完成研究流程。你负责判断，
-          系统负责让每条引用都能回到原始证据。
+        <p class="mt-3 text-sm leading-relaxed text-muted-foreground">
+          从文献检索、证据筛选到综述成稿，多智能体协同完成研究流程。你负责判断，系统负责让每条引用都能回到原始证据。
         </p>
 
-        <!-- 这里只是登录页的静态产品示例，明确标注，绝不冒充真实任务核验结果。 -->
+        <!-- 静态产品示例卡片：1px 极简边框，无斜置层叠 -->
         <div
           data-test="login-evidence-proof"
-          class="relative mt-10 max-w-xl rounded-xl border border-border-strong/60 bg-card/85 p-5 shadow-raised"
+          class="mt-8 rounded-lg border border-border bg-card p-4"
         >
-          <div
-            class="pointer-events-none absolute -right-2 -bottom-2 -z-10 h-full w-full rotate-[-1deg] rounded-xl border border-border bg-card/35"
-            aria-hidden="true"
-          />
-          <div class="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-3 text-xs">
+          <div class="flex items-center justify-between gap-2 border-b border-border pb-2.5 text-xs">
             <span class="font-medium text-muted-foreground">正文证据片段 · 示例</span>
-            <span class="inline-flex items-center gap-1 text-success">
-              <Check :size="13" :stroke-width="2.2" aria-hidden="true" />
+            <span class="inline-flex items-center gap-1 font-medium text-success">
+              <Check :size="12" :stroke-width="2.2" aria-hidden="true" />
               引用核验通过
             </span>
           </div>
-          <p class="mt-4 font-display text-sm leading-7 text-card-foreground">
+          <p class="mt-3 font-display text-sm leading-7 text-card-foreground">
             检索增强生成的评估正从单一答案准确率，转向对忠实度、证据完整性与上下文利用效率的综合判断。
           </p>
-          <div class="mt-4 flex items-center justify-between gap-3 text-[11px] text-muted-foreground">
+          <div class="mt-3 flex items-center justify-between gap-3 text-[11px] text-muted-foreground">
             <span>GB/T 7714—2025 · 顺序编码制</span>
             <span class="text-primary">证据可回溯</span>
           </div>
         </div>
       </div>
 
-      <div class="relative flex flex-wrap gap-x-6 gap-y-2 text-[10px] text-muted-foreground">
+      <div class="flex flex-wrap gap-x-5 gap-y-2 text-[11px] text-muted-foreground">
         <span v-for="item in CAPABILITIES" :key="item">{{ item }}</span>
         <span>Markdown / DOCX</span>
       </div>
     </section>
 
-    <!-- 右侧：登录/注册表单。保留原字段与提交流程，只提升排版层级。 -->
-    <section class="flex items-center justify-center bg-card/45 px-4 py-10 sm:px-8 lg:bg-card/35">
-      <div class="w-full max-w-sm">
-        <div class="mb-9 lg:hidden">
-          <div class="mb-5 flex items-center gap-2.5">
-            <img src="/logo.svg" alt="" aria-hidden="true" class="size-8" />
+    <!-- 右侧：极简居中登录/注册表单 -->
+    <section class="flex items-center justify-center bg-background px-4 py-10 sm:px-8">
+      <div class="w-full max-w-[22rem]">
+        <div class="mb-7 lg:hidden">
+          <div class="mb-4 flex items-center gap-2">
+            <img src="/logo.svg" alt="" aria-hidden="true" class="size-7" />
             <span class="text-sm font-semibold tracking-tight">VeriPaper</span>
           </div>
-          <h1 class="font-display text-3xl leading-snug font-medium tracking-[-0.035em]">
-            让每一句论断，<br />都有迹可循。
+          <h1 class="text-2xl font-semibold tracking-tight">
+            让每一句论断，都有迹可循。
           </h1>
         </div>
 
         <div class="hidden lg:block">
-          <p class="text-[10px] font-semibold tracking-[0.18em] text-primary uppercase">Welcome back</p>
-          <h2 class="mt-3 font-display text-3xl font-medium tracking-[-0.025em]">继续你的研究</h2>
-          <p class="mt-2 text-sm text-muted-foreground">登录以访问任务、证据与引用库。</p>
+          <h2 class="text-xl font-semibold tracking-tight">继续你的研究</h2>
+          <p class="mt-1 text-xs text-muted-foreground">登录以访问研究任务、知识库与引用库。</p>
         </div>
 
-        <form class="mt-7 flex flex-col gap-4" @submit.prevent="handleSubmit">
-          <div class="grid grid-cols-2 gap-1 rounded-lg border border-border bg-muted p-1" role="tablist">
+        <form class="mt-6 flex flex-col gap-3.5" @submit.prevent="handleSubmit">
+          <div class="grid grid-cols-2 gap-1 rounded-md border border-border bg-muted p-0.5" role="tablist">
             <button
               v-for="option in [
                 { value: 'login', label: '登录' },
@@ -223,9 +208,9 @@ async function handleResend() {
               role="tab"
               :aria-selected="mode === option.value"
               :class="[
-                'rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                'rounded-sm px-3 py-1.5 text-xs font-medium transition-colors',
                 mode === option.value
-                  ? 'bg-card text-foreground shadow-xs'
+                  ? 'bg-background text-foreground'
                   : 'text-muted-foreground hover:text-foreground',
               ]"
               @click="mode = option.value"
@@ -235,7 +220,7 @@ async function handleResend() {
           </div>
 
           <div v-if="mode === 'login'" class="grid gap-1.5">
-            <Label for="account">用户名 / 邮箱</Label>
+            <Label for="account" class="text-xs">用户名 / 邮箱</Label>
             <Input
               id="account"
               v-model="account"
@@ -243,12 +228,12 @@ async function handleResend() {
               required
               autocomplete="username"
               placeholder="请输入用户名或邮箱"
-              class="h-11 bg-card/70"
+              class="h-9"
             />
           </div>
           <template v-else>
             <div class="grid gap-1.5">
-              <Label for="username">用户名</Label>
+              <Label for="username" class="text-xs">用户名</Label>
               <Input
                 id="username"
                 v-model="username"
@@ -256,24 +241,24 @@ async function handleResend() {
                 required
                 minlength="3"
                 autocomplete="username"
-                class="h-11 bg-card/70"
+                class="h-9"
               />
             </div>
             <div class="grid gap-1.5">
-              <Label for="email">邮箱</Label>
+              <Label for="email" class="text-xs">邮箱</Label>
               <Input
                 id="email"
                 v-model="email"
                 type="email"
                 required
                 autocomplete="email"
-                class="h-11 bg-card/70"
+                class="h-9"
               />
             </div>
           </template>
 
           <div class="grid gap-1.5">
-            <Label for="password">密码</Label>
+            <Label for="password" class="text-xs">密码</Label>
             <Input
               id="password"
               v-model="password"
@@ -282,7 +267,7 @@ async function handleResend() {
               minlength="8"
               placeholder="至少 8 位"
               :autocomplete="mode === 'login' ? 'current-password' : 'new-password'"
-              class="h-11 bg-card/70"
+              class="h-9"
             />
           </div>
 
@@ -295,13 +280,13 @@ async function handleResend() {
             <MailCheck />
             <span>
               验证邮件已发送至
-              <strong>{{ pendingVerificationEmail }}</strong
-              >。请点击邮件里的链接完成验证，再回来登录。
+              <strong>{{ pendingVerificationEmail }}</strong>
+              。请点击邮件里的链接完成验证，再回来登录。
             </span>
           </Alert>
           <div
             v-if="unverifiedEmail"
-            class="rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm"
+            class="rounded-md border border-warning/40 bg-warning/10 p-3 text-xs"
             data-test="login-unverified"
           >
             <p class="font-medium">邮箱还没验证</p>
@@ -319,19 +304,13 @@ async function handleResend() {
               :disabled="resending"
               @click="handleResend"
             >
-              <Loader2 v-if="resending" class="size-4 animate-spin" aria-hidden="true" />
-              <MailCheck v-else :size="14" aria-hidden="true" />
+              <Loader2 v-if="resending" class="size-3.5 animate-spin" aria-hidden="true" />
+              <MailCheck v-else :size="13" aria-hidden="true" />
               {{ resending ? "发送中…" : "重新发送验证邮件" }}
             </Button>
           </div>
 
           <div v-if="mode === 'register' && captchaEnabled" class="grid gap-1.5">
-            <!--
-              ⚠️ v3 的属性是 `challenge`（URL 或 JSON）。v2 的 `challengeurl`
-              在 v3 已被移除——传错了 widget 不报错，而是回退去请求**当前页面**
-              （拿到 text/html），表现为「验证失败：invalid content-type」。
-              也没有 `refetchonexpire`：挑战 10 分钟有效期，过期后刷新即可。
-            -->
             <altcha-widget
               :challenge="captchaChallengeUrl"
               auto="onload"
@@ -347,14 +326,14 @@ async function handleResend() {
           <Button
             type="submit"
             :disabled="loading || (mode === 'register' && captchaEnabled && !captchaSolved)"
-            class="h-11 w-full"
+            class="h-9 w-full"
           >
             <Loader2 v-if="loading" class="animate-spin" aria-hidden="true" />
             <span>{{ loading ? "处理中…" : submitLabel }}</span>
-            <ArrowRight v-if="!loading" :size="15" aria-hidden="true" />
+            <ArrowRight v-if="!loading" :size="14" aria-hidden="true" />
           </Button>
 
-          <p v-if="mode === 'login'" class="text-center text-sm">
+          <p v-if="mode === 'login'" class="text-center text-xs">
             <RouterLink
               :to="{ name: 'password-reset' }"
               data-test="forgot-password"
@@ -365,7 +344,7 @@ async function handleResend() {
           </p>
         </form>
 
-        <p class="mt-8 flex items-center justify-center gap-1.5 text-[10px] text-muted-foreground">
+        <p class="mt-8 flex items-center justify-center gap-1.5 text-[11px] text-muted-foreground">
           <LockKeyhole :size="12" aria-hidden="true" />
           你的研究数据仅对当前工作空间可见
         </p>

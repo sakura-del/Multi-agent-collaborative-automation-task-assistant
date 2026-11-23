@@ -3,12 +3,15 @@ import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { Coins, RefreshCw, TriangleAlert } from "lucide-vue-next";
 
+import BarTrendChart, { type BarTrendItem } from "@/components/charts/BarTrendChart.vue";
+import DonutChart, { type DonutSegment } from "@/components/charts/DonutChart.vue";
+import SegmentedBar from "@/components/charts/SegmentedBar.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import PageHeader from "@/components/common/PageHeader.vue";
 import StatusBadge from "@/components/common/StatusBadge.vue";
 import { Badge, type BadgeVariants } from "@/components/ui/badge";
-import { StatCard } from "@/components/ui/card";
+import { Card, StatCard } from "@/components/ui/card";
 import { getObservabilityOverview } from "@/api/observability";
 import type { ObservabilityOverview } from "@/api/types";
 import { formatDateTime } from "@/utils/task-status";
@@ -126,6 +129,42 @@ const statusBadges = computed(() => {
 
 /** 分布合计：用来给用户核对「合计 == 总数」，也是「看板不说谎」的显式证据。 */
 const statusSum = computed(() => statusBadges.value.reduce((total, item) => total + item.count, 0));
+
+const STATUS_CHART_COLOR: Record<string, string> = {
+  completed: "var(--success)",
+  failed: "var(--destructive)",
+  cancelled: "var(--muted-foreground)",
+  waiting_human: "var(--warning)",
+  waiting_approval: "var(--warning)",
+  running: "var(--primary)",
+  reviewing: "var(--primary)",
+  planning: "var(--accent-foreground)",
+  created: "var(--border-strong)",
+  paused: "var(--muted-foreground)",
+  retrying: "var(--warning)",
+};
+
+const statusSegments = computed<DonutSegment[]>(() =>
+  statusBadges.value.map((item) => ({
+    id: item.status,
+    label: STATUS_LABELS[item.status] ?? item.status,
+    value: item.count,
+    color: STATUS_CHART_COLOR[item.status] ?? "var(--muted-foreground)",
+    hint: `${item.count} 个`,
+  })),
+);
+
+const recentTokenBars = computed<BarTrendItem[]>(() =>
+  (overview.value?.recent ?? [])
+    .slice(0, 12)
+    .reverse()
+    .map((row) => ({
+      key: row.task_id,
+      label: shortId(row.task_id).slice(0, 6),
+      total: row.used_tokens,
+      meta: formatDuration(row.duration_seconds),
+    })),
+);
 
 /** 成功率显示为百分比（后端给 0~1 的小数）。 */
 const successRateText = computed(() => {
@@ -294,28 +333,53 @@ async function refresh() {
         />
       </div>
 
-      <!-- 状态分布：全量状态（含 waiting_approval），并显示合计供核对 -->
-      <Card as="section" size="compact" class="mb-4 gap-0 px-3 py-2.5">
-        <div class="mb-2 flex items-baseline justify-between gap-2">
-          <h2 class="text-sm font-medium">状态分布</h2>
-          <!-- 合计是「看板自洽」的可见证据：合计 ≠ 总数就说明漏了状态 -->
-          <p class="text-[11px] text-muted-foreground" data-test="observability-status-sum">
-            合计 {{ statusSum }} / 共 {{ overview.tasks.total }} 个
-          </p>
-        </div>
-        <div class="flex flex-wrap gap-1.5" data-test="observability-statuses">
-          <Badge
-            v-for="item in statusBadges"
-            :key="item.status"
-            :variant="STATUS_TONE[item.status] ?? 'muted'"
-          >
-            {{ STATUS_LABELS[item.status] ?? item.status }} {{ item.count }}
-          </Badge>
-          <span v-if="statusBadges.length === 0" class="text-sm text-muted-foreground">
-            暂无状态数据
-          </span>
-        </div>
-      </Card>
+      <!-- 可视化分析双栏：左侧状态分布环形图 + 分段条；右侧最近任务 Token 柱状图 -->
+      <div class="mb-4 grid gap-4 lg:grid-cols-2">
+        <Card as="section" size="compact" class="gap-3 px-3.5 py-3">
+          <div class="flex items-baseline justify-between gap-2">
+            <h2 class="text-sm font-medium">状态分布</h2>
+            <p class="text-[11px] text-muted-foreground" data-test="observability-status-sum">
+              合计 {{ statusSum }} / 共 {{ overview.tasks.total }} 个
+            </p>
+          </div>
+          <SegmentedBar :segments="statusSegments" />
+          <DonutChart
+            v-if="statusSegments.length"
+            :segments="statusSegments"
+            :center-value="successRateText"
+            center-label="终态成功率"
+          />
+          <div class="flex flex-wrap gap-1.5 border-t border-border pt-2.5" data-test="observability-statuses">
+            <Badge
+              v-for="item in statusBadges"
+              :key="item.status"
+              :variant="STATUS_TONE[item.status] ?? 'muted'"
+            >
+              {{ STATUS_LABELS[item.status] ?? item.status }} {{ item.count }}
+            </Badge>
+            <span v-if="statusBadges.length === 0" class="text-sm text-muted-foreground">
+              暂无状态数据
+            </span>
+          </div>
+        </Card>
+
+        <Card as="section" size="compact" class="gap-3 px-3.5 py-3">
+          <div class="flex items-baseline justify-between gap-2">
+            <h2 class="text-sm font-medium">最近任务 Token 消耗</h2>
+            <span class="text-[11px] text-muted-foreground">点击柱子直达详情</span>
+          </div>
+          <BarTrendChart
+            v-if="recentTokenBars.some((b) => b.total > 0)"
+            :items="recentTokenBars"
+            total-label="Token 消耗"
+            clickable
+            @select="openTask"
+          />
+          <div v-else class="flex flex-1 items-center justify-center py-8 text-xs text-muted-foreground">
+            最近任务暂无 Token 消耗记录
+          </div>
+        </Card>
+      </div>
 
       <!-- 最近任务：标题是唯一能认出「哪次运行」的信息，UUID 只作辅助 -->
       <Card

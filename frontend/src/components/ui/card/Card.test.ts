@@ -16,25 +16,25 @@ function classes(wrapper: ReturnType<typeof mount>): string {
 }
 
 describe("Card 结构", () => {
-  it("默认 outlined：白底、16px 圆角、根容器管垂直间距", () => {
+  it("默认 outlined：白底、8px 微圆角、根容器管垂直间距", () => {
     const wrapper = mount(Card);
     const cls = classes(wrapper);
 
     expect(cls).toContain("bg-card");
-    expect(cls).toContain("rounded-2xl");
+    expect(cls).toContain("rounded-lg");
     expect(cls).toContain("border-border");
     // 根管 py + gap，部件才管 px——省略部件时边缘不会塌
-    expect(cls).toContain("py-5");
-    expect(cls).toContain("gap-5");
+    expect(cls).toContain("py-4");
+    expect(cls).toContain("gap-4");
   });
 
-  it("muted + compact：灰底无边框、16px 内边距", () => {
+  it("muted + compact：灰底无边框、12px 紧凑垂直内边距", () => {
     const wrapper = mount(Card, { props: { variant: "muted", size: "compact" } });
     const cls = classes(wrapper);
 
     expect(cls).toContain("bg-muted");
     expect(cls).toContain("border-transparent");
-    expect(cls).toContain("py-4");
+    expect(cls).toContain("py-3");
   });
 
   it("selected：主色描边 + 1px 环，并把状态暴露到 DOM", () => {

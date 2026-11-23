@@ -230,212 +230,224 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section>
-    <header class="mb-4 flex flex-wrap items-start justify-between gap-3">
-      <div class="min-w-0">
-        <p class="mb-1.5 text-[9px] font-semibold tracking-[0.16em] text-primary uppercase">
-          Research task
-        </p>
-        <h1 class="font-display text-2xl leading-snug font-medium tracking-[-0.025em]">
+  <section class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_17.5rem] lg:items-start">
+    <!-- 左侧主工作区：标题、行动提示、Tab 与内容 -->
+    <div class="min-w-0">
+      <header class="mb-4">
+        <h1 class="text-xl leading-snug font-semibold tracking-tight text-foreground">
           {{ store.snapshot?.title ?? "任务详情" }}
         </h1>
-        <p class="mt-1.5 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-          <StatusBadge :status="store.snapshot?.status ?? 'created'" />
-          <span class="text-xs">
-            修订 {{ store.snapshot?.revision ?? "—" }} · 更新于
-            {{ formatDateTime(store.snapshot?.updated_at) }}
-          </span>
-          <!-- 模型快照（Issue #15 BYOK）：凭据删除后仍能看到当时用的模型 -->
-          <span v-if="store.snapshot" class="text-xs" data-test="task-model">
+      </header>
+
+      <!-- 需要用户行动时显式提示 -->
+      <div
+        v-if="needsAction"
+        data-test="action-hint"
+        class="mb-4 flex flex-col gap-1 rounded-md border border-warning/30 bg-warning/8 px-3 py-2 text-sm"
+      >
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="font-medium text-warning">
             {{
-              store.snapshot.model
-                ? `模型：${store.snapshot.model.name}（${store.snapshot.model.model}）`
-                : "模型：平台默认"
+              store.snapshot?.status === "waiting_approval"
+                ? "规划已生成，等你确认后开始执行"
+                : "任务已暂停，等你介入"
             }}
           </span>
+          <button
+            v-if="activeTab !== 'plan' && canReplan"
+            type="button"
+            class="text-xs text-warning underline underline-offset-2"
+            @click="selectTab('plan')"
+          >
+            {{ store.snapshot?.status === "waiting_approval" ? "去确认规划" : "去重新规划" }} →
+          </button>
+        </div>
+        <p
+          v-if="waitingReason"
+          data-test="waiting-reason"
+          class="font-mono text-xs leading-5 break-words text-warning/90"
+        >
+          {{ waitingReason }}
+        </p>
+        <p
+          v-if="waitingAdvice"
+          data-test="waiting-advice"
+          class="text-xs leading-5 text-muted-foreground"
+        >
+          {{ waitingAdvice }}
         </p>
       </div>
 
-      <div class="flex shrink-0 items-center gap-2">
-        <!-- 批注入口：抽屉默认收起，用计数提示有没有待看意见 -->
+      <ErrorBanner :message="errorMessage" />
+
+      <!-- 选项卡：Linear 极简下划线式 -->
+      <nav class="mb-4 flex gap-1 overflow-x-auto border-b border-border" role="tablist">
+        <button
+          v-for="tab in TABS"
+          :key="tab"
+          class="-mb-px shrink-0 whitespace-nowrap border-b-2 px-3 py-2 text-xs font-medium transition-colors"
+          :class="
+            activeTab === tab
+              ? 'border-primary text-foreground'
+              : 'border-transparent text-muted-foreground hover:text-foreground'
+          "
+          :data-test="`tab-${tab}`"
+          role="tab"
+          type="button"
+          :aria-selected="activeTab === tab"
+          :disabled="tab === 'result' && !resultAvailable"
+          @click="selectTab(tab)"
+        >
+          {{ { plan: "规划", execution: "执行", logs: "日志", result: "结果" }[tab] }}
+        </button>
+      </nav>
+
+      <TaskToolbar
+        class="mb-3"
+        :status="store.snapshot?.status ?? 'created'"
+        :pending="pending"
+        :selected-node-id="selectedNodeId"
+        :selected-node-status="selectedSubtask?.status ?? null"
+        @command="handleControl"
+      />
+
+      <div v-if="activeTab === 'plan'">
+        <PlanPanel
+          :plan="store.snapshot?.plan ?? null"
+          :pending="pending"
+          :blocked="store.snapshot?.status === 'waiting_human' && !store.snapshot?.plan"
+          :can-replan="canReplan"
+          :error="errorMessage"
+          :conflict="conflictMessage"
+          @approve="handleApprove"
+          @regenerate="handleRegenerate"
+        />
+      </div>
+
+      <div
+        v-else-if="activeTab === 'execution'"
+        class="grid gap-3 xl:grid-cols-[minmax(0,1fr)_18rem]"
+      >
+        <TaskDag
+          v-if="store.snapshot?.plan"
+          :nodes="store.snapshot.plan.nodes"
+          :statuses="statuses"
+          :selected="selectedNodeId"
+          @select="selectedNodeId = $event"
+        />
+        <p v-else class="text-sm text-muted-foreground">暂无规划，无法展示 DAG。</p>
+        <NodeDetail :node="selectedNode" :subtask="selectedSubtask" @close="selectedNodeId = null" />
+      </div>
+
+      <div v-else-if="activeTab === 'logs'" class="space-y-4">
+        <div
+          v-if="timelineEvents.length"
+          data-test="event-timeline"
+          class="rounded-lg border border-border bg-card p-2"
+        >
+          <BeTimeline
+            :events="timelineEvents"
+            :height="340"
+            :item-width="290"
+            :initial-index="timelineEvents.length - 1"
+            aria-label="执行事件时间线"
+            @activate="scrollToLogEvent"
+          >
+            <template #media="{ event }">
+              <div
+                class="flex h-full w-full flex-col justify-between p-3"
+                :class="eventToneClass(eventLevel(eventById(event.id)))"
+              >
+                <div class="flex items-center justify-between text-xs font-medium">
+                  <span>{{ EVENT_LEVEL_LABEL[eventLevel(eventById(event.id))] ?? "信息" }}</span>
+                  <span class="tabular-nums">#{{ eventById(event.id)?.event_id }}</span>
+                </div>
+                <p class="truncate text-[11px] opacity-80">
+                  {{ eventById(event.id)?.event_type }}
+                </p>
+              </div>
+            </template>
+            <template #meta="{ event }">
+              <span>{{ formatDateTime(eventById(event.id)?.occurred_at) }}</span>
+            </template>
+          </BeTimeline>
+          <p class="px-3 pb-1 text-xs text-muted-foreground">
+            最近 {{ timelineEvents.length }} 条事件 · 点击卡片定位下方日志
+          </p>
+        </div>
+        <TaskLog :events="store.events" />
+      </div>
+
+      <div v-else>
+        <TaskResult
+          v-if="store.snapshot?.review_report"
+          :task-id="props.taskId"
+          :report="store.snapshot.review_report"
+          :artifacts="artifacts"
+        />
+        <EmptyState
+          v-else
+          title="任务尚未产出复盘报告"
+          description="任务执行完成后，这里会展示复盘结论、引用核验与导出入口。"
+        />
+      </div>
+    </div>
+
+    <!-- 右侧属性检查器（Linear Inspector）：窄屏置顶紧凑展示，宽屏吸顶固定 -->
+    <aside
+      aria-label="任务属性与快捷操作"
+      class="flex flex-col gap-3 rounded-lg border border-border bg-card p-3.5 max-lg:order-first lg:sticky lg:top-16"
+    >
+      <div class="flex items-center justify-between border-b border-border pb-2.5">
+        <span class="text-[11px] font-medium tracking-wider text-muted-foreground uppercase">
+          任务属性
+        </span>
+        <StatusBadge :status="store.snapshot?.status ?? 'created'" />
+      </div>
+
+      <dl class="grid gap-2.5 text-xs">
+        <div class="flex items-baseline justify-between gap-2">
+          <dt class="text-muted-foreground">修订</dt>
+          <dd class="font-medium tabular-nums">v{{ store.snapshot?.revision ?? "—" }}</dd>
+        </div>
+        <div class="flex items-baseline justify-between gap-2">
+          <dt class="text-muted-foreground">更新于</dt>
+          <dd class="text-right tabular-nums">{{ formatDateTime(store.snapshot?.updated_at) }}</dd>
+        </div>
+        <div v-if="store.snapshot" class="flex flex-col gap-1 border-t border-border pt-2.5">
+          <dt class="text-muted-foreground">使用模型</dt>
+          <dd class="font-medium break-words" data-test="task-model">
+            {{
+              store.snapshot.model
+                ? `${store.snapshot.model.name}（${store.snapshot.model.model}）`
+                : "平台默认"
+            }}
+          </dd>
+        </div>
+      </dl>
+
+      <div class="grid grid-cols-2 gap-2 border-t border-border pt-3 lg:grid-cols-1">
         <button
           type="button"
           data-test="toggle-annotation"
           :aria-expanded="annotationOpen"
-          class="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-sm font-medium transition-colors hover:bg-muted"
+          class="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-xs font-medium transition-colors hover:bg-muted"
           @click="annotationOpen = !annotationOpen"
         >
-          <MessageSquare :size="15" aria-hidden="true" />
+          <MessageSquare :size="13" aria-hidden="true" />
           <span>批注</span>
         </button>
 
-        <!-- PRISMA 筛选工作台入口（Phase 2）：筛选数据跟着任务走 -->
         <RouterLink
           :to="{ name: 'task-screening', params: { taskId: props.taskId } }"
           data-test="open-screening"
-          class="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-sm font-medium transition-colors hover:bg-muted"
+          class="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-xs font-medium transition-colors hover:bg-muted"
         >
-          <ListFilter :size="15" aria-hidden="true" />
+          <ListFilter :size="13" aria-hidden="true" />
           <span>PRISMA 筛选</span>
         </RouterLink>
       </div>
-    </header>
-
-    <!-- 需要用户行动时显式提示：这是本页唯一「你必须做点什么」的信息，
-         以前只靠状态徽标暗示，容易被忽略。 -->
-    <div
-      v-if="needsAction"
-      data-test="action-hint"
-      class="mb-4 flex flex-col gap-1 rounded-lg border border-warning/30 bg-warning/8 px-3 py-2 text-sm"
-    >
-      <div class="flex flex-wrap items-center gap-2">
-        <span class="font-medium text-warning">
-          {{
-            store.snapshot?.status === "waiting_approval"
-              ? "规划已生成，等你确认后开始执行"
-              : "任务已暂停，等你介入"
-          }}
-        </span>
-        <button
-          v-if="activeTab !== 'plan' && canReplan"
-          type="button"
-          class="text-xs text-warning underline underline-offset-2"
-          @click="selectTab('plan')"
-        >
-          {{ store.snapshot?.status === "waiting_approval" ? "去确认规划" : "去重新规划" }} →
-        </button>
-      </div>
-      <!-- 后端给的原因原文：不翻译，方便贴给管理员排查 -->
-      <p
-        v-if="waitingReason"
-        data-test="waiting-reason"
-        class="font-mono text-xs leading-5 break-words text-warning/90"
-      >
-        {{ waitingReason }}
-      </p>
-      <p
-        v-if="waitingAdvice"
-        data-test="waiting-advice"
-        class="text-xs leading-5 text-muted-foreground"
-      >
-        {{ waitingAdvice }}
-      </p>
-    </div>
-
-    <ErrorBanner :message="errorMessage" />
-
-    <!-- 选项卡：下划线式，窄屏可横向滚动 -->
-    <nav class="mb-4 flex gap-1 overflow-x-auto border-b border-border" role="tablist">
-      <button
-        v-for="tab in TABS"
-        :key="tab"
-        class="-mb-px shrink-0 whitespace-nowrap border-b-2 px-3 py-2 text-sm transition-colors"
-        :class="
-          activeTab === tab
-            ? 'border-primary font-medium text-primary'
-            : 'border-transparent text-muted-foreground hover:text-foreground'
-        "
-        :data-test="`tab-${tab}`"
-        role="tab"
-        type="button"
-        :aria-selected="activeTab === tab"
-        :disabled="tab === 'result' && !resultAvailable"
-        @click="selectTab(tab)"
-      >
-        {{ { plan: "规划", execution: "执行", logs: "日志", result: "结果" }[tab] }}
-      </button>
-    </nav>
-
-    <TaskToolbar
-      class="mb-3"
-      :status="store.snapshot?.status ?? 'created'"
-      :pending="pending"
-      :selected-node-id="selectedNodeId"
-      :selected-node-status="selectedSubtask?.status ?? null"
-      @command="handleControl"
-    />
-
-    <div v-if="activeTab === 'plan'">
-      <PlanPanel
-        :plan="store.snapshot?.plan ?? null"
-        :pending="pending"
-        :blocked="store.snapshot?.status === 'waiting_human' && !store.snapshot?.plan"
-        :can-replan="canReplan"
-        :error="errorMessage"
-        :conflict="conflictMessage"
-        @approve="handleApprove"
-        @regenerate="handleRegenerate"
-      />
-    </div>
-
-    <div
-      v-else-if="activeTab === 'execution'"
-      class="grid gap-3 lg:grid-cols-[minmax(0,1fr)_20rem]"
-    >
-      <TaskDag
-        v-if="store.snapshot?.plan"
-        :nodes="store.snapshot.plan.nodes"
-        :statuses="statuses"
-        :selected="selectedNodeId"
-        @select="selectedNodeId = $event"
-      />
-      <p v-else class="text-sm text-muted-foreground">暂无规划，无法展示 DAG。</p>
-      <NodeDetail :node="selectedNode" :subtask="selectedSubtask" @close="selectedNodeId = null" />
-    </div>
-
-    <div v-else-if="activeTab === 'logs'" class="space-y-4">
-      <!-- beUI 时间线：最近 12 条执行事件，默认聚焦最新一条；点击定位下方日志行 -->
-      <div
-        v-if="timelineEvents.length"
-        data-test="event-timeline"
-        class="rounded-3xl border border-border bg-card p-2"
-      >
-        <BeTimeline
-          :events="timelineEvents"
-          :height="360"
-          :item-width="300"
-          :initial-index="timelineEvents.length - 1"
-          aria-label="执行事件时间线"
-          @activate="scrollToLogEvent"
-        >
-          <template #media="{ event }">
-            <div
-              class="flex h-full w-full flex-col justify-between p-3"
-              :class="eventToneClass(eventLevel(eventById(event.id)))"
-            >
-              <div class="flex items-center justify-between text-xs font-medium">
-                <span>{{ EVENT_LEVEL_LABEL[eventLevel(eventById(event.id))] ?? "信息" }}</span>
-                <span class="tabular-nums">#{{ eventById(event.id)?.event_id }}</span>
-              </div>
-              <p class="truncate text-[11px] opacity-80">
-                {{ eventById(event.id)?.event_type }}
-              </p>
-            </div>
-          </template>
-          <template #meta="{ event }">
-            <span>{{ formatDateTime(eventById(event.id)?.occurred_at) }}</span>
-          </template>
-        </BeTimeline>
-        <p class="px-4 pb-2 text-xs text-muted-foreground">
-          最近 {{ timelineEvents.length }} 条事件 · 点击卡片定位下方日志
-        </p>
-      </div>
-      <TaskLog :events="store.events" />
-    </div>
-
-    <div v-else>
-      <TaskResult
-        v-if="store.snapshot?.review_report"
-        :task-id="props.taskId"
-        :report="store.snapshot.review_report"
-        :artifacts="artifacts"
-      />
-      <EmptyState
-        v-else
-        title="任务尚未产出复盘报告"
-        description="任务执行完成后，这里会展示复盘结论、引用核验与导出入口。"
-      />
-    </div>
+    </aside>
 
     <!-- 导师批注（Phase 2）：**侧边抽屉**，默认收起。
          旧版把它常驻在四个 tab 底部（含大块空态），把结果/日志挤得很长；

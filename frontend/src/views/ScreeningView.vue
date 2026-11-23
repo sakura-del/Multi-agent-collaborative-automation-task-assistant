@@ -308,46 +308,36 @@ async function submitDecision(
       <span>{{ success }}</span>
     </Alert>
 
-    <!-- PRISMA 漏斗：所有数字由后端明细现算，前端只展示 -->
-    <FunnelChart
-      v-if="prisma && hasPrismaData"
-      class="mb-4"
-      data-test="screening-prisma"
-      :stages="funnelStages"
-      title="筛选漏斗"
-      unit="条"
-      :period-label="`共 ${prisma.identified_total} 条识别记录`"
-    />
+    <!-- 筛选工具栏：阶段过滤 + 智能排序同一行紧凑收纳 -->
+    <div class="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2">
+      <div class="flex flex-wrap items-center gap-2">
+        <Label class="sr-only" for="screening-stage-filter">按阶段过滤</Label>
+        <select
+          id="screening-stage-filter"
+          v-model="stageFilter"
+          data-test="screening-stage-filter"
+          class="flex h-8 rounded-md border border-input bg-background px-2.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          @change="handleStageChange()"
+        >
+          <option value="">全部阶段</option>
+          <option value="title_abstract">标题/摘要</option>
+          <option value="fulltext">全文</option>
+          <option value="included">已纳入</option>
+        </select>
 
-    <div class="mb-3">
-      <Label class="sr-only" for="screening-stage-filter">按阶段过滤</Label>
-      <select
-        id="screening-stage-filter"
-        v-model="stageFilter"
-        data-test="screening-stage-filter"
-        class="flex h-9 rounded-md border border-input bg-background px-3 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-        @change="handleStageChange()"
-      >
-        <option value="">全部阶段</option>
-        <option value="title_abstract">标题/摘要</option>
-        <option value="fulltext">全文</option>
-        <option value="included">已纳入</option>
-      </select>
-    </div>
-
-    <div class="mb-3 flex flex-wrap items-center gap-2">
-      <Button
-        variant="outline"
-        size="sm"
-        type="button"
-        data-test="screening-priority-toggle"
-        :aria-pressed="priorityEnabled"
-        :disabled="priorityDisabled"
-        @click="togglePriority"
-      >
-        <Sparkles :size="15" aria-hidden="true" />
-        智能排序：{{ priorityEnabled ? "开" : "关" }}
-      </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          type="button"
+          data-test="screening-priority-toggle"
+          :aria-pressed="priorityEnabled"
+          :disabled="priorityDisabled"
+          @click="togglePriority"
+        >
+          <Sparkles :size="13" aria-hidden="true" />
+          智能排序：{{ priorityEnabled ? "开" : "关" }}
+        </Button>
+      </div>
       <span class="text-xs text-muted-foreground">
         按标题/摘要排序，不自动纳入或排除
       </span>
@@ -364,141 +354,157 @@ async function submitDecision(
       <span v-else-if="priority">{{ priority.message }}</span>
     </Alert>
 
-    <p v-if="loading && !records.length" class="text-sm text-muted-foreground">加载中…</p>
+    <div class="grid gap-5" :class="prisma && (hasPrismaData || prisma.mermaid) ? 'xl:grid-cols-[minmax(0,1fr)_22rem] xl:items-start' : ''">
+      <!-- 左侧：候选筛选队列（首屏焦点） -->
+      <div class="min-w-0">
+        <p v-if="loading && !records.length" class="text-sm text-muted-foreground">加载中…</p>
 
-    <EmptyState
-      v-else-if="!records.length"
-      testid="screening-empty"
-      title="还没有候选记录"
-      description="先在任务里执行检索，检索结果会作为快照进入筛选队列；跨源重复已在落库时去除。"
-    />
+        <EmptyState
+          v-else-if="!records.length"
+          testid="screening-empty"
+          title="还没有候选记录"
+          description="先在任务里执行检索，检索结果会作为快照进入筛选队列；跨源重复已在落库时去除。"
+        />
 
-    <ul v-else class="space-y-2">
-      <li
-        v-for="record in displayRecords"
-        :key="record.record_id"
-        class="rounded-lg border border-border bg-card px-3 py-2.5"
-        :data-test="`screening-row-${record.record_id}`"
-      >
-        <div class="flex flex-wrap items-start justify-between gap-2">
-          <div class="min-w-0">
-            <div class="flex flex-wrap items-center gap-1.5">
-              <span class="text-sm font-medium">{{ record.title }}</span>
-              <Badge :variant="STAGE_TONE[record.current_stage] ?? 'muted'">
-                {{ STAGE_LABELS[record.current_stage] ?? record.current_stage }}
-              </Badge>
-              <!-- 只展示推荐名次，不展示模型分数/概率，也不改变记录本身 -->
-              <Badge
-                v-if="priorityRanks.get(record.record_id)"
-                variant="success"
-                :data-test="`screening-priority-rank-${record.record_id}`"
-              >
-                推荐优先 #{{ priorityRanks.get(record.record_id) }}
-              </Badge>
-              <Badge
-                v-if="record.current_verdict === 'exclude'"
-                variant="destructive"
-                :data-test="`screening-excluded-badge-${record.record_id}`"
-              >
-                已排除{{ record.current_exclusion_reason ? `：${record.current_exclusion_reason}` : "" }}
-              </Badge>
-              <Badge
-                v-else-if="record.current_verdict === 'maybe'"
-                variant="warning"
-                :data-test="`screening-maybe-badge-${record.record_id}`"
-              >
-                待定
-              </Badge>
-            </div>
-            <div class="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              <span>{{ record.authors.join("；") || "（无作者）" }}</span>
-              <code class="rounded bg-muted px-1 py-0.5">
-                {{ record.source }}:{{ record.source_id }}
-              </code>
-              <code v-if="record.doi" class="rounded bg-muted px-1 py-0.5">
-                doi:{{ record.doi }}
-              </code>
-            </div>
-          </div>
-
-          <div
-            v-if="canDecide(record)"
-            class="flex flex-wrap items-center gap-1.5"
+        <ul v-else class="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
+          <li
+            v-for="record in displayRecords"
+            :key="record.record_id"
+            class="px-3.5 py-3 transition-colors hover:bg-muted/25"
+            :data-test="`screening-row-${record.record_id}`"
           >
-            <Button
-              size="sm"
-              :data-test="`screening-include-${record.record_id}`"
-              type="button"
-              :disabled="busyId === record.record_id"
-              @click="handleInclude(record)"
-            >
-              <Check :size="15" aria-hidden="true" />
-              <span>纳入</span>
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              :data-test="`screening-maybe-${record.record_id}`"
-              type="button"
-              :disabled="busyId === record.record_id"
-              @click="handleMaybe(record)"
-            >
-              <MinusCircle :size="15" aria-hidden="true" />
-              <span>待定</span>
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              :data-test="`screening-exclude-${record.record_id}`"
-              type="button"
-              :disabled="busyId === record.record_id"
-              @click="openExclude(record)"
-            >
-              <CircleX :size="15" aria-hidden="true" />
-              <span>排除</span>
-            </Button>
-          </div>
-        </div>
+            <div class="flex flex-wrap items-start justify-between gap-2">
+              <div class="min-w-0 flex-1">
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <span class="text-sm font-medium text-foreground">{{ record.title }}</span>
+                  <Badge :variant="STAGE_TONE[record.current_stage] ?? 'muted'">
+                    {{ STAGE_LABELS[record.current_stage] ?? record.current_stage }}
+                  </Badge>
+                  <Badge
+                    v-if="priorityRanks.get(record.record_id)"
+                    variant="success"
+                    :data-test="`screening-priority-rank-${record.record_id}`"
+                  >
+                    推荐优先 #{{ priorityRanks.get(record.record_id) }}
+                  </Badge>
+                  <Badge
+                    v-if="record.current_verdict === 'exclude'"
+                    variant="destructive"
+                    :data-test="`screening-excluded-badge-${record.record_id}`"
+                  >
+                    已排除{{ record.current_exclusion_reason ? `：${record.current_exclusion_reason}` : "" }}
+                  </Badge>
+                  <Badge
+                    v-else-if="record.current_verdict === 'maybe'"
+                    variant="warning"
+                    :data-test="`screening-maybe-badge-${record.record_id}`"
+                  >
+                    待定
+                  </Badge>
+                </div>
+                <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <span>{{ record.authors.join("；") || "（无作者）" }}</span>
+                  <code class="rounded bg-muted px-1 py-0.5 text-[11px]">
+                    {{ record.source }}:{{ record.source_id }}
+                  </code>
+                  <code v-if="record.doi" class="rounded bg-muted px-1 py-0.5 text-[11px]">
+                    doi:{{ record.doi }}
+                  </code>
+                </div>
+              </div>
 
-        <p v-if="record.abstract" class="mt-1.5 line-clamp-3 text-sm text-muted-foreground">
-          {{ record.abstract }}
-        </p>
+              <div
+                v-if="canDecide(record)"
+                class="flex shrink-0 flex-wrap items-center gap-1.5"
+              >
+                <Button
+                  size="sm"
+                  :data-test="`screening-include-${record.record_id}`"
+                  type="button"
+                  :disabled="busyId === record.record_id"
+                  @click="handleInclude(record)"
+                >
+                  <Check :size="14" aria-hidden="true" />
+                  <span>纳入</span>
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  :data-test="`screening-maybe-${record.record_id}`"
+                  type="button"
+                  :disabled="busyId === record.record_id"
+                  @click="handleMaybe(record)"
+                >
+                  <MinusCircle :size="14" aria-hidden="true" />
+                  <span>待定</span>
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  :data-test="`screening-exclude-${record.record_id}`"
+                  type="button"
+                  :disabled="busyId === record.record_id"
+                  @click="openExclude(record)"
+                >
+                  <CircleX :size="14" aria-hidden="true" />
+                  <span>排除</span>
+                </Button>
+              </div>
+            </div>
 
-        <div
-          v-if="excludeFormId === record.record_id"
-          class="mt-2 flex flex-wrap items-end gap-2 rounded-md border border-border bg-muted/40 p-2.5"
-          :data-test="`screening-exclude-form-${record.record_id}`"
-        >
-          <div class="grid min-w-56 flex-1 gap-1.5">
-            <Label :for="`screening-exclude-reason-${record.record_id}`">排除理由（必填）</Label>
-            <Input
-              :id="`screening-exclude-reason-${record.record_id}`"
-              v-model="excludeReason"
-              :data-test="`screening-exclude-reason-${record.record_id}`"
-              type="text"
-              placeholder="如：不相关 / 无全文 / 人群不符"
-              @keydown.enter.prevent="submitExclude(record)"
-            />
-          </div>
-          <Button
-            :data-test="`screening-exclude-submit-${record.record_id}`"
-            type="button"
-            @click="submitExclude(record)"
+            <p v-if="record.abstract" class="mt-2 line-clamp-3 text-xs leading-relaxed text-muted-foreground">
+              {{ record.abstract }}
+            </p>
+
+            <div
+              v-if="excludeFormId === record.record_id"
+              class="mt-2.5 flex flex-wrap items-end gap-2 rounded-md border border-border bg-muted/40 p-2.5"
+              :data-test="`screening-exclude-form-${record.record_id}`"
+            >
+              <div class="grid min-w-56 flex-1 gap-1.5">
+                <Label :for="`screening-exclude-reason-${record.record_id}`" class="text-xs">排除理由（必填）</Label>
+                <Input
+                  :id="`screening-exclude-reason-${record.record_id}`"
+                  v-model="excludeReason"
+                  :data-test="`screening-exclude-reason-${record.record_id}`"
+                  type="text"
+                  placeholder="如：不相关 / 无全文 / 人群不符"
+                  @keydown.enter.prevent="submitExclude(record)"
+                />
+              </div>
+              <Button
+                size="sm"
+                :data-test="`screening-exclude-submit-${record.record_id}`"
+                type="button"
+                @click="submitExclude(record)"
+              >
+                确认排除
+              </Button>
+            </div>
+          </li>
+        </ul>
+      </div>
+
+      <!-- 右侧：PRISMA 漏斗与 Mermaid 源码检查器 -->
+      <aside v-if="prisma && (hasPrismaData || prisma.mermaid)" class="space-y-4">
+        <FunnelChart
+          v-if="hasPrismaData"
+          data-test="screening-prisma"
+          :stages="funnelStages"
+          title="筛选漏斗"
+          unit="条"
+          :period-label="`共 ${prisma.identified_total} 条识别记录`"
+        />
+
+        <div v-if="prisma.mermaid" class="rounded-lg border border-border bg-card p-3">
+          <h2 class="mb-2 text-xs font-semibold tracking-tight text-foreground">PRISMA 流程图（Mermaid 源码）</h2>
+          <pre
+            class="max-h-64 overflow-auto rounded-md bg-muted/50 p-2.5 font-mono text-[11px] leading-relaxed text-muted-foreground"
+            data-test="screening-mermaid"
+            >{{ prisma.mermaid }}</pre
           >
-            确认排除
-          </Button>
         </div>
-      </li>
-    </ul>
-
-    <!-- Mermaid 源码：可直接复制进论文/GitHub 渲染 -->
-    <div v-if="prisma?.mermaid" class="mt-6">
-      <h2 class="mb-1.5 text-base font-semibold tracking-tight">PRISMA 流程图（Mermaid 源码）</h2>
-      <pre
-        class="overflow-auto rounded-lg border border-border bg-card p-3 font-mono text-xs leading-relaxed"
-        data-test="screening-mermaid"
-        >{{ prisma.mermaid }}</pre
-      >
+      </aside>
     </div>
   </section>
 </template>
