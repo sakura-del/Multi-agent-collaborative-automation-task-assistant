@@ -153,7 +153,11 @@ async def login(
 
     repo = UserRepository(db)
     user = await repo.get_by_account(payload.account)
-    if user is None or not verify_password(payload.password, user.password_hash):
+    if (
+        user is None
+        or not user.password_hash
+        or not verify_password(payload.password, user.password_hash)
+    ):
         failures = await _throttle_register_failure(throttle, account_key)
         logger.warning(
             "login_failed",

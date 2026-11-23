@@ -32,9 +32,9 @@ class User(Base):
     email: Mapped[str] = mapped_column(
         String(128), unique=True, index=True, nullable=False, comment="邮箱"
     )
-    # passlib bcrypt 哈希后约 60 字符，留余量
-    password_hash: Mapped[str] = mapped_column(
-        String(128), nullable=False, comment="密码哈希（bcrypt）"
+    # passlib bcrypt 哈希后约 60 字符，留余量；OAuth/免密用户可为空
+    password_hash: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, comment="密码哈希（bcrypt，可为空）"
     )
 
     # 角色：admin / user，默认 user

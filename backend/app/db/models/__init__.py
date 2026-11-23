@@ -41,6 +41,7 @@ from app.db.models.feedback import HumanFeedback
 from app.db.models.knowledge import DocChunk, KnowledgeDoc, VectorIndex
 from app.db.models.llm_credential import LLMCredential, LLMNodeRouting
 from app.db.models.log import ExecutionLog, FailureCase, ValidationResult
+from app.db.models.oauth_account import OAuthAccount
 from app.db.models.reference_library import ReferenceLibraryItem
 from app.db.models.revoked_token import RevokedRefreshToken
 from app.db.models.routine import TaskRefresh, TaskRoutine
@@ -70,6 +71,7 @@ __all__ = [
     "LLMCredential",
     "LLMNodeRouting",
     "Message",
+    "OAuthAccount",
     "Plan",
     "ReferenceLibraryItem",
     "RevokedRefreshToken",

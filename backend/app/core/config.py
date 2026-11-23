@@ -633,6 +633,29 @@ class SearchConfig(BaseModel):
     snippet_chars: int = Field(default=500, ge=100, le=2000)
 
 
+class OAuthProviderConfig(BaseModel):
+    """单个 OAuth 提供方凭据（client_id 与 client_secret 缺一不可）。"""
+
+    client_id: str = ""
+    client_secret: str = ""
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.client_id.strip() and self.client_secret.strip())
+
+
+class OAuthConfig(BaseModel):
+    """第三方 OAuth 一键登录配置（Google / GitHub）。"""
+
+    google: OAuthProviderConfig = Field(default_factory=OAuthProviderConfig)
+    github: OAuthProviderConfig = Field(default_factory=OAuthProviderConfig)
+    frontend_base_url: str = ""
+    """前端回调根地址；留空时回退到 email.frontend_base_url。"""
+
+    backend_base_url: str = ""
+    """后端公网根地址（用于拼接精确的 redirect_uri，留空则由请求 URL 推导）。"""
+
+
 class Settings(BaseSettings):
     """全局配置入口。
 
@@ -666,6 +689,7 @@ class Settings(BaseSettings):
     routine: RoutineConfig = RoutineConfig()
     reference_verification: ReferenceVerificationConfig = ReferenceVerificationConfig()
     email: EmailConfig = EmailConfig()
+    oauth: OAuthConfig = OAuthConfig()
     captcha: CaptchaConfig = CaptchaConfig()
     secrets: SecretsConfig = SecretsConfig()
     billing: BillingConfig = BillingConfig()
@@ -721,6 +745,7 @@ class Settings(BaseSettings):
         "orchestration",
         "reference_verification",
         "email",
+        "oauth",
         "secrets",
         "billing",
         "rate_limit",

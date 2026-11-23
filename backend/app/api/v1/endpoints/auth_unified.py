@@ -13,10 +13,14 @@ import re
 import secrets
 import time
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
+from urllib.parse import quote, urlencode
 
+import httpx
 from fastapi import APIRouter, Depends, Request
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, EmailStr, Field, model_validator
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.endpoints.auth_lifecycle import get_email_sender
@@ -28,6 +32,7 @@ from app.core.security import (
     create_refresh_token,
     hash_password,
 )
+from app.db.models.oauth_account import OAuthAccount
 from app.db.models.user import User
 from app.db.repositories.user import UserRepository
 from app.db.session import get_db
@@ -119,9 +124,21 @@ def _sha256_hex(value: str) -> str:
 
 
 def _frontend_base_url() -> str:
+    oauth_cfg = getattr(get_settings(), "oauth", None)
+    oauth_front = getattr(oauth_cfg, "frontend_base_url", "") or ""
+    if oauth_front.strip():
+        return oauth_front.strip().rstrip("/")
     email_cfg = getattr(get_settings(), "email", None)
     base = getattr(email_cfg, "frontend_base_url", None) or "http://localhost:5173"
     return str(base).rstrip("/")
+
+
+def _oauth_redirect_uri(request: Request, provider: str) -> str:
+    oauth_cfg = getattr(get_settings(), "oauth", None)
+    backend_base = (getattr(oauth_cfg, "backend_base_url", "") or "").strip().rstrip("/")
+    if backend_base:
+        return f"{backend_base}/api/v1/auth/oauth/{provider}/callback"
+    return str(request.url_for("oauth_callback", provider=provider))
 
 
 async def _generate_unique_username(repo: UserRepository, email: str) -> str:
@@ -282,4 +299,296 @@ async def verify_email_otp(
             user.email_verified_at = now
             await db.flush()
 
+    return _issue_tokens(user)
+
+
+# =====================================================================
+# 第三方 OAuth 一键登录（Google / GitHub）
+# =====================================================================
+
+OAuthProvider = Literal["google", "github"]
+OAUTH_STATE_TTL_SECONDS = 600
+OAUTH_EXCHANGE_TTL_SECONDS = 120
+
+
+class OAuthProvidersOut(BaseModel):
+    google: bool
+    github: bool
+
+
+class OAuthExchangeIn(BaseModel):
+    code: str = Field(min_length=16, max_length=256)
+
+
+def _error_redirect(message: str) -> RedirectResponse:
+    target = f"{_frontend_base_url()}/login?oauth_error={quote(message)}"
+    return RedirectResponse(url=target, status_code=302)
+
+
+def _get_provider_cfg(provider: str) -> tuple[str, str]:
+    oauth_cfg = get_settings().oauth
+    p_cfg = oauth_cfg.google if provider == "google" else oauth_cfg.github
+    return p_cfg.client_id.strip(), p_cfg.client_secret.strip()
+
+
+async def _fetch_oauth_profile(
+    provider: str,
+    code: str,
+    redirect_uri: str,
+    client_id: str,
+    client_secret: str,
+) -> tuple[str, str]:
+    """向第三方换取 token 并返回 (provider_user_id, verified_email)。"""
+    async with httpx.AsyncClient(timeout=15.0) as http:
+        if provider == "google":
+            token_resp = await http.post(
+                "https://oauth2.googleapis.com/token",
+                data={
+                    "code": code,
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "redirect_uri": redirect_uri,
+                    "grant_type": "authorization_code",
+                },
+            )
+            token_resp.raise_for_status()
+            access_token = token_resp.json().get("access_token")
+            if not access_token:
+                raise ValueError("Google 未返回 access_token")
+
+            info_resp = await http.get(
+                "https://openidconnect.googleapis.com/v1/userinfo",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            info_resp.raise_for_status()
+            info = info_resp.json()
+            uid = str(info.get("sub") or "").strip()
+            email = _normalize_email(str(info.get("email") or ""))
+            if not uid or not email or info.get("email_verified") is not True:
+                raise ValueError("Google 账号缺少已验证邮箱")
+            return uid, email
+
+        # GitHub
+        token_resp = await http.post(
+            "https://github.com/login/oauth/access_token",
+            data={
+                "code": code,
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "redirect_uri": redirect_uri,
+            },
+            headers={"Accept": "application/json"},
+        )
+        token_resp.raise_for_status()
+        access_token = token_resp.json().get("access_token")
+        if not access_token:
+            raise ValueError("GitHub 未返回 access_token")
+
+        gh_headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Accept": "application/vnd.github+json",
+        }
+        user_resp = await http.get("https://api.github.com/user", headers=gh_headers)
+        user_resp.raise_for_status()
+        user_data = user_resp.json()
+        uid = str(user_data.get("id") or "").strip()
+
+        emails_resp = await http.get("https://api.github.com/user/emails", headers=gh_headers)
+        emails_resp.raise_for_status()
+        emails = emails_resp.json()
+        verified_email = ""
+        for entry in emails:
+            if entry.get("verified") and entry.get("primary"):
+                verified_email = _normalize_email(str(entry.get("email") or ""))
+                break
+        if not verified_email:
+            for entry in emails:
+                if entry.get("verified"):
+                    verified_email = _normalize_email(str(entry.get("email") or ""))
+                    break
+
+        if not uid or not verified_email:
+            raise ValueError("GitHub 账号缺少已验证邮箱")
+        return uid, verified_email
+
+
+@router.get("/oauth/providers", response_model=OAuthProvidersOut, summary="查询启用的 OAuth 提供方")
+async def oauth_providers() -> OAuthProvidersOut:
+    oauth_cfg = get_settings().oauth
+    return OAuthProvidersOut(
+        google=oauth_cfg.google.enabled,
+        github=oauth_cfg.github.enabled,
+    )
+
+
+@router.get("/oauth/{provider}/authorize", summary="跳转第三方 OAuth 授权页")
+async def oauth_authorize(provider: OAuthProvider, request: Request) -> RedirectResponse:
+    client_id, client_secret = _get_provider_cfg(provider)
+    if not client_id or not client_secret:
+        label = "Google" if provider == "google" else "GitHub"
+        return _error_redirect(f"管理员尚未配置 {label} 登录密钥")
+
+    state = secrets.token_urlsafe(24)
+    store = _resolve_store(request)
+    await store.setex(f"oauth:state:{state}", OAUTH_STATE_TTL_SECONDS, provider)
+
+    redirect_uri = _oauth_redirect_uri(request, provider)
+    if provider == "google":
+        params = urlencode(
+            {
+                "client_id": client_id,
+                "redirect_uri": redirect_uri,
+                "response_type": "code",
+                "scope": "openid email profile",
+                "state": state,
+                "prompt": "select_account",
+            }
+        )
+        return RedirectResponse(
+            url=f"https://accounts.google.com/o/oauth2/v2/auth?{params}",
+            status_code=302,
+        )
+
+    params = urlencode(
+        {
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "scope": "read:user user:email",
+            "state": state,
+        }
+    )
+    return RedirectResponse(
+        url=f"https://github.com/login/oauth/authorize?{params}",
+        status_code=302,
+    )
+
+
+@router.get(
+    "/oauth/{provider}/callback",
+    name="oauth_callback",
+    summary="第三方 OAuth 回调处理",
+)
+async def oauth_callback(
+    provider: OAuthProvider,
+    request: Request,
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+    db: AsyncSession = Depends(get_db),
+) -> RedirectResponse:
+    if error:
+        return _error_redirect("已取消第三方授权")
+    if not code or not state:
+        return _error_redirect("缺少授权回调参数")
+
+    store = _resolve_store(request)
+    state_key = f"oauth:state:{state}"
+    expected_provider = await store.get(state_key)
+    await store.delete(state_key)
+    expected_str = (
+        expected_provider.decode("utf-8")
+        if isinstance(expected_provider, bytes)
+        else str(expected_provider or "")
+    )
+    if expected_str != provider:
+        return _error_redirect("授权状态无效或已过期，请重试")
+
+    client_id, client_secret = _get_provider_cfg(provider)
+    if not client_id or not client_secret:
+        return _error_redirect("OAuth 服务未配置")
+
+    redirect_uri = _oauth_redirect_uri(request, provider)
+    try:
+        provider_uid, verified_email = await _fetch_oauth_profile(
+            provider, code, redirect_uri, client_id, client_secret
+        )
+    except Exception as exc:
+        logger.warning("oauth_callback_failed", provider=provider, error=str(exc))
+        return _error_redirect("第三方授权验证失败，请重试或改用邮箱验证码")
+
+    stmt = select(OAuthAccount).where(
+        OAuthAccount.provider == provider,
+        OAuthAccount.provider_user_id == provider_uid,
+    )
+    link = (await db.execute(stmt)).scalar_one_or_none()
+    repo = UserRepository(db)
+    now = datetime.now(UTC)
+
+    if link is not None:
+        user = await repo.get(link.user_id)
+        if user is None:
+            return _error_redirect("关联账号不存在")
+        if not user.is_active:
+            return _error_redirect("账号已被禁用")
+    else:
+        user = await repo.get_by_email(verified_email)
+        if user is None:
+            username = await _generate_unique_username(repo, verified_email)
+            user = User(
+                username=username,
+                email=verified_email,
+                password_hash=None,
+                role="user",
+                is_active=True,
+                email_verified_at=now,
+            )
+            await repo.create(user)
+            logger.info("oauth_auto_registered", provider=provider, user_id=str(user.id))
+        else:
+            if not user.is_active:
+                return _error_redirect("账号已被禁用")
+            if user.email_verified_at is None:
+                user.email_verified_at = now
+                await db.flush()
+
+        db.add(
+            OAuthAccount(
+                user_id=user.id,
+                provider=provider,
+                provider_user_id=provider_uid,
+                provider_email=verified_email,
+            )
+        )
+        await db.flush()
+
+    exchange_code = secrets.token_urlsafe(32)
+    await store.setex(
+        f"oauth:exchange:{_sha256_hex(exchange_code)}",
+        OAUTH_EXCHANGE_TTL_SECONDS,
+        str(user.id),
+    )
+    return RedirectResponse(
+        url=f"{_frontend_base_url()}/auth/callback?code={quote(exchange_code)}",
+        status_code=302,
+    )
+
+
+@router.post(
+    "/oauth/exchange",
+    response_model=TokenOut,
+    summary="用一次性 OAuth 交换码换取 JWT",
+)
+async def oauth_exchange(
+    payload: OAuthExchangeIn,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> TokenOut:
+    store = _resolve_store(request)
+    key = f"oauth:exchange:{_sha256_hex(payload.code.strip())}"
+    raw_uid = await store.get(key)
+    await store.delete(key)
+    if not raw_uid:
+        raise UnauthorizedException("授权登录码无效或已过期，请重新登录")
+
+    uid_str = raw_uid.decode("utf-8") if isinstance(raw_uid, bytes) else str(raw_uid)
+    import uuid as _uuid
+
+    try:
+        user_uuid = _uuid.UUID(uid_str)
+    except ValueError as exc:
+        raise UnauthorizedException("授权登录码无效") from exc
+
+    user = await UserRepository(db).get(user_uuid)
+    if user is None or not user.is_active:
+        raise UnauthorizedException("账号不存在或已被禁用")
     return _issue_tokens(user)

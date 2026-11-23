@@ -11,6 +11,7 @@ import LandingView from "@/views/LandingView.vue";
 import LoginView from "@/views/LoginView.vue";
 import ChatView from "@/views/ChatView.vue";
 import ModelSettingsView from "@/views/ModelSettingsView.vue";
+import OAuthCallbackView from "@/views/OAuthCallbackView.vue";
 import ObservabilityView from "@/views/ObservabilityView.vue";
 import PasswordResetView from "@/views/PasswordResetView.vue";
 import ReferenceImportView from "@/views/ReferenceImportView.vue";
@@ -78,6 +79,12 @@ export const router = createRouter({
       name: "password-reset",
       component: PasswordResetView,
       props: (route) => ({ token: typeof route.query.token === "string" ? route.query.token : "" }),
+      meta: { public: true },
+    },
+    {
+      path: "/auth/callback",
+      name: "oauth-callback",
+      component: OAuthCallbackView,
       meta: { public: true },
     },
     // 工作台布局路由：必须保持 path: "/"（不能写 ""，否则 Vue Router 4 评分高于 "/" 会抢占首页）

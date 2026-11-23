@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Check,
+  Github,
   KeyRound,
   Loader2,
   LockKeyhole,
@@ -154,7 +155,15 @@ function switchStep(next: AuthStep) {
   step.value = next;
 }
 
+const googleAuthUrl = computed(() => authApi.getOAuthAuthorizeUrl("google"));
+const githubAuthUrl = computed(() => authApi.getOAuthAuthorizeUrl("github"));
+
 onMounted(async () => {
+  const oauthErr = typeof route.query.oauth_error === "string" ? route.query.oauth_error.trim() : "";
+  if (oauthErr) {
+    errorMessage.value = oauthErr;
+  }
+
   const magic = typeof route.query.magic_token === "string" ? route.query.magic_token.trim() : "";
   if (!magic) return;
   magicChecking.value = true;
@@ -312,39 +321,80 @@ onBeforeUnmount(() => {
           <span>正在验证一键登录链接…</span>
         </div>
 
-        <!-- Step 1：单输入框邮箱登录注册一体流 -->
-        <form
-          v-else-if="step === 'email'"
-          class="mt-6 flex flex-col gap-3.5"
-          @submit.prevent="handleSendOtp"
-        >
-          <div class="grid gap-1.5">
-            <Label for="otp-email" class="text-xs">邮箱地址</Label>
-            <Input
-              id="otp-email"
-              v-model="otpEmail"
-              data-test="otp-email-input"
-              type="email"
-              required
-              autocomplete="email"
-              placeholder="name@university.edu"
-              class="h-10 rounded-lg border-neutral-200 focus-visible:border-[#0F4C3A] focus-visible:ring-1 focus-visible:ring-[#0F4C3A]/20 focus-visible:outline-none dark:border-input"
-            />
+        <!-- Step 1：OAuth 一键登录 + 单输入框邮箱登录注册一体流 -->
+        <div v-else-if="step === 'email'" class="mt-6 space-y-4">
+          <div class="grid gap-2">
+            <a
+              :href="googleAuthUrl"
+              data-test="oauth-google-btn"
+              class="inline-flex h-10 w-full items-center justify-center gap-2.5 rounded-lg border border-neutral-200 bg-card px-4 text-xs font-medium text-foreground transition-colors hover:bg-muted/60 focus-visible:outline-2 focus-visible:outline-[#0F4C3A] dark:border-input"
+            >
+              <svg class="size-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  fill="#4285F4"
+                  d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z"
+                />
+                <path
+                  fill="#34A853"
+                  d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.96H1.29v3.14C3.26 21.3 7.31 24 12 24Z"
+                />
+                <path
+                  fill="#FBBC05"
+                  d="M5.28 14.24c-.24-.72-.38-1.49-.38-2.24s.14-1.52.38-2.24V6.62H1.29a11.98 11.98 0 0 0 0 10.76l3.99-3.14Z"
+                />
+                <path
+                  fill="#EA4335"
+                  d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96Z"
+                />
+              </svg>
+              <span>Continue with Google</span>
+            </a>
+
+            <a
+              :href="githubAuthUrl"
+              data-test="oauth-github-btn"
+              class="inline-flex h-10 w-full items-center justify-center gap-2.5 rounded-lg border border-neutral-200 bg-card px-4 text-xs font-medium text-foreground transition-colors hover:bg-muted/60 focus-visible:outline-2 focus-visible:outline-[#0F4C3A] dark:border-input"
+            >
+              <Github :size="15" aria-hidden="true" />
+              <span>Continue with GitHub</span>
+            </a>
           </div>
 
-          <ErrorBanner :message="errorMessage" />
+          <div class="relative flex items-center py-0.5">
+            <div class="h-px flex-1 bg-border" />
+            <span class="px-3 text-[11px] text-muted-foreground">或</span>
+            <div class="h-px flex-1 bg-border" />
+          </div>
 
-          <Button
-            type="submit"
-            data-test="otp-send-btn"
-            :disabled="loading"
-            class="h-10 w-full rounded-lg bg-[#0F4C3A] text-white hover:bg-[#135D47] dark:bg-primary dark:text-primary-foreground dark:hover:bg-primary/90"
-          >
-            <Loader2 v-if="loading" class="animate-spin" aria-hidden="true" />
-            <span>{{ loading ? "发送中…" : "继续" }}</span>
-            <ArrowRight v-if="!loading" :size="14" aria-hidden="true" />
-          </Button>
-        </form>
+          <form class="flex flex-col gap-3.5" @submit.prevent="handleSendOtp">
+            <div class="grid gap-1.5">
+              <Label for="otp-email" class="text-xs">邮箱地址</Label>
+              <Input
+                id="otp-email"
+                v-model="otpEmail"
+                data-test="otp-email-input"
+                type="email"
+                required
+                autocomplete="email"
+                placeholder="name@university.edu"
+                class="h-10 rounded-lg border-neutral-200 focus-visible:border-[#0F4C3A] focus-visible:ring-1 focus-visible:ring-[#0F4C3A]/20 focus-visible:outline-none dark:border-input"
+              />
+            </div>
+
+            <ErrorBanner :message="errorMessage" />
+
+            <Button
+              type="submit"
+              data-test="otp-send-btn"
+              :disabled="loading"
+              class="h-10 w-full rounded-lg bg-[#0F4C3A] text-white hover:bg-[#135D47] dark:bg-primary dark:text-primary-foreground dark:hover:bg-primary/90"
+            >
+              <Loader2 v-if="loading" class="animate-spin" aria-hidden="true" />
+              <span>{{ loading ? "发送中…" : "继续" }}</span>
+              <ArrowRight v-if="!loading" :size="14" aria-hidden="true" />
+            </Button>
+          </form>
+        </div>
 
         <!-- Step 2：输入 6 位验证码 -->
         <form

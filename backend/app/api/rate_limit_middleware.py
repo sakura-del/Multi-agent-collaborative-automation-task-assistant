@@ -54,6 +54,7 @@ _ROUTE_RULES: tuple[tuple[str, str, str], ...] = (
     ("auth_register", "POST", "/api/v1/auth/register"),
     ("auth_register", "POST", "/api/v1/auth/email-otp/request"),
     ("auth_login", "POST", "/api/v1/auth/email-otp/verify"),
+    ("auth_login", "POST", "/api/v1/auth/oauth/exchange"),
     ("auth_register", "POST", "/api/v1/auth/password-reset/request"),
     ("auth_register", "POST", "/api/v1/auth/password-reset/confirm"),
     ("auth_register", "POST", "/api/v1/auth/verify-email/request"),

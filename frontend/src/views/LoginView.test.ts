@@ -14,6 +14,8 @@ vi.mock("@/api/auth", () => ({
   authApi: {
     requestEmailOtp: mocks.requestEmailOtp,
     verifyEmailOtp: mocks.verifyEmailOtp,
+    getOAuthAuthorizeUrl: (provider: string) => `/api/v1/auth/oauth/${provider}/authorize`,
+    exchangeOAuthCode: vi.fn(),
     login: mocks.login,
     me: mocks.me,
     register: vi.fn(),
@@ -22,6 +24,7 @@ vi.mock("@/api/auth", () => ({
   default: {
     requestEmailOtp: mocks.requestEmailOtp,
     verifyEmailOtp: mocks.verifyEmailOtp,
+    getOAuthAuthorizeUrl: (provider: string) => `/api/v1/auth/oauth/${provider}/authorize`,
     login: mocks.login,
     me: mocks.me,
   },
@@ -91,10 +94,16 @@ beforeEach(() => {
 });
 
 describe("登录/注册一体流（Email OTP + Magic Link）", () => {
-  it("首屏展示统一邮箱输入，不再区分登录/注册 Tab", async () => {
+  it("首屏展示 Google / GitHub OAuth 入口与统一邮箱输入，不再区分登录/注册 Tab", async () => {
     const { wrapper } = await mountLogin();
 
     expect(wrapper.get('[data-test="auth-title"]').text()).toBe("登录或创建账号");
+    expect(wrapper.get('[data-test="oauth-google-btn"]').attributes("href")).toBe(
+      "/api/v1/auth/oauth/google/authorize",
+    );
+    expect(wrapper.get('[data-test="oauth-github-btn"]').attributes("href")).toBe(
+      "/api/v1/auth/oauth/github/authorize",
+    );
     expect(wrapper.find('[data-test="otp-email-input"]').exists()).toBe(true);
     expect(wrapper.find('[role="tab"]').exists()).toBe(false);
   });

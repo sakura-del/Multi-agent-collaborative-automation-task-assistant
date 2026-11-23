@@ -1,5 +1,8 @@
+import { resolveApiBase } from "@/config/endpoint";
 import api from "./client";
 import type { LoginInput, RegisterInput, TokenOut, UserOut } from "./types";
+
+export type OAuthProvider = "google" | "github";
 
 // 鉴权 API：对接后端 /api/v1/auth/*
 export const authApi = {
@@ -16,6 +19,12 @@ export const authApi = {
 
   verifyEmailOtp: (payload: { email?: string; code?: string; magic_token?: string }) =>
     api.post<TokenOut>("/auth/email-otp/verify", payload).then((response) => response.data),
+
+  exchangeOAuthCode: (code: string) =>
+    api.post<TokenOut>("/auth/oauth/exchange", { code }).then((response) => response.data),
+
+  getOAuthAuthorizeUrl: (provider: OAuthProvider) =>
+    `${resolveApiBase()}/auth/oauth/${provider}/authorize`,
 
   refresh: (refreshToken: string) =>
     api

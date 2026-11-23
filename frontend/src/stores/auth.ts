@@ -42,6 +42,11 @@ export const useAuthStore = defineStore("auth", () => {
     user.value = await authApi.me();
   }
 
+  async function loginWithOAuthCode(code: string): Promise<void> {
+    persistTokens(await authApi.exchangeOAuthCode(code));
+    user.value = await authApi.me();
+  }
+
   async function register(input: RegisterInput): Promise<void> {
     // 2026-11-13：不再自动登录——邮箱未验证就被门禁挡住（403 EMAIL_NOT_VERIFIED），
     // 这里的静默失败曾让用户「没验证邮箱也进了系统」。注册成功即返回，
@@ -73,6 +78,7 @@ export const useAuthStore = defineStore("auth", () => {
     login,
     loginWithEmailOtp,
     loginWithMagicToken,
+    loginWithOAuthCode,
     register,
     refresh,
     logout,
