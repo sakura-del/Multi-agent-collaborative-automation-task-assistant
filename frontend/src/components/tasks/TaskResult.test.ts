@@ -394,4 +394,76 @@ describe("TaskResult · 引用核验集成", () => {
     expect(wrapper.find('[data-test="verification-summary"]').exists()).toBe(false);
     expect(wrapper.find('[data-test="bibliography-verdict-1"]').exists()).toBe(false);
   });
+
+  it("warns about retracted references and highlights their citation markers", () => {
+    const wrapper = mountResult({
+      report: report({
+        final_markdown: "# 综述\n\n论断一 [E1]，论断二 [E2]。",
+        bibliography: [
+          {
+            index: 1,
+            title: "撤稿文献",
+            is_retracted: true,
+            quality_flags: ["retracted", "preprint"],
+            retraction_reason: "数据不可复现",
+            retraction_notice_doi: "10.1234/notice",
+          },
+          { index: 2, title: "正常文献", is_retracted: false },
+        ],
+      }),
+    });
+
+    const banner = wrapper.find('[data-test="retracted-banner"]');
+    expect(banner.exists()).toBe(true);
+    expect(banner.text()).toContain("1 篇已撤稿文献");
+    expect(banner.text()).toContain("数据不可复现");
+    expect(banner.text()).toContain("10.1234/notice");
+
+    // 只标红被撤稿的角标，其他引用保持原样
+    const highlighted = wrapper.findAll('[data-test="retracted-citation"]');
+    expect(highlighted).toHaveLength(1);
+    expect(highlighted[0].text()).toBe("[E1]");
+    expect(wrapper.find('[data-test="result-markdown"]').text()).toContain("[E2]");
+  });
+
+  it("does not warn or highlight when no reference is retracted", () => {
+    const wrapper = mountResult({
+      report: report({ bibliography: [{ index: 1, title: "正常文献", is_retracted: false }] }),
+    });
+
+    expect(wrapper.find('[data-test="retracted-banner"]').exists()).toBe(false);
+    expect(wrapper.findAll('[data-test="retracted-citation"]')).toHaveLength(0);
+  });
+
+  it("renders quality badges per reference and aggregated counts in the panel", () => {
+    const wrapper = mountResult({
+      report: report({
+        stats: {
+          reference_verification: verificationSummary({ retracted: 1, preprint: 2, low_citation: 1 }),
+        },
+        bibliography: [
+          {
+            index: 1,
+            title: "预印本且低被引",
+            quality_flags: ["preprint", "low_citation"],
+            cited_by_count: 2,
+          },
+        ],
+      }),
+    });
+
+    expect(wrapper.find('[data-test="bibliography-flag-1-preprint"]').text()).toBe("预印本");
+    expect(wrapper.find('[data-test="bibliography-flag-1-low_citation"]').text()).toContain("2 次");
+    expect(wrapper.find('[data-test="quality-count-retracted"]').text()).toContain("1");
+    expect(wrapper.find('[data-test="quality-count-preprint"]').text()).toContain("2");
+    expect(wrapper.find('[data-test="quality-count-low_citation"]').text()).toContain("1");
+  });
+
+  it("hides quality counts when the summary has none (old report format)", () => {
+    const wrapper = mountResult({
+      report: report({ stats: { reference_verification: verificationSummary() } }),
+    });
+
+    expect(wrapper.find('[data-test="quality-summary"]').exists()).toBe(false);
+  });
 });

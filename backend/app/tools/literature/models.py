@@ -85,6 +85,12 @@ class Artifact(BaseModel):
 
 # ===== 引用真实性校验契约（Issue #3，Lead 冻结：实现方不得改字段名/语义）=====
 
+#: 来源质量标记（Issue #31）：只允许这三种取值，避免前端与导出侧各造一套词表。
+QualityFlag = Literal["retracted", "preprint", "low_citation"]
+
+#: 来源类型：同行评审 / 预印本 / 其他（无法判定时一律 other，不猜）。
+SourceType = Literal["peer_reviewed", "preprint", "other"]
+
 
 class MetadataRecord(BaseModel):
     """外部元数据源（CrossRef / OpenAlex）归一化后的单条文献元数据。
@@ -110,6 +116,14 @@ class MetadataRecord(BaseModel):
     is_open_access: bool | None = None
     is_retracted: bool | None = None
     """撤稿标记：True=明确撤稿，False=未标记撤稿，None=未知。"""
+    retraction_reason: str | None = None
+    """撤稿原因（来源给出时才有，如 CrossRef 的更新说明）。"""
+    retraction_notice_doi: str | None = None
+    """撤稿声明自身的 DOI（用于把用户引到声明原文）。"""
+    source_type: SourceType = "other"
+    """来源类型：同行评审 / 预印本 / 其他；无法判定时保持 other，不猜。"""
+    quality_flags: list[QualityFlag] = Field(default_factory=list)
+    """来源质量标记（Issue #31）：由核验层统一计算，适配器一般不填。"""
     source_url: HttpUrl | None = None
 
 
@@ -158,6 +172,12 @@ class ReferenceVerification(BaseModel):
     similarity: float = Field(default=0.0, ge=0.0, le=1.0)
     is_retracted: bool | None = None
     """与四态核验正交的撤稿状态；True/False/None 分别对应已撤稿/未标记/未知。"""
+    quality_flags: list[QualityFlag] = Field(default_factory=list)
+    """来源质量标记：retracted / preprint / low_citation（可能同时存在多个）。"""
+    source_type: SourceType = "other"
+    cited_by_count: int | None = Field(default=None, ge=0)
+    retraction_reason: str | None = None
+    retraction_notice_doi: str | None = None
     matched: MetadataRecord | None = None
     cached: bool = False
     """是否来自核验缓存（缓存命中不得再次外呼）。"""
@@ -176,6 +196,11 @@ class ReferenceVerificationSummary(BaseModel):
     cached_hits: int = Field(default=0, ge=0)
     dropped: int = Field(default=0, ge=0)
     """因「拦截未核验引用」开关被剔出参考文献列表的条数。"""
+
+    retracted: int = Field(default=0, ge=0)
+    """命中来源质量标记的条数（Issue #31；三项互不排斥，可能重叠）。"""
+    preprint: int = Field(default=0, ge=0)
+    low_citation: int = Field(default=0, ge=0)
 
     intercepted: bool = False
     """拦截开关是否生效。"""

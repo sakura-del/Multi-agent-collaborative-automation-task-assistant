@@ -455,3 +455,63 @@ class TestClientLifecycle:
             assert client.is_closed is False
         finally:
             await client.aclose()
+
+
+# ===== 来源类型映射（Issue #31） =====
+
+
+def _payload_with(**updates: Any) -> dict[str, Any]:
+    """在 fixture 上覆写顶层字段（深拷贝，避免污染模块级 WORK_PAYLOAD）。"""
+    payload = json.loads(json.dumps(WORK_PAYLOAD))
+    payload.update(updates)
+    return payload
+
+
+async def _parse_payload(payload: dict[str, Any]) -> MetadataRecord:
+    captured: list[httpx.Request] = []
+    async with _openalex(_json_handler(payload, captured)) as adapter:
+        record = await adapter.lookup_doi("10.7717/peerj.4375")
+    assert record is not None
+    return record
+
+
+class TestSourceType:
+    async def test_journal_article_is_peer_reviewed(self) -> None:
+        record = await _parse_payload(
+            _payload_with(
+                type="article",
+                primary_location={"source": {"display_name": "PeerJ", "type": "journal"}},
+            )
+        )
+        assert record.source_type == "peer_reviewed"
+
+    async def test_preprint_work_type_is_preprint(self) -> None:
+        record = await _parse_payload(
+            _payload_with(
+                type="preprint",
+                primary_location={"source": {"display_name": "arXiv", "type": "repository"}},
+            )
+        )
+        assert record.source_type == "preprint"
+
+    async def test_missing_type_is_other(self) -> None:
+        payload = _payload_with()
+        payload.pop("type", None)
+        record = await _parse_payload(payload)
+        assert record.source_type == "other"
+
+    async def test_repository_without_preprint_type_stays_other(self) -> None:
+        """work type 仍是论文类时不能仅凭 repository 就判预印本（保守优先）。"""
+        record = await _parse_payload(
+            _payload_with(
+                type="article",
+                primary_location={"source": {"display_name": "Institutional Repository"}},
+            )
+        )
+        assert record.source_type == "other"
+
+    async def test_retraction_fields_default_to_none(self) -> None:
+        record = await _parse_payload(_payload_with())
+        assert record.retraction_reason is None
+        assert record.retraction_notice_doi is None
+        assert record.quality_flags == []

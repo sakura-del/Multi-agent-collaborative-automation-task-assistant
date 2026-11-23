@@ -35,6 +35,7 @@ from app.core.exceptions import UpstreamError, ValidationException
 from app.core.logging import get_logger
 from app.tools.literature.models import (
     MetadataRecord,
+    QualityFlag,
     ReferenceCandidate,
     ReferenceVerdict,
     ReferenceVerification,
@@ -48,8 +49,9 @@ DEFAULT_SIMILARITY_THRESHOLD = 0.90
 
 # 缓存默认 TTL：7 天（与计划 §2.5 的 cache_ttl_seconds 默认值一致）
 _DEFAULT_CACHE_TTL = 604800
-# v2：载荷新增 `is_retracted` 字段，换命名空间避免旧缓存（无该字段）被当成有效命中
-_CACHE_KEY_PREFIX = "refverify:v2:"
+# v3：载荷新增来源质量字段（Issue #31），旧 v2 缓存缺 `quality_flags` 等键，
+# 直接复用会让已撤稿文献显示为「无标记」——换命名空间，宁可多查一次外呼。
+_CACHE_KEY_PREFIX = "refverify:v3:"
 
 CACHE_REDIS_FAILURE_THRESHOLD = 2
 """连续 Redis 操作失败达到该次数即熔断（计划 §2.9 修订 R5②）。
@@ -287,6 +289,40 @@ def candidates_from_bibliography(entries: Sequence[dict[str, Any]]) -> list[Refe
 
 # ===== 汇总与拦截键 =====
 
+#: 低被引阈值与最低发表年限（Issue #31）：只对「发表满 2 年且被引 < 5」的文献打标，
+#: 避免把刚上线、还没被引用的新论文误判成低质量。
+LOW_CITATION_THRESHOLD = 5
+MIN_YEARS_FOR_LOW_CITATION = 2
+
+
+def assess_quality_flags(
+    record: MetadataRecord, *, current_year: int | None = None
+) -> list[QualityFlag]:
+    """按外部元数据计算来源质量标记（Issue #31 的唯一口径）。
+
+    - ``retracted``：来源明确标记撤稿（``is_retracted is True``；None 不算）；
+    - ``preprint``：来源类型为预印本；
+    - ``low_citation``：发表满 2 年、被引次数可观测且低于阈值。新论文（< 2 年）
+      即使 0 被引也不打标——这正是「防误伤」的关键边界。
+
+    ``current_year`` 显式传入便于测试固定时间；缺省用本地日期年份。
+    """
+    flags: list[QualityFlag] = []
+    if record.is_retracted is True:
+        flags.append("retracted")
+    if record.source_type == "preprint":
+        flags.append("preprint")
+    year = record.year
+    reference_year = current_year if current_year is not None else date.today().year
+    if (
+        year is not None
+        and record.cited_by_count is not None
+        and reference_year - year >= MIN_YEARS_FOR_LOW_CITATION
+        and record.cited_by_count < LOW_CITATION_THRESHOLD
+    ):
+        flags.append("low_citation")
+    return flags
+
 
 def blocked_keys(verifications: Sequence[ReferenceVerification]) -> set[str]:
     """``verdict ∈ {METADATA_MISMATCH, NOT_FOUND}`` 的 ``reference_key``。"""
@@ -298,6 +334,7 @@ def summarize_verifications(
 ) -> ReferenceVerificationSummary:
     """核验统计汇总：供校验报告与导出报告展示。"""
     counts = Counter(item.verdict for item in verifications)
+    flags = Counter(flag for item in verifications for flag in item.quality_flags)
     return ReferenceVerificationSummary(
         total=len(verifications),
         verified=counts[ReferenceVerdict.VERIFIED],
@@ -306,6 +343,9 @@ def summarize_verifications(
         unverified=counts[ReferenceVerdict.UNVERIFIED],
         cached_hits=sum(1 for item in verifications if item.cached),
         dropped=dropped,
+        retracted=flags["retracted"],
+        preprint=flags["preprint"],
+        low_citation=flags["low_citation"],
         intercepted=intercepted,
     )
 
@@ -314,7 +354,7 @@ def summarize_verifications(
 
 
 class ReferenceVerificationCache:
-    """Redis 优先、内存回退；键为 ``refverify:v2:{reference_key}``。
+    """Redis 优先、内存回退；键为 ``refverify:v3:{reference_key}``。
 
     接口为 **async**（计划 §2.3 修订 R2）：项目 Redis 只有 ``redis.asyncio`` 客户端
     （``app/core/redis.py::RedisManager.get_client()``），同步接口无法消费 awaitable，
@@ -644,6 +684,7 @@ class ReferenceVerifier:
         if score < self._similarity_threshold:
             if doi_status == _DOI_RESOLVED:
                 # 修订 R1：DOI 已解析成功 ⇒ 文献确实存在，标题不符属「元数据不符」而非「未找到」
+                quality_flags = assess_quality_flags(record)
                 return ReferenceVerification(
                     reference_key=candidate.key,
                     title=candidate.title,
@@ -654,7 +695,12 @@ class ReferenceVerifier:
                     ),
                     similarity=score,
                     is_retracted=record.is_retracted,
-                    matched=record,
+                    quality_flags=quality_flags,
+                    source_type=record.source_type,
+                    cited_by_count=record.cited_by_count,
+                    retraction_reason=record.retraction_reason,
+                    retraction_notice_doi=record.retraction_notice_doi,
+                    matched=record.model_copy(update={"quality_flags": quality_flags}),
                 )
             reason = (
                 f"标题相似度 {score:.2f} 低于阈值 {self._similarity_threshold:.2f}"
@@ -662,6 +708,8 @@ class ReferenceVerifier:
             )
             if doi_note:
                 reason = f"{doi_note}；{reason}"
+            # 相似度不达标 ⇒ 该候选不是被引文献本身，**不得**把它的撤稿/预印本标记
+            # 安到用户引用的那篇上（宁可留空，也不制造错误警示）。
             return ReferenceVerification(
                 reference_key=candidate.key,
                 title=candidate.title,
@@ -702,6 +750,7 @@ class ReferenceVerifier:
             else:
                 reason = f"标题检索命中 {record.source} 且元数据吻合（相似度 {score:.2f}）"
 
+        quality_flags = assess_quality_flags(record)
         return ReferenceVerification(
             reference_key=candidate.key,
             title=candidate.title,
@@ -709,7 +758,12 @@ class ReferenceVerifier:
             reason=reason,
             similarity=score,
             is_retracted=record.is_retracted,
-            matched=record,
+            quality_flags=quality_flags,
+            source_type=record.source_type,
+            cited_by_count=record.cited_by_count,
+            retraction_reason=record.retraction_reason,
+            retraction_notice_doi=record.retraction_notice_doi,
+            matched=record.model_copy(update={"quality_flags": quality_flags}),
         )
 
     @staticmethod

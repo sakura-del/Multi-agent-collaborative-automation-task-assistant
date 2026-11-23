@@ -9,10 +9,18 @@ import { Button } from "@/components/ui/button";
 import type {
   Artifact,
   BibliographyEntry,
+  QualityFlag,
   ReferenceVerificationSummary,
   ReviewReport,
   VerificationStatus,
 } from "@/api/types";
+import {
+  QUALITY_FLAG_LABELS,
+  markRetractedCitations,
+  parseQualityFlags,
+  parseSourceType,
+  retractedIndices,
+} from "@/utils/citation-quality";
 import { renderMarkdown } from "@/utils/markdown";
 
 // 结果视图：左侧正文（Markdown 渲染成排版 + 可切源码），右侧克制的元数据栏。
@@ -37,8 +45,8 @@ const errorMessage = ref<string | null>(null);
 /** 源码视图开关（默认渲染视图）。 */
 const showSource = ref(false);
 
-/** 消毒后的正文 HTML（`v-html` 用；安全性由 renderMarkdown 保证）。 */
-const renderedMarkdown = computed(() => renderMarkdown(props.report.final_markdown));
+/** 消毒后的正文 HTML（未做质量标记；`v-html` 的安全性由 renderMarkdown 保证）。 */
+const baseRenderedMarkdown = computed(() => renderMarkdown(props.report.final_markdown));
 
 const SCORE_LABELS: Record<string, string> = {
   citation_traceability: "引用可追溯性",
@@ -115,6 +123,14 @@ function parseVerificationSummary(value: unknown): ReferenceVerificationSummary 
   if (typeof record.intercepted !== "boolean") {
     return null;
   }
+  // 来源质量计数（Issue #31）是可选增量：缺键/非法值表示「后端未评估」，不是 0。
+  const optionalCount = (key: string): number | undefined => {
+    const raw = record[key];
+    return typeof raw === "number" && Number.isFinite(raw) ? raw : undefined;
+  };
+  const retracted = optionalCount("retracted");
+  const preprint = optionalCount("preprint");
+  const lowCitation = optionalCount("low_citation");
   return {
     total: counts.total,
     verified: counts.verified,
@@ -124,6 +140,9 @@ function parseVerificationSummary(value: unknown): ReferenceVerificationSummary 
     cached_hits: counts.cached_hits,
     dropped: counts.dropped,
     intercepted: record.intercepted,
+    ...(retracted !== undefined ? { retracted } : {}),
+    ...(preprint !== undefined ? { preprint } : {}),
+    ...(lowCitation !== undefined ? { low_citation: lowCitation } : {}),
   };
 }
 
@@ -135,15 +154,80 @@ const bibliography = computed<BibliographyEntry[]>(() =>
   (props.report.bibliography ?? []).map((item, position) => {
     const record = item as Record<string, unknown>;
     const index = Number(record.index ?? position + 1);
+    const qualityFlags = parseQualityFlags(record.quality_flags);
+    const sourceType = parseSourceType(record.source_type);
     return {
       index,
       title: String(record.title ?? record.source_id ?? `文献 ${index}`),
       url: safeUrl(record.source_url ?? record.url),
       verification_status: parseVerificationStatus(record.verification_status),
       is_retracted: typeof record.is_retracted === "boolean" ? record.is_retracted : null,
+      // 质量字段只在后端真的给出时展开：旧报告（无这些键）与既有断言保持原样。
+      ...(qualityFlags.length ? { quality_flags: qualityFlags } : {}),
+      ...(sourceType ? { source_type: sourceType } : {}),
+      ...(typeof record.cited_by_count === "number" && Number.isFinite(record.cited_by_count)
+        ? { cited_by_count: record.cited_by_count }
+        : {}),
+      ...(typeof record.retraction_reason === "string" && record.retraction_reason
+        ? { retraction_reason: record.retraction_reason }
+        : {}),
+      ...(typeof record.retraction_notice_doi === "string" && record.retraction_notice_doi
+        ? { retraction_notice_doi: record.retraction_notice_doi }
+        : {}),
     };
   })
 );
+
+/** 已撤稿的参考文献条目（来源质量 Issue #31）：正文顶部横幅与角标标红共用。 */
+const retractedEntries = computed(() =>
+  bibliography.value.filter(
+    (entry) => entry.is_retracted === true || entry.quality_flags?.includes("retracted"),
+  )
+);
+
+/** 正文 HTML：在消毒后的产物上把已撤稿角标包红（不能改 markdown 源，ALLOWED_TAGS 不含 span）。 */
+const renderedMarkdown = computed(() =>
+  markRetractedCitations(
+    baseRenderedMarkdown.value,
+    retractedIndices(retractedEntries.value),
+  )
+);
+
+const retractedBannerText = computed(() => {
+  const items = retractedEntries.value.map((entry) => {
+    const reason = entry.retraction_reason ? `（${entry.retraction_reason}）` : "";
+    const notice = entry.retraction_notice_doi ? `，撤稿声明 ${entry.retraction_notice_doi}` : "";
+    return `[${entry.index}] ${entry.title}${reason}${notice}`;
+  });
+  return `以下文献已被撤稿：${items.join("；")}。正文对这些来源的引用不能作为论据，请移除相关论断或更换来源后再导出。`;
+});
+
+const QUALITY_TONES: Record<QualityFlag, string> = {
+  retracted: "border-destructive/30 bg-destructive/10 text-destructive",
+  preprint: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+  low_citation: "border-border bg-muted text-muted-foreground",
+};
+
+/** 低被引标签带具体次数；撤稿标签悬停给出原因/声明 DOI。 */
+function qualityBadgeLabel(flag: QualityFlag, entry: BibliographyEntry): string {
+  if (flag === "low_citation" && typeof entry.cited_by_count === "number") {
+    return `低被引 · ${entry.cited_by_count} 次`;
+  }
+  return QUALITY_FLAG_LABELS[flag];
+}
+
+function qualityBadgeTitle(flag: QualityFlag, entry: BibliographyEntry): string | undefined {
+  if (flag !== "retracted") {
+    return undefined;
+  }
+  if (entry.retraction_reason) {
+    return `撤稿原因：${entry.retraction_reason}`;
+  }
+  if (entry.retraction_notice_doi) {
+    return `撤稿声明：${entry.retraction_notice_doi}`;
+  }
+  return "该文献已被撤稿";
+}
 
 function findArtifact(kind: "markdown" | "docx"): Artifact | undefined {
   return (props.artifacts ?? []).find((item) => item.kind === kind);
@@ -196,6 +280,17 @@ async function download(kind: "markdown" | "docx") {
           {{ showSource ? "渲染视图" : "源码" }}
         </button>
       </div>
+
+      <!-- 撤稿警示：只要正文引用了已撤稿文献，就必须在正文顶部明确提示移除。 -->
+      <Alert
+        v-if="retractedEntries.length"
+        variant="destructive"
+        :dismissible="false"
+        class="mb-4"
+        data-test="retracted-banner"
+        :title="`本文引用了 ${retractedEntries.length} 篇已撤稿文献`"
+        :description="retractedBannerText"
+      />
 
       <!-- renderMarkdown 继续负责 marked + DOMPurify 两段式安全链，不在本层另做 HTML 拼接。 -->
       <div
@@ -278,17 +373,36 @@ async function download(kind: "markdown" | "docx") {
             <span class="mt-0.5 w-5 shrink-0 font-mono text-[10px] text-primary">
               {{ String(entry.index).padStart(2, "0") }}
             </span>
-            <a
-              v-if="entry.url"
-              :data-test="`bibliography-link-${entry.index}`"
-              :href="entry.url"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="min-w-0 font-display text-xs leading-5 break-words text-foreground underline-offset-4 hover:text-primary hover:underline"
-            >
-              {{ entry.title }}
-            </a>
-            <span v-else class="min-w-0 font-display text-xs leading-5 break-words">{{ entry.title }}</span>
+            <div class="flex min-w-0 flex-col gap-1">
+              <a
+                v-if="entry.url"
+                :data-test="`bibliography-link-${entry.index}`"
+                :href="entry.url"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="min-w-0 font-display text-xs leading-5 break-words text-foreground underline-offset-4 hover:text-primary hover:underline"
+              >
+                {{ entry.title }}
+              </a>
+              <span v-else class="min-w-0 font-display text-xs leading-5 break-words">{{ entry.title }}</span>
+              <!-- 来源质量标签（Issue #31）：撤稿=红、预印本=琥珀、低被引=中性灰。 -->
+              <span
+                v-if="entry.quality_flags?.length"
+                class="flex flex-wrap items-center gap-1"
+                :data-test="`bibliography-quality-${entry.index}`"
+              >
+                <span
+                  v-for="flag in entry.quality_flags"
+                  :key="flag"
+                  class="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] leading-3 font-medium"
+                  :class="QUALITY_TONES[flag]"
+                  :title="qualityBadgeTitle(flag, entry)"
+                  :data-test="`bibliography-flag-${entry.index}-${flag}`"
+                >
+                  {{ qualityBadgeLabel(flag, entry) }}
+                </span>
+              </span>
+            </div>
           </li>
         </ol>
         <p

@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Any
 
 import httpx
@@ -25,7 +26,7 @@ from pydantic import ValidationError as PydanticValidationError
 
 from app.core.exceptions import UpstreamError, UpstreamTemporaryError, ValidationException
 from app.core.logging import get_logger
-from app.tools.literature.models import MetadataRecord
+from app.tools.literature.models import MetadataRecord, SourceType
 
 logger = get_logger(__name__)
 
@@ -157,6 +158,99 @@ def _source_url(doi: str | None, raw_url: Any) -> HttpUrl | None:
         return HttpUrl(candidate)
     except PydanticValidationError:
         return None
+
+
+#: 标题以撤稿标记开头（Crossref 老记录 / 聚合源常见兜底写法）。
+_RETRACTED_TITLE_RE = re.compile(r"^\s*(?:retracted|retraction)(?:\s+article)?\s*:", re.IGNORECASE)
+
+#: 预印本平台名（判断 `posted-content` 之外的兜底，覆盖平台把预印本当 journal-article 投递的情况）。
+_PREPRINT_CONTAINERS = (
+    "arxiv",
+    "biorxiv",
+    "medrxiv",
+    "ssrn",
+    "chemrxiv",
+    "techrxiv",
+    "research square",
+    "preprints.org",
+    "psyarxiv",
+    "socarxiv",
+    "osf preprints",
+)
+
+#: Crossref 的预印本 work type。
+_PREPRINT_TYPES = frozenset({"posted-content"})
+
+#: Crossref 里视为同行评审的 work type。
+_PEER_REVIEWED_TYPES = frozenset(
+    {
+        "journal-article",
+        "proceedings-article",
+        "book-chapter",
+        "book",
+        "reference-entry",
+        "report",
+        "standard",
+    }
+)
+
+
+def _retraction_info(work: dict[str, Any], title: str) -> tuple[bool, str | None, str | None]:
+    """解析撤稿状态，返回 ``(is_retracted, 原因, 撤稿声明 DOI)``。
+
+    三条判据按可靠性排序（Issue #31）：
+    1. ``update-to`` 里 ``type == "retraction"`` —— Crossref 的正式撤稿关联；
+    2. ``relation.is-retracted-by`` —— 旧记录使用的关系字段；
+    3. 标题前缀 ``RETRACTED:`` / ``Retraction:`` —— 两者都缺失时的兜底。
+
+    都没有命中时返回 ``False``：Crossref 是权威元数据源，查过且无撤稿信号
+    即「未标记撤稿」，与「未知」（OpenAlex 源不可用）不是同一语义。
+    """
+    updates = work.get("update-to")
+    if isinstance(updates, dict):
+        updates = [updates]
+    if isinstance(updates, list):
+        for item in updates:
+            if not isinstance(item, dict):
+                continue
+            if _as_text(item.get("type")).strip().lower() != "retraction":
+                continue
+            notice = normalize_doi(_as_text(item.get("DOI"))) or None
+            label = _first_text(item.get("label"))
+            reason = (label or "CrossRef 标注该文献已被撤稿")[:200]
+            return True, reason, notice
+
+    relation = work.get("relation")
+    if isinstance(relation, dict):
+        refs = relation.get("is-retracted-by")
+        if isinstance(refs, dict):
+            refs = [refs]
+        if isinstance(refs, list):
+            for item in refs:
+                if not isinstance(item, dict):
+                    continue
+                notice = normalize_doi(_as_text(item.get("id"))) or None
+                return True, "CrossRef 关系字段标注被撤稿（is-retracted-by）", notice
+
+    if _RETRACTED_TITLE_RE.match(title):
+        return True, "题录标题以 RETRACTED/RETRACTION 标记开头", None
+
+    return False, None, None
+
+
+def _source_type(work: dict[str, Any], container_title: str | None) -> SourceType:
+    """把 Crossref 的 ``type`` / 平台名映射为来源类型。
+
+    预印本判定优先于同行评审：同一记录即使被标成 ``journal-article``，
+    只要平台名是 arXiv/SSRN 等，也按预印本展示——这是对用户更有用的信息。
+    """
+    work_type = _as_text(work.get("type")).strip().lower()
+    container = (container_title or "").casefold()
+    if work_type in _PREPRINT_TYPES or any(name in container for name in _PREPRINT_CONTAINERS):
+        return "preprint"
+    if work_type in _PEER_REVIEWED_TYPES:
+        return "peer_reviewed"
+    return "other"
 
 
 class CrossrefClient:
@@ -317,6 +411,8 @@ class CrossrefClient:
         if not title:
             raise ValidationException("CrossRef 记录缺少标题")
         doi = normalize_doi(_as_text(work.get("DOI"))) or fallback_doi
+        container_title = _first_text(work.get("container-title"))
+        is_retracted, retraction_reason, retraction_notice_doi = _retraction_info(work, title)
         try:
             return MetadataRecord(
                 source="crossref",
@@ -324,9 +420,13 @@ class CrossrefClient:
                 title=title[:_MAX_TITLE_LENGTH],
                 authors=_parse_authors(work.get("author")),
                 year=_extract_year(work.get("issued")),
-                container_title=_first_text(work.get("container-title")),
+                container_title=container_title,
                 cited_by_count=_as_non_negative_int(work.get("is-referenced-by-count")),
                 is_open_access=None,
+                is_retracted=is_retracted,
+                retraction_reason=retraction_reason,
+                retraction_notice_doi=retraction_notice_doi,
+                source_type=_source_type(work, container_title),
                 source_url=_source_url(doi, work.get("URL")),
             )
         except PydanticValidationError as exc:

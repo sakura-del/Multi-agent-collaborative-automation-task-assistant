@@ -427,3 +427,93 @@ class TestClientLifecycle:
             assert client.is_closed is False
         finally:
             await client.aclose()
+
+
+# ===== 来源质量：撤稿 / 预印本（Issue #31） =====
+
+
+def _payload_with(**updates: Any) -> dict[str, Any]:
+    """在 fixture 上覆写 message 字段（深拷贝，避免污染模块级 WORK_PAYLOAD）。"""
+    payload = json.loads(json.dumps(WORK_PAYLOAD))
+    payload["message"].update(updates)
+    return payload
+
+
+async def _parse_payload(payload: dict[str, Any]) -> Any:
+    """经 `lookup_doi` 走完整解析路径，返回 MetadataRecord。"""
+    captured: list[httpx.Request] = []
+    async with _crossref(_json_handler(payload, captured)) as adapter:
+        return await adapter.lookup_doi("10.1000/xyz.123")
+
+
+class TestSourceQuality:
+    async def test_clean_record_is_not_retracted(self) -> None:
+        record = await _parse_payload(WORK_PAYLOAD)
+        assert record.is_retracted is False
+        assert record.retraction_reason is None
+        assert record.retraction_notice_doi is None
+
+    async def test_update_to_retraction_sets_notice_and_reason(self) -> None:
+        record = await _parse_payload(
+            _payload_with(
+                **{
+                    "update-to": [
+                        {
+                            "type": "retraction",
+                            "DOI": "10.5555/RETRACT.123",
+                            "label": "Retraction: data could not be reproduced",
+                        }
+                    ]
+                }
+            )
+        )
+        assert record.is_retracted is True
+        assert record.retraction_notice_doi == "10.5555/retract.123"
+        assert record.retraction_reason == "Retraction: data could not be reproduced"
+
+    async def test_relation_is_retracted_by_sets_notice(self) -> None:
+        record = await _parse_payload(
+            _payload_with(
+                relation={
+                    "is-retracted-by": [
+                        {"id": "https://doi.org/10.5555/NOTICE.9", "id-type": "doi"}
+                    ]
+                }
+            )
+        )
+        assert record.is_retracted is True
+        assert record.retraction_notice_doi == "10.5555/notice.9"
+
+    async def test_non_retraction_update_is_ignored(self) -> None:
+        record = await _parse_payload(
+            _payload_with(**{"update-to": [{"type": "correction", "DOI": "10.5555/fix"}]})
+        )
+        assert record.is_retracted is False
+
+    async def test_title_prefix_is_fallback_retraction_signal(self) -> None:
+        record = await _parse_payload(
+            _payload_with(
+                title=["RETRACTED: Evidence-Constrained Literature Review"],
+            )
+        )
+        assert record.is_retracted is True
+        assert record.retraction_notice_doi is None
+        assert "RETRACTED" in (record.retraction_reason or "")
+
+    async def test_posted_content_is_preprint(self) -> None:
+        record = await _parse_payload(_payload_with(type="posted-content"))
+        assert record.source_type == "preprint"
+
+    async def test_arxiv_container_is_preprint_even_if_type_is_journal_article(self) -> None:
+        record = await _parse_payload(_payload_with(**{"container-title": ["arXiv (Cornell)"]}))
+        assert record.source_type == "preprint"
+
+    async def test_journal_article_is_peer_reviewed(self) -> None:
+        record = await _parse_payload(WORK_PAYLOAD)
+        assert record.source_type == "peer_reviewed"
+
+    async def test_unknown_type_is_other(self) -> None:
+        record = await _parse_payload(
+            _payload_with(type="dataset", **{"container-title": ["Some Data Repository"]})
+        )
+        assert record.source_type == "other"

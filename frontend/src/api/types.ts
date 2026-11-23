@@ -477,6 +477,12 @@ export interface LibrarySaveResponse {
 /** 单条参考文献的核验结论（与后端 `ReferenceVerdict` 对齐）。 */
 export type VerificationStatus = "verified" | "metadata_mismatch" | "not_found" | "unverified";
 
+/** 来源质量标记（Issue #31）：三项可同时存在。 */
+export type QualityFlag = "retracted" | "preprint" | "low_citation";
+
+/** 来源类型：同行评审 / 预印本 / 其他。 */
+export type SourceType = "peer_reviewed" | "preprint" | "other";
+
 /**
  * 核验统计汇总（`review_report.stats.reference_verification`）。
  *
@@ -490,6 +496,10 @@ export interface ReferenceVerificationSummary {
   unverified: number;
   cached_hits: number;
   dropped: number;
+  /** 来源质量计数（Issue #31）：旧报告可能没有这三个键，展示层按「未知」处理。 */
+  retracted?: number;
+  preprint?: number;
+  low_citation?: number;
   intercepted: boolean;
 }
 
@@ -505,6 +515,12 @@ export interface BibliographyEntry {
    * ⚠️ `false` 不等于「安全」：它只说明来源没有撤稿标记；`null` 表示来源不可用或无该字段。
    */
   is_retracted?: boolean | null;
+  /** 来源质量标记（Issue #31）；缺省 = 未标记。 */
+  quality_flags?: QualityFlag[];
+  source_type?: SourceType;
+  cited_by_count?: number | null;
+  retraction_reason?: string | null;
+  retraction_notice_doi?: string | null;
 }
 
 /* ===== Phase 2 · PRISMA 筛选工作台 ===== */

@@ -22,6 +22,7 @@ from app.knowledge.services.reference_verifier import ReferenceVerifier
 from app.orchestration.agents.reviewer import ReviewerAgent
 from app.tools.literature.models import (
     MetadataRecord,
+    QualityFlag,
     ReferenceCandidate,
     ReferenceVerdict,
     ReferenceVerification,
@@ -82,12 +83,14 @@ class FakeVerifier:
         error: Exception | None = None,
         cached_first: bool = False,
         retractions: Mapping[str, bool | None] | None = None,
+        quality: Mapping[str, Sequence[QualityFlag]] | None = None,
     ) -> None:
         self._verdicts = dict(verdicts or {})
         self._intercept = intercept
         self._error = error
         self._cached_first = cached_first
         self._retractions = dict(retractions or {})
+        self._quality = dict(quality or {})
         self.calls = 0
         self.candidates: list[ReferenceCandidate] = []
 
@@ -110,6 +113,7 @@ class FakeVerifier:
                 reason=f"核验理由：{candidate.title}",
                 cached=self._cached_first and index == 0,
                 is_retracted=self._retractions.get(candidate.title),
+                quality_flags=list(self._quality.get(candidate.title, ())),
             )
             for index, candidate in enumerate(candidates)
         ]
@@ -251,6 +255,10 @@ class TestReviewerVerificationStats:
             "cached_hits": 1,
             "dropped": 0,
             "intercepted": False,
+            # 来源质量汇总（Issue #31）：旧载荷没有这三项，但新报告总是显式给出计数。
+            "retracted": 0,
+            "preprint": 0,
+            "low_citation": 0,
         }
 
         bibliography = report["bibliography"]
@@ -282,6 +290,32 @@ class TestReviewerVerificationStats:
         assert "已拦截 0 条" in markdown
         assert "拦截开关：关闭" in markdown
         assert bibliography_indexes(markdown) == [1, 2, 3, 4]
+
+    async def test_quality_flags_flow_into_bibliography_and_summary_line(self) -> None:
+        fake = FakeVerifier(
+            VERDICTS,
+            retractions={VERIFIED_TITLE: True},
+            quality={
+                VERIFIED_TITLE: ["retracted", "preprint"],
+                MISMATCH_TITLE: ["low_citation"],
+            },
+        )
+        report = await ReviewerAgent(reference_verifier=fake).execute(make_input())
+
+        entries = {entry["title"]: entry for entry in report["bibliography"]}
+        assert entries[VERIFIED_TITLE]["quality_flags"] == ["retracted", "preprint"]
+        assert entries[VERIFIED_TITLE]["is_retracted"] is True
+        assert entries[MISMATCH_TITLE]["quality_flags"] == ["low_citation"]
+        # 没有标记的条目显式给空列表，前端据此区分「无标记」与「未知」
+        assert entries[NOT_FOUND_TITLE]["quality_flags"] == []
+
+        summary = report["stats"]["reference_verification"]
+        assert summary["retracted"] == 1
+        assert summary["preprint"] == 1
+        assert summary["low_citation"] == 1
+
+        # 章节正文只追加确有标记的项（全为 0 时保持旧口径）
+        assert "来源质量：已撤稿 1 条 / 预印本 1 条 / 低被引 1 条" in report["final_markdown"]
 
     async def test_intercept_drops_blocked_and_renumbers(self) -> None:
         fake = FakeVerifier(VERDICTS, intercept=True)

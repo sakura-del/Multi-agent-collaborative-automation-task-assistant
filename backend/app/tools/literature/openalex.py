@@ -26,7 +26,7 @@ from pydantic import ValidationError as PydanticValidationError
 
 from app.core.exceptions import UpstreamError, UpstreamTemporaryError, ValidationException
 from app.core.logging import get_logger
-from app.tools.literature.models import MetadataRecord
+from app.tools.literature.models import MetadataRecord, SourceType
 
 logger = get_logger(__name__)
 
@@ -142,6 +142,41 @@ def _is_open_access(value: Any) -> bool | None:
         return None
     flag = value.get("is_oa")
     return flag if isinstance(flag, bool) else None
+
+
+#: OpenAlex 里明确表示「预印本」的 work type。
+_PREPRINT_WORK_TYPES = frozenset({"preprint"})
+
+#: 同行评审来源常见的 work type（source 必须是期刊/会议等连续出版物）。
+_PEER_REVIEWED_WORK_TYPES = frozenset(
+    {"article", "review", "book-chapter", "book", "proceedings-article", "report"}
+)
+
+#: 有同行评审语义的 source type。
+_PEER_REVIEWED_SOURCE_TYPES = frozenset({"journal", "conference", "book series", "ebook platform"})
+
+
+def _source_type(work: dict[str, Any]) -> SourceType:
+    """把 OpenAlex 的 `type` / `primary_location.source.type` 映射为来源类型。
+
+    判定顺序（宁可标 other，也不把仓库副本误标成同行评审）：
+    1. work type 为 `preprint` → 预印本；
+    2. work type 属论文类，且 source type 是期刊/会议 → 同行评审；
+    3. source type 为 `repository`（arXiv/机构库等）且 work type 不是论文类 → 预印本；
+    4. 其余 → other。
+    """
+    work_type = _as_text(work.get("type")).strip().lower()
+    location = work.get("primary_location")
+    source = location.get("source") if isinstance(location, dict) else None
+    source_type = _as_text(source.get("type")).strip().lower() if isinstance(source, dict) else ""
+
+    if work_type in _PREPRINT_WORK_TYPES:
+        return "preprint"
+    if work_type in _PEER_REVIEWED_WORK_TYPES and source_type in _PEER_REVIEWED_SOURCE_TYPES:
+        return "peer_reviewed"
+    if source_type == "repository" and work_type not in _PEER_REVIEWED_WORK_TYPES:
+        return "preprint"
+    return "other"
 
 
 def _source_url(raw_id: Any, doi: str | None) -> HttpUrl | None:
@@ -326,6 +361,7 @@ class OpenAlexClient:
                 is_retracted=(
                     work.get("is_retracted") if isinstance(work.get("is_retracted"), bool) else None
                 ),
+                source_type=_source_type(work),
                 source_url=_source_url(work.get("id"), doi),
             )
         except PydanticValidationError as exc:

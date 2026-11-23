@@ -21,9 +21,12 @@ from app.knowledge.services import reference_verifier as verifier_module
 from app.knowledge.services.reference_verifier import (
     CACHE_REDIS_FAILURE_THRESHOLD,
     DEFAULT_SIMILARITY_THRESHOLD,
+    LOW_CITATION_THRESHOLD,
+    MIN_YEARS_FOR_LOW_CITATION,
     MetadataSource,
     ReferenceVerificationCache,
     ReferenceVerifier,
+    assess_quality_flags,
     blocked_keys,
     candidates_from_artifacts,
     candidates_from_bibliography,
@@ -36,6 +39,7 @@ from app.tools.literature.models import (
     ReferenceCandidate,
     ReferenceVerdict,
     ReferenceVerification,
+    SourceType,
 )
 
 # fakeredis 2.37 自身给 setex 加了弃用提示；redis-py 与项目 app/core/redis.py 均在用 setex
@@ -179,6 +183,11 @@ def make_record(
     title: str = "Deep Learning for Graphs",
     authors: Sequence[str] = ("Wei Zhang",),
     year: int | None = 2024,
+    cited_by_count: int | None = None,
+    is_retracted: bool | None = None,
+    source_type: SourceType = "other",
+    retraction_reason: str | None = None,
+    retraction_notice_doi: str | None = None,
 ) -> MetadataRecord:
     """构造外部元数据记录。"""
     return MetadataRecord(
@@ -187,6 +196,11 @@ def make_record(
         title=title,
         authors=list(authors),
         year=year,
+        cited_by_count=cited_by_count,
+        is_retracted=is_retracted,
+        source_type=source_type,
+        retraction_reason=retraction_reason,
+        retraction_notice_doi=retraction_notice_doi,
     )
 
 
@@ -427,12 +441,82 @@ class TestBlockedKeysAndSummary:
         assert summary.verified == 0
         assert summary.intercepted is False
 
+    def test_summary_counts_quality_flags(self) -> None:
+        verifications = [
+            make_verification("a", ReferenceVerdict.VERIFIED).model_copy(
+                update={"quality_flags": ["retracted"]}
+            ),
+            make_verification("b", ReferenceVerdict.VERIFIED).model_copy(
+                update={"quality_flags": ["preprint", "low_citation"]}
+            ),
+            make_verification("c", ReferenceVerdict.NOT_FOUND),
+        ]
+        summary = summarize_verifications(verifications)
+        assert summary.retracted == 1
+        assert summary.preprint == 1
+        assert summary.low_citation == 1
+
+
+# ===== 来源质量标记（Issue #31） =====
+
+
+class TestSourceQualityFlags:
+    """`assess_quality_flags` 是来源质量的唯一口径：撤稿 / 预印本 / 低被引。"""
+
+    def test_clean_recent_peer_reviewed_record_has_no_flags(self) -> None:
+        record = make_record(year=2025, cited_by_count=0, source_type="peer_reviewed")
+        assert assess_quality_flags(record, current_year=2026) == []
+
+    def test_retracted_only_when_explicitly_true(self) -> None:
+        assert assess_quality_flags(make_record(is_retracted=True), current_year=2026) == [
+            "retracted"
+        ]
+        # None（未知）与 False（明确未撤稿）都不打标，避免把「源没给数据」当成撤稿
+        assert assess_quality_flags(make_record(is_retracted=None)) == []
+        assert assess_quality_flags(make_record(is_retracted=False)) == []
+
+    def test_preprint_flag(self) -> None:
+        record = make_record(source_type="preprint")
+        assert assess_quality_flags(record, current_year=2026) == ["preprint"]
+
+    def test_low_citation_requires_two_years_and_below_threshold(self) -> None:
+        old_low = make_record(year=2023, cited_by_count=LOW_CITATION_THRESHOLD - 1)
+        assert assess_quality_flags(old_low, current_year=2026) == ["low_citation"]
+
+        # 边界：被引恰好等于阈值 → 不算低被引
+        at_threshold = make_record(year=2023, cited_by_count=LOW_CITATION_THRESHOLD)
+        assert assess_quality_flags(at_threshold, current_year=2026) == []
+
+        # 防误伤：发表不满 MIN_YEARS_FOR_LOW_CITATION 年的新论文哪怕 0 被引也不打标
+        recent = make_record(year=2025, cited_by_count=0)
+        assert assess_quality_flags(recent, current_year=2026) == []
+
+    def test_low_citation_skipped_when_year_or_citation_unknown(self) -> None:
+        assert assess_quality_flags(make_record(year=None, cited_by_count=0)) == []
+        assert assess_quality_flags(make_record(year=2020, cited_by_count=None)) == []
+
+    def test_all_flags_can_coexist_in_stable_order(self) -> None:
+        record = make_record(
+            year=2020,
+            cited_by_count=1,
+            is_retracted=True,
+            source_type="preprint",
+        )
+        assert assess_quality_flags(record, current_year=2026) == [
+            "retracted",
+            "preprint",
+            "low_citation",
+        ]
+
+    def test_min_years_constant_is_two(self) -> None:
+        assert MIN_YEARS_FOR_LOW_CITATION == 2
+
 
 # ===== 缓存组件 =====
 
 
 class TestReferenceVerificationCache:
-    """Redis 优先、内存回退；键为 `refverify:v2:{reference_key}`；接口为 async（修订 R2）。"""
+    """Redis 优先、内存回退；键为 `refverify:v3:{reference_key}`；接口为 async（修订 R2）。"""
 
     async def test_memory_fallback_round_trip(self) -> None:
         cache = ReferenceVerificationCache()
@@ -450,7 +534,7 @@ class TestReferenceVerificationCache:
         redis = FakeAsyncRedis()
         cache = ReferenceVerificationCache(redis_client=redis, ttl=120)
         await cache.set("10.1/x", make_verification("10.1/x", ReferenceVerdict.NOT_FOUND))
-        assert redis.setex_calls[0][0] == "refverify:v2:10.1/x"
+        assert redis.setex_calls[0][0] == "refverify:v3:10.1/x"
         assert redis.setex_calls[0][1] == 120
         cached = await cache.get("10.1/x")
         assert cached is not None
@@ -480,7 +564,7 @@ class TestReferenceVerificationCache:
         client = fakeredis.aioredis.FakeRedis(decode_responses=True)
         cache = ReferenceVerificationCache(redis_client=client)
         await cache.set("k", make_verification("k", ReferenceVerdict.VERIFIED))
-        assert await client.get("refverify:v2:k") is not None
+        assert await client.get("refverify:v3:k") is not None
         cached = await cache.get("k")
         assert cached is not None
         assert cached.verdict is ReferenceVerdict.VERIFIED
@@ -1002,7 +1086,45 @@ async def test_verified_result_preserves_retraction_flag() -> None:
     assert result.is_retracted is True
 
 
-async def test_cache_uses_v2_namespace_and_preserves_unknown_retraction() -> None:
+async def test_verified_verification_carries_quality_flags() -> None:
+    record = make_record(
+        is_retracted=True,
+        retraction_reason="数据不可复现",
+        retraction_notice_doi="10.5555/retract",
+        source_type="preprint",
+        cited_by_count=10,
+        year=2024,
+    )
+    verifier = ReferenceVerifier(crossref=FakeSource(doi_result=record))
+
+    verification = await verifier.verify(make_candidate())
+
+    assert verification.verdict is ReferenceVerdict.VERIFIED
+    assert verification.quality_flags == ["retracted", "preprint"]
+    assert verification.retraction_reason == "数据不可复现"
+    assert verification.retraction_notice_doi == "10.5555/retract"
+    assert verification.matched is not None
+    assert verification.matched.quality_flags == ["retracted", "preprint"]
+
+
+async def test_not_found_does_not_inherit_flags_from_near_miss_candidate() -> None:
+    """相似度不达标的候选不是被引文献本身：它的撤稿标记不得安到用户引用上。"""
+    near_miss = make_record(
+        doi=None,
+        title="Quantum Computing for Chemistry",
+        is_retracted=True,
+        source_type="preprint",
+    )
+    verifier = ReferenceVerifier(crossref=FakeSource(doi_result=None, title_results=[near_miss]))
+
+    verification = await verifier.verify(make_candidate())
+
+    assert verification.verdict is ReferenceVerdict.NOT_FOUND
+    assert verification.quality_flags == []
+
+
+async def test_cache_uses_current_namespace_and_preserves_unknown_retraction() -> None:
+    """缓存命名空间跟随载荷版本：v3 起含 quality 字段，旧 v2 键不得命中。"""
     redis = FakeAsyncRedis()
     cache = ReferenceVerificationCache(redis_client=redis)
     verification = make_verification("k", ReferenceVerdict.VERIFIED).model_copy(
@@ -1012,7 +1134,7 @@ async def test_cache_uses_v2_namespace_and_preserves_unknown_retraction() -> Non
     await cache.set("k", verification)
     cached = await cache.get("k")
 
-    assert "refverify:v2:k" in redis.store
+    assert "refverify:v3:k" in redis.store
     assert "refverify:k" not in redis.store
     assert cached is not None
     assert cached.is_retracted is None
@@ -1079,7 +1201,7 @@ class TestVerifierCacheIntegration:
 
         assert second.cached is True
         assert crossref.calls == 1
-        assert redis.setex_calls[0][0] == "refverify:v2:10.1234/abc"
+        assert redis.setex_calls[0][0] == "refverify:v3:10.1234/abc"
 
     async def test_second_verify_hits_fakeredis_without_external_call(self) -> None:
         """注入 fakeredis.aioredis：第二次 verify 零外呼且 cached=True（Redis 路径真生效）。"""
@@ -1094,7 +1216,7 @@ class TestVerifierCacheIntegration:
         assert first.cached is False
         assert second.cached is True
         assert crossref.calls == 1
-        assert await client.get("refverify:v2:10.1234/abc") is not None
+        assert await client.get("refverify:v3:10.1234/abc") is not None
 
     async def test_different_keys_do_not_collide(self) -> None:
         crossref = FakeSource(doi_result=make_record())

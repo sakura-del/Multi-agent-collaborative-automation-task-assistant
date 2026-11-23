@@ -87,9 +87,22 @@ def _verification_line(summary: Mapping[str, Any]) -> str:
         f"{label} {_summary_count(summary, verdict)} 条" for verdict, label in _VERDICT_LABELS
     )
     switch = "开启" if summary.get("intercepted") else "关闭"
-    return (
+    line = (
         f"引用核验：{counts} / 已拦截 {_summary_count(summary, 'dropped')} 条；拦截开关：{switch}"
     )
+    # 来源质量（Issue #31）：只在确有标记时追加，避免把「未评估」写成「零风险」。
+    quality_parts = [
+        f"{label} {_summary_count(summary, flag)} 条"
+        for flag, label in (
+            ("retracted", "已撤稿"),
+            ("preprint", "预印本"),
+            ("low_citation", "低被引"),
+        )
+        if _summary_count(summary, flag) > 0
+    ]
+    if quality_parts:
+        line += f"；来源质量：{' / '.join(quality_parts)}"
+    return line
 
 
 def _renumber_citations(
@@ -589,6 +602,12 @@ class ReviewerAgent(BaseAgent):
             entry["verification_status"] = verification.verdict.value
             entry["verification_reason"] = verification.reason
             entry["is_retracted"] = verification.is_retracted
+            # Issue #31 来源质量：透传到 bibliography，前端据此显示胶囊标签/横幅/角标标红
+            entry["quality_flags"] = list(verification.quality_flags)
+            entry["source_type"] = verification.source_type
+            entry["cited_by_count"] = verification.cited_by_count
+            entry["retraction_reason"] = verification.retraction_reason
+            entry["retraction_notice_doi"] = verification.retraction_notice_doi
 
         summary = summarize_verifications(verifications, dropped=dropped, intercepted=intercept)
         return bibliography, summary.model_dump()

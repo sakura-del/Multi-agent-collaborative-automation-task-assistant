@@ -84,6 +84,24 @@ const interceptedLabel = computed(() => {
   }
   return summary.intercepted ? `拦截：开启（已剔除 ${summary.dropped} 条）` : "拦截：关闭";
 });
+
+/**
+ * 来源质量汇总（Issue #31 Phase 1）：只显示 >0 的项。
+ *
+ * 旧报告没有这些键（`undefined`），按「没标记」处理而不是「0 篇有问题」——
+ * 区分「未评估」与「评估后为零」是这一层的核心口径。
+ */
+const qualityCounts = computed(() => {
+  const summary = props.summary;
+  if (!summary) {
+    return [];
+  }
+  return [
+    { flag: "retracted", label: "已撤稿", count: summary.retracted ?? 0, tone: "destructive" as const },
+    { flag: "preprint", label: "预印本", count: summary.preprint ?? 0, tone: "warning" as const },
+    { flag: "low_citation", label: "低被引", count: summary.low_citation ?? 0, tone: "muted" as const },
+  ].filter((item) => item.count > 0);
+});
 </script>
 
 <template>
@@ -114,6 +132,20 @@ const interceptedLabel = computed(() => {
       >
         缓存命中 {{ props.summary.cached_hits }} 条
       </p>
+
+      <!-- 来源质量只统计被标记的项；全为 0（含旧报告无该字段）时整行不出现。 -->
+      <ul
+        v-if="qualityCounts.length"
+        class="flex flex-wrap gap-1.5"
+        data-test="quality-summary"
+      >
+        <li v-for="item in qualityCounts" :key="item.flag" :data-test="`quality-count-${item.flag}`">
+          <Badge :variant="item.tone">
+            {{ item.label }}
+            <strong class="ml-1 tabular-nums">{{ item.count }}</strong>
+          </Badge>
+        </li>
+      </ul>
 
       <!-- 逐条结果只出「序号 + 核验结论」：标题与链接由结果页的参考文献列表承载，避免重复渲染 -->
       <ol
