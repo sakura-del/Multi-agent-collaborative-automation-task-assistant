@@ -58,6 +58,8 @@ REVIEWER_PAYLOAD: dict[str, Any] = {
 
 MARKER_RE = re.compile(r"\[E(\d+)\]")
 EVIDENCE_LINE_RE = re.compile(r"\[E(\d+)\] doc=(\S+) chunk=(\S+)")
+#: 文献元数据证据行（`[E1 metadata] …`）：没有 doc/chunk 标识，但同样占用参考文献编号
+EVIDENCE_METADATA_RE = re.compile(r"\[E(\d+) metadata\]")
 
 
 def _system_prompt(messages: list[Message]) -> str:
@@ -77,11 +79,22 @@ def _user_prompt(messages: list[Message]) -> str:
 def executor_content(user_prompt: str) -> str:
     """生成带可解析引用标记的正文。
 
-    只从**证据行**（`[E{n}] doc=… chunk=…`）取编号：依赖输出里也可能出现 `[E{n}]`，
-    若一并采用会生成越界标记（执行器会拒绝该输出）。
+    只从**证据行**取编号：依赖输出里也可能出现 `[E{n}]`，若一并采用会生成越界标记
+    （执行器会拒绝该输出）。证据行有两种形态，**都要算**：
+
+    - 知识库分块：`[E{n}] doc=… chunk=…`；
+    - 文献元数据：`[E{n} metadata] …`（检索节点 artifacts 转换而来，没有 doc/chunk）。
+
+    ## 为什么元数据也要引用（2026-11-23 smoke 实测）
+
+    `_evidence_text` 把元数据渲染成 `[E{n} metadata]` 行。旧实现只认 `doc=` 行，
+    于是同一份 prompt 里元数据编号（E1~E10）全部漏引；复盘把这些条目登记进
+    参考文献后，#25 的引用一致性闸门判「孤儿条目」→ 任务 `failed`，
+    Compose 发布冒烟整条红。只认 doc= 行时，编号越大越危险（元数据总排在前面）。
     """
     evidence_numbers = sorted(
         {int(number) for number, _doc, _chunk in EVIDENCE_LINE_RE.findall(user_prompt)}
+        | {int(number) for number in EVIDENCE_METADATA_RE.findall(user_prompt)}
     )
     if not evidence_numbers:
         evidence_numbers = sorted({int(number) for number in MARKER_RE.findall(user_prompt)})

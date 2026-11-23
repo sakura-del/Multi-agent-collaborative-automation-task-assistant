@@ -242,7 +242,9 @@ class TestLiteratureReviewProcessE2E:
         assert final["review_report"] is not None
         assert final["artifacts"], "缺少导出产物"
 
-        # 1) 每条形式化引用都能回溯到已上传文档的分块
+        # 1) 每条**分块**证据都能回溯到已上传文档的分块
+        #    文献元数据证据（Issue #17：检索 artifacts → 证据池）没有 doc/chunk，
+        #    不属于「可回溯到上传分块」的范畴，单独跳过而不是当成越权证据。
         stored_chunks = _stored_chunk_ids(e2e_env, me["id"])
         assert stored_chunks, "上传文档未产生分块"
         cited_chunks: set[str] = set()
@@ -250,7 +252,9 @@ class TestLiteratureReviewProcessE2E:
             output = subtask.get("output") or {}
             execution = output.get("execution_result") or {}
             for evidence in execution.get("evidence") or []:
-                cited_chunks.add(str(evidence["chunk_id"]))
+                chunk_id = evidence.get("chunk_id")
+                if chunk_id:
+                    cited_chunks.add(str(chunk_id))
         assert cited_chunks, "执行结果没有任何被引用证据"
         assert cited_chunks <= stored_chunks, f"存在无法回溯的证据: {cited_chunks - stored_chunks}"
 
