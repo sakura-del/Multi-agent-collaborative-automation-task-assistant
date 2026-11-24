@@ -294,6 +294,15 @@ export interface TaskSnapshot {
 }
 
 /** 定时重跑排期（Issue #27）：每任务最多一条。 */
+/** 定时增量监控的跨期状态记忆（Issue #42）。 */
+export interface RoutineMemoryBrief {
+  topic_summary?: string;
+  open_gaps?: string[];
+  recent_updates?: string[];
+  stale_queries?: string[];
+  updated_at?: string | null;
+}
+
 export interface TaskRoutine {
   task_id: string;
   enabled: boolean;
@@ -301,6 +310,7 @@ export interface TaskRoutine {
   notify: "none" | "email";
   next_run_at: string;
   last_run_at: string | null;
+  memory_brief?: RoutineMemoryBrief | null;
 }
 
 /** 保存排期的入参。 */

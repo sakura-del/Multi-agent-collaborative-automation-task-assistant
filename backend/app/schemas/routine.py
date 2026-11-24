@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -32,6 +32,7 @@ class RoutineOut(BaseModel):
     notify: str
     next_run_at: datetime
     last_run_at: datetime | None = None
+    memory_brief: dict[str, Any] | None = None
 
 
 class RefreshOut(BaseModel):

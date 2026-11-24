@@ -41,6 +41,8 @@ const isCompleted = computed(() => props.status === "completed");
 const refreshing = computed(() => runs.value.some((run) => run.status === "running"));
 const visibleRuns = computed(() => runs.value.slice(0, 5));
 const hasNew = computed(() => (runs.value[0]?.new_count ?? 0) > 0);
+const memoryBrief = computed(() => routine.value?.memory_brief ?? null);
+const staleQueries = computed(() => memoryBrief.value?.stale_queries ?? []);
 
 function stopPolling() {
   if (pollTimer !== null) {
@@ -253,6 +255,24 @@ onBeforeUnmount(stopPolling);
         <Clock :size="12" aria-hidden="true" />
         下次：{{ formatDateTime(routine.next_run_at) }}
       </span>
+    </div>
+
+    <!-- 监控记忆状态条（Issue #42）：透明展示跟踪的空白与连续 3 期 0 新增的失效检索式 -->
+    <div
+      v-if="memoryBrief && (memoryBrief.open_gaps?.length || staleQueries.length)"
+      data-test="routine-memory-strip"
+      class="mt-2 rounded-lg border border-border/70 bg-muted/30 px-3 py-2 text-xs text-muted-foreground"
+    >
+      <p v-if="memoryBrief.open_gaps?.length">
+        已跟踪 {{ memoryBrief.open_gaps.length }} 项待补研究空白（增量汇报时自动对照）
+      </p>
+      <p
+        v-if="staleQueries.length"
+        data-test="routine-stale-queries"
+        class="mt-1 text-amber-700 dark:text-amber-400"
+      >
+        以下检索式已连续 3 期无新增文献，建议调整：{{ staleQueries.join("；") }}
+      </p>
     </div>
 
     <!-- 历史：默认只展开最近一次，其余点开才看全文 -->

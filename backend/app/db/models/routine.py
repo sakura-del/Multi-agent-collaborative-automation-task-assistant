@@ -89,6 +89,11 @@ class TaskRoutine(Base):
     last_run_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, comment="上次运行时刻（UTC）"
     )
+    #: 跨期增量记忆（Issue #42 轻量版）：存原综述已知空白、近几期已报要点与失效检索式，
+    #: 供增量摘要 LOAD 并在刷新结束时确定性 OFFLOAD；None 表示尚未初始化。
+    memory_brief: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON, nullable=True, comment="跨期增量状态记忆（结构化 JSON）"
+    )
 
 
 class TaskRefresh(Base):

@@ -152,4 +152,33 @@ describe("持续更新面板", () => {
     expect(mocked.saveRoutine).toHaveBeenCalledWith("t1", expect.objectContaining({ enabled: false }));
     wrapper.unmount();
   });
+
+  it("监控记忆：存在 memory_brief 时展示待补空白与失效检索式，旧接口无该字段时不渲染", async () => {
+    // 旧接口无 memory_brief 时不渲染也不报错
+    mocked.routine.mockResolvedValue(routine);
+    const legacy = mountPanel();
+    await flushPromises();
+    expect(legacy.find('[data-test="routine-memory-strip"]').exists()).toBe(false);
+    legacy.unmount();
+
+    // 带 open_gaps 与 stale_queries 时正确渲染提示条
+    mocked.routine.mockResolvedValue({
+      ...routine,
+      memory_brief: {
+        topic_summary: "原综述基线",
+        open_gaps: ["长上下文延迟瓶颈", "跨模态幻觉实证"],
+        recent_updates: ["本期新增 2 篇"],
+        stale_queries: ["old narrow query"],
+        updated_at: "2026-11-24T08:00:00Z",
+      },
+    });
+    const wrapper = mountPanel();
+    await flushPromises();
+
+    const strip = wrapper.get('[data-test="routine-memory-strip"]');
+    expect(strip.text()).toContain("已跟踪 2 项待补研究空白");
+    const stale = wrapper.get('[data-test="routine-stale-queries"]');
+    expect(stale.text()).toContain("old narrow query");
+    wrapper.unmount();
+  });
 });

@@ -36,6 +36,13 @@ from typing import Any
 
 from app.core.logging import get_logger
 from app.llm.models import Message, MessageRole
+from app.orchestration.services.routine_memory import (
+    RoutineMemoryBrief,
+    bootstrap_memory_brief,
+    format_memory_for_prompt,
+    parse_memory_brief,
+    update_memory_brief,
+)
 from app.orchestration.validation.citation_consistency import audit_citation_alignment
 from app.tools.literature.models import LiteratureRecord, LiteratureSearch
 
@@ -335,7 +342,11 @@ def compose_summary(
     return "\n".join(lines)
 
 
-def build_bullets_prompt(records: list[LiteratureRecord]) -> str:
+def build_bullets_prompt(
+    records: list[LiteratureRecord],
+    *,
+    memory_context: str = "",
+) -> str:
     """把新文献压成提示词（题名 + 年份 + 摘要截断）。"""
     payload = []
     for index, record in enumerate(records[:_MAX_PROMPT_ENTRIES], start=1):
@@ -348,10 +359,12 @@ def build_bullets_prompt(records: list[LiteratureRecord]) -> str:
                 "abstract": (record.abstract or "")[:600],
             }
         )
+    prefix = f"{memory_context}\n\n" if memory_context else ""
     return (
-        "本期新增文献（JSON）：\n"
+        prefix
+        + "本期新增文献（JSON）：\n"
         + json.dumps(payload, ensure_ascii=False)
-        + "\n\n请按要求输出要点。"
+        + "\n\n请对照已有研究状态（如有），按要求输出本期新增文献的增量要点。"
     )
 
 
@@ -608,9 +621,12 @@ class RefreshRunner:
     # ---- 主流程 ----
 
     async def run(self, refresh_id: uuid.UUID) -> RefreshOutcome:
-        from app.db.models.routine import TaskRefresh
+        from sqlalchemy import select
+
+        from app.db.models.routine import TaskRefresh, TaskRoutine
         from app.db.models.task import Task
 
+        memory_brief: RoutineMemoryBrief | None = None
         async with self._session_factory() as session:
             refresh = await session.get(TaskRefresh, refresh_id)
             if refresh is None:
@@ -618,6 +634,13 @@ class RefreshRunner:
             task = await session.get(Task, refresh.task_id)
             if task is None:
                 raise LookupError(f"任务不存在：{refresh.task_id}")
+            routine = (
+                await session.execute(select(TaskRoutine).where(TaskRoutine.task_id == task.id))
+            ).scalar_one_or_none()
+            if routine is not None:
+                memory_brief = parse_memory_brief(routine.memory_brief) or bootstrap_memory_brief(
+                    task
+                )
             cfg = self._routine_config()
             config = getattr(task, "config", None) or {}
             context = _TaskContext(
@@ -684,6 +707,7 @@ class RefreshRunner:
 
         terms = relevance_terms(keywords=context.keywords, queries=context.queries)
         new_records: list[LiteratureRecord] = []
+        new_count_by_query: dict[str, int] = {}
         duplicates = 0
         filtered = 0
         for query, records in hits_by_query.items():
@@ -692,6 +716,7 @@ class RefreshRunner:
             # 主题相关度过滤：窗口内的「新」不等于「相关」，跑题的不能当新证据
             relevant = [item for item in fresh if is_relevant(item, terms)]
             filtered += len(fresh) - len(relevant)
+            new_count_by_query[query] = len(relevant)
             if relevant:
                 await self._record_search(context, query=query, hits=records, fresh=relevant)
             new_records.extend(relevant)
@@ -712,8 +737,11 @@ class RefreshRunner:
             await self._finish(outcome, window_from=window_from, window_to=window_to)
             return outcome
 
+        memory_context = format_memory_for_prompt(memory_brief)
         bullets, tokens, citation_ok, fallback_reason = await self._summarize(
-            new_records, has_errors=bool(errors)
+            new_records,
+            has_errors=bool(errors),
+            memory_context=memory_context,
         )
         outcome.tokens_used = tokens
         outcome.citation_ok = citation_ok
@@ -729,7 +757,22 @@ class RefreshRunner:
         )
         if errors:
             outcome.error = "部分检索失败：" + "; ".join(errors[:3])
-        await self._finish(outcome, window_from=window_from, window_to=window_to)
+        updated_brief = (
+            update_memory_brief(
+                memory_brief,
+                bullets=bullets,
+                citation_ok=outcome.citation_ok,
+                new_count_by_query=new_count_by_query,
+            )
+            if memory_brief is not None
+            else None
+        )
+        await self._finish(
+            outcome,
+            window_from=window_from,
+            window_to=window_to,
+            memory_brief=updated_brief,
+        )
         return outcome
 
     async def _search_queries(
@@ -862,8 +905,11 @@ class RefreshRunner:
         *,
         window_from: datetime | None,
         window_to: datetime | None,
+        memory_brief: RoutineMemoryBrief | None = None,
     ) -> None:
-        from app.db.models.routine import TaskRefresh
+        from sqlalchemy import select
+
+        from app.db.models.routine import TaskRefresh, TaskRoutine
 
         async with self._session_factory() as session:
             refresh = await session.get(TaskRefresh, outcome.refresh_id)
@@ -881,12 +927,24 @@ class RefreshRunner:
             refresh.window_from = window_from
             refresh.window_to = window_to
             refresh.finished_at = self._now()
+            if memory_brief is not None:
+                routine = (
+                    await session.execute(
+                        select(TaskRoutine).where(TaskRoutine.task_id == outcome.task_id)
+                    )
+                ).scalar_one_or_none()
+                if routine is not None:
+                    routine.memory_brief = memory_brief.model_dump(mode="json")
             await session.commit()
 
     # ---- 摘要 ----
 
     async def _summarize(
-        self, records: list[LiteratureRecord], *, has_errors: bool = False
+        self,
+        records: list[LiteratureRecord],
+        *,
+        has_errors: bool = False,
+        memory_context: str = "",
     ) -> tuple[str | None, int, bool, str | None]:
         """生成要点；失败/越界时回落，绝不把刷新整体判失败。"""
         if not records:
@@ -899,7 +957,10 @@ class RefreshRunner:
                 response = await self._chat(
                     [
                         Message(role=MessageRole.SYSTEM, content=SUMMARY_SYSTEM),
-                        Message(role=MessageRole.USER, content=build_bullets_prompt(records)),
+                        Message(
+                            role=MessageRole.USER,
+                            content=build_bullets_prompt(records, memory_context=memory_context),
+                        ),
                     ],
                     temperature=0.2,
                     max_tokens=800,

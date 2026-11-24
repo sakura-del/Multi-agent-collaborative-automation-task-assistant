@@ -27,6 +27,7 @@ from app.db.models.screening import ScreeningRecord
 from app.db.models.task import Task
 from app.orchestration.services.routine_scheduler import RoutineScheduler, advance
 from app.orchestration.services.task_refresh import (
+    SUMMARY_SYSTEM,
     RefreshRunner,
     audit_bullets,
     collect_queries,
@@ -78,7 +79,9 @@ def record(
     )
 
 
-async def make_task(factory, *, status: str = "completed", plan=None, config=None) -> Task:
+async def make_task(
+    factory, *, status: str = "completed", plan=None, config=None, review_report=None
+) -> Task:
     async with factory() as session:
         task = Task(
             user_id=uuid4(),
@@ -88,6 +91,7 @@ async def make_task(factory, *, status: str = "completed", plan=None, config=Non
             status=status,
             config=config or {"topic": "图神经网络"},
             plan=plan,
+            review_report=review_report,
             completed_at=datetime(2026, 11, 1, tzinfo=UTC),
         )
         session.add(task)
@@ -367,6 +371,95 @@ def test_refresh_retries_once_when_all_queries_fail(factory) -> None:
         assert outcome.status == "completed"
         assert outcome.new_count == 1
         assert source.calls == 2
+
+    asyncio.run(scenario())
+
+
+def test_refresh_loads_and_offloads_routine_memory_brief(factory) -> None:
+    """Issue #42：LOAD 不改 SUMMARY_SYSTEM（保前缀缓存），user 含记忆，结束落库更新 memory_brief。"""
+
+    async def scenario():
+        task = await make_task(
+            factory,
+            plan={"search_queries": ["GNN survey", "empty gnn query"]},
+            review_report={
+                "final_markdown": "# 图神经网络综述\n\n原综述总结了静态图基准的表达能力。",
+                "evidence_matrix": {
+                    "questions": ["静态图表现如何？", "动态图长时延是否缺少评估？"],
+                    "cells": [
+                        {"question_index": 0, "bucket": "strong", "claim_ids": ["c1"]},
+                        {"question_index": 1, "bucket": "gap", "claim_ids": []},
+                    ],
+                },
+            },
+        )
+        async with factory() as session:
+            session.add(
+                TaskRoutine(
+                    task_id=task.id,
+                    user_id=task.user_id,
+                    enabled=True,
+                    cadence="weekly",
+                    notify="email",
+                    next_run_at=datetime(2026, 11, 27, tzinfo=UTC),
+                )
+            )
+            await session.commit()
+
+        captured_messages: list[list] = []
+
+        async def fake_chat(messages, **_kwargs):
+            captured_messages.append(messages)
+            return _Response("- 新工作补齐了动态图长时延对照实验 [E1]")
+
+        class _PerQuerySource:
+            async def search(self, search):
+                if search.query == "GNN survey":
+                    return [record(1)]
+                return []
+
+            async def aclose(self) -> None:
+                return None
+
+        refresh1 = await make_refresh(factory, task)
+        runner = RefreshRunner(
+            session_factory=factory,
+            source_factory=lambda _ctx: _as_coroutine(_PerQuerySource()),
+            chat=fake_chat,
+            config=CFG,
+        )
+        outcome1 = await runner.run(refresh1.id)
+        assert outcome1.status == "completed"
+        assert len(captured_messages) == 1
+        # 严格保住前缀缓存：SUMMARY_SYSTEM 原样不变
+        assert captured_messages[0][0].content == SUMMARY_SYSTEM
+        user_prompt = captured_messages[0][1].content
+        assert "已有研究状态" in user_prompt
+        assert "动态图长时延是否缺少评估？" in user_prompt
+
+        async with factory() as session:
+            routine = (
+                await session.execute(select(TaskRoutine).where(TaskRoutine.task_id == task.id))
+            ).scalar_one()
+            brief1 = routine.memory_brief
+            assert brief1 is not None
+            assert brief1["open_gaps"] == ["动态图长时延是否缺少评估？"]
+            assert brief1["recent_updates"] == ["新工作补齐了动态图长时延对照实验 [E1]"]
+            assert brief1["query_empty_streaks"]["GNN survey"] == 0
+            assert brief1["query_empty_streaks"]["empty gnn query"] == 1
+            assert brief1["stale_queries"] == []
+
+        # 再跑两期空命中，确认 empty gnn query 连续 3 期 0 新增后进入 stale_queries
+        for _ in range(2):
+            r_next = await make_refresh(factory, task)
+            await runner.run(r_next.id)
+
+        async with factory() as session:
+            routine = (
+                await session.execute(select(TaskRoutine).where(TaskRoutine.task_id == task.id))
+            ).scalar_one()
+            assert routine.memory_brief is not None
+            assert "empty gnn query" in routine.memory_brief["stale_queries"]
 
     asyncio.run(scenario())
 
