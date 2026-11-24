@@ -1,10 +1,24 @@
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it, beforeEach, vi } from "vitest";
+import { nextTick } from "vue";
 import { mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { createRouter, createMemoryHistory } from "vue-router";
 
 import TaskListView from "@/views/TaskListView.vue";
 import type { TaskSummary } from "@/api/types";
+
+// 真实渲染 TaskCreateForm 时它会在 onMounted 拉「引用库可用篇数 / 引用样式 /
+// 模型凭据」。单测里不能让它发真请求（happy-dom 会报 AsyncTaskManager 中止的
+// 未处理拒绝）。
+vi.mock("@/api/reference-library", () => ({
+  getLibrarySummary: vi.fn(async () => ({ total: 0, usable_as_source: 0 })),
+}));
+vi.mock("@/api/citation-styles", () => ({
+  listCitationStyles: vi.fn(async () => []),
+}));
+vi.mock("@/api/llm-credentials", () => ({
+  listLLMCredentials: vi.fn(async () => []),
+}));
 
 /**
  * 任务列表页重设计（2026-10-23 第二阶段）。
@@ -57,7 +71,16 @@ function task(overrides: Partial<TaskSummary> = {}): TaskSummary {
   } as TaskSummary;
 }
 
-async function mountWith(tasks: TaskSummary[], options?: { total?: number; page?: number }) {
+async function mountWith(
+  tasks: TaskSummary[],
+  options?: {
+    total?: number;
+    page?: number;
+    /** 用真实 TaskCreateForm（默认为 stub），用于验证「新建表单」相关接线。 */
+    realForm?: boolean;
+    documents?: Array<{ id: string; title: string }>;
+  },
+) {
   setActivePinia(createPinia());
   const router = makeRouter();
   await router.push("/tasks");
@@ -83,8 +106,20 @@ async function mountWith(tasks: TaskSummary[], options?: { total?: number; page?
   store.loadCounts = async () => {};
   store.listLoading = false;
 
+  // 新建表单接线（P2 回归）：真实表单需要知识库文档列表；直接注入状态，
+  // 避免展开表单时发请求。默认仍 stub 掉 TaskCreateForm，保证既有用例零网络。
+  const { useKnowledgeStore } = await import("@/stores/knowledge");
+  const knowledge = useKnowledgeStore();
+  knowledge.loadAll = async () => {};
+  if (options?.realForm) {
+    knowledge.documents = (options.documents ?? []) as never;
+  }
+
   const wrapper = mount(TaskListView, {
-    global: { plugins: [router], stubs: { TaskCreateForm: true } },
+    global: {
+      plugins: [router],
+      stubs: options?.realForm ? {} : { TaskCreateForm: true },
+    },
   });
   return wrapper;
 }
@@ -328,5 +363,32 @@ describe("服务端分页", () => {
     );
 
     expect(wrapper.find('[data-test="be-timeline"]').exists()).toBe(false);
+  });
+});
+
+describe("新建表单：指定知识库文档（Issue #35 验收发现的 P2）", () => {
+  it("展开表单时把可用的知识库文档传给表单，用户可以直接勾选", async () => {
+    // 回归点：TaskListView 曾漏传 `:documents`，而 TaskCreateForm 的字段集是
+    // `v-if="props.documents.length"` → 生产上这一整块永远不渲染。
+    const wrapper = await mountWith([task()], {
+      realForm: true,
+      documents: [{ id: "doc-1", title: "RAG 原文" }],
+    });
+
+    await wrapper.find('[data-test="new-task"]').trigger("click");
+    await nextTick();
+
+    expect(wrapper.find('[data-test="doc-doc-1"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain("指定知识库文档（可选）");
+    expect(wrapper.text()).toContain("RAG 原文");
+  });
+
+  it("知识库没有文档时不渲染空字段集", async () => {
+    const wrapper = await mountWith([task()], { realForm: true, documents: [] });
+
+    await wrapper.find('[data-test="new-task"]').trigger("click");
+    await nextTick();
+
+    expect(wrapper.text()).not.toContain("指定知识库文档（可选）");
   });
 });

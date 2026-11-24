@@ -11,6 +11,7 @@ import TaskCreateForm from "@/components/tasks/TaskCreateForm.vue";
 import TaskStatusIcon from "@/components/tasks/TaskStatusIcon.vue";
 import { Button } from "@/components/ui/button";
 import { Pagination } from "@/components/ui/pagination";
+import { useKnowledgeStore } from "@/stores/knowledge";
 import { useTaskStore } from "@/stores/tasks";
 import type { TaskStatusGroup } from "@/api/tasks";
 import type { TaskCreate, TaskStatus, TaskSummary } from "@/api/types";
@@ -38,6 +39,7 @@ import {
 // 4. **没有筛选/搜索**：20 条以上就找不到东西。
 // 5. **20 个「打开」按钮**：整行可点击，省掉一整列。
 const store = useTaskStore();
+const knowledge = useKnowledgeStore();
 const router = useRouter();
 
 const showForm = ref(false);
@@ -47,6 +49,21 @@ const errorMessage = ref<string | null>(null);
 const keyword = ref("");
 /** 筛选：`all` / `needs-me` / `active` / `done`。 */
 const filter = ref<"all" | "needs-me" | "active" | "done">("all");
+
+/**
+ * 打开/收起新建表单，并在首次展开时加载知识库文档。
+ *
+ * 文档列表只用于「指定知识库文档（可选）」；加载失败不能让表单打不开，
+ * 所以这里吞掉异常——用户仍可创建不使用知识库文档的任务。
+ */
+function toggleCreateForm() {
+  showForm.value = !showForm.value;
+  if (showForm.value && knowledge.documents.length === 0 && !knowledge.loading) {
+    void knowledge.loadAll().catch(() => {
+      /* 文档列表加载失败不阻塞任务创建，错误由知识库页自行提示 */
+    });
+  }
+}
 
 onMounted(() => {
   void refresh(1);
@@ -291,7 +308,7 @@ const rows = computed(() =>
             <span>时间线</span>
           </button>
         </div>
-        <Button size="sm" data-test="new-task" @click="showForm = !showForm">
+        <Button size="sm" data-test="new-task" @click="toggleCreateForm">
           <Plus :size="14" aria-hidden="true" />
           <span>{{ showForm ? "收起" : "新建任务" }}</span>
         </Button>
@@ -305,6 +322,7 @@ const rows = computed(() =>
       class="mb-5"
       :pending="submitting"
       :error="errorMessage"
+      :documents="knowledge.documents"
       @submit="handleCreate"
     />
 
