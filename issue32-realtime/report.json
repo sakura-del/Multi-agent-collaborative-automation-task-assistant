@@ -1,0 +1,38 @@
+{
+  "startedAt": "2026-11-24T03:53:43.876Z",
+  "steps": [
+    {
+      "step": "login",
+      "ok": true
+    },
+    {
+      "step": "submitted",
+      "taskId": "9ea57976-4ac7-4989-b83a-5f2453cf30bb",
+      "at": "2026-11-24T03:53:53.117Z"
+    },
+    {
+      "step": "plan-appeared",
+      "elapsedMs": 33184
+    },
+    {
+      "step": "cancelled"
+    }
+  ],
+  "wsTickets": [
+    {
+      "status": 200,
+      "acao": "https://veripaper.me",
+      "at": "2026-11-24T03:53:54.695Z"
+    }
+  ],
+  "corsErrors": [],
+  "pageErrors": [],
+  "wsFrames": [
+    "{\"type\":\"snapshot\",\"data\":{\"task_id\":\"9ea57976-4ac7-4989-b83a-5f2453cf30bb\",\"status\":\"planning\",\"title\":\"软件供应链安全研究的进展与空白（实时通道验收）\",\"plan_version\":0,\"revision\":0,",
+    "{\"type\":\"event\",\"data\":{\"event_id\":2,\"task_id\":\"9ea57976-4ac7-4989-b83a-5f2453cf30bb\",\"subtask_id\":null,\"event_type\":\"plan_ready\",\"status\":\"waiting_approval\",\"o",
+    "{\"type\":\"event\",\"data\":{\"event_id\":3,\"task_id\":\"9ea57976-4ac7-4989-b83a-5f2453cf30bb\",\"subtask_id\":null,\"event_type\":\"task_status\",\"status\":\"cancelled\",\"occurre"
+  ],
+  "taskId": "9ea57976-4ac7-4989-b83a-5f2453cf30bb",
+  "planAppearedAfterMs": 33184,
+  "finishedAt": "2026-11-24T03:54:33.285Z"
+}
