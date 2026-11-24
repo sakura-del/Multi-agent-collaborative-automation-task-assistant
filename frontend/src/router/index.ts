@@ -1,8 +1,9 @@
 import { createRouter, createWebHistory } from "vue-router";
 
-import AppLayout from "@/layouts/AppLayout.vue";
 import { useAuthStore } from "@/stores/auth";
-import { useTaskStore } from "@/stores/tasks";
+
+// 工作台壳子懒加载：避免未登录打开 /、/login、/password-reset 时提前下载侧栏、命令面板与动效依赖
+const AppLayout = () => import("@/layouts/AppLayout.vue");
 
 const AdminByokView = () => import("@/views/AdminByokView.vue");
 const AdminConsoleView = () => import("@/views/AdminConsoleView.vue");
@@ -184,9 +185,10 @@ router.beforeEach(async (to) => {
   // 路由级并行业务预取：在下载懒加载页面 JS chunk 的同时启动接口请求
   if (auth.authenticated) {
     if (to.name === "tasks") {
-      useTaskStore().prefetchList();
+      void import("@/stores/tasks").then(({ useTaskStore }) => useTaskStore().prefetchList());
     } else if (to.name === "task-detail" && typeof to.params.taskId === "string") {
-      useTaskStore().prefetchDetail(to.params.taskId);
+      const taskId = to.params.taskId;
+      void import("@/stores/tasks").then(({ useTaskStore }) => useTaskStore().prefetchDetail(taskId));
     }
   }
   return true;

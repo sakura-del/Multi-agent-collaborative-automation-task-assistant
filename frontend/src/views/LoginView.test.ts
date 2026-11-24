@@ -146,10 +146,11 @@ describe("登录/注册一体流（Email OTP + Magic Link）", () => {
 
     expect(wrapper.find("#account").exists()).toBe(true);
     expect(wrapper.find("#password").exists()).toBe(true);
+    expect(wrapper.get("#password").attributes("placeholder")).toBe("请输入密码");
     expect(wrapper.find('[data-test="forgot-password"]').exists()).toBe(true);
   });
 
-  it("Logo 是可点的首页链接，左侧双层溯源卡支持 [1]/[2] 切换", async () => {
+  it("Logo 是可点的首页链接，左侧双层溯源卡支持 [1]/[2] 切换且引用不硬截断", async () => {
     const { wrapper } = await mountLogin();
 
     const brand = wrapper.get('[data-test="brand-home"]');
@@ -160,7 +161,9 @@ describe("登录/注册一体流（Email OTP + Magic Link）", () => {
     expect(tag.element.tagName).toBe("SPAN");
     expect(tag.element.closest("a")).toBeNull();
 
-    expect(wrapper.get('[data-test="login-proof-footer"]').text()).toContain("ACL Findings 2025");
+    const footer = wrapper.get('[data-test="login-proof-footer"]');
+    expect(footer.text()).toContain("ACL Findings 2025");
+    expect(footer.text()).not.toContain("...");
     await wrapper.get('[data-test="login-proof-marker-2"]').trigger("click");
     expect(wrapper.get('[data-test="login-proof-footer"]').text()).toContain("J. Biomed. Inform. 2025");
     expect(wrapper.text()).toContain("你负责判断，系统负责");

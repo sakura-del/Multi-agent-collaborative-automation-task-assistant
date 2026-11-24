@@ -60,4 +60,17 @@ describe("重置密码页", () => {
 
     expect(router.currentRoute.value.name).toBe("login");
   });
+
+  it("版式、品牌主色与邮箱占位与登录页统一（Issue #39）", async () => {
+    const { wrapper } = await mountReset();
+
+    expect(wrapper.find('[data-test="auth-brand-panel"]').exists()).toBe(true);
+    expect(wrapper.findAll("h1")).toHaveLength(1);
+    expect(wrapper.get('[data-test="reset-email"]').attributes("placeholder")).toBe(
+      "name@university.edu",
+    );
+    const submitClasses = wrapper.get('[data-test="reset-request-submit"]').classes();
+    expect(submitClasses).toContain("w-full");
+    expect(submitClasses).toContain("bg-[#0F4C3A]");
+  });
 });
