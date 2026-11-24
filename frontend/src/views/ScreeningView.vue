@@ -1,17 +1,22 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
-import { Check, CircleX, MinusCircle, Sparkles } from "lucide-vue-next";
+import { computed, inject, onMounted, ref } from "vue";
+import { routerKey } from "vue-router";
+import { Check, CircleX, MinusCircle, Sparkles, Table2 } from "lucide-vue-next";
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import FunnelChart from "@/components/charts/FunnelChart.vue";
 import type { FunnelStageInput } from "@/components/charts/build-funnel";
 import EmptyState from "@/components/common/EmptyState.vue";
 import PageHeader from "@/components/common/PageHeader.vue";
+import CreateExtractionDialog, {
+  type ExtractionCandidateSource,
+} from "@/components/extractions/CreateExtractionDialog.vue";
 import { Alert } from "@/components/ui/alert";
 import { Badge, type BadgeVariants } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import type { ExtractionTableOut } from "@/api/extractions";
 import {
   createDecision,
   getPrismaCounts,
@@ -33,6 +38,7 @@ import type { PrismaCounts, ScreeningPriority, ScreeningRecord } from "@/api/typ
  * `screening-priority-rank-<id>`。
  */
 const props = defineProps<{ taskId: string }>();
+const router = inject(routerKey, null);
 
 const records = ref<ScreeningRecord[]>([]);
 const prisma = ref<PrismaCounts | null>(null);
@@ -43,6 +49,47 @@ const busyId = ref<string | null>(null);
 const excludeFormId = ref<string | null>(null);
 const excludeReason = ref("");
 const stageFilter = ref("");
+const extractionDialogOpen = ref(false);
+const extractionSources = ref<ExtractionCandidateSource[]>([]);
+const loadingIncluded = ref(false);
+
+const includedCount = computed(() => {
+  const fromPrisma = prisma.value?.included ?? 0;
+  const fromLoaded = records.value.filter((item) => item.current_stage === "included").length;
+  return Math.max(fromPrisma, fromLoaded);
+});
+
+async function openExtractionFromIncluded() {
+  error.value = null;
+  loadingIncluded.value = true;
+  try {
+    const includedList =
+      stageFilter.value === "included"
+        ? records.value.filter((item) => item.current_stage === "included")
+        : await listScreeningRecords(props.taskId, "included");
+    if (!includedList.length) {
+      error.value = "当前任务暂无已纳入（included）文献，无法生成抽取表";
+      return;
+    }
+    extractionSources.value = includedList.map((item) => ({
+      source_type: "screening_record",
+      source_id: item.record_id,
+      title: item.title,
+    }));
+    extractionDialogOpen.value = true;
+  } catch (err) {
+    error.value = (err as Error).message || "加载已纳入文献失败";
+  } finally {
+    loadingIncluded.value = false;
+  }
+}
+
+function handleExtractionCreated(created: ExtractionTableOut) {
+  extractionDialogOpen.value = false;
+  if (router) {
+    void router.push({ name: "extractions", params: { tableId: created.id } });
+  }
+}
 
 /** 任务还没跑筛选时五个计数全是 0：不画空漏斗（容易误读成「筛选坏了」）。 */
 const hasPrismaData = computed(
@@ -337,6 +384,18 @@ async function submitDecision(
           <Sparkles :size="13" aria-hidden="true" />
           智能排序：{{ priorityEnabled ? "开" : "关" }}
         </Button>
+
+        <Button
+          v-if="includedCount > 0"
+          size="sm"
+          type="button"
+          data-test="screening-create-extraction"
+          :disabled="loadingIncluded"
+          @click="openExtractionFromIncluded"
+        >
+          <Table2 :size="13" aria-hidden="true" />
+          {{ loadingIncluded ? "加载中…" : `生成数据抽取表（已纳入 ${includedCount} 篇）` }}
+        </Button>
       </div>
       <span class="text-xs text-muted-foreground">
         按标题/摘要排序，不自动纳入或排除
@@ -506,5 +565,14 @@ async function submitDecision(
         </div>
       </aside>
     </div>
+
+    <CreateExtractionDialog
+      :open="extractionDialogOpen"
+      :sources="extractionSources"
+      :task-id="props.taskId"
+      :default-title="`PRISMA 纳入文献抽取表（${extractionSources.length} 篇）`"
+      @close="extractionDialogOpen = false"
+      @created="handleExtractionCreated"
+    />
   </section>
 </template>

@@ -247,3 +247,22 @@ describe("既有契约必须保留", () => {
     expect(wrapper.findComponent({ name: "DocumentUpload" }).exists()).toBe(true);
   });
 });
+
+describe("Issue #36：勾选就绪文档新建论文抽取表", () => {
+  it("仅允许勾选 ready 文档，选中后显示「新建抽取表（已选 N 篇）」按钮", async () => {
+    const wrapper = await mountWith([
+      doc({ id: "ready-1", title: "已就绪论文", index_status: "ready" }),
+      doc({ id: "failed-1", title: "失败论文", index_status: "failed" }),
+    ]);
+
+    expect(wrapper.find('[data-test="kb-create-extraction"]').exists()).toBe(false);
+    expect(
+      wrapper.find('[data-test="document-select-failed-1"]').attributes("disabled"),
+    ).toBeDefined();
+
+    await wrapper.find('[data-test="document-select-ready-1"]').setValue(true);
+    const btn = wrapper.find('[data-test="kb-create-extraction"]');
+    expect(btn.exists()).toBe(true);
+    expect(btn.text()).toContain("新建抽取表（已选 1 篇）");
+  });
+});

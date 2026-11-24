@@ -9,6 +9,7 @@ const AdminConsoleView = () => import("@/views/AdminConsoleView.vue");
 const DesignTimelineView = () => import("@/views/DesignTimelineView.vue");
 const ApiKeyView = () => import("@/views/ApiKeyView.vue");
 const PlanView = () => import("@/views/PlanView.vue");
+const ExtractionTableView = () => import("@/views/ExtractionTableView.vue");
 const KnowledgeView = () => import("@/views/KnowledgeView.vue");
 const LandingView = () => import("@/views/LandingView.vue");
 const LoginView = () => import("@/views/LoginView.vue");
@@ -112,6 +113,12 @@ export const router = createRouter({
           props: true,
         },
         { path: "knowledge", name: "knowledge", component: KnowledgeView },
+        {
+          path: "extractions/:tableId?",
+          name: "extractions",
+          component: ExtractionTableView,
+          props: true,
+        },
         { path: "styles", name: "styles", component: StyleView },
         { path: "templates", name: "templates", component: TemplateView },
         { path: "references/import", name: "reference-import", component: ReferenceImportView },

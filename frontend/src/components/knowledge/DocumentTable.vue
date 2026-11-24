@@ -25,13 +25,30 @@ import {
 //
 // ⚠️ 测试契约（不要改）：data-test="document-table" / "document-row-<id>" /
 // "document-delete-<id>" / "document-delete-confirm-<id>"。
-const props = defineProps<{ documents: KnowledgeDocument[] }>();
-const emit = defineEmits<{ remove: [docId: string] }>();
+const props = defineProps<{
+  documents: KnowledgeDocument[];
+  selectable?: boolean;
+  selectedIds?: string[];
+}>();
+const emit = defineEmits<{
+  remove: [docId: string];
+  toggleSelect: [docId: string];
+  toggleSelectAll: [];
+}>();
 
 const confirming = ref<string | null>(null);
 
 /** 来源列只在来源确实有差异时显示（实测全是 upload）。 */
 const showSource = computed(() => shouldShowSourceColumn(props.documents));
+const selectedSet = computed(() => new Set(props.selectedIds ?? []));
+const readyDocuments = computed(() =>
+  props.documents.filter((doc) => doc.index_status === "ready"),
+);
+const allReadySelected = computed(
+  () =>
+    readyDocuments.value.length > 0 &&
+    readyDocuments.value.every((doc) => selectedSet.value.has(doc.id)),
+);
 
 function requestRemove(docId: string) {
   if (confirming.value !== docId) {
@@ -48,6 +65,17 @@ function requestRemove(docId: string) {
     <table class="w-full border-collapse text-sm" data-test="document-table">
       <thead>
         <tr class="border-b border-border text-left">
+          <th v-if="selectable" scope="col" class="w-9 px-3 py-2">
+            <input
+              type="checkbox"
+              data-test="document-select-all"
+              :checked="allReadySelected"
+              :disabled="!readyDocuments.length"
+              aria-label="全选已就绪文档"
+              class="accent-foreground"
+              @change="emit('toggleSelectAll')"
+            />
+          </th>
           <th scope="col" class="px-3 py-2 text-xs font-medium text-muted-foreground">标题</th>
           <th scope="col" class="w-20 px-3 py-2 text-xs font-medium text-muted-foreground">类型</th>
           <th
@@ -82,6 +110,18 @@ function requestRemove(docId: string) {
           :data-test="`document-row-${doc.id}`"
           class="border-b border-border align-top last:border-b-0 hover:bg-muted/40"
         >
+          <td v-if="selectable" class="px-3 py-2.5" data-label="选择">
+            <input
+              type="checkbox"
+              :data-test="`document-select-${doc.id}`"
+              :checked="selectedSet.has(doc.id)"
+              :disabled="doc.index_status !== 'ready'"
+              :aria-label="`选择 ${doc.title}`"
+              :title="doc.index_status === 'ready' ? '勾选加入论文抽取表' : '仅已就绪文档可加入抽取表'"
+              class="accent-foreground"
+              @change="emit('toggleSelect', doc.id)"
+            />
+          </td>
           <td class="px-3 py-2.5" data-label="标题">
             <span class="block font-medium text-foreground" :title="doc.title">
               {{ doc.title }}

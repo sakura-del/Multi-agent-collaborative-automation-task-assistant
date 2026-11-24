@@ -19,6 +19,7 @@ from app.api.v1.endpoints import (
     billing,
     citation_styles,
     conversations,
+    extractions,
     health,
     intent,
     llm_credentials,
@@ -60,6 +61,7 @@ api_router.include_router(references.router)
 # 引用库（2026-10-26）：导入的 BibTeX/RIS 存下来，可作为任务文献源
 api_router.include_router(reference_library.router)
 api_router.include_router(screening.router)
+api_router.include_router(extractions.router)
 api_router.include_router(tasks.router)
 api_router.include_router(task_ws.router)
 # 可观测性看板（Phase 2）：owner-scoped 的任务健康与成本概览

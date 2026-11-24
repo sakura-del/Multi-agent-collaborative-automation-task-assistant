@@ -37,6 +37,7 @@ from app.db.models.billing import Plan, Subscription, UsageCounter
 from app.db.models.citation_style import CitationStyle
 from app.db.models.conversation import Conversation, Message
 from app.db.models.email_token import EmailToken
+from app.db.models.extraction import ExtractionCell, ExtractionTable
 from app.db.models.feedback import HumanFeedback
 from app.db.models.knowledge import DocChunk, KnowledgeDoc, VectorIndex
 from app.db.models.llm_credential import LLMCredential, LLMNodeRouting
@@ -65,6 +66,8 @@ __all__ = [
     "DocChunk",
     "EmailToken",
     "ExecutionLog",
+    "ExtractionCell",
+    "ExtractionTable",
     "FailureCase",
     "HumanFeedback",
     "KnowledgeDoc",

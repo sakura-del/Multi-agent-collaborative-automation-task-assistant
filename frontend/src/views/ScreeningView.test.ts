@@ -434,4 +434,29 @@ describe("ScreeningView", () => {
     expect(toggle.attributes("disabled")).toBeDefined();
     expect(wrapper.find('[data-test="screening-priority-status"]').exists()).toBe(false);
   });
+
+  it("存在已纳入文献时显示「生成数据抽取表」按钮，点击后弹窗展示摘要抽取提示", async () => {
+    const includedRow = recordRow({ record_id: "r-inc", current_stage: "included", title: "纳入文献 A" });
+    vi.mocked(listScreeningRecords).mockResolvedValue([includedRow]);
+    vi.mocked(getPrismaCounts).mockResolvedValue({ ...PRISMA, included: 1 });
+
+    const wrapper = mount(ScreeningView, {
+      props: { taskId: "task-1" },
+      global: { stubs: { Teleport: true } },
+    });
+    await flushPromises();
+
+    const trigger = wrapper.find('[data-test="screening-create-extraction"]');
+    expect(trigger.exists()).toBe(true);
+    expect(trigger.text()).toContain("生成数据抽取表");
+
+    await trigger.trigger("click");
+    await flushPromises();
+
+    const dialog = wrapper.find('[data-test="create-extraction-dialog"]');
+    expect(dialog.exists()).toBe(true);
+    expect(dialog.find('[data-test="extraction-abstract-warning"]').text()).toContain(
+      "外部检索文献仅基于摘要抽取，未提及字段将标为未报告",
+    );
+  });
 });

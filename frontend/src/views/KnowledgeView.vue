@@ -1,12 +1,18 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
-import { AlertTriangle, CheckCircle2, FileText, Layers, Search } from "lucide-vue-next";
+import { computed, inject, onMounted, ref } from "vue";
+import { routerKey } from "vue-router";
+import { AlertTriangle, CheckCircle2, FileText, Layers, Search, Table2 } from "lucide-vue-next";
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
 import PageHeader from "@/components/common/PageHeader.vue";
+import CreateExtractionDialog, {
+  type ExtractionCandidateSource,
+} from "@/components/extractions/CreateExtractionDialog.vue";
 import DocumentTable from "@/components/knowledge/DocumentTable.vue";
 import DocumentUpload from "@/components/knowledge/DocumentUpload.vue";
+import { Button } from "@/components/ui/button";
+import type { ExtractionTableOut } from "@/api/extractions";
 import { useKnowledgeStore } from "@/stores/knowledge";
 import type { KnowledgeDocument } from "@/api/types";
 import { docTypeLabel, needsAttention } from "@/utils/knowledge-display";
@@ -25,10 +31,14 @@ import { docTypeLabel, needsAttention } from "@/utils/knowledge-display";
 // ⚠️ 契约（E2E `literature-review` 直接操作，不要收起来）：
 // `document-file` / `document-title` / `document-submit` / `document-table`。
 const store = useKnowledgeStore();
+const router = inject(routerKey, null);
 const actionError = ref<string | null>(null);
 const keyword = ref("");
 /** 类型筛选：`all` 或具体 doc_type。 */
 const typeFilter = ref<string>("all");
+/** 勾选用于新建论文抽取表的已就绪文档 ID 列表。 */
+const selectedDocIds = ref<string[]>([]);
+const extractionDialogOpen = ref(false);
 
 onMounted(() => {
   void refresh();
@@ -47,8 +57,52 @@ async function handleRemove(docId: string) {
   actionError.value = null;
   try {
     await store.remove(docId);
+    selectedDocIds.value = selectedDocIds.value.filter((id) => id !== docId);
   } catch (error) {
     actionError.value = (error as Error).message;
+  }
+}
+
+function toggleSelectDoc(docId: string) {
+  if (selectedDocIds.value.includes(docId)) {
+    selectedDocIds.value = selectedDocIds.value.filter((id) => id !== docId);
+  } else {
+    selectedDocIds.value = [...selectedDocIds.value, docId];
+  }
+}
+
+function toggleSelectAllVisible() {
+  const readyVisibleIds = visibleDocuments.value
+    .filter((item) => item.index_status === "ready")
+    .map((item) => item.id);
+  const allSelected =
+    readyVisibleIds.length > 0 &&
+    readyVisibleIds.every((id) => selectedDocIds.value.includes(id));
+  if (allSelected) {
+    const visibleSet = new Set(readyVisibleIds);
+    selectedDocIds.value = selectedDocIds.value.filter((id) => !visibleSet.has(id));
+  } else {
+    const merged = new Set([...selectedDocIds.value, ...readyVisibleIds]);
+    selectedDocIds.value = [...merged];
+  }
+}
+
+const selectedExtractionSources = computed<ExtractionCandidateSource[]>(() => {
+  const chosen = new Set(selectedDocIds.value);
+  return documents.value
+    .filter((item) => item.index_status === "ready" && chosen.has(item.id))
+    .map((item) => ({
+      source_type: "knowledge_doc",
+      source_id: item.id,
+      title: item.title,
+    }));
+});
+
+function handleExtractionCreated(created: ExtractionTableOut) {
+  extractionDialogOpen.value = false;
+  selectedDocIds.value = [];
+  if (router) {
+    void router.push({ name: "extractions", params: { tableId: created.id } });
   }
 }
 
@@ -214,20 +268,33 @@ const isFiltered = computed(() => typeFilter.value !== "all" || keyword.value.tr
         </button>
       </div>
 
-      <div class="relative ml-auto w-full sm:w-64">
-        <Search
-          :size="14"
-          class="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground"
-          aria-hidden="true"
-        />
-        <input
-          v-model="keyword"
-          data-test="kb-search"
-          type="search"
-          placeholder="搜索标题或文件名…"
-          aria-label="搜索文档"
-          class="w-full rounded-md border border-input bg-card py-1.5 pr-2.5 pl-8 text-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring"
-        />
+      <div class="relative ml-auto flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
+        <Button
+          v-if="selectedExtractionSources.length > 0"
+          type="button"
+          size="sm"
+          data-test="kb-create-extraction"
+          @click="extractionDialogOpen = true"
+        >
+          <Table2 :size="13" aria-hidden="true" />
+          新建抽取表（已选 {{ selectedExtractionSources.length }} 篇）
+        </Button>
+
+        <div class="relative w-full sm:w-64">
+          <Search
+            :size="14"
+            class="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground"
+            aria-hidden="true"
+          />
+          <input
+            v-model="keyword"
+            data-test="kb-search"
+            type="search"
+            placeholder="搜索标题或文件名…"
+            aria-label="搜索文档"
+            class="w-full rounded-md border border-input bg-card py-1.5 pr-2.5 pl-8 text-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring"
+          />
+        </div>
       </div>
     </div>
 
@@ -268,7 +335,15 @@ const isFiltered = computed(() => typeFilter.value !== "all" || keyword.value.tr
       </button>
     </div>
 
-    <DocumentTable v-else :documents="visibleDocuments" @remove="handleRemove" />
+    <DocumentTable
+      v-else
+      :documents="visibleDocuments"
+      :selectable="true"
+      :selected-ids="selectedDocIds"
+      @remove="handleRemove"
+      @toggle-select="toggleSelectDoc"
+      @toggle-select-all="toggleSelectAllVisible"
+    />
 
     <p
       v-if="isFiltered && visibleDocuments.length"
@@ -277,5 +352,12 @@ const isFiltered = computed(() => typeFilter.value !== "all" || keyword.value.tr
     >
       显示 {{ visibleDocuments.length }} / {{ documents.length }} 篇
     </p>
+
+    <CreateExtractionDialog
+      :open="extractionDialogOpen"
+      :sources="selectedExtractionSources"
+      @close="extractionDialogOpen = false"
+      @created="handleExtractionCreated"
+    />
   </section>
 </template>
