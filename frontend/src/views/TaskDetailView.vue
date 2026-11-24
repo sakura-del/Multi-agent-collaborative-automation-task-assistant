@@ -401,16 +401,19 @@ onBeforeUnmount(() => {
 
       <ErrorBanner :message="errorMessage" />
 
-      <!-- 选项卡：Linear 极简下划线式 -->
-      <nav class="mb-4 flex gap-1 overflow-x-auto border-b border-border" role="tablist">
+      <!-- 选项卡：Linear 极简下划线式；用伪元素下划线并显式 overflow-y-hidden，避免 -mb-px 触发窄屏纵向滚动箭头（Issue #57） -->
+      <nav
+        class="mb-4 flex gap-1 overflow-x-auto overflow-y-hidden border-b border-border"
+        role="tablist"
+      >
         <button
           v-for="tab in TABS"
           :key="tab"
-          class="-mb-px shrink-0 whitespace-nowrap border-b-2 px-3 py-2 text-xs font-medium transition-colors"
+          class="relative shrink-0 whitespace-nowrap px-3 py-2 text-xs font-medium transition-colors after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:rounded-full"
           :class="
             activeTab === tab
-              ? 'border-primary text-foreground'
-              : 'border-transparent text-muted-foreground hover:text-foreground'
+              ? 'text-foreground after:bg-primary'
+              : 'text-muted-foreground after:bg-transparent hover:text-foreground'
           "
           :data-test="`tab-${tab}`"
           role="tab"

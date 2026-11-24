@@ -130,18 +130,19 @@ const statusBadges = computed(() => {
 /** 分布合计：用来给用户核对「合计 == 总数」，也是「看板不说谎」的显式证据。 */
 const statusSum = computed(() => statusBadges.value.reduce((total, item) => total + item.count, 0));
 
+/** 各状态在环形图/分段条中的独立色值，避免「待确认/待人工」「已暂停/已取消」图例撞色（Issue #57）。 */
 const STATUS_CHART_COLOR: Record<string, string> = {
   completed: "var(--success)",
   failed: "var(--destructive)",
-  cancelled: "var(--muted-foreground)",
-  waiting_human: "var(--warning)",
-  waiting_approval: "var(--warning)",
+  cancelled: "#9ca3af",
+  waiting_human: "#ea580c",
+  waiting_approval: "#eab308",
   running: "var(--primary)",
-  reviewing: "var(--primary)",
-  planning: "var(--accent-foreground)",
+  reviewing: "#0284c7",
+  planning: "#7c3aed",
   created: "var(--border-strong)",
-  paused: "var(--muted-foreground)",
-  retrying: "var(--warning)",
+  paused: "#64748b",
+  retrying: "#f59e0b",
 };
 
 const statusSegments = computed<DonutSegment[]>(() =>
@@ -288,13 +289,15 @@ async function refresh() {
           :value="successRateText"
           value-testid="observability-success-rate"
         >
-          <!-- 分母必须露出来：76.9% 是 20/26 还是 20/27，用户要能自己核对 -->
+          <!-- 分母必须露出来：76.9% 是 20/26 还是 20/27，用户要能自己核对；含待人工时显式标明口径（Issue #57） -->
           <template #hint>
             <p
               class="mt-0.5 text-[11px] text-muted-foreground"
               data-test="observability-success-denominator"
             >
-              已完成 {{ successCount }} / {{ terminalCount }} 个终态任务
+              已完成 {{ successCount }} / {{ terminalCount }} 个已完结任务<template
+                v-if="overview.tasks.waiting_human > 0"
+              >（含 {{ overview.tasks.waiting_human }} 个待人工）</template>
             </p>
           </template>
         </StatCard>
@@ -347,14 +350,21 @@ async function refresh() {
             v-if="statusSegments.length"
             :segments="statusSegments"
             :center-value="successRateText"
-            center-label="终态成功率"
+            center-label="完结成功率"
           />
           <div class="flex flex-wrap gap-1.5 border-t border-border pt-2.5" data-test="observability-statuses">
             <Badge
               v-for="item in statusBadges"
               :key="item.status"
               :variant="STATUS_TONE[item.status] ?? 'muted'"
+              class="gap-1.5"
             >
+              <span
+                :data-test="`observability-dot-${item.status}`"
+                class="size-2 shrink-0 rounded-full"
+                :style="{ backgroundColor: STATUS_CHART_COLOR[item.status] ?? 'var(--muted-foreground)' }"
+                aria-hidden="true"
+              />
               {{ STATUS_LABELS[item.status] ?? item.status }} {{ item.count }}
             </Badge>
             <span v-if="statusBadges.length === 0" class="text-sm text-muted-foreground">

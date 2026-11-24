@@ -174,4 +174,11 @@ describe("GlobalPromptEntry（Issue #8 P0 全局入口）", () => {
       verify_references: true,
     });
   });
+
+  it("侧栏紧凑输入栏不冗余展示 Ctrl/⌘+Enter 提交提示（Issue #57）", () => {
+    const wrapper = mount(GlobalPromptEntry, { props: { collapsed: false } });
+    const footer = wrapper.get('[data-test="prompt-input-footer"]').text();
+    expect(footer).toContain("Enter 创建任务");
+    expect(footer).not.toContain("Ctrl/⌘+Enter");
+  });
 });

@@ -39,6 +39,7 @@ from citeproc import (
 from citeproc.source.json import CiteProcJSON
 
 from app.tools.csl.models import (
+    CJK_PATTERN,
     DEFAULT_STYLE_ID,
     TYPE_IDENTIFIERS,
     CslItem,
@@ -166,6 +167,33 @@ def _add_warning(bibliography: RenderedBibliography, message: str) -> None:
     """写入可观测告警（同一消息只记一次）。"""
     if message not in bibliography.warnings:
         bibliography.warnings.append(message)
+
+
+def _csl_json_for_engine(item: CslItem) -> dict[str, object]:
+    """生成喂给 citeproc-py 引擎的 CSL-JSON，避免英文样式把中文拆成 `牛, . 耕田 .`（Issue #57）。
+
+    APA / IEEE / Nature 等西文样式普遍开启 `initialize-with=". "`，citeproc-py
+    遇到含汉字的 `family`/`given` 会错误拆字加点号。在渲染入口将含 CJK 的姓名
+    转为 CSL 规范的 `literal` 形态，不改动 `CslItem.to_csl_json()` 原始数据契约。
+    """
+    payload = item.to_csl_json()
+    raw_authors = payload.get("author")
+    if isinstance(raw_authors, list):
+        normalized_authors: list[dict[str, str]] = []
+        for entry in raw_authors:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("literal"):
+                normalized_authors.append(entry)
+                continue
+            family = str(entry.get("family") or "").strip()
+            given = str(entry.get("given") or "").strip()
+            if (family and CJK_PATTERN.search(family)) or (given and CJK_PATTERN.search(given)):
+                normalized_authors.append({"literal": f"{family}{given}"})
+            else:
+                normalized_authors.append(entry)
+        payload["author"] = normalized_authors
+    return payload
 
 
 class CitationRenderer:
@@ -324,7 +352,7 @@ class CitationRenderer:
 
         # 前序条目 + 当前条目一起进引擎，保证 citation-number 与全局序号一致
         all_items = [*preceding, item]
-        source = CiteProcJSON([entry.to_csl_json() for entry in all_items])
+        source = CiteProcJSON([_csl_json_for_engine(entry) for entry in all_items])
         engine = CitationStylesBibliography(style, source, formatter.plain)
         citations = [Citation([CitationItem(entry.id)]) for entry in all_items]
         for citation in citations:

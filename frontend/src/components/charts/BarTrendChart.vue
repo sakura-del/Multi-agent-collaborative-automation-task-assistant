@@ -42,12 +42,22 @@ const hasPrimarySeries = computed(() =>
 );
 
 const chartWidth = 560;
-const padLeft = 6;
+const padLeft = 44;
 const padRight = 6;
 const padTop = 10;
 const padBottom = 22;
 
 const plotHeight = computed(() => props.height - padTop - padBottom);
+/** Y 轴三档参考刻度（顶 / 中 / 0），为用量看板与 BYOK 趋势图提供清晰数值参照（Issue #57）。 */
+const yTicks = computed(() => [
+  { ratio: 0, value: maxTotal.value, label: formatCompact(maxTotal.value) },
+  {
+    ratio: 0.5,
+    value: Math.round(maxTotal.value / 2),
+    label: formatCompact(Math.round(maxTotal.value / 2)),
+  },
+  { ratio: 1, value: 0, label: "0" },
+]);
 const stepWidth = computed(() =>
   props.items.length > 0 ? (chartWidth - padLeft - padRight) / props.items.length : 0,
 );
@@ -115,17 +125,28 @@ function formatCompact(value: number): string {
       role="img"
       :aria-label="props.totalLabel"
     >
-      <!-- 水平参考线 -->
-      <line
-        v-for="ratio in [0, 0.5, 1]"
-        :key="ratio"
-        :x1="padLeft"
-        :x2="chartWidth - padRight"
-        :y1="padTop + plotHeight * ratio"
-        :y2="padTop + plotHeight * ratio"
-        stroke="var(--border)"
-        stroke-dasharray="3 3"
-      />
+      <!-- 水平参考线与 Y 轴刻度 -->
+      <g v-for="tick in yTicks" :key="tick.ratio">
+        <line
+          :x1="padLeft"
+          :x2="chartWidth - padRight"
+          :y1="padTop + plotHeight * tick.ratio"
+          :y2="padTop + plotHeight * tick.ratio"
+          stroke="var(--border)"
+          stroke-dasharray="3 3"
+        />
+        <text
+          :x="padLeft - 6"
+          :y="padTop + plotHeight * tick.ratio + 3"
+          text-anchor="end"
+          fill="var(--muted-foreground)"
+          font-size="10"
+          data-test="bar-y-tick"
+          class="tabular-nums"
+        >
+          {{ tick.label }}
+        </text>
+      </g>
 
       <g
         v-for="bar in bars"

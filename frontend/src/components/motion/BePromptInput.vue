@@ -26,6 +26,8 @@ const props = withDefaults(
     disabled?: boolean;
     /** Enter 直提交（一句话入口）；false = Ctrl/⌘+Enter（粘贴区多行） */
     submitOnEnter?: boolean;
+    /** 紧凑模式（侧栏窄容器）：底部单行展示提示与字数，避免换行挤压（Issue #57） */
+    compact?: boolean;
   }>(),
   {
     modelValue: "",
@@ -35,6 +37,7 @@ const props = withDefaults(
     minHeight: "10rem",
     disabled: false,
     submitOnEnter: false,
+    compact: false,
   }
 );
 
@@ -107,18 +110,26 @@ const charCount = computed(() => props.modelValue.length);
       @blur="focused = false"
       @keydown="onKeydown"
     />
-    <div class="flex items-center gap-2 border-t border-border px-3 py-2">
-      <span class="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
-        <Sparkles class="size-3" />
-        {{ hint }}
+    <div
+      class="flex items-center justify-between gap-2 border-t border-border px-3 py-2"
+      data-test="prompt-input-footer"
+    >
+      <span class="inline-flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground">
+        <Sparkles class="size-3 shrink-0" />
+        <span class="truncate">{{ hint }}</span>
       </span>
-      <span class="ml-auto font-mono text-[10px] tabular-nums text-muted-foreground">
-        {{ charCount }} chars
-      </span>
-      <span class="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
-        <CornerDownLeft class="size-3" />
-        Ctrl/⌘+Enter 提交
-      </span>
+      <div class="flex shrink-0 items-center gap-2 whitespace-nowrap">
+        <span class="font-mono text-[10px] tabular-nums text-muted-foreground">
+          {{ compact ? `${charCount} 字` : `${charCount} chars` }}
+        </span>
+        <span
+          v-if="!compact"
+          class="inline-flex items-center gap-1 text-[10px] text-muted-foreground"
+        >
+          <CornerDownLeft class="size-3 shrink-0" />
+          {{ submitOnEnter ? "Enter 提交" : "Ctrl/⌘+Enter 提交" }}
+        </span>
+      </div>
     </div>
   </div>
 </template>

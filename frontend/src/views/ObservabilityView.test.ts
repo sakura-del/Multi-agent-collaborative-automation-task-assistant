@@ -255,4 +255,54 @@ describe("ObservabilityView", () => {
 
     expect(getObservabilityOverview).toHaveBeenCalledTimes(2);
   });
+
+  it("含待人工时显式标注分母口径、状态图例不撞色，且柱状图带 Y 轴刻度（Issue #57）", async () => {
+    vi.mocked(getObservabilityOverview).mockResolvedValue(
+      overview({
+        tasks: { total: 6, completed: 2, failed: 0, cancelled: 1, waiting_human: 1 },
+        by_status: {
+          completed: 2,
+          waiting_approval: 1,
+          waiting_human: 1,
+          paused: 1,
+          cancelled: 1,
+        },
+        terminal_count: 4,
+      }) as never,
+    );
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    // 分母显式提示含待人工任务
+    expect(wrapper.get('[data-test="observability-success-denominator"]').text()).toContain(
+      "含 1 个待人工",
+    );
+
+    // 柱状图必须渲染 3 个 Y 轴数值刻度（顶 / 中 / 0）
+    const yTicks = wrapper.findAll('[data-test="bar-y-tick"]');
+    expect(yTicks).toHaveLength(3);
+    expect(yTicks[2].text()).toBe("0");
+
+    // 待确认 vs 待人工、已暂停 vs 已取消的图例色点互不相同且均非空
+    const approvalColor = (
+      wrapper.get('[data-test="observability-dot-waiting_approval"]').element as HTMLElement
+    ).style.backgroundColor;
+    const humanColor = (
+      wrapper.get('[data-test="observability-dot-waiting_human"]').element as HTMLElement
+    ).style.backgroundColor;
+    const pausedColor = (
+      wrapper.get('[data-test="observability-dot-paused"]').element as HTMLElement
+    ).style.backgroundColor;
+    const cancelledColor = (
+      wrapper.get('[data-test="observability-dot-cancelled"]').element as HTMLElement
+    ).style.backgroundColor;
+
+    expect(approvalColor).toBeTruthy();
+    expect(humanColor).toBeTruthy();
+    expect(pausedColor).toBeTruthy();
+    expect(cancelledColor).toBeTruthy();
+    expect(approvalColor).not.toBe(humanColor);
+    expect(pausedColor).not.toBe(cancelledColor);
+  });
 });

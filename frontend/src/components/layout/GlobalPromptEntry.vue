@@ -195,6 +195,7 @@ function dismissTask(taskId: string) {
       hint="Enter 创建任务"
       min-height="3.5rem"
       :submit-on-enter="true"
+      compact
       :submitting="submitting"
       class="text-xs"
       @submit="submit"

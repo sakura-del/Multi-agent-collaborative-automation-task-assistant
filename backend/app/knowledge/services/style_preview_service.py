@@ -53,8 +53,8 @@ def _sample_items() -> list[CslItem]:
             type="article-journal",
             title="检索增强生成评估方法综述",
             author=[
-                CslName(family="牛", given="耕田"),
-                CslName(family="李", given="四"),
+                CslName(literal="牛耕田"),
+                CslName(literal="李四"),
             ],
             container_title="计算机学报",
             issued_year=2024,

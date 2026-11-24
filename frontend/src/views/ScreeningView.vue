@@ -24,6 +24,7 @@ import {
   listScreeningRecords,
 } from "@/api/screening";
 import type { PrismaCounts, ScreeningPriority, ScreeningRecord } from "@/api/types";
+import { cleanAbstractLatex } from "@/utils/latex-text";
 
 /**
  * PRISMA 筛选工作台（Phase 2）：候选列表 + 逐条决策 + PRISMA 计数。
@@ -435,7 +436,7 @@ async function submitDecision(
             <div class="flex flex-wrap items-start justify-between gap-2">
               <div class="min-w-0 flex-1">
                 <div class="flex flex-wrap items-center gap-1.5">
-                  <span class="text-sm font-medium text-foreground">{{ record.title }}</span>
+                  <span class="text-sm font-medium text-foreground">{{ cleanAbstractLatex(record.title) }}</span>
                   <Badge :variant="STAGE_TONE[record.current_stage] ?? 'muted'">
                     {{ STAGE_LABELS[record.current_stage] ?? record.current_stage }}
                   </Badge>
@@ -511,8 +512,12 @@ async function submitDecision(
               </div>
             </div>
 
-            <p v-if="record.abstract" class="mt-2 line-clamp-3 text-xs leading-relaxed text-muted-foreground">
-              {{ record.abstract }}
+            <p
+              v-if="record.abstract"
+              data-test="screening-abstract"
+              class="mt-2 line-clamp-3 text-xs leading-relaxed text-muted-foreground"
+            >
+              {{ cleanAbstractLatex(record.abstract) }}
             </p>
 
             <div

@@ -130,5 +130,10 @@ describe("TaskDetailView 规划 Tab 状态一致性（Issue #55）", () => {
     expect(agentPlan.text()).not.toContain("Awaiting approval");
     expect(agentPlan.text()).not.toContain("No steps yet");
     expect(agentPlan.text()).not.toContain("0/0 complete");
+
+    // Issue #57：Tab 栏避免 -mb-px 触发纵向滚动箭头
+    const tablist = wrapper.get('nav[role="tablist"]');
+    expect(tablist.attributes("class")).toContain("overflow-y-hidden");
+    expect(wrapper.get('[data-test="tab-plan"]').attributes("class")).not.toContain("-mb-px");
   });
 });

@@ -992,3 +992,28 @@ class TestGoldenSnapshots:
             assert line.startswith(f"[{index}] ")
             assert not re.match(rf"^\[{index}\]\s*{index}[.)]", line)
             assert "1." not in line.split(" ", 1)[0]
+
+    @pytest.mark.parametrize("style_id", ["apa", "ieee", "nature"])
+    def test_english_styles_render_cjk_authors_without_dot_artifacts(self, style_id: str) -> None:
+        """Issue #57：英文样式渲染中文作者时不得出现 `牛, . 耕田 .` 这类点号拼接异常。"""
+        item = CslItem(
+            id="zh-author-sample",
+            type="article-journal",
+            title="检索增强生成评估方法综述",
+            author=[
+                CslName(family="牛", given="耕田"),
+                CslName(family="李", given="四"),
+            ],
+            container_title="计算机学报",
+            issued_year=2024,
+            language="zh-CN",
+        )
+        renderer = CitationRenderer()
+        result = renderer.render([item], style_id=style_id)
+
+        assert len(result.entries) == 1
+        entry = result.entries[0]
+        assert "牛耕田" in entry
+        assert "李四" in entry
+        assert "牛, ." not in entry
+        assert ". 耕田" not in entry

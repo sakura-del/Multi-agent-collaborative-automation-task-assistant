@@ -100,10 +100,17 @@ watch(filter, () => {
   void refresh(1);
 });
 
-// 搜索防抖：每敲一个字都请求会在慢网下把结果打乱（后发先至）
+// 搜索防抖：非空输入防抖避免慢网乱序；清空时立即恢复完整列表（Issue #57）
 let searchTimer: ReturnType<typeof setTimeout> | undefined;
 watch(keyword, (value) => {
-  if (searchTimer) clearTimeout(searchTimer);
+  if (searchTimer) {
+    clearTimeout(searchTimer);
+    searchTimer = undefined;
+  }
+  if (!value.trim()) {
+    void refresh(1, "");
+    return;
+  }
   searchTimer = setTimeout(() => {
     void refresh(1, value);
   }, 300);
