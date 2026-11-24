@@ -54,8 +54,12 @@ const BUILT_IN_STYLES: StyleOption[] = [
 
 const workflowPreset = ref<WorkflowPreset>(DEFAULT_WORKFLOW_PRESET);
 const activePreset = computed(() => getWorkflowPreset(workflowPreset.value));
+const isVerifyCitations = computed(
+    () => workflowPreset.value === "verify_citations",
+);
 
 const topic = ref("");
+const draftText = ref("");
 const keywords = ref<string[]>([]);
 const keywordDraft = ref("");
 const maxDocuments = ref(activePreset.value.defaults.maxDocuments);
@@ -176,6 +180,27 @@ function toggleDocument(id: string, checked: boolean) {
 
 function validate(): string[] {
     const messages: string[] = [];
+    if (isVerifyCitations.value) {
+        const trimmedDraft = draftText.value.trim();
+        if (!trimmedDraft && selectedDocuments.value.length === 0) {
+            messages.push("验证引用模式请粘贴待核验草稿，或至少勾选一篇知识库文档");
+        }
+        const trimmedTopic = topic.value.trim();
+        if (
+            trimmedTopic &&
+            (trimmedTopic.length < TOPIC_MIN || trimmedTopic.length > TOPIC_MAX)
+        ) {
+            messages.push(`主题需为 ${TOPIC_MIN}–${TOPIC_MAX} 个字符`);
+        }
+        if (selectedDocuments.value.length > DOC_MAX) {
+            messages.push(`最多选择 ${DOC_MAX} 篇知识库文档`);
+        }
+        if (modelSource.value === "byok" && !selectedCredentialInfo.value) {
+            messages.push("已选择自带模型，请从列表中选出一把可用凭据");
+        }
+        return messages;
+    }
+
     const trimmedTopic = topic.value.trim();
     if (trimmedTopic.length < TOPIC_MIN || trimmedTopic.length > TOPIC_MAX) {
         messages.push(`主题需为 ${TOPIC_MIN}–${TOPIC_MAX} 个字符`);
@@ -211,12 +236,44 @@ function validate(): string[] {
     return messages;
 }
 
+function resolveVerifyTopic(): string {
+    const manual = topic.value.trim();
+    if (manual.length >= TOPIC_MIN) {
+        return manual;
+    }
+    const firstLine = draftText.value
+        .trim()
+        .split(/\r?\n/)[0]
+        ?.replace(/^#+\s*/, "")
+        .trim();
+    if (firstLine && firstLine.length >= TOPIC_MIN) {
+        return firstLine.slice(0, 60);
+    }
+    return "草稿引用核验任务";
+}
+
 function handleSubmit() {
     const messages = validate();
     validationMessages.value = messages;
     if (messages.length > 0) {
         return;
     }
+    if (isVerifyCitations.value) {
+        const payload: TaskCreate = {
+            topic: resolveVerifyTopic(),
+            keywords: ["引用核验"],
+            workflow_preset: "verify_citations",
+            draft_text: draftText.value.trim() || null,
+            document_ids: [...selectedDocuments.value],
+            verify_references: true,
+            ...(modelSource.value === "byok" && selectedCredentialInfo.value
+                ? { llm_credential_id: selectedCredential.value }
+                : {}),
+        };
+        emit("submit", payload);
+        return;
+    }
+
     const pendingKeyword = keywordDraft.value.trim();
     const payload: TaskCreate = {
         topic: topic.value.trim(),
@@ -276,7 +333,9 @@ function handleSubmit() {
         </div>
 
         <div class="grid gap-1.5">
-            <Label for="task-topic">主题</Label>
+            <Label for="task-topic">{{
+                isVerifyCitations ? "任务标题（可选）" : "主题"
+            }}</Label>
             <Input
                 id="task-topic"
                 v-model="topic"
@@ -288,6 +347,25 @@ function handleSubmit() {
             />
         </div>
 
+        <div v-if="isVerifyCitations" class="grid gap-1.5">
+            <Label for="task-draft-text">
+                待核验草稿（含 [E#] 或 [1] 引用与文末参考文献列表）
+            </Label>
+            <textarea
+                id="task-draft-text"
+                v-model="draftText"
+                data-test="draft-text"
+                rows="8"
+                maxlength="30000"
+                placeholder="粘贴待核验段落及文末 ## 参考文献 列表，系统将直接核验每条引用的真实性、撤稿状态与论断支撑度…"
+                class="flex min-h-[11rem] w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+            />
+            <p class="text-xs text-muted-foreground">
+                若同时勾选下方知识库文档，系统将基于原文分块做全文级论断核验；未勾选时按题录/摘要级核验。
+            </p>
+        </div>
+
+        <template v-if="!isVerifyCitations">
         <div class="grid gap-1.5">
             <Label for="task-keyword">关键词（回车添加，1–10 个）</Label>
             <Input
@@ -427,6 +505,7 @@ function handleSubmit() {
                 </div>
             </div>
         </div>
+        </template>
 
         <div class="grid gap-1.5">
             <span class="text-sm font-medium leading-none">使用的模型</span>
@@ -503,7 +582,7 @@ function handleSubmit() {
             </p>
         </div>
 
-        <div class="grid gap-2">
+        <div v-if="!isVerifyCitations" class="grid gap-2">
             <label
                 class="flex items-start gap-2 text-sm"
                 data-test="reference-library-label"

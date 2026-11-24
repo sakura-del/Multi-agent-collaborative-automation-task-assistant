@@ -667,4 +667,38 @@ describe("TaskCreateForm 默认模型", () => {
             verify_references: true,
         });
     });
+
+    it("切换到 verify_citations 预设：隐藏文献数与关键词，空草稿且无文档时拦截，粘贴草稿后正常提交", async () => {
+        const wrapper = mountForm({
+            documents: [{ id: "doc-1", title: "RAG 原文" }],
+        });
+        await flushPromises();
+
+        await wrapper.find('[data-test="preset-verify_citations"]').trigger("click");
+        expect(wrapper.find('[data-test="draft-text"]').exists()).toBe(true);
+        expect(wrapper.find('[data-test="max-documents"]').exists()).toBe(false);
+        expect(wrapper.find('[data-test="keyword-input"]').exists()).toBe(false);
+
+        // 草稿与知识库均为空 → 拦截
+        await wrapper.find("form").trigger("submit");
+        expect(wrapper.emitted("submit")).toBeUndefined();
+        expect(wrapper.find('[data-test="validation-error"]').text()).toContain(
+            "待核验草稿",
+        );
+
+        // 粘贴草稿 + 勾选知识库文档 → 提交成功
+        await wrapper
+            .find('[data-test="draft-text"]')
+            .setValue("检索增强生成显著降低了事实错误 [E1]。\n\n## 参考文献\n- [1] RAG 2020");
+        await wrapper.find('[data-test="doc-doc-1"]').setValue(true);
+        await wrapper.find("form").trigger("submit");
+
+        expect(wrapper.emitted("submit")?.[0][0]).toMatchObject({
+            workflow_preset: "verify_citations",
+            draft_text:
+                "检索增强生成显著降低了事实错误 [E1]。\n\n## 参考文献\n- [1] RAG 2020",
+            document_ids: ["doc-1"],
+            verify_references: true,
+        });
+    });
 });

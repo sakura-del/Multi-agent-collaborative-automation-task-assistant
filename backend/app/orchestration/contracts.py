@@ -266,8 +266,8 @@ class TaskEvent(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
-#: 预设工作流标识（Issue #32 Phase 1）：支持文献综述与研究空白分析。
-WorkflowPreset = Literal["literature_review", "research_gaps"]
+#: 预设工作流标识（Issue #32）：文献综述 / 研究空白分析 / 验证引用。
+WorkflowPreset = Literal["literature_review", "research_gaps", "verify_citations"]
 
 
 # ===== 任务调用契约（HTTP 层映射，编排层不依赖 app.schemas）=====
@@ -279,8 +279,10 @@ class LiteratureReviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     topic: str = Field(min_length=5, max_length=200)
-    keywords: list[str] = Field(min_length=1, max_length=10)
+    keywords: list[str] = Field(default_factory=list, max_length=10)
     workflow_preset: WorkflowPreset = "literature_review"
+    #: 验证引用模式（verify_citations）下的待核验草稿正文（含 [E#] 或参考文献列表）
+    draft_text: str | None = Field(default=None, max_length=30000)
     date_from: date | None = None
     date_to: date | None = None
     max_documents: int = Field(default=20, ge=1, le=50)
@@ -345,6 +347,19 @@ class LiteratureReviewRequest(BaseModel):
     关闭后 `review` 节点用上游 `write` 节点的输出作为最终正文，不调用 LLM。
     同上：仍被规划，只跳过执行。
     """
+
+    @model_validator(mode="after")
+    def _validate_preset_inputs(self) -> LiteratureReviewRequest:
+        """按预设校验必填输入：verify_citations 需草稿或知识库文档，其余模式需至少 1 个关键词。"""
+        if self.workflow_preset == "verify_citations":
+            has_draft = bool((self.draft_text or "").strip())
+            if not has_draft and not self.document_ids:
+                raise ValueError("验证引用模式需提供待核验草稿（draft_text）或至少一篇知识库文档")
+            if not self.keywords:
+                self.keywords = ["引用核验"]
+        elif len(self.keywords) < 1:
+            raise ValueError("keywords 至少需要 1 个关键词")
+        return self
 
 
 class TaskControlRequest(BaseModel):

@@ -44,8 +44,9 @@ class TaskCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     topic: str = Field(min_length=5, max_length=200)
-    keywords: list[str] = Field(min_length=1, max_length=10)
+    keywords: list[str] = Field(default_factory=list, max_length=10)
     workflow_preset: WorkflowPreset = "literature_review"
+    draft_text: str | None = Field(default=None, max_length=30000)
     date_from: date | None = None
     date_to: date | None = None
     max_documents: int = Field(default=20, ge=1, le=50)
@@ -81,6 +82,18 @@ class TaskCreate(BaseModel):
 
     review_enabled: bool = True
     """是否执行 review 节点（关闭后用 write 输出作最终正文）。"""
+
+    @model_validator(mode="after")
+    def _validate_preset_inputs(self) -> TaskCreate:
+        if self.workflow_preset == "verify_citations":
+            has_draft = bool((self.draft_text or "").strip())
+            if not has_draft and not self.document_ids:
+                raise ValueError("验证引用模式需提供待核验草稿（draft_text）或至少一篇知识库文档")
+            if not self.keywords:
+                self.keywords = ["引用核验"]
+        elif len(self.keywords) < 1:
+            raise ValueError("keywords 至少需要 1 个关键词")
+        return self
 
     def to_contract(self) -> LiteratureReviewRequest:
         """映射为编排层契约（HTTP 层不向编排层传递自身模型）。"""

@@ -461,7 +461,10 @@ class TaskExecution:
             await session.commit()
 
         await self._publish(event)
-        self.container.track(task_id, self._plan(task_id))
+        if request.workflow_preset == "verify_citations":
+            self.container.track(task_id, self._run_verify_citations(task_id))
+        else:
+            self.container.track(task_id, self._plan(task_id))
         logger.info("task_submitted", task_id=str(task_id), trace_id=trace_id)
         return task_id
 
@@ -1330,6 +1333,162 @@ class TaskExecution:
             provider=client.provider if client else "platform",
             model=client.model if client else "(platform default)",
         )
+
+    async def _run_verify_citations(self, task_id: UUID) -> None:
+        """执行 `verify_citations` 独立短链路（Issue #32 Phase 2A）。
+
+        跳过多节点规划确认门禁：自动写入单步验证计划，直接复用 ReferenceVerifier 与
+        ClaimVerifier 产出标准 ReviewReport，落库前走引用一致性闸门并结算实际 token。
+        """
+        from app.db.models.knowledge import DocChunk, KnowledgeDoc
+        from app.orchestration.contracts import PlanNode, TaskPlan
+        from app.orchestration.workflows.verify_citations import (
+            DocumentChunkInput,
+            VerifyCitationsRunner,
+        )
+
+        used_tokens = 0
+        try:
+            async with self._session_factory() as session:
+                repo = TaskRepository(session)
+                task = await repo.lock_for_update(task_id)
+                if task.status != TaskStatus.PLANNING.value:
+                    return
+                config = dict(task.config or {})
+                user_id = task.user_id
+                title = task.title
+                draft_text = config.get("draft_text")
+                raw_doc_ids = config.get("document_ids") or []
+                citation_style = str(config.get("citation_style") or "").strip() or None
+
+                single_plan = TaskPlan(
+                    version=1,
+                    topic=title[:200] if len(title) >= 5 else f"{title}引用核验"[:200],
+                    research_questions=["核验草稿引用的题录真实性、来源质量与论断支撑度"],
+                    search_queries=["citation verification"],
+                    acceptance_criteria=["输出四态题录核验、来源质量标记与论断核验报告"],
+                    nodes=[
+                        PlanNode(
+                            id="n1",
+                            type="validate",
+                            title="核验草稿引用与论断",
+                            dependencies=[],
+                            input={"workflow_preset": "verify_citations"},
+                            required_evidence=0,
+                        )
+                    ],
+                )
+                dag = PlannerAgent.build_dag(single_plan)
+                await repo.replace_plan(task, single_plan, dag)
+                await repo.transition(task, {TaskStatus.PLANNING}, TaskStatus.RUNNING)
+                start_event = await self._append_event(
+                    session,
+                    task_id,
+                    event_type="task_status",
+                    status=TaskStatus.RUNNING.value,
+                    payload={"workflow_preset": "verify_citations"},
+                )
+
+                # 读取用户勾选的知识库原文分块（owner-scoped）作为核验依据
+                doc_chunks: list[DocumentChunkInput] = []
+                parsed_doc_ids: list[UUID] = []
+                for item in raw_doc_ids:
+                    try:
+                        parsed_doc_ids.append(UUID(str(item)))
+                    except (TypeError, ValueError):
+                        continue
+                if parsed_doc_ids:
+                    rows = (
+                        await session.execute(
+                            select(DocChunk, KnowledgeDoc.title)
+                            .join(KnowledgeDoc, DocChunk.doc_id == KnowledgeDoc.id)
+                            .where(
+                                KnowledgeDoc.user_id == user_id,
+                                DocChunk.doc_id.in_(parsed_doc_ids),
+                            )
+                            .order_by(DocChunk.doc_id, DocChunk.chunk_index)
+                            .limit(60)
+                        )
+                    ).all()
+                    for chunk, doc_title in rows:
+                        doc_chunks.append(
+                            DocumentChunkInput(
+                                doc_id=chunk.doc_id,
+                                chunk_id=chunk.id,
+                                title=str(doc_title or ""),
+                                content=str(chunk.content or ""),
+                            )
+                        )
+                await session.commit()
+
+            await self._publish(start_event)
+            await self._bind_task_llm(task)
+
+            reviewer = self.container.create_agent("reviewer")
+            # verify_citations 的核心目的即引用核验；仅离线模式且未显式开启时跳过外呼
+            if config.get("offline_dataset") and config.get("verify_references") is not True:
+                reference_verifier = None
+            else:
+                reference_verifier = getattr(reviewer, "reference_verifier", None)
+            llm = getattr(reviewer, "llm", None)
+
+            with use_usage_ledger() as ledger:
+                runner = VerifyCitationsRunner(
+                    reference_verifier=reference_verifier,
+                    llm=llm,
+                )
+                report_model = await runner.run(
+                    topic=title,
+                    draft_text=str(draft_text) if isinstance(draft_text, str) else None,
+                    document_chunks=doc_chunks,
+                )
+            used_tokens = ledger.total_tokens
+
+            review_report = report_model.model_dump(mode="json")
+
+            async with self._session_factory() as session:
+                repo = TaskRepository(session)
+                task = await repo.lock_for_update(task_id)
+                if task.status != TaskStatus.RUNNING.value:
+                    return
+                await repo.transition(task, {TaskStatus.RUNNING}, TaskStatus.REVIEWING)
+                await session.commit()
+
+            if used_tokens > 0:
+                await self.add_used_tokens(task_id, used_tokens)
+
+            if not await self._guard_citation_consistency(task_id, review_report):
+                return
+
+            artifacts = self._export_literature_artifacts(
+                user_id, task_id, review_report, citation_style=citation_style
+            )
+
+            async with self._session_factory() as session:
+                repo = TaskRepository(session)
+                task = await repo.lock_for_update(task_id)
+                if task.status != TaskStatus.REVIEWING.value:
+                    return
+                task.review_report = review_report
+                task.final_output = str(review_report.get("final_markdown") or "")
+                task.artifacts = artifacts
+                await repo.transition(task, {TaskStatus.REVIEWING}, TaskStatus.COMPLETED)
+                done_event = await self._append_event(
+                    session,
+                    task_id,
+                    event_type="task_completed",
+                    status=TaskStatus.COMPLETED.value,
+                    payload={"workflow_preset": "verify_citations"},
+                )
+                await session.commit()
+            await self._publish(done_event)
+            await self.settle_quota(task_id)
+            await self._record_task_terminal(task_id, TaskStatus.COMPLETED.value)
+        except Exception as exc:
+            logger.warning("verify_citations_failed", task_id=str(task_id), error=str(exc))
+            if used_tokens > 0:
+                await self.add_used_tokens(task_id, used_tokens)
+            await self._mark_waiting_human(task_id, f"引用核验执行失败：{exc}")
 
     async def _plan(self, task_id: UUID, *, base_version: int | None = None) -> None:
         """后台规划：生成 TaskPlan + DAG，失败时进行一次 schema 修复。
@@ -2546,6 +2705,7 @@ class TaskExecution:
             "工作流目标：聚焦研究空白分析，系统识别尚未充分研究的问题、证据薄弱点、"
             "结论冲突与未来研究方向；所有空白判断必须有检索记录与可回溯证据支撑"
         ),
+        "verify_citations": "工作流目标：核验草稿已有引用的题录真实性、来源质量与论断支撑度",
     }
 
     @classmethod

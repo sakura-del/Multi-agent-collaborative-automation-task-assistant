@@ -70,14 +70,16 @@ export type TaskCommand =
 
 export type PlanNodeType = "search" | "extract" | "write" | "validate" | "review";
 
-/** 预设工作流（Issue #32 Phase 1）：先上线文献综述与研究空白分析。 */
-export type WorkflowPreset = "literature_review" | "research_gaps";
+/** 预设工作流（Issue #32）：文献综述 / 研究空白分析 / 验证引用。 */
+export type WorkflowPreset = "literature_review" | "research_gaps" | "verify_citations";
 
 export interface TaskCreate {
   topic: string;
   keywords: string[];
   /** 预设工作流标识；缺省时后端按 literature_review 处理 */
   workflow_preset?: WorkflowPreset;
+  /** 验证引用模式（verify_citations）下的待核验草稿文本 */
+  draft_text?: string | null;
   date_from?: string | null;
   date_to?: string | null;
   max_documents?: number;

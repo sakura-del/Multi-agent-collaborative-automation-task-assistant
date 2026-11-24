@@ -17,7 +17,7 @@ import BePromptInput from "@/components/motion/BePromptInput.vue";
 import { taskApi } from "@/api/tasks";
 import { classifyIntent } from "@/api/intent";
 import {
-  WORKFLOW_PRESETS,
+  GLOBAL_PROMPT_PRESETS,
   getWorkflowPreset,
 } from "@/config/workflow-presets";
 import type { WorkflowPreset } from "@/api/types";
@@ -172,7 +172,7 @@ function dismissTask(taskId: string) {
       aria-label="选择工作流预设"
     >
       <button
-        v-for="preset in WORKFLOW_PRESETS"
+        v-for="preset in GLOBAL_PROMPT_PRESETS"
         :key="preset.id"
         type="button"
         :data-test="`global-preset-${preset.id}`"
