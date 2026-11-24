@@ -585,7 +585,7 @@ describe("TaskResult · 引用核验集成", () => {
     await wrapper.find('[data-test="matrix-fill-gap-0-gap"]').trigger("click");
     await nextTick();
     await nextTick();
-    expect(fillMatrixGap).toHaveBeenCalledWith("t-1", {
+    expect(fillMatrixGap).toHaveBeenCalledWith("task-1", {
       question_index: 0,
       query: "RAG gap query",
     });
