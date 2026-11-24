@@ -85,4 +85,43 @@ describe("PlanPanel", () => {
     expect(wrapper.find('[data-test="plan-regenerate"]').exists()).toBe(false);
     expect(wrapper.find('[data-test="plan-approve"]').exists()).toBe(true);
   });
+
+  it("hides approve and renders completed steps and hint for completed tasks (Issue #55)", () => {
+    const wrapper = mount(PlanPanel, {
+      props: {
+        plan: PLAN,
+        canApprove: false,
+        canReplan: false,
+        planStatus: "completed",
+        steps: [
+          { id: "n1", title: "检索", kind: "search", status: "completed", durationMs: 1200 },
+          { id: "n2", title: "撰写", kind: "write", status: "completed", durationMs: 2800 },
+        ],
+      },
+    });
+
+    expect(wrapper.find('[data-test="plan-approve"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="plan-regenerate"]').exists()).toBe(false);
+    const hint = wrapper.find('[data-test="plan-approve-hint"]').text();
+    expect(hint).toContain("执行完成");
+    expect(hint).not.toContain("已暂停在执行阶段");
+
+    const agentPlan = wrapper.find('[data-test="agent-plan"]');
+    expect(agentPlan.find('[data-test="agent-plan-status"]').text()).toBe("Completed");
+    expect(agentPlan.text()).not.toContain("Awaiting approval");
+    expect(agentPlan.text()).not.toContain("No steps yet");
+    expect(agentPlan.text()).toContain("2 steps");
+  });
+
+  it("renders running and failed hints accurately when approval is disabled", () => {
+    const running = mount(PlanPanel, {
+      props: { plan: PLAN, canApprove: false, canReplan: false, planStatus: "running" },
+    });
+    expect(running.find('[data-test="plan-approve-hint"]').text()).toContain("正在执行中");
+
+    const failed = mount(PlanPanel, {
+      props: { plan: PLAN, canApprove: false, canReplan: true, planStatus: "failed" },
+    });
+    expect(failed.find('[data-test="plan-approve-hint"]').text()).toContain("重试失败的节点");
+  });
 });

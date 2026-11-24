@@ -336,6 +336,72 @@ describe("TaskCreateForm 引用库文献源", () => {
         expect(label.text()).toContain("7");
     });
 
+    it("摘要加载中显示加载态，不误报 0 篇或引用库为空（Issue #55）", async () => {
+        let resolveSummary!: (value: {
+            data: { total: number; usable_as_source: number };
+        }) => void;
+        const summaryPromise = new Promise<{
+            data: { total: number; usable_as_source: number };
+        }>((resolve) => {
+            resolveSummary = resolve;
+        });
+
+        vi.mocked(api.get).mockImplementation((url: string) => {
+            if (url === "/citation-styles") {
+                return Promise.resolve({
+                    data: {
+                        styles: [apiStyleRow()],
+                        default_style_id: "gbt7714-2025-numeric",
+                    },
+                });
+            }
+            if (url === "/reference-library/summary") {
+                return summaryPromise;
+            }
+            if (url === "/llm-credentials") {
+                return Promise.resolve({ data: [] });
+            }
+            return Promise.reject(new Error(`unexpected url ${url}`));
+        });
+
+        const wrapper = mountForm();
+        const label = wrapper.find('[data-test="reference-library-label"]');
+        expect(label.text()).toContain("加载中");
+        expect(label.text()).not.toContain("0 篇");
+        expect(label.text()).not.toContain("引用库为空");
+
+        resolveSummary({ data: { total: 2, usable_as_source: 2 } });
+        await flushPromises();
+        expect(label.text()).toContain("2 篇");
+        expect(label.text()).not.toContain("引用库为空");
+    });
+
+    it("引用样式返回空列表时仍并行加载引用库条数与自带模型（Issue #55）", async () => {
+        vi.mocked(api.get).mockImplementation((url: string) => {
+            if (url === "/citation-styles") {
+                return Promise.resolve({
+                    data: { styles: [], default_style_id: "" },
+                });
+            }
+            if (url === "/reference-library/summary") {
+                return Promise.resolve({
+                    data: { total: 2, usable_as_source: 2 },
+                });
+            }
+            if (url === "/llm-credentials") {
+                return Promise.resolve({ data: [] });
+            }
+            return Promise.reject(new Error(`unexpected url ${url}`));
+        });
+
+        const wrapper = mountForm();
+        await flushPromises();
+
+        expect(
+            wrapper.find('[data-test="reference-library-label"]').text(),
+        ).toContain("2 篇");
+    });
+
     it("引用库为空时给出引导", async () => {
         vi.mocked(api.get).mockImplementation((url: string) => {
             if (url === "/citation-styles") {

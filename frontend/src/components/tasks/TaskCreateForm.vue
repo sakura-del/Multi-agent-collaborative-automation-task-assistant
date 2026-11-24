@@ -79,8 +79,9 @@ const styleOptions = ref<StyleOption[] | null>(null);
 const citationStyle = ref("gbt7714");
 const offlineDataset = ref(false);
 // 引用库作为文献源（2026-10-26 引用库计划）：默认关，开启后完全不外呼检索
+// null 表示摘要请求仍在加载中，避免数据尚未返回前误报「0 篇 / 引用库为空」
 const useReferenceLibrary = ref(false);
-const libraryCount = ref(0);
+const libraryCount = ref<number | null>(null);
 // 引用核验默认关闭：与全局默认一致，避免用户无感知地引入外呼延迟（Issue #3 遗留项）
 const verifyReferences = ref(activePreset.value.defaults.verifyReferences);
 
@@ -114,39 +115,55 @@ const selectedCredentialInfo = computed(
 const canSubmit = computed(() => !props.pending);
 
 onMounted(async () => {
-    try {
-        const data = await listCitationStyles();
+    // 三个初始化接口彼此独立，改为并行加载并单独容错：
+    // 避免引用样式列表慢或为空时阻塞/跳过引用库条数与自带模型列表（Issue #55）
+    const [stylesResult, summaryResult, credentialsResult] =
+        await Promise.allSettled([
+            listCitationStyles(),
+            getLibrarySummary(),
+            listLLMCredentials(),
+        ]);
+
+    if (
+        stylesResult.status === "fulfilled" &&
+        Array.isArray(stylesResult.value?.styles)
+    ) {
+        const data = stylesResult.value;
         const options: StyleOption[] = data.styles.map((style) => ({
             style_id: style.style_id,
             title: style.title,
             source: style.source,
         }));
-        if (!options.length) {
-            return;
+        if (options.length) {
+            styleOptions.value = options;
+            const preferred = options.find(
+                (option) => option.style_id === data.default_style_id,
+            );
+            citationStyle.value = preferred
+                ? preferred.style_id
+                : options[0].style_id;
         }
-        styleOptions.value = options;
-        const preferred = options.find(
-            (option) => option.style_id === data.default_style_id,
-        );
-        citationStyle.value = preferred
-            ? preferred.style_id
-            : options[0].style_id;
-    } catch {
+    } else {
         // 列表不可用时静默降级为内置两项：创建任务不能被引用样式接口拖垮
         styleOptions.value = null;
     }
 
     // 引用库摘要：只为提示「将有 N 篇可用」，失败不影响表单（局部失败不连坐）
-    try {
-        const summary = await getLibrarySummary();
-        libraryCount.value = summary.usable_as_source;
-    } catch {
+    if (
+        summaryResult.status === "fulfilled" &&
+        typeof summaryResult.value?.usable_as_source === "number"
+    ) {
+        libraryCount.value = summaryResult.value.usable_as_source;
+    } else {
         libraryCount.value = 0;
     }
 
     // 自带模型列表：失败就只剩「平台模型」，同样不阻塞建任务
-    try {
-        const list = await listLLMCredentials();
+    if (
+        credentialsResult.status === "fulfilled" &&
+        Array.isArray(credentialsResult.value)
+    ) {
+        const list = credentialsResult.value;
         credentials.value = list;
         // 用户把某把凭据标成「默认」，建任务就该显式选中「自带模型」：
         // 否则会静默走平台模型，平台密钥缺失时任务直接卡在规划阶段
@@ -160,7 +177,7 @@ onMounted(async () => {
                 selectedCredential.value = preferred.credential_id;
             }
         }
-    } catch {
+    } else {
         credentials.value = [];
     }
 });
@@ -709,7 +726,11 @@ function handleSubmit() {
                     class="mt-0.5 size-4 rounded border-input accent-primary"
                 />
                 <span>
-                    使用我的引用库（{{ libraryCount }} 篇，不访问外部检索源）
+                    使用我的引用库（{{
+                        libraryCount === null
+                            ? "加载中…"
+                            : `${libraryCount} 篇`
+                    }}，不访问外部检索源）
                     <span
                         v-if="libraryCount === 0"
                         class="text-muted-foreground"

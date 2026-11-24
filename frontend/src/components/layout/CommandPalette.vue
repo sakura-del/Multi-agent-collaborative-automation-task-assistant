@@ -17,6 +17,7 @@ import {
   Palette,
   Search,
   Sun,
+  Table2,
   Users,
 } from "lucide-vue-next";
 
@@ -74,6 +75,14 @@ const commands = computed<CommandItem[]>(() => {
       keywords: "knowledge docs 知识库 文档",
       icon: Library,
       run: () => void router.push({ name: "knowledge" }),
+    },
+    {
+      id: "nav-extractions",
+      label: "论文抽取表",
+      group: "页面跳转",
+      keywords: "extractions table csv 抽取 论文抽取表 对比表 表格",
+      icon: Table2,
+      run: () => void router.push({ name: "extractions" }),
     },
     {
       id: "nav-reference-library",

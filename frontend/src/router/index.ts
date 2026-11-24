@@ -167,7 +167,7 @@ export const router = createRouter({
 });
 
 // 鉴权守卫：等待会话恢复完成（ready）后再决定放行/跳转
-router.beforeEach(async (to) => {
+router.beforeEach(async (to, from) => {
   const auth = useAuthStore();
   if (!auth.ready) {
     await auth.bootstrap();
@@ -184,9 +184,13 @@ router.beforeEach(async (to) => {
   }
   // 路由级并行业务预取：在下载懒加载页面 JS chunk 的同时启动接口请求
   if (auth.authenticated) {
-    if (to.name === "tasks") {
+    if (to.name === "tasks" && from.name !== "tasks") {
       void import("@/stores/tasks").then(({ useTaskStore }) => useTaskStore().prefetchList());
-    } else if (to.name === "task-detail" && typeof to.params.taskId === "string") {
+    } else if (
+      to.name === "task-detail" &&
+      typeof to.params.taskId === "string" &&
+      (from.name !== "task-detail" || from.params.taskId !== to.params.taskId)
+    ) {
       const taskId = to.params.taskId;
       void import("@/stores/tasks").then(({ useTaskStore }) => useTaskStore().prefetchDetail(taskId));
     }

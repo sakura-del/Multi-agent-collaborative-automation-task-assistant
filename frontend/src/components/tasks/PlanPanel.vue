@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import BeAgentPlan from "@/components/motion/BeAgentPlan.vue";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
@@ -48,6 +49,22 @@ const props = withDefaults(
 );
 
 const emit = defineEmits<{ approve: [version: number]; regenerate: []; retry: [stepId: string] }>();
+
+/** 不可确认规划时按真实执行阶段给出准确说明，避免已完成任务误报「已暂停在执行阶段」（Issue #55）。 */
+const approveHint = computed(() => {
+  if (props.planStatus === "completed") {
+    return "该规划已确认并执行完成，可切到「执行」或「结果」页查看完整产出。";
+  }
+  if (props.planStatus === "running") {
+    return "该规划已确认，任务正在执行中，可切到「执行」页查看实时进度。";
+  }
+  if (props.planStatus === "failed") {
+    return props.canReplan
+      ? "该规划已确认，任务已暂停在执行阶段；请到「执行」页重试失败的节点，或点上方「重新生成」换一版规划。"
+      : "该规划已确认，任务已暂停在执行阶段；请到「执行」页检查失败的节点。";
+  }
+  return "该规划已确认，当前任务状态不可重复确认规划。";
+});
 </script>
 
 <template>
@@ -94,7 +111,7 @@ const emit = defineEmits<{ approve: [version: number]; regenerate: []; retry: [s
         class="text-sm text-muted-foreground"
         data-test="plan-approve-hint"
       >
-        该规划已确认，任务已暂停在执行阶段；请到「执行」页重试失败的节点，或点上方「重新生成」换一版规划。
+        {{ approveHint }}
       </p>
 
       <div class="grid gap-3 md:grid-cols-3">

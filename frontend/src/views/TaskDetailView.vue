@@ -444,10 +444,14 @@ onBeforeUnmount(() => {
           :pending="pending"
           :blocked="store.snapshot?.status === 'waiting_human' && !store.snapshot?.plan"
           :can-replan="canReplan"
+          :can-approve="canApprove"
+          :steps="planSteps"
+          :plan-status="agentPlanStatus"
           :error="errorMessage"
           :conflict="conflictMessage"
           @approve="handleApprove"
           @regenerate="handleRegenerate"
+          @retry="handleRetryStep"
         />
       </div>
 

@@ -22,6 +22,7 @@ function buildRouter() {
       { path: "/", component: stub },
       { path: "/tasks", name: "tasks", component: stub },
       { path: "/knowledge", name: "knowledge", component: stub },
+      { path: "/extractions/:tableId?", name: "extractions", component: stub },
       { path: "/styles", name: "styles", component: stub },
       { path: "/templates", name: "templates", component: stub },
       { path: "/reference-import", name: "reference-import", component: stub },
@@ -223,6 +224,37 @@ describe("Linear / Notion 顶栏与命令面板", () => {
     const dialog = document.body.querySelector('[data-test="command-palette"]');
     expect(dialog).not.toBeNull();
     expect(dialog?.textContent).toContain("知识库");
+    wrapper.unmount();
+  });
+
+  it("命令面板收录论文抽取表且搜索「抽取」可直接跳转（Issue #55）", async () => {
+    setActivePinia(createPinia());
+    const router = buildRouter();
+    await router.push("/tasks");
+    await router.isReady();
+    const wrapper = mount(AppLayout, {
+      global: { plugins: [router], stubs: { RouterView: true } },
+    });
+    await flushPromises();
+
+    await wrapper.get('[data-test="open-command-palette"]').trigger("click");
+    await flushPromises();
+
+    const dialog = document.body.querySelector('[data-test="command-palette"]') as HTMLElement;
+    expect(dialog).not.toBeNull();
+    const input = dialog.querySelector("input") as HTMLInputElement;
+    input.value = "抽取";
+    input.dispatchEvent(new Event("input"));
+    await flushPromises();
+
+    expect(dialog.textContent).toContain("论文抽取表");
+    expect(dialog.textContent).not.toContain("没有匹配的页面或命令");
+
+    const optionBtn = dialog.querySelector('li[role="option"] button') as HTMLButtonElement;
+    optionBtn.click();
+    await flushPromises();
+
+    expect(router.currentRoute.value.name).toBe("extractions");
     wrapper.unmount();
   });
 });

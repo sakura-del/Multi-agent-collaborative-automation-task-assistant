@@ -193,6 +193,9 @@ export const useTaskStore = defineStore("tasks", () => {
     return current.plan == null && PLAN_VISIBLE_STATUS.has(nextStatus);
   }
 
+  /** 不可逆终态：历史事件回放不得将已完结任务状态倒退回早期阶段，也不应触发重复拉取（Issue #55） */
+  const IRREVERSIBLE_TERMINAL_STATUS = new Set<TaskSnapshot["status"]>(["completed", "cancelled"]);
+
   function applyEvent(event: TaskEvent): void {
     if (event.event_id <= lastEventId.value) {
       return;
@@ -204,6 +207,18 @@ export const useTaskStore = defineStore("tasks", () => {
     }
     const previousStatus = snapshot.value.status;
     const nextStatus = event.status as TaskSnapshot["status"];
+    if (IRREVERSIBLE_TERMINAL_STATUS.has(previousStatus)) {
+      // 已完成/已取消任务的快照已是最新的终态；回放创建/规划/执行历史事件时只记日志，
+      // 避免把页面状态短暂闪烁回「待确认/执行中」并反复触发 GET /tasks/:id
+      if (
+        previousStatus === "completed" &&
+        (snapshot.value.plan == null || snapshot.value.review_report == null) &&
+        event.event_type === "task_completed"
+      ) {
+        void load(snapshot.value.task_id).catch(() => undefined);
+      }
+      return;
+    }
     const merged = { ...snapshot.value, status: nextStatus };
     snapshot.value = merged;
     if (needsSnapshotRefresh(previousStatus, nextStatus, event.event_type, merged)) {

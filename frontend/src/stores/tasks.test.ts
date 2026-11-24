@@ -106,6 +106,39 @@ describe("task store", () => {
     expect(store.events).toHaveLength(1);
   });
 
+  it("does not regress a completed snapshot when replaying historical events (Issue #55)", () => {
+    const store = useTaskStore();
+    vi.mocked(taskApi.get).mockReset();
+    store.snapshot = snapshot({
+      status: "completed",
+      plan: {
+        version: 1,
+        topic: "已完成综述",
+        research_questions: ["Q1"],
+        search_queries: ["RAG"],
+        acceptance_criteria: ["可追溯"],
+        nodes: [],
+      },
+      review_report: {
+        final_markdown: "# 综述",
+        bibliography: [],
+        scores: {},
+        issues: [],
+        stats: {},
+      },
+    });
+
+    store.applyEvent({ ...event(1, "created"), event_type: "task_created" });
+    store.applyEvent({ ...event(2, "waiting_approval"), event_type: "plan_ready" });
+    store.applyEvent({ ...event(3, "running"), event_type: "subtask_started" });
+    store.applyEvent({ ...event(4, "completed"), event_type: "task_completed" });
+
+    expect(store.snapshot?.status).toBe("completed");
+    expect(store.events).toHaveLength(4);
+    expect(store.lastEventId).toBe(4);
+    expect(taskApi.get).not.toHaveBeenCalled();
+  });
+
   it("creates a task through the API adapter", async () => {
     const store = useTaskStore();
     vi.mocked(taskApi.create).mockResolvedValue({ task_id: "task-9", status: "created" });
