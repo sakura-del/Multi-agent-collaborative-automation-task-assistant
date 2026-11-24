@@ -4,6 +4,7 @@ import { Download } from "lucide-vue-next";
 
 import { taskApi } from "@/api/tasks";
 import ClaimEvidenceDrawer from "@/components/tasks/ClaimEvidenceDrawer.vue";
+import EvidenceMatrixView from "@/components/tasks/EvidenceMatrixView.vue";
 import ReferenceVerificationPanel from "@/components/tasks/ReferenceVerificationPanel.vue";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -11,6 +12,7 @@ import type {
   Artifact,
   BibliographyEntry,
   ClaimCheckResult,
+  EvidenceMatrixCell,
   QualityFlag,
   ReferenceVerificationSummary,
   ReviewReport,
@@ -43,10 +45,23 @@ const props = defineProps<{
   artifacts?: Artifact[];
 }>();
 
+const emit = defineEmits<{ refresh: [] }>();
+
 const downloading = ref<"markdown" | "docx" | null>(null);
 const errorMessage = ref<string | null>(null);
 /** 源码视图开关（默认渲染视图）。 */
 const showSource = ref(false);
+/** 综述正文 / 证据矩阵 Tab（仅存在 evidence_matrix 时展示切换栏）。 */
+const resultView = ref<"paper" | "matrix">("paper");
+const hasMatrix = computed(
+  () => Boolean(props.report.evidence_matrix?.questions?.length),
+);
+const fillingQuestionIndex = ref<number | null>(null);
+const gapNotice = ref<string | null>(null);
+const activeMatrixCell = ref<{
+  cell: EvidenceMatrixCell;
+  question: string;
+} | null>(null);
 
 /** 消毒后的正文 HTML（未做质量标记；`v-html` 的安全性由 renderMarkdown 保证）。 */
 const baseRenderedMarkdown = computed(() => renderMarkdown(props.report.final_markdown));
@@ -207,11 +222,65 @@ const activeEntry = computed<BibliographyEntry | null>(
 );
 
 /** 同一篇文献可能被多句话引用：抽屉里给出所有相关论断，不能只展示第一条。 */
-const activeClaims = computed(() =>
-  activeCitation.value === null
+const activeClaims = computed(() => {
+  if (activeMatrixCell.value !== null) {
+    const idSet = new Set(activeMatrixCell.value.cell.claim_ids);
+    return claimChecks.value.filter((check) => idSet.has(check.claim_id));
+  }
+  return activeCitation.value === null
     ? []
-    : claimChecks.value.filter((check) => check.cited_ref_ids.includes(`E${activeCitation.value}`)),
+    : claimChecks.value.filter((check) => check.cited_ref_ids.includes(`E${activeCitation.value}`));
+});
+
+const drawerOpen = computed(
+  () => activeCitation.value !== null || activeMatrixCell.value !== null,
 );
+
+const BUCKET_LABELS: Record<EvidenceMatrixCell["bucket"], string> = {
+  strong: "强支持",
+  weak_or_caveat: "弱支持 / 存疑",
+  conflicting: "冲突",
+  gap: "空白 / 无法核验",
+};
+
+const drawerTitle = computed(() => {
+  if (!activeMatrixCell.value) return null;
+  const { cell } = activeMatrixCell.value;
+  return `证据矩阵 · Q${cell.question_index + 1} · ${BUCKET_LABELS[cell.bucket]}`;
+});
+
+const drawerSubtitle = computed(() => activeMatrixCell.value?.question ?? null);
+
+function openMatrixCell(cell: EvidenceMatrixCell, question: string) {
+  activeCitation.value = null;
+  activeMatrixCell.value = { cell, question };
+}
+
+function closeDrawer() {
+  activeCitation.value = null;
+  activeMatrixCell.value = null;
+}
+
+async function handleFillGap(questionIndex: number, query: string | null) {
+  fillingQuestionIndex.value = questionIndex;
+  errorMessage.value = null;
+  gapNotice.value = null;
+  try {
+    const res = await taskApi.fillMatrixGap(props.taskId, {
+      question_index: questionIndex,
+      query,
+    });
+    gapNotice.value =
+      res.added_count > 0
+        ? `已为 Q${questionIndex + 1} 定向补充 ${res.added_count} 篇文献（去重 ${res.duplicate_count} 篇）。`
+        : `Q${questionIndex + 1} 未检出更多新文献（命中 ${res.duplicate_count} 篇已有文献）。`;
+    emit("refresh");
+  } catch (error) {
+    errorMessage.value = (error as Error).message || "补检索失败";
+  } finally {
+    fillingQuestionIndex.value = null;
+  }
+}
 
 /** 事件委托：正文来自 v-html，逐个角标绑事件不现实，按 data-cite 找最近的角标。 */
 function onPaperClick(event: MouseEvent) {
@@ -301,13 +370,53 @@ async function download(kind: "markdown" | "docx") {
   <section class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_17rem]" data-test="task-result">
     <!-- 正文是核心交付物：纸页式排版，不再把长文关进 70vh 的内滚动卡片。 -->
     <article class="min-w-0" data-test="result-paper">
-      <div class="mb-3 flex items-center justify-between gap-3">
-        <div>
-          <p class="text-[9px] font-semibold tracking-[0.16em] text-primary uppercase">Final review</p>
-          <h2 class="mt-1 text-base font-semibold tracking-tight">最终综述</h2>
+      <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-3">
+          <div>
+            <p class="text-[9px] font-semibold tracking-[0.16em] text-primary uppercase">Final review</p>
+            <h2 class="mt-1 text-base font-semibold tracking-tight">最终综述</h2>
+          </div>
+          <div
+            v-if="hasMatrix"
+            role="tablist"
+            aria-label="结果展示切换"
+            class="inline-flex gap-1 rounded-lg bg-muted p-0.5 text-xs"
+          >
+            <button
+              type="button"
+              role="tab"
+              data-test="result-tab-paper"
+              :aria-selected="resultView === 'paper'"
+              :class="[
+                'rounded-md px-2.5 py-1 font-medium transition-colors',
+                resultView === 'paper'
+                  ? 'bg-background text-foreground shadow-xs'
+                  : 'text-muted-foreground hover:text-foreground',
+              ]"
+              @click="resultView = 'paper'"
+            >
+              综述正文
+            </button>
+            <button
+              type="button"
+              role="tab"
+              data-test="result-tab-matrix"
+              :aria-selected="resultView === 'matrix'"
+              :class="[
+                'rounded-md px-2.5 py-1 font-medium transition-colors',
+                resultView === 'matrix'
+                  ? 'bg-background text-foreground shadow-xs'
+                  : 'text-muted-foreground hover:text-foreground',
+              ]"
+              @click="resultView = 'matrix'"
+            >
+              证据矩阵
+            </button>
+          </div>
         </div>
         <!-- 源码/预览切换仍保留，核对引用标记与复制时可查看原始 Markdown。 -->
         <button
+          v-if="resultView === 'paper'"
           type="button"
           data-test="toggle-md-source"
           class="rounded px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
@@ -316,6 +425,14 @@ async function download(kind: "markdown" | "docx") {
           {{ showSource ? "渲染视图" : "源码" }}
         </button>
       </div>
+
+      <Alert
+        v-if="gapNotice"
+        variant="info"
+        class="mb-4"
+        data-test="matrix-gap-notice"
+        :description="gapNotice"
+      />
 
       <!-- 撤稿警示：只要正文引用了已撤稿文献，就必须在正文顶部明确提示移除。 -->
       <Alert
@@ -328,9 +445,17 @@ async function download(kind: "markdown" | "docx") {
         :description="retractedBannerText"
       />
 
+      <EvidenceMatrixView
+        v-if="resultView === 'matrix' && props.report.evidence_matrix"
+        :matrix="props.report.evidence_matrix"
+        :filling-index="fillingQuestionIndex"
+        @select-cell="openMatrixCell"
+        @fill-gap="handleFillGap"
+      />
+
       <!-- renderMarkdown 继续负责 marked + DOMPurify 两段式安全链，不在本层另做 HTML 拼接。 -->
       <div
-        v-if="!showSource"
+        v-else-if="!showSource"
         data-test="result-markdown"
         class="md-body max-h-none overflow-visible rounded-lg border border-border bg-card px-5 py-6 font-display sm:px-8 sm:py-8 lg:px-10"
         v-html="renderedMarkdown"
@@ -488,13 +613,15 @@ async function download(kind: "markdown" | "docx") {
       </section>
     </aside>
 
-    <!-- 论断核验抽屉：点正文角标打开，展示该文献的来源质量与逐句判定。 -->
+    <!-- 论断核验抽屉：点正文角标或证据矩阵非空格子打开，展示来源质量与逐句判定。 -->
     <ClaimEvidenceDrawer
-      :open="activeCitation !== null"
+      :open="drawerOpen"
       :index="activeCitation"
       :entry="activeEntry"
       :claims="activeClaims"
-      @close="activeCitation = null"
+      :title="drawerTitle"
+      :subtitle="drawerSubtitle"
+      @close="closeDrawer"
     />
   </section>
 </template>

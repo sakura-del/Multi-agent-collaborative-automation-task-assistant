@@ -511,6 +511,7 @@ onBeforeUnmount(() => {
           :task-id="props.taskId"
           :report="store.snapshot.review_report"
           :artifacts="artifacts"
+          @refresh="refresh"
         />
         <EmptyState
           v-else

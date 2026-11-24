@@ -733,6 +733,138 @@ class TaskExecution:
         )
         return refresh
 
+    async def fill_matrix_gap(
+        self,
+        user_id: UUID,
+        task_id: UUID,
+        *,
+        question_index: int,
+        query: str | None = None,
+    ) -> dict[str, Any]:
+        """研究空白矩阵空格子一键定向补检索（Issue #32 Phase 3）。
+
+        复用文献源解析、三键去重、增量要点生成与引用一致性闸门，
+        将新增文献合并回 `review_report` 并重算该子问题行矩阵格子。
+        """
+        from app.orchestration.contracts import EvidenceMatrix
+        from app.orchestration.services.evidence_matrix import (
+            build_suggested_query,
+            merge_gap_records_into_matrix,
+        )
+        from app.orchestration.services.task_refresh import (
+            SessionBoundSource,
+            run_gap_fill_search,
+        )
+
+        async with self._session_factory() as session:
+            repo = TaskRepository(session)
+            task = await repo.get_for_user(user_id, task_id)
+            if task is None:
+                raise NotFoundException("任务不存在")
+            if TaskStatus(task.status) is not TaskStatus.COMPLETED:
+                raise ValidationException(
+                    "只有已完成的任务支持研究空白补检索", details={"status": task.status}
+                )
+            report = dict(task.review_report or {}) if isinstance(task.review_report, dict) else {}
+            raw_matrix = report.get("evidence_matrix")
+            if not isinstance(raw_matrix, dict):
+                raise ValidationException("该任务报告尚未生成证据矩阵")
+            matrix = EvidenceMatrix.model_validate(raw_matrix)
+            if not (0 <= question_index < len(matrix.questions)):
+                raise ValidationException(
+                    "question_index 越界",
+                    details={"question_index": question_index, "total": len(matrix.questions)},
+                )
+            question = matrix.questions[question_index]
+            suggested = next(
+                (
+                    cell.suggested_query
+                    for cell in matrix.cells
+                    if cell.question_index == question_index and cell.suggested_query
+                ),
+                None,
+            )
+            effective_query = (
+                (query or "").strip()
+                or suggested
+                or build_suggested_query(question, topic=task.title)
+            )
+            existing_bib = list(report.get("bibliography") or [])
+
+        await self._bind_task_llm(task)
+        source_session = self._session_factory()
+        try:
+            source = resolve_literature_source(task, session=source_session)
+            if source is None:
+                raise ValidationException("任务没有可用的文献源，无法执行空白补检索")
+            bound_source = SessionBoundSource(source, source_session)
+            try:
+                reviewer = self.container.create_agent("reviewer")
+                llm = getattr(reviewer, "llm", None)
+                gap_result = await run_gap_fill_search(
+                    source=bound_source,
+                    query=effective_query,
+                    question=question,
+                    existing_bibliography=existing_bib,
+                    llm=llm,
+                    max_results=8,
+                )
+            finally:
+                await bound_source.aclose()
+        except Exception:
+            await source_session.close()
+            raise
+
+        merged_bib = [*existing_bib, *gap_result.new_bibliography_entries]
+        base_md = str(report.get("final_markdown") or "")
+        updated_md = (
+            f"{base_md}\n\n{gap_result.section_markdown}".strip()
+            if gap_result.new_bibliography_entries
+            else base_md
+        )
+        if gap_result.new_bibliography_entries:
+            # 合并后的正文与参考文献表必须继续通过引用一致性闸门
+            audit = audit_citation_alignment(updated_md, merged_bib)
+            if not audit.ok:
+                raise ValidationException(f"补检索结果未通过引用一致性校验：{audit.reason}")
+
+        updated_matrix = merge_gap_records_into_matrix(
+            matrix,
+            question_index=question_index,
+            added_ref_indices=[int(e["index"]) for e in gap_result.new_bibliography_entries],
+            query=effective_query,
+        )
+
+        if gap_result.new_bibliography_entries:
+            async with self._session_factory() as session:
+                repo = TaskRepository(session)
+                locked = await repo.lock_for_update(task_id)
+                latest_report = (
+                    dict(locked.review_report or {})
+                    if isinstance(locked.review_report, dict)
+                    else {}
+                )
+                latest_report["bibliography"] = merged_bib
+                latest_report["final_markdown"] = updated_md
+                latest_report["evidence_matrix"] = updated_matrix.model_dump()
+                locked.review_report = latest_report
+                locked.final_output = updated_md
+                await session.commit()
+
+        if gap_result.tokens_used > 0:
+            await self.add_used_tokens(task_id, gap_result.tokens_used)
+
+        return {
+            "task_id": task_id,
+            "question_index": question_index,
+            "query": effective_query,
+            "added_count": len(gap_result.new_bibliography_entries),
+            "duplicate_count": gap_result.duplicate_count,
+            "summary_markdown": gap_result.section_markdown,
+            "evidence_matrix": updated_matrix.model_dump(),
+            "bibliography": merged_bib,
+        }
+
     async def _refresh(self, refresh_id: UUID) -> None:
         """后台刷新协程：绑模型 → 跑（检索/摘要/落库）→ 汇报。"""
         from app.db.models.routine import TaskRefresh
@@ -2084,6 +2216,15 @@ class TaskExecution:
             # Issue #4：引用样式在**渲染期**生效（此前只拼进提示词）；缺省 None 表示沿用既有渲染
             task_config = task.config if isinstance(task.config, dict) else {}
             citation_style = str(task_config.get("citation_style") or "").strip() or None
+            task_plan = task.plan if isinstance(task.plan, dict) else {}
+            research_questions = [
+                str(q) for q in (task_plan.get("research_questions") or []) if str(q).strip()
+            ]
+            node_titles = {
+                str(node.get("id")): str(node.get("title") or "")
+                for node in (task_plan.get("nodes") or [])
+                if isinstance(node, dict) and node.get("id")
+            }
             event_count = int(
                 (
                     await session.execute(
@@ -2107,6 +2248,8 @@ class TaskExecution:
                     "results": [item.model_dump(mode="json") for item in execution_results],
                     "validations": validations,
                     "event_stats": {"event_count": event_count, "task_id": str(task_id)},
+                    "research_questions": research_questions,
+                    "node_titles": node_titles,
                 }
             )
             # Issue #25 沉淀项 1：Agent 产出**落库前**强制校验引用一致性。

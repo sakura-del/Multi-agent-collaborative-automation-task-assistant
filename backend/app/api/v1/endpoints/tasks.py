@@ -40,6 +40,8 @@ from app.orchestration.services.task_execution import TaskExecution
 from app.orchestration.services.task_submission import submit_review_task
 from app.schemas.routine import RefreshOut, RoutineIn, RoutineOut
 from app.schemas.task import (
+    MatrixFillGapOut,
+    MatrixFillGapRequest,
     PlanApproval,
     TaskControl,
     TaskCountsOut,
@@ -384,6 +386,28 @@ async def start_refresh(
     """
     refresh = await execution.start_refresh(current_user.id, task_id, trigger="manual")
     return RefreshOut.model_validate(refresh)
+
+
+@router.post(
+    "/{task_id}/matrix/fill-gap",
+    response_model=MatrixFillGapOut,
+    summary="研究空白矩阵空格子定向补检索",
+)
+async def fill_matrix_gap(
+    task_id: UUID,
+    payload: MatrixFillGapRequest,
+    execution: ExecutionDep,
+    current_user: ApiUserDep,
+    _scope: TasksWriteScope,
+) -> MatrixFillGapOut:
+    """针对证据矩阵中的单个研究子问题执行定向补检索并重算矩阵格子（Issue #32 Phase 3）。"""
+    result = await execution.fill_matrix_gap(
+        current_user.id,
+        task_id,
+        question_index=payload.question_index,
+        query=payload.query,
+    )
+    return MatrixFillGapOut.model_validate(result)
 
 
 @router.get(

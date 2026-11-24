@@ -529,6 +529,32 @@ class ReviewerAgent(BaseAgent):
         }
         if verification_summary is not None:
             stats["reference_verification"] = verification_summary
+
+        # Issue #32 Phase 3：聚合研究空白矩阵（失败时降级为 None，绝不阻断主报告交付）
+        evidence_matrix_payload: dict[str, Any] | None = None
+        raw_questions = input_data.get("research_questions")
+        if isinstance(raw_questions, list) and raw_questions:
+            try:
+                from app.orchestration.services.evidence_matrix import build_evidence_matrix
+
+                raw_titles = input_data.get("node_titles")
+                node_titles = (
+                    {str(k): str(v) for k, v in raw_titles.items()}
+                    if isinstance(raw_titles, Mapping)
+                    else None
+                )
+                matrix = build_evidence_matrix(
+                    [str(q) for q in raw_questions],
+                    claim_checks,
+                    bibliography,
+                    node_titles=node_titles,
+                    topic=topic,
+                )
+                evidence_matrix_payload = matrix.model_dump()
+            except Exception as exc:
+                logger.warning("reviewer_evidence_matrix_failed", error=str(exc))
+                evidence_matrix_payload = None
+
         logger.info(
             "reviewer_literature_done",
             topic=topic,
@@ -544,6 +570,7 @@ class ReviewerAgent(BaseAgent):
             "stats": stats,
             "claim_checks": [item.model_dump() for item in claim_checks],
             "claim_stats": claim_stats,
+            "evidence_matrix": evidence_matrix_payload,
         }
 
     @staticmethod

@@ -26,6 +26,8 @@ from app.orchestration.contracts import (
 )
 
 __all__ = [
+    "MatrixFillGapOut",
+    "MatrixFillGapRequest",
     "PlanApproval",
     "SubtaskSnapshot",
     "TaskControl",
@@ -209,3 +211,27 @@ class WebSocketTicketOut(BaseModel):
 
     ticket: str
     expires_in: int
+
+
+class MatrixFillGapRequest(BaseModel):
+    """研究空白矩阵一键补检索请求（Issue #32 Phase 3）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    question_index: int = Field(ge=0)
+    query: str | None = Field(default=None, max_length=300)
+
+
+class MatrixFillGapOut(BaseModel):
+    """研究空白矩阵补检索结果。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    task_id: UUID
+    question_index: int
+    query: str
+    added_count: int
+    duplicate_count: int
+    summary_markdown: str
+    evidence_matrix: dict[str, Any] | None = None
+    bibliography: list[dict[str, Any]] = Field(default_factory=list)

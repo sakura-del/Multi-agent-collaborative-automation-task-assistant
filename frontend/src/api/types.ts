@@ -199,6 +199,44 @@ export interface ClaimStats {
   by_verdict?: Record<string, number>;
 }
 
+/** 研究空白矩阵证据强度桶（Issue #32 Phase 3）。 */
+export type EvidenceStrengthBucket =
+  | "strong"
+  | "weak_or_caveat"
+  | "conflicting"
+  | "gap";
+
+export interface EvidenceMatrixCell {
+  question_index: number;
+  bucket: EvidenceStrengthBucket;
+  claim_ids: string[];
+  ref_indices: number[];
+  evidence_kind: "excerpt" | "metadata" | "none";
+  summary: string;
+  suggested_query?: string | null;
+}
+
+export interface EvidenceMatrix {
+  questions: string[];
+  cells: EvidenceMatrixCell[];
+}
+
+export interface MatrixFillGapInput {
+  question_index: number;
+  query?: string | null;
+}
+
+export interface MatrixFillGapOut {
+  task_id: string;
+  question_index: number;
+  query: string;
+  added_count: number;
+  duplicate_count: number;
+  summary_markdown: string;
+  evidence_matrix?: EvidenceMatrix | null;
+  bibliography: Array<Record<string, unknown>>;
+}
+
 export interface ReviewReport {
   final_markdown: string;
   bibliography: Array<Record<string, unknown>>;
@@ -208,6 +246,8 @@ export interface ReviewReport {
   /** 论断级核验明细（Issue #31 Phase 2）；缺省 = 未执行 */
   claim_checks?: ClaimCheckResult[];
   claim_stats?: ClaimStats;
+  /** 研究空白矩阵（Issue #32 Phase 3）；旧报告缺省为 null */
+  evidence_matrix?: EvidenceMatrix | null;
 }
 
 /** 任务创建时选择的模型快照（Issue #15 BYOK）；凭据删除后仍保留。 */

@@ -12,6 +12,7 @@ import type {
 } from "@/api/types";
 
 const downloadArtifact = vi.fn();
+const fillMatrixGap = vi.fn();
 vi.mock("@/api/tasks", () => ({
   taskApi: {
     list: vi.fn(),
@@ -22,6 +23,7 @@ vi.mock("@/api/tasks", () => ({
     events: vi.fn(),
     wsTicket: vi.fn(),
     downloadArtifact: (...args: unknown[]) => downloadArtifact(...args),
+    fillMatrixGap: (...args: unknown[]) => fillMatrixGap(...args),
   },
 }));
 
@@ -513,6 +515,81 @@ describe("TaskResult · 引用核验集成", () => {
 
     const drawer = document.body.querySelector('[data-test="claim-drawer"]');
     expect(drawer?.textContent).toContain("还没有论断级核验结论");
+    wrapper.unmount();
+  });
+
+  it("renders the evidence matrix tab, opens claim drawer on cell click, and triggers fill-gap", async () => {
+    fillMatrixGap.mockReset().mockResolvedValue({
+      task_id: "t-1",
+      question_index: 0,
+      query: "RAG gap query",
+      added_count: 2,
+      duplicate_count: 1,
+      summary_markdown: "### 补检索",
+      evidence_matrix: null,
+      bibliography: [],
+    });
+    const wrapper = mountResult({
+      report: report({
+        claim_checks: [
+          {
+            claim_id: "n2:c1",
+            sentence_text: "方法显著提升了召回率 [E1]。",
+            cited_ref_ids: ["E1"],
+            verdict: "supported",
+            confidence: 0.9,
+            rationale: "原文支持",
+            evidence_scope: "full_text",
+            evidence_passage: "Recall increased significantly.",
+          },
+        ],
+        evidence_matrix: {
+          questions: ["RAG 召回率提升是否稳定？"],
+          cells: [
+            {
+              question_index: 0,
+              bucket: "strong",
+              claim_ids: ["n2:c1"],
+              ref_indices: [1],
+              evidence_kind: "excerpt",
+              summary: "命中 1 条强支持论断。",
+              suggested_query: null,
+            },
+            {
+              question_index: 0,
+              bucket: "gap",
+              claim_ids: [],
+              ref_indices: [],
+              evidence_kind: "none",
+              summary: "暂无更多空白证据",
+              suggested_query: "RAG gap query",
+            },
+          ],
+        },
+      }),
+    });
+
+    const matrixTab = wrapper.find('[data-test="result-tab-matrix"]');
+    expect(matrixTab.exists()).toBe(true);
+    await matrixTab.trigger("click");
+    await nextTick();
+
+    // 点击非空格子打开抽屉
+    await wrapper.find('[data-test="matrix-cell-open-0-strong"]').trigger("click");
+    await nextTick();
+    const drawer = document.body.querySelector('[data-test="claim-drawer"]');
+    expect(drawer?.textContent).toContain("证据矩阵 · Q1 · 强支持");
+    expect(drawer?.textContent).toContain("方法显著提升了召回率");
+
+    // 点击空格子一键补检索
+    await wrapper.find('[data-test="matrix-fill-gap-0-gap"]').trigger("click");
+    await nextTick();
+    await nextTick();
+    expect(fillMatrixGap).toHaveBeenCalledWith("t-1", {
+      question_index: 0,
+      query: "RAG gap query",
+    });
+    expect(wrapper.emitted("refresh")).toHaveLength(1);
     wrapper.unmount();
   });
 });

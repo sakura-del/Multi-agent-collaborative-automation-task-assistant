@@ -16,6 +16,9 @@ const props = defineProps<{
   index: number | null;
   entry: BibliographyEntry | null;
   claims: ClaimCheckResult[];
+  /** 证据矩阵格子打开时的自定义标题（不传时沿用「来源核验 · [E#]」） */
+  title?: string | null;
+  subtitle?: string | null;
 }>();
 
 const emit = defineEmits<{ close: [] }>();
@@ -94,7 +97,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
               Source check
             </p>
             <h2 class="mt-1 truncate text-sm font-semibold">
-              来源核验 · [E{{ index ?? "?" }}]
+              {{ title || `来源核验 · [E${index ?? "?"}]` }}
             </h2>
           </div>
           <button
@@ -113,7 +116,11 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
           <!-- 文献信息 + 来源质量 -->
           <section class="flex flex-col gap-2">
             <p class="text-sm font-medium leading-snug" data-test="claim-source-title">
-              {{ entry?.title ?? "未找到这条引用的参考文献条目" }}
+              {{
+                subtitle ||
+                entry?.title ||
+                "未找到这条引用的参考文献条目"
+              }}
             </p>
             <a
               v-if="safeUrl"

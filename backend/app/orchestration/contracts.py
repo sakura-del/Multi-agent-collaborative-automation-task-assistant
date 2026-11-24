@@ -237,6 +237,33 @@ class ValidationReport(BaseModel):
     retracted_refs_count: int = Field(default=0, ge=0)
 
 
+#: 研究空白矩阵的证据强度分桶（Issue #32 Phase 3）。
+EvidenceStrengthBucket = Literal["strong", "weak_or_caveat", "conflicting", "gap"]
+
+
+class EvidenceMatrixCell(BaseModel):
+    """研究空白矩阵单个格子：某研究子问题 × 某证据强度桶的聚合结论。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    question_index: int = Field(ge=0)
+    bucket: EvidenceStrengthBucket
+    claim_ids: list[str] = Field(default_factory=list)
+    ref_indices: list[int] = Field(default_factory=list)
+    evidence_kind: Literal["excerpt", "metadata", "none"] = "none"
+    summary: str = Field(default="", max_length=400)
+    suggested_query: str | None = Field(default=None, max_length=300)
+
+
+class EvidenceMatrix(BaseModel):
+    """研究空白矩阵（子问题行 × 四档证据强度列）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    questions: list[str] = Field(default_factory=list)
+    cells: list[EvidenceMatrixCell] = Field(default_factory=list)
+
+
 class ReviewReport(BaseModel):
     """复盘 Agent 输出：最终报告、参考文献、评分与统计。"""
 
@@ -250,6 +277,8 @@ class ReviewReport(BaseModel):
     #: 论断级核验明细（Issue #31 Phase 2），引用编号已重写为最终正文的全局编号
     claim_checks: list[ClaimCheckResult] = Field(default_factory=list)
     claim_stats: dict[str, Any] = Field(default_factory=dict)
+    #: 研究空白矩阵（Issue #32 Phase 3）；旧报告缺省为 None，保持零破坏兼容
+    evidence_matrix: EvidenceMatrix | None = None
 
 
 class TaskEvent(BaseModel):

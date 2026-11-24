@@ -1,5 +1,7 @@
 import api from "./client";
 import type {
+  MatrixFillGapInput,
+  MatrixFillGapOut,
   TaskControl,
   TaskCreate,
   TaskCreateOut,
@@ -80,6 +82,12 @@ export const taskApi = {
   /** 增量检索新文献（Issue #27，手动触发）；返回 running 记录，结果需轮询 refreshes。 */
   startRefresh: (taskId: string) =>
     api.post<TaskRefreshRun>(`/tasks/${taskId}/refresh`).then((response) => response.data),
+
+  /** 研究空白矩阵空格子定向补检索（Issue #32 Phase 3）。 */
+  fillMatrixGap: (taskId: string, payload: MatrixFillGapInput) =>
+    api
+      .post<MatrixFillGapOut>(`/tasks/${taskId}/matrix/fill-gap`, payload)
+      .then((response) => response.data),
 
   /** 刷新历史（最新在前）。 */
   refreshes: (taskId: string, limit = 20) =>

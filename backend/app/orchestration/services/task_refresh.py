@@ -355,6 +355,167 @@ def build_bullets_prompt(records: list[LiteratureRecord]) -> str:
     )
 
 
+def bibliography_keys(bibliography: Sequence[dict[str, Any]]) -> set[str]:
+    """从已有 `review_report.bibliography` 提取身份键（与 `record_keys` 同口径）。"""
+    keys: set[str] = set()
+    for entry in bibliography:
+        if not isinstance(entry, dict):
+            continue
+        doi = str(entry.get("doi") or "").strip().casefold()
+        if doi:
+            keys.add(f"doi:{doi}")
+        url = str(entry.get("source_url") or "")
+        match = re.match(r"^https?://(?:dx\.)?doi\.org/(?P<doi>.+)$", url, re.IGNORECASE)
+        if match is not None:
+            url_doi = match.group("doi").strip().strip("/").casefold()
+            if url_doi:
+                keys.add(f"doi:{url_doi}")
+        sid = str(entry.get("source_id") or "").strip().casefold()
+        if sid:
+            keys.add(f"sid:{sid}")
+        title = normalize_title(str(entry.get("title") or ""))
+        if title:
+            keys.add(f"title:{title}")
+    return keys
+
+
+@dataclass
+class GapFillResult:
+    """单次研究空白定向补检索的纯结果（含引用一致性校验通过的摘要与新文献条目）。"""
+
+    query: str
+    new_records: list[LiteratureRecord]
+    duplicate_count: int
+    new_bibliography_entries: list[dict[str, Any]]
+    section_markdown: str
+    tokens_used: int = 0
+
+
+async def run_gap_fill_search(
+    *,
+    source: Any,
+    query: str,
+    question: str,
+    existing_bibliography: Sequence[dict[str, Any]],
+    llm: Any | None = None,
+    max_results: int = 8,
+) -> GapFillResult:
+    """针对单个子问题执行定向补检索：去重 → 生成带新全局 `[E#]` 要点 → 一致性闸门校验。"""
+    known = bibliography_keys(existing_bibliography)
+    raw_records = await source.search(LiteratureSearch(query=query, max_results=max_results))
+
+    new_records: list[LiteratureRecord] = []
+    duplicate_count = 0
+    for record in raw_records:
+        keys = record_keys(record)
+        if keys and (keys & known):
+            duplicate_count += 1
+            continue
+        known.update(keys)
+        new_records.append(record)
+
+    existing_indices = [
+        int(item["index"])
+        for item in existing_bibliography
+        if isinstance(item, dict) and isinstance(item.get("index"), int)
+    ]
+    base_index = max(existing_indices, default=0)
+
+    new_entries: list[dict[str, Any]] = []
+    for offset, record in enumerate(new_records, start=1):
+        global_idx = base_index + offset
+        doi_val: str | None = None
+        url_str = str(record.source_url or "")
+        m = re.match(r"^https?://(?:dx\.)?doi\.org/(?P<doi>.+)$", url_str, re.IGNORECASE)
+        if m is not None:
+            doi_val = m.group("doi").strip().strip("/")
+        new_entries.append(
+            {
+                "index": global_idx,
+                "title": record.title,
+                "authors": list(record.authors),
+                "year": record.published_at.year if record.published_at else None,
+                "source_url": url_str or None,
+                "source_id": record.source_id,
+                **({"doi": doi_val} if doi_val else {}),
+            }
+        )
+
+    if not new_records:
+        section_md = (
+            f"### 空白补检索：{question}\n\n"
+            f"检索式：`{query}`（命中 {len(raw_records)} 篇，均为既有文献，本期无新增）。"
+        )
+        return GapFillResult(
+            query=query,
+            new_records=[],
+            duplicate_count=duplicate_count,
+            new_bibliography_entries=[],
+            section_markdown=section_md,
+            tokens_used=0,
+        )
+
+    bullets_text = ""
+    tokens_used = 0
+    if llm is not None:
+        numbered_payload = [
+            {
+                "citation": f"E{base_index + i}",
+                "title": rec.title,
+                "year": _entry_year(rec),
+                "authors": rec.authors[:3],
+                "abstract": (rec.abstract or "")[:500],
+            }
+            for i, rec in enumerate(new_records[:_MAX_PROMPT_ENTRIES], start=1)
+        ]
+        user_msg = (
+            f"目标研究子问题：{question}\n"
+            f"检索式：{query}\n"
+            "请严格基于以下新增文献写出 2–4 条中文要点（无序列表），"
+            "每条必须引用对应的 citation 标记（例如 [E5]），且只能使用下面给出的编号，"
+            "不得编造文献中未提及的实验数据：\n"
+            f"{json.dumps(numbered_payload, ensure_ascii=False)}"
+        )
+        try:
+            resp = await llm.chat(
+                [
+                    Message(role=MessageRole.SYSTEM, content=SUMMARY_SYSTEM),
+                    Message(role=MessageRole.USER, content=user_msg),
+                ],
+                temperature=0.2,
+                max_tokens=600,
+            )
+            usage = getattr(resp, "usage", None)
+            if isinstance(usage, dict):
+                tokens_used = int(usage.get("total_tokens") or 0)
+            candidate = str(getattr(resp, "content", "") or "").strip()
+            audit = audit_citation_alignment(candidate, new_entries)
+            if candidate and audit.ok:
+                bullets_text = candidate
+        except Exception as exc:
+            logger.warning("matrix_gap_fill_summary_failed", query=query, error=str(exc))
+
+    if not bullets_text:
+        bullets_text = "\n".join(
+            f"- 新增文献 [E{entry['index']}]：{entry['title']}（仅题录/摘要级补检索结果）。"
+            for entry in new_entries
+        )
+
+    section_md = (
+        f"### 空白补检索：{question}\n\n"
+        f"定向检索式：`{query}`（新增 {len(new_entries)} 篇，去重 {duplicate_count} 篇）。\n\n"
+        f"{bullets_text}"
+    )
+    return GapFillResult(
+        query=query,
+        new_records=new_records,
+        duplicate_count=duplicate_count,
+        new_bibliography_entries=new_entries,
+        section_markdown=section_md,
+        tokens_used=tokens_used,
+    )
+
+
 def extract_bullets(content: str) -> str:
     """清洗模型输出：只保留列表行，剥掉它自己加的标题/参考文献段。"""
     lines = []
