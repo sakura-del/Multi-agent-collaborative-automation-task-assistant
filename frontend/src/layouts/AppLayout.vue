@@ -20,7 +20,7 @@ import {
   Palette,
   Settings2,
   Users,
-} from "@/components/icons";
+} from "lucide-vue-next";
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 

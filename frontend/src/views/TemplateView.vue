@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { CircleCheck, Download, FileText, Loader2, Trash2, Upload } from "@/components/icons";
+import { CircleCheck, Download, FileText, Loader2, Trash2, Upload } from "lucide-vue-next";
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import FilePicker from "@/components/common/FilePicker.vue";

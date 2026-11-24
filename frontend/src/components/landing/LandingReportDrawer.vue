@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from "vue";
-import { ArrowRight, CheckCircle2, FileText, ShieldCheck, X } from "@/components/icons";
+import { ArrowRight, CheckCircle2, FileText, ShieldCheck, X } from "lucide-vue-next";
 
 import {
   DEMO_CITATIONS,

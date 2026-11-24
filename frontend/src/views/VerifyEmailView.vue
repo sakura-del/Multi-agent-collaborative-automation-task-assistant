@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
-import { CircleCheck, Loader2, MailCheck } from "@/components/icons";
+import { CircleCheck, Loader2, MailCheck } from "lucide-vue-next";
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import { Alert } from "@/components/ui/alert";

@@ -10,7 +10,7 @@
  * 确认后再把 token 提升为全局，并按方案逐页迁移。
  */
 import { ref } from "vue";
-import { ArrowLeft } from "@/components/icons";
+import { ArrowLeft } from "lucide-vue-next";
 
 import BeTimeline, { type BeTimelineEvent } from "@/components/motion/BeTimeline.vue";
 import { Alert } from "@/components/ui/alert";

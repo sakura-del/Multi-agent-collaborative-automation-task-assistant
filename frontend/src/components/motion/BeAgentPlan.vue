@@ -29,7 +29,7 @@ import {
   RefreshCw,
   Search,
   Wrench,
-} from "@/components/icons";
+} from "lucide-vue-next";
 
 export type AgentStepStatus =
   | "pending"

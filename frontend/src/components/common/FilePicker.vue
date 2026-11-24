@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { HTMLAttributes } from "vue";
 import { computed, ref } from "vue";
-import { Paperclip } from "@/components/icons";
+import { Paperclip } from "lucide-vue-next";
 
 import { cn } from "@/lib/utils";
 

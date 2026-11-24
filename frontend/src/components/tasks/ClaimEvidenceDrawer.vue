@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { X } from "@/components/icons";
+import { X } from "lucide-vue-next";
 
 import type { BibliographyEntry, ClaimCheckResult } from "@/api/types";
 import { highlightQuote } from "@/utils/claim-highlight";

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import { Coins, RefreshCw, TriangleAlert } from "@/components/icons";
+import { Coins, RefreshCw, TriangleAlert } from "lucide-vue-next";
 
 import BarTrendChart, { type BarTrendItem } from "@/components/charts/BarTrendChart.vue";
 import DonutChart, { type DonutSegment } from "@/components/charts/DonutChart.vue";

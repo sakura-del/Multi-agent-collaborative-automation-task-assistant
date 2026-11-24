@@ -9,7 +9,7 @@
  */
 import { computed, useId } from "vue";
 import { AnimatePresence, LayoutGroup, Motion, useReducedMotion } from "motion-v";
-import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "@/components/icons";
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-vue-next";
 
 import { EASE_OUT, SPRING_LAYOUT } from "@/lib/ease";
 import { cn } from "@/lib/utils";

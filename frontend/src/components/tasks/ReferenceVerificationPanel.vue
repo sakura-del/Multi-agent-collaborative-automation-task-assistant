@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { ShieldCheck } from "@/components/icons";
+import { ShieldCheck } from "lucide-vue-next";
 
 import { Badge } from "@/components/ui/badge";
 import type { BadgeVariants } from "@/components/ui/badge";

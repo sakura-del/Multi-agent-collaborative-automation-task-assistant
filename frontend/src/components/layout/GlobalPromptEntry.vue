@@ -11,7 +11,7 @@
  */
 import { computed, onBeforeUnmount, ref } from "vue";
 import { useRouter } from "vue-router";
-import { Sparkles, X } from "@/components/icons";
+import { Sparkles, X } from "lucide-vue-next";
 
 import BePromptInput from "@/components/motion/BePromptInput.vue";
 import { taskApi } from "@/api/tasks";

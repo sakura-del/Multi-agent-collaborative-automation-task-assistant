@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
-import { ChevronRight, Clock, List, Plus, Search } from "@/components/icons";
+import { ChevronRight, Clock, List, Plus, Search } from "lucide-vue-next";
 
 import BeTimeline from "@/components/motion/BeTimeline.vue";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";

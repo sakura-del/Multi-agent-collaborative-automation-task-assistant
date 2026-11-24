@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { Trash2 } from "@/components/icons";
+import { Trash2 } from "lucide-vue-next";
 
 import StatusBadge from "@/components/common/StatusBadge.vue";
 import { Badge } from "@/components/ui/badge";

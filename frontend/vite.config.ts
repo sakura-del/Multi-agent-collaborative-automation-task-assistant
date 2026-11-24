@@ -51,7 +51,7 @@ export default defineConfig({
           if (id.includes("vue-router") || id.includes("pinia") || id.includes("/vue/") || id.includes("@vue/")) {
             return "vendor-vue";
           }
-          if (id.includes("/components/icons/")) {
+          if (id.includes("lucide-vue-next")) {
             return "vendor-icons";
           }
           if (id.includes("reka-ui") || id.includes("clsx") || id.includes("tailwind-merge") || id.includes("class-variance-authority")) {

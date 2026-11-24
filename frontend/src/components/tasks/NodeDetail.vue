@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { Brain, CircleAlert, Clock3, Repeat2, X } from "@/components/icons";
+import { Brain, CircleAlert, Clock3, Repeat2, X } from "lucide-vue-next";
 
 import StatusBadge from "@/components/common/StatusBadge.vue";
 import type { PlanNode, SubtaskSnapshot } from "@/api/types";

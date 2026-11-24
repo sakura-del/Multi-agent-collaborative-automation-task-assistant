@@ -15,7 +15,7 @@ import {
   Sparkles,
   Table2,
   X,
-} from "@/components/icons";
+} from "lucide-vue-next";
 
 import {
   DEMO_AGENT_STAGES,

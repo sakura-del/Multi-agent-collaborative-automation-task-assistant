@@ -3,7 +3,7 @@ import BeTraceWaterfall, { type TraceSpan } from "@/components/motion/BeTraceWat
 import BeAgentPlan, { type AgentPlanStep } from "@/components/motion/BeAgentPlan.vue";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ListFilter, MessageSquare, X } from "@/components/icons";
+import { ListFilter, MessageSquare, X } from "lucide-vue-next";
 
 import BeTimeline from "@/components/motion/BeTimeline.vue";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";

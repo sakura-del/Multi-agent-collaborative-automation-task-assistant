@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { HTMLAttributes } from "vue";
-import { Inbox } from "@/components/icons";
+import { Inbox } from "lucide-vue-next";
 
 import { cn } from "@/lib/utils";
 
