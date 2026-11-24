@@ -1,0 +1,210 @@
+{
+  "startedAt": "2026-11-24T06:12:47.210Z",
+  "steps": [
+    "00-knowledge-no-selection",
+    "01-knowledge-table-created",
+    "02-knowledge-table-completed",
+    "03-cell-drawer",
+    "04-added-column",
+    "05-screening-dialog-abstract-warning",
+    "06-screening-table-completed"
+  ],
+  "tables": {
+    "knowledge": {
+      "status": "completed",
+      "columns": [
+        "study_design",
+        "sample_size",
+        "intervention",
+        "primary_outcome",
+        "limitations"
+      ],
+      "sources": [
+        {
+          "title": "Issue 35 溯源验收（3 页 PDF）",
+          "type": "knowledge_doc"
+        },
+        {
+          "title": "05_Factually_Wearable_FactCheck__2504.17204v1",
+          "type": "knowledge_doc"
+        }
+      ],
+      "cellCount": 10,
+      "extracted": 2,
+      "notReported": 8,
+      "errors": 0,
+      "withQuote": 2,
+      "withLocator": 2,
+      "scopes": [
+        "full_text"
+      ],
+      "sample": [
+        {
+          "col": "intervention",
+          "status": "extracted",
+          "value": "voice-based, interactive learning companion",
+          "quote": "a voice-based, interactive learning companion",
+          "locator": {
+            "page_start": 1,
+            "page_end": 1,
+            "section_title": null,
+            "table_ref": "Fig. 1"
+          }
+        },
+        {
+          "col": "limitations",
+          "status": "not_reported",
+          "value": null,
+          "quote": null,
+          "locator": null
+        },
+        {
+          "col": "primary_outcome",
+          "status": "not_reported",
+          "value": null,
+          "quote": null,
+          "locator": null
+        },
+        {
+          "col": "sample_size",
+          "status": "not_reported",
+          "value": null,
+          "quote": null,
+          "locator": null
+        },
+        {
+          "col": "study_design",
+          "status": "not_reported",
+          "value": null,
+          "quote": null,
+          "locator": null
+        },
+        {
+          "col": "intervention",
+          "status": "extracted",
+          "value": "fine-grained locators preservation pipeline (deterministic mapping from character offsets to page spans, scalar metadata schema, backfill procedure)",
+          "quote": "Our contributions are a deterministic mapping from character offsets to page spans, a scalar metadata schema that survives vector stores, and an evaluation on three document types.",
+          "locator": {
+            "page_start": 1,
+            "page_end": 1,
+            "section_title": null,
+            "table_ref": null
+          }
+        }
+      ]
+    },
+    "afterAddColumn": {
+      "columns": [
+        "study_design",
+        "sample_size",
+        "intervention",
+        "primary_outcome",
+        "limitations",
+        "code_url"
+      ],
+      "codeUrlStatuses": [
+        "not_reported",
+        "not_reported"
+      ]
+    }
+  },
+  "csv": {
+    "includeQuotes": {
+      "filename": "Issue 36 验收：多智能体 RAG 实证对比.csv",
+      "bytes": 1095,
+      "hasBom": true,
+      "header": [
+        "论文标题",
+        "年份",
+        "来源类型",
+        "证据范围",
+        "研究设计",
+        "研究设计_原文引用",
+        "研究设计_定位",
+        "样本量",
+        "样本量_原文引用",
+        "样本量_定位",
+        "干预/方法",
+        "干预/方法_原文引用",
+        "干预/方法_定位",
+        "主要结局",
+        "主要结局_原文引用",
+        "主要结局_定位",
+        "局限性",
+        "局限性_原文引用",
+        "局限性_定位",
+        "代码链接",
+        "代码链接_原文引用",
+        "代码链接_定位"
+      ],
+      "rowCount": 2,
+      "hasNotReported": true,
+      "hasQuoteColumn": true,
+      "hasLocatorColumn": true
+    },
+    "compact": {
+      "filename": "Issue 36 验收：多智能体 RAG 实证对比.csv",
+      "header": [
+        "论文标题",
+        "年份",
+        "来源类型",
+        "证据范围",
+        "研究设计",
+        "样本量",
+        "干预/方法",
+        "主要结局",
+        "局限性",
+        "代码链接"
+      ],
+      "rowCount": 2,
+      "hasQuoteColumn": false,
+      "hasLocatorColumn": false
+    }
+  },
+  "consoleErrors": [
+    "Failed to load resource: net::ERR_NETWORK_CHANGED",
+    "Failed to load resource: net::ERR_NETWORK_CHANGED",
+    "TypeError: Failed to fetch dynamically imported module: https://veripaper.me/assets/LoginView-DKrqhQJy.js",
+    "Failed to load resource: net::ERR_NETWORK_CHANGED",
+    "Failed to load resource: net::ERR_NETWORK_CHANGED",
+    "Failed to load resource: net::ERR_NETWORK_CHANGED",
+    "Failed to load resource: net::ERR_NETWORK_CHANGED",
+    "Failed to load resource: net::ERR_NETWORK_CHANGED",
+    "Failed to load resource: net::ERR_NETWORK_CHANGED"
+  ],
+  "pageErrors": [],
+  "loggedIn": true,
+  "emptySelection": {
+    "buttonCount": 0
+  },
+  "dialogSources": "2",
+  "knowledgeTableId": "62e92b20-9d23-4f0d-ba94-14254460deb0",
+  "drawer": {
+    "value": "fine-grained locators preservation pipeline (deterministic mapping from character offsets to page spans, scalar metadata schema, backfill procedure)",
+    "passage": "the retrieval experiments and a backfill procedure for documents that were indexed before locators were introduced. Our contributions are a deterministic mapping from character offsets to page spans, ",
+    "locator": "出处定位：PDF 第 1 页",
+    "scope": "full_text"
+  },
+  "afterAddRequestError": null,
+  "afterAddRunStatus": 202,
+  "screening": {
+    "seededIds": [
+      "074ba0d4-2ce5-4fc6-bbab-a3e1df1024af",
+      "1d4530fe-21dc-45fa-9f9d-5e6cb8ce439f"
+    ],
+    "buttonText": "生成数据抽取表（已纳入 2 篇）",
+    "abstractWarning": "外部检索文献仅基于摘要抽取，未提及字段将标为未报告",
+    "tableId": "8225ec46-92af-4075-a9f0-a61faf57d208",
+    "table": {
+      "status": "completed",
+      "cellCount": 10,
+      "scopes": [
+        "abstract_only"
+      ],
+      "extracted": 3,
+      "notReported": 7
+    }
+  },
+  "ok": true,
+  "finishedAt": "2026-11-24T06:14:35.756Z"
+}

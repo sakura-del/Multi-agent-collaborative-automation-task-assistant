@@ -1,0 +1,3 @@
+﻿论文标题,年份,来源类型,证据范围,研究设计,研究设计_原文引用,研究设计_定位,样本量,样本量_原文引用,样本量_定位,干预/方法,干预/方法_原文引用,干预/方法_定位,主要结局,主要结局_原文引用,主要结局_定位,局限性,局限性_原文引用,局限性_定位,代码链接,代码链接_原文引用,代码链接_定位
+Issue 35 溯源验收（3 页 PDF）,,知识库文档,全文,未报告,,,未报告,,,"fine-grained locators preservation pipeline (deterministic mapping from character offsets to page spans, scalar metadata schema, backfill procedure)","Our contributions are a deterministic mapping from character offsets to page spans, a scalar metadata schema that survives vector stores, and an evaluation on three document types.",PDF p.1,未报告,,,未报告,,,未报告,,
+05_Factually_Wearable_FactCheck__2504.17204v1,,知识库文档,全文,未报告,,,未报告,,,"voice-based, interactive learning companion","a voice-based, interactive learning companion",PDF p.1 | Fig. 1,未报告,,,未报告,,,未报告,,
