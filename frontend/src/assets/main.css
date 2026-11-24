@@ -403,4 +403,19 @@
     font-size: 0.8125rem;
     line-height: 1.7;
   }
+
+  /* IconMCP duotone 双色图标的自适应微透底色：常规白/灰底跟随品牌主色，深色/语义按钮内跟随文本色 */
+  :root {
+    --icon-tint: var(--primary, #2D68FF);
+  }
+  .bg-primary,
+  .bg-destructive,
+  .bg-success {
+    --icon-tint: currentColor;
+  }
+  .text-warning,
+  .text-destructive,
+  .text-success {
+    --icon-tint: currentColor;
+  }
 }
