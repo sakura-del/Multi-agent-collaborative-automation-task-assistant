@@ -114,6 +114,11 @@ class RedisConfig(BaseModel):
 
     url: str = "redis://redis:6379/0"
     max_connections: int = 50
+    #: Pub/Sub 专用连接池上限。订阅连接是**长连接**，与命令连接混用同一池时，
+    #: 一批打开着的任务页就能把命令池占满，导致票据、限流、配额等普通命令
+    #: 报 `MaxConnectionsError`（2026-11-24 生产事故：50 个订阅占满 50 连接，
+    #: /ws-ticket 与 /health/ready 一起 500/503）。因此单独建池、单独限额。
+    pubsub_max_connections: int = 100
     default_ttl: int = 3600
 
 

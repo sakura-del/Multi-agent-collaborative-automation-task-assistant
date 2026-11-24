@@ -13,9 +13,11 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import uuid
 
 import pytest
+from redis.exceptions import MaxConnectionsError
 from starlette.websockets import WebSocketDisconnect
 
 from app.orchestration.events import InMemoryTicketService
@@ -195,3 +197,85 @@ class TestWebSocketStreaming:
             ) as websocket:
                 websocket.receive_json()
         assert exc_info.value.code == 4401
+
+    def test_websocket_disconnect_releases_subscription(self, api_env) -> None:
+        """浏览器关页后必须释放订阅。
+
+        只发不收的实现不会感知断开，已关闭的页面会永久占用一条 Redis Pub/Sub
+        连接；生产上 50 个这样的连接正好耗尽 50 条命令连接，票据与健康检查一起挂
+        （2026-11-24 事故）。这里用内存发布器的订阅表验证「断开 → 订阅消失」。
+        """
+        client, install_runtime = api_env
+        install_runtime()
+        token = _register_and_login(client, "vera")
+        task_id = _create(client, token).json()["task_id"]
+        _wait_status(client, token, task_id, {"waiting_approval"})
+        ticket = client.post(
+            "/api/v1/ws-ticket", json={"task_id": task_id}, headers=_auth(token)
+        ).json()["ticket"]
+        publisher = client.app.state.container.event_publisher
+        key = uuid.UUID(task_id)
+
+        with client.websocket_connect(f"/api/v1/tasks/{task_id}/ws?ticket={ticket}") as websocket:
+            assert websocket.receive_json()["type"] == "snapshot"
+            # 内存发布器在生成器首次 __anext__ 时才登记订阅（snapshot 之后、补拉之后），
+            # 因此这里等登记出现，而不是紧接 snapshot 就断言。
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline and not publisher._subscribers.get(key):
+                time.sleep(0.02)
+            assert publisher._subscribers.get(key), "连接期间订阅未登记"
+
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and publisher._subscribers.get(key):
+            time.sleep(0.05)
+        assert not publisher._subscribers.get(key), "断开后订阅未释放，会泄漏 Pub/Sub 连接"
+
+
+class TestTicketFailure:
+    def test_ticket_returns_503_instead_of_500_when_redis_is_unavailable(
+        self, api_env, monkeypatch
+    ) -> None:
+        """Redis 池耗尽时返回可读 503。
+
+        未捕获异常会以 500 冒出，且**绕过 CORS 中间件**——浏览器只报
+        「No Access-Control-Allow-Origin」，把真实故障藏成跨域问题。
+        """
+        client, install_runtime = api_env
+        install_runtime()
+        token = _register_and_login(client, "wade")
+        task_id = _create(client, token).json()["task_id"]
+
+        class _ExhaustedTicketService(InMemoryTicketService):
+            async def issue(self, *args: object, **kwargs: object) -> str:
+                raise MaxConnectionsError("Too many connections")
+
+        monkeypatch.setattr(client.app.state.container, "ticket_service", _ExhaustedTicketService())
+        resp = client.post("/api/v1/ws-ticket", json={"task_id": task_id}, headers=_auth(token))
+
+        assert resp.status_code == 503
+        assert "实时通道暂不可用" in resp.json()["detail"]
+
+
+class TestPubsubConnectionIsolation:
+    def test_pubsub_client_uses_a_separate_pool(self) -> None:
+        """订阅连接必须与命令连接分池。
+
+        共用 50 条命令连接时，任务页开得足够多就会让票据/限流/健康检查同时失败
+        （2026-11-24 生产事故）。这里只验证两个客户端不共享连接池，不建立真实连接。
+        """
+        from app.core.redis import RedisManager
+
+        RedisManager._client = None
+        RedisManager._pool = None
+        RedisManager._pubsub_client = None
+        RedisManager._pubsub_pool = None
+        try:
+            command = RedisManager.get_client()
+            pubsub = RedisManager.get_pubsub_client()
+            assert command is not pubsub
+            assert command.connection_pool is not pubsub.connection_pool
+        finally:
+            RedisManager._client = None
+            RedisManager._pool = None
+            RedisManager._pubsub_client = None
+            RedisManager._pubsub_pool = None

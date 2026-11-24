@@ -16,20 +16,36 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+import asyncio
+import contextlib
+from collections.abc import AsyncIterator
+from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
+from redis.exceptions import RedisError
 
 from app.api.deps import get_current_active_user
 from app.api.v1.endpoints.tasks import get_task_execution
 from app.core.exceptions import NotFoundException
+from app.core.logging import get_logger
 from app.db.models.user import User
+from app.orchestration.contracts import TaskEvent
 from app.orchestration.events import TICKET_TTL_SECONDS
 from app.orchestration.services.task_execution import TaskExecution
 from app.schemas.task import WebSocketTicketOut, WebSocketTicketRequest
 
 router = APIRouter(tags=["tasks"])
+
+logger = get_logger(__name__)
 
 CurrentUserDep = Annotated[User, Depends(get_current_active_user)]
 
@@ -60,8 +76,37 @@ async def issue_ws_ticket(
     """先校验任务归属（跨用户 404），再签发 60 秒单次票据。"""
     await execution.get_snapshot(current_user.id, payload.task_id)
     container = _get_container(request)
-    ticket = await container.ticket_service.issue(current_user.id, payload.task_id)
+    try:
+        ticket = await container.ticket_service.issue(current_user.id, payload.task_id)
+    except RedisError:
+        # Redis 不可用时给可读的 503，而不是冒到 500——500 会绕过 CORS 中间件，
+        # 浏览器只报「被 CORS 拦截」，把真实故障藏起来（2026-11-24 生产事故）。
+        logger.warning("ws_ticket_redis_unavailable", task_id=str(payload.task_id))
+        raise HTTPException(status_code=503, detail="实时通道暂不可用，请稍后重试") from None
     return WebSocketTicketOut(ticket=ticket, expires_in=TICKET_TTL_SECONDS)
+
+
+async def _forward_events(
+    websocket: WebSocket,
+    execution: TaskExecution,
+    subscription: AsyncIterator[TaskEvent],
+    *,
+    user_id: UUID,
+    task_id: UUID,
+    snapshot: Any,
+    after_event_id: int,
+) -> None:
+    """发送快照、补拉遗漏事件，然后转发实时事件（按 event_id 去重）。"""
+    last_sent = after_event_id
+    await websocket.send_json({"type": "snapshot", "data": snapshot.model_dump(mode="json")})
+    for event in await execution.events_after(user_id, task_id, after_event_id):
+        await websocket.send_json({"type": "event", "data": event.model_dump(mode="json")})
+        last_sent = event.event_id
+    async for event in subscription:
+        if event.event_id <= last_sent:
+            continue
+        await websocket.send_json({"type": "event", "data": event.model_dump(mode="json")})
+        last_sent = event.event_id
 
 
 @router.websocket("/tasks/{task_id}/ws")
@@ -92,25 +137,46 @@ async def task_events_ws(
         return
 
     # 3. 先建立订阅，避免 accept 与订阅之间的事件丢失
-    last_sent = after_event_id
     subscription = container.event_publisher.subscribe(task_id)
+    sender: asyncio.Task[None] | None = None
+    disconnect: asyncio.Task[Any] | None = None
     try:
         await websocket.accept()
-        await websocket.send_json({"type": "snapshot", "data": snapshot.model_dump(mode="json")})
-
-        # 4. 补拉断线期间遗漏的事件
-        for event in await execution.events_after(user_id, task_id, after_event_id):
-            await websocket.send_json({"type": "event", "data": event.model_dump(mode="json")})
-            last_sent = event.event_id
-
-        # 5. 转发实时事件（按 event_id 去重）
-        async for event in subscription:
-            if event.event_id <= last_sent:
-                continue
-            await websocket.send_json({"type": "event", "data": event.model_dump(mode="json")})
-            last_sent = event.event_id
-    except WebSocketDisconnect:
+        sender = asyncio.create_task(
+            _forward_events(
+                websocket,
+                execution,
+                subscription,
+                user_id=user_id,
+                task_id=task_id,
+                snapshot=snapshot,
+                after_event_id=after_event_id,
+            )
+        )
+        # 关键：主动等客户端断开。只发不收时，浏览器关页后服务端仍会挂在订阅上，
+        # 每个被遗弃的页面都会泄漏一条 Redis Pub/Sub 连接（2026-11-24 生产事故）。
+        disconnect = asyncio.create_task(websocket.receive())
+        done, _ = await asyncio.wait({sender, disconnect}, return_when=asyncio.FIRST_COMPLETED)
+        for finished in done:
+            # 断开与「已关闭后继续发送」都不该把异常抛到 ASGI 层：
+            # 未捕获异常会绕过 CORS 中间件，前端只能看到「被 CORS 拦截」。
+            with contextlib.suppress(WebSocketDisconnect, RuntimeError, asyncio.CancelledError):
+                exc = finished.exception()
+                if exc is not None:
+                    logger.warning("task_ws_stream_failed", task_id=str(task_id), error=repr(exc))
+    except asyncio.CancelledError:
+        # 服务端关闭或 TestClient 的取消范围会直接取消本任务；清理已在 finally 完成，
+        # 这里吞掉取消，避免把「正常断开」变成测试/客户端看到的 CancelledError。
         return
     finally:
-        # 6. 断开时停止订阅
-        await subscription.aclose()
+        # 4. 无论哪条路径结束，都取消发送与接收，并关闭订阅（释放 Pub/Sub 连接）
+        for pending in (sender, disconnect):
+            if pending is not None and not pending.done():
+                pending.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await asyncio.gather(
+                *(pending for pending in (sender, disconnect) if pending is not None),
+                return_exceptions=True,
+            )
+        with contextlib.suppress(asyncio.CancelledError):
+            await subscription.aclose()

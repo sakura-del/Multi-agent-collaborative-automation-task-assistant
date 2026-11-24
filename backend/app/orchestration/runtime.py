@@ -93,8 +93,10 @@ class RuntimeContainer:
                 # 短超时探测：Redis 不可用时立即回退内存实现，不拖慢启动
                 if await asyncio.wait_for(RedisManager.ping(), timeout=0.5):
                     client = RedisManager.get_client()
+                    # 订阅用独立连接池：长连接不能占用命令池（否则票据/限流会被饿死）
+                    pubsub_client = RedisManager.get_pubsub_client()
                     if not self._explicit_publisher:
-                        self.event_publisher = RedisEventPublisher(client)
+                        self.event_publisher = RedisEventPublisher(pubsub_client)
                     if not self._explicit_ticket_service:
                         self.ticket_service = RedisTicketService(client)
                     logger.info("runtime_realtime_backend", backend="redis")

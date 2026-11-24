@@ -49,6 +49,9 @@ class RedisManager:
 
     _pool: aioredis.ConnectionPool | None = None
     _client: aioredis.Redis | None = None
+    # Pub/Sub 长连接专用池：与命令池隔离，避免订阅把普通命令饿死（见 RedisConfig 注释）
+    _pubsub_pool: aioredis.ConnectionPool | None = None
+    _pubsub_client: aioredis.Redis | None = None
 
     @classmethod
     def get_client(cls) -> aioredis.Redis:
@@ -68,8 +71,34 @@ class RedisManager:
         return cls._client
 
     @classmethod
+    def get_pubsub_client(cls) -> aioredis.Redis:
+        """获取 Pub/Sub 专用客户端（独立连接池）。
+
+        为什么独立：`pubsub()` 会**长期占用**一条连接直到订阅结束。若与命令池共用，
+        打开 N 个任务页就吃掉 N 条连接，命令池（默认 50）耗尽后票据/限流/健康检查
+        全部失败。这里单独建池，并且不会因为订阅数增长影响普通命令。
+        """
+        if cls._pubsub_client is None:
+            cls._pubsub_pool = aioredis.ConnectionPool.from_url(
+                settings.redis.url,
+                max_connections=settings.redis.pubsub_max_connections,
+                decode_responses=True,
+                health_check_interval=30,
+            )
+            cls._pubsub_client = aioredis.Redis(connection_pool=cls._pubsub_pool)
+            logger.info("redis_pubsub_pool_created", url=settings.redis.url)
+        assert cls._pubsub_client is not None
+        return cls._pubsub_client
+
+    @classmethod
     async def close(cls) -> None:
         """关闭连接池，释放资源。应用关闭时调用。"""
+        if cls._pubsub_client is not None:
+            await cls._pubsub_client.aclose()
+            cls._pubsub_client = None
+        if cls._pubsub_pool is not None:
+            await cls._pubsub_pool.disconnect()
+            cls._pubsub_pool = None
         if cls._client is not None:
             await cls._client.aclose()
             cls._client = None
