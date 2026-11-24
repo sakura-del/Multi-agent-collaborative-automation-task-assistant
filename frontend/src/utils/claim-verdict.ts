@@ -5,7 +5,7 @@
  * 所以渲染前必须逐条校验。判定值来自后端 Literal，未知值一律丢弃——
  * 不把「看不懂的判定」伪装成 supported。
  */
-import type { ClaimCheckResult, ClaimVerdict } from "@/api/types";
+import type { ClaimCheckResult, ClaimVerdict, EvidenceLocator } from "@/api/types";
 
 export const CLAIM_VERDICT_LABELS: Record<ClaimVerdict, string> = {
   supported: "支持",
@@ -30,6 +30,50 @@ const CLAIM_VERDICTS = Object.keys(CLAIM_VERDICT_LABELS) as ClaimVerdict[];
 
 function isVerdict(value: unknown): value is ClaimVerdict {
   return typeof value === "string" && (CLAIM_VERDICTS as readonly string[]).includes(value);
+}
+
+function parseLocator(value: unknown): EvidenceLocator | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+  const raw = value as Record<string, unknown>;
+  const pageStart =
+    typeof raw.page_start === "number" && Number.isInteger(raw.page_start) && raw.page_start >= 1
+      ? raw.page_start
+      : null;
+  const pageEnd =
+    typeof raw.page_end === "number" && Number.isInteger(raw.page_end) && raw.page_end >= 1
+      ? raw.page_end
+      : pageStart;
+  const sectionTitle =
+    typeof raw.section_title === "string" && raw.section_title.trim()
+      ? raw.section_title.trim()
+      : null;
+  const tableRef =
+    typeof raw.table_ref === "string" && raw.table_ref.trim() ? raw.table_ref.trim() : null;
+  if (pageStart === null && sectionTitle === null && tableRef === null) {
+    return null;
+  }
+  return {
+    page_start: pageStart,
+    page_end: pageEnd,
+    section_title: sectionTitle,
+    table_ref: tableRef,
+  };
+}
+
+/** 格式化定位标签：PDF 第 5 页 · 3.2 实验设置 · Table 2 */
+export function formatEvidenceLocator(locator?: EvidenceLocator | null): string | null {
+  if (!locator) return null;
+  const parts: string[] = [];
+  if (locator.page_start) {
+    const end =
+      locator.page_end && locator.page_end > locator.page_start ? `–${locator.page_end}` : "";
+    parts.push(`PDF 第 ${locator.page_start}${end} 页`);
+  }
+  if (locator.section_title) parts.push(locator.section_title);
+  if (locator.table_ref) parts.push(locator.table_ref);
+  return parts.length ? parts.join(" · ") : null;
 }
 
 /** 解析 `review_report.claim_checks`：非法条目逐条丢弃，不猜测、不伪造。 */
@@ -73,6 +117,7 @@ export function parseClaimChecks(value: unknown): ClaimCheckResult[] {
           : null,
       evidence_passage:
         typeof record.evidence_passage === "string" ? record.evidence_passage : null,
+      locator: parseLocator(record.locator),
     });
   }
   return checks;

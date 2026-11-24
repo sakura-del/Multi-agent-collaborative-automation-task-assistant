@@ -136,6 +136,28 @@ class VectorStore:
         """
         return self._backend.list_ids()
 
+    @staticmethod
+    def _chunk_metadata(chunk: TextChunk) -> dict[str, Any]:
+        """组装写入向量库的标量 metadata，透传页码/章节/图表定位字段。"""
+        meta: dict[str, Any] = {
+            "doc_id": chunk.doc_id,
+            "chunk_index": chunk.metadata.get("chunk_index", 0),
+            "doc_source": chunk.metadata.get("doc_source", ""),
+            "start_offset": chunk.start_offset,
+            "end_offset": chunk.end_offset,
+            # user_id 随 chunk 元数据落库，供检索时 where 过滤（多用户隔离）
+            "user_id": chunk.metadata.get("user_id", ""),
+        }
+        for key in ("page_start", "page_end"):
+            val = chunk.metadata.get(key)
+            if isinstance(val, int) and not isinstance(val, bool) and val >= 1:
+                meta[key] = val
+        for key in ("section_title", "table_ref"):
+            val = chunk.metadata.get(key)
+            if isinstance(val, str) and val.strip():
+                meta[key] = val.strip()
+        return meta
+
     def add_chunks(self, chunks: list[TextChunk]) -> int:
         """批量添加分块到向量索引。返回实际添加数量。"""
         if not chunks:
@@ -146,18 +168,7 @@ class VectorStore:
         vectors = self._embedding.embed(texts)
 
         ids = [c.chunk_id for c in chunks]
-        metadatas = [
-            {
-                "doc_id": c.doc_id,
-                "chunk_index": c.metadata.get("chunk_index", 0),
-                "doc_source": c.metadata.get("doc_source", ""),
-                "start_offset": c.start_offset,
-                "end_offset": c.end_offset,
-                # user_id 随 chunk 元数据落库，供检索时 where 过滤（多用户隔离）
-                "user_id": c.metadata.get("user_id", ""),
-            }
-            for c in chunks
-        ]
+        metadatas = [self._chunk_metadata(c) for c in chunks]
 
         self._backend.upsert(ids=ids, vectors=vectors, documents=texts, metadatas=metadatas)
         logger.info("vector_chunks_added", backend=self._backend_name, count=len(chunks))

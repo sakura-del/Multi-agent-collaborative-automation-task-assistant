@@ -16,6 +16,7 @@ RRF 优势：
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 from app.core.logging import get_logger
@@ -114,15 +115,25 @@ class HybridRetriever:
         for rank, result in enumerate(vector_results):
             rrf_score = self._vector_weight / (self._rrf_k + rank + 1)
             scores[result.chunk_id] = scores.get(result.chunk_id, 0.0) + rrf_score
-            if result.chunk_id not in meta:
+            existing = meta.get(result.chunk_id)
+            if existing is None:
                 meta[result.chunk_id] = result
+            elif result.metadata:
+                merged = dict(result.metadata)
+                merged.update(existing.metadata or {})
+                meta[result.chunk_id] = replace(existing, metadata=merged)
 
         # BM25 路
         for rank, result in enumerate(bm25_results):
             rrf_score = self._bm25_weight / (self._rrf_k + rank + 1)
             scores[result.chunk_id] = scores.get(result.chunk_id, 0.0) + rrf_score
-            if result.chunk_id not in meta:
+            existing = meta.get(result.chunk_id)
+            if existing is None:
                 meta[result.chunk_id] = result
+            elif result.metadata:
+                merged = dict(result.metadata)
+                merged.update(existing.metadata or {})
+                meta[result.chunk_id] = replace(existing, metadata=merged)
 
         # 按融合得分降序排序
         sorted_ids = sorted(scores, key=lambda cid: scores[cid], reverse=True)

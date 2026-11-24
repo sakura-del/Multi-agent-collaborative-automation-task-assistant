@@ -73,6 +73,28 @@ def resolve_retrieval_ids(
     return resolved
 
 
+def extract_locator_metadata(position: Any, chunk_meta: Any) -> dict[str, Any]:
+    """从 `DocChunk.position` / `chunk_meta` 提取标量定位字段，供索引与检索透传。"""
+    meta: dict[str, Any] = {}
+    if isinstance(position, dict):
+        raw_start = position.get("page_start")
+        raw_end = position.get("page_end")
+        if isinstance(raw_start, int) and not isinstance(raw_start, bool) and raw_start >= 1:
+            meta["page_start"] = raw_start
+            if isinstance(raw_end, int) and not isinstance(raw_end, bool) and raw_end >= 1:
+                meta["page_end"] = raw_end
+            else:
+                meta["page_end"] = raw_start
+    if isinstance(chunk_meta, dict):
+        raw_section = chunk_meta.get("section_title")
+        if isinstance(raw_section, str) and raw_section.strip():
+            meta["section_title"] = raw_section.strip()[:160]
+        raw_table = chunk_meta.get("table_ref")
+        if isinstance(raw_table, str) and raw_table.strip():
+            meta["table_ref"] = raw_table.strip()[:64]
+    return meta
+
+
 class KnowledgeDocumentService:
     """知识文档事务编排服务。"""
 
@@ -141,11 +163,27 @@ class KnowledgeDocumentService:
             # 4. 持久化分块行
             chunk_rows: list[DocChunk] = []
             for chunk in chunks:
+                position: dict[str, Any] = {
+                    "start_offset": getattr(chunk, "start_offset", 0),
+                    "end_offset": getattr(chunk, "end_offset", 0),
+                }
+                if "page_start" in chunk.metadata:
+                    position["page_start"] = chunk.metadata["page_start"]
+                    position["page_end"] = chunk.metadata.get(
+                        "page_end", chunk.metadata["page_start"]
+                    )
+                chunk_meta: dict[str, Any] = {}
+                if chunk.metadata.get("section_title"):
+                    chunk_meta["section_title"] = chunk.metadata["section_title"]
+                if chunk.metadata.get("table_ref"):
+                    chunk_meta["table_ref"] = chunk.metadata["table_ref"]
                 row = DocChunk(
                     doc_id=doc.id,
                     chunk_index=chunk.metadata.get("chunk_index", 0),
                     content=chunk.text,
                     char_count=len(chunk.text),
+                    position=position,
+                    chunk_meta=chunk_meta or None,
                 )
                 self._db.add(row)
                 chunk_rows.append(row)
@@ -314,7 +352,8 @@ class KnowledgeDocumentService:
             user_id,
             KnowledgeSearchIn(query=query, top_k=top_k),
         )
-        return await self._attach_storage_ids(results)
+        resolved = await self._attach_storage_ids(results)
+        return await self._backfill_locator_metadata(resolved)
 
     async def _attach_storage_ids(
         self,
@@ -336,6 +375,51 @@ class KnowledgeDocumentService:
         }
         return resolve_retrieval_ids(results, mapping)
 
+    async def _backfill_locator_metadata(
+        self,
+        results: list[RetrievalResult],
+    ) -> list[RetrievalResult]:
+        """若检索结果缺少定位字段（旧向量索引或未同步的 BM25），从 `DocChunk` 批量回填。"""
+        pending_ids: list[UUID] = []
+        seen: set[UUID] = set()
+        for item in results:
+            meta = item.metadata or {}
+            if any(k in meta for k in ("page_start", "section_title", "table_ref")):
+                continue
+            if not _UUID_RE.match(str(item.chunk_id)):
+                continue
+            cid = UUID(str(item.chunk_id))
+            if cid not in seen:
+                seen.add(cid)
+                pending_ids.append(cid)
+        if self._db is None or not pending_ids:
+            return results
+
+        rows = (
+            await self._db.execute(
+                select(DocChunk.id, DocChunk.position, DocChunk.chunk_meta).where(
+                    DocChunk.id.in_(pending_ids)
+                )
+            )
+        ).all()
+        by_id: dict[str, dict[str, Any]] = {}
+        for chunk_id, position, chunk_meta in rows:
+            loc = extract_locator_metadata(position, chunk_meta)
+            if loc:
+                by_id[str(chunk_id)] = loc
+        if not by_id:
+            return results
+
+        enriched: list[RetrievalResult] = []
+        for item in results:
+            item_loc = by_id.get(str(item.chunk_id))
+            if not item_loc:
+                enriched.append(item)
+                continue
+            merged = {**item_loc, **(item.metadata or {})}
+            enriched.append(replace(item, metadata=merged))
+        return enriched
+
     async def rebuild_bm25(self) -> int:
         """从持久化的 ready 分块重建 BM25 内存索引（启动恢复场景）。"""
         rows = (
@@ -347,12 +431,14 @@ class KnowledgeDocumentService:
         ).all()
         chunks: list[TextChunk] = []
         for chunk, user_id in rows:
+            meta: dict[str, Any] = {"user_id": str(user_id), "chunk_index": chunk.chunk_index}
+            meta.update(extract_locator_metadata(chunk.position, chunk.chunk_meta))
             chunks.append(
                 TextChunk(
                     chunk_id=str(chunk.id),
                     doc_id=str(chunk.doc_id),
                     text=chunk.content,
-                    metadata={"user_id": str(user_id), "chunk_index": chunk.chunk_index},
+                    metadata=meta,
                 )
             )
         count = await asyncio.to_thread(self._mgr.rebuild_bm25_from_chunks, chunks)

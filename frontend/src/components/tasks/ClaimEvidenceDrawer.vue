@@ -4,7 +4,12 @@ import { X } from "lucide-vue-next";
 
 import type { BibliographyEntry, ClaimCheckResult } from "@/api/types";
 import { highlightQuote } from "@/utils/claim-highlight";
-import { CLAIM_VERDICT_LABELS, CLAIM_VERDICT_TONES, claimSeverity } from "@/utils/claim-verdict";
+import {
+  CLAIM_VERDICT_LABELS,
+  CLAIM_VERDICT_TONES,
+  claimSeverity,
+  formatEvidenceLocator,
+} from "@/utils/claim-verdict";
 import { QUALITY_FLAG_LABELS, parseQualityFlags } from "@/utils/citation-quality";
 
 // 点击正文 [En] 打开的「来源核验」抽屉（Issue #31 Phase 2）。
@@ -50,6 +55,7 @@ const renderedClaims = computed(() =>
       confidence: Math.round(claim.confidence * 100),
       passageHtml: highlighted.html,
       quoteMissing: Boolean(claim.evidence_quote) && !highlighted.matched,
+      locatorLabel: formatEvidenceLocator(claim.locator),
     };
   }),
 );
@@ -207,6 +213,14 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
                 data-test="claim-fix"
               >
                 建议：{{ item.claim.suggested_fix }}
+              </p>
+
+              <p
+                v-if="item.locatorLabel"
+                class="inline-flex w-fit items-center rounded border border-border bg-muted/60 px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
+                data-test="claim-locator"
+              >
+                出处定位：{{ item.locatorLabel }}
               </p>
 
               <div v-if="item.passageHtml" class="flex flex-col gap-1">

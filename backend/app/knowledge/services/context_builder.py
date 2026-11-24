@@ -13,16 +13,44 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import Any
 from uuid import UUID
 
 from pydantic import ValidationError as PydanticValidationError
 
 from app.core.exceptions import ValidationException
 from app.knowledge.services.document_service import KnowledgeDocumentService
-from app.orchestration.contracts import Evidence, EvidenceContext
+from app.orchestration.contracts import Evidence, EvidenceContext, EvidenceLocator
 
 # 与 Evidence.excerpt 的 max_length 保持一致
 MAX_EXCERPT_CHARS = 2000
+
+
+def _locator_from_metadata(meta: Mapping[str, Any]) -> EvidenceLocator | None:
+    """从检索结果 metadata 构造原文定位，全空时返回 None 避免制造空对象。"""
+    raw_start = meta.get("page_start")
+    raw_end = meta.get("page_end")
+    page_start = (
+        int(raw_start)
+        if isinstance(raw_start, int) and not isinstance(raw_start, bool) and raw_start >= 1
+        else None
+    )
+    page_end = (
+        int(raw_end)
+        if isinstance(raw_end, int) and not isinstance(raw_end, bool) and raw_end >= 1
+        else page_start
+    )
+    section_title = str(meta.get("section_title") or "").strip()[:160] or None
+    table_ref = str(meta.get("table_ref") or "").strip()[:64] or None
+    if page_start is None and section_title is None and table_ref is None:
+        return None
+    return EvidenceLocator(
+        page_start=page_start,
+        page_end=page_end,
+        section_title=section_title,
+        table_ref=table_ref,
+    )
 
 
 class LiteratureContextBuilder:
@@ -51,7 +79,8 @@ class LiteratureContextBuilder:
                 chunk_id = UUID(str(item.chunk_id))
             except (ValueError, TypeError, AttributeError) as exc:
                 raise ValidationException("检索结果缺少合法的文档/分块标识") from exc
-            source_url = (item.metadata or {}).get("source_url")
+            meta = item.metadata or {}
+            source_url = meta.get("source_url")
             try:
                 evidence.append(
                     Evidence(
@@ -59,6 +88,7 @@ class LiteratureContextBuilder:
                         chunk_id=chunk_id,
                         source_url=source_url,
                         excerpt=excerpt[:MAX_EXCERPT_CHARS],
+                        locator=_locator_from_metadata(meta),
                     )
                 )
             except PydanticValidationError as exc:

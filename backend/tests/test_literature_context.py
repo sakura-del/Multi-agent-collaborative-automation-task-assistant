@@ -197,3 +197,42 @@ class TestRetrievalIdResolution:
         UUID(resolved[1].chunk_id)
         UUID(resolved[1].doc_id)
         assert dc_replace(already).text == resolved[0].text
+
+
+class TestLocatorMapping:
+    """Issue #35：EvidenceLocator 透传与空定位兼容。"""
+
+    async def test_populates_locator_from_scalar_metadata(self) -> None:
+        from app.orchestration.contracts import EvidenceLocator
+
+        knowledge = _FakeKnowledge(
+            {
+                USER_A: [
+                    _result(
+                        metadata={
+                            "source_url": "https://example.com/paper.pdf",
+                            "page_start": 5,
+                            "page_end": 6,
+                            "section_title": "3.2 实验设置",
+                            "table_ref": "Table 2",
+                        }
+                    ),
+                    _result(metadata={}),
+                ]
+            }
+        )
+        context = await LiteratureContextBuilder(knowledge).build(USER_A, "实验设置", top_k=4)
+
+        assert context.evidence[0].locator == EvidenceLocator(
+            page_start=5,
+            page_end=6,
+            section_title="3.2 实验设置",
+            table_ref="Table 2",
+        )
+        assert context.evidence[1].locator is None
+
+    def test_legacy_evidence_without_locator_validates(self) -> None:
+        from app.orchestration.contracts import Evidence
+
+        ev = Evidence.model_validate({"excerpt": "历史快照原文"})
+        assert ev.locator is None

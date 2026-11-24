@@ -324,3 +324,78 @@ class TestChunkMetadata:
         chunks = chunker.chunk(doc, strategy=ChunkStrategy.RECURSIVE)
 
         assert [c.metadata["chunk_index"] for c in chunks] == list(range(len(chunks)))
+
+
+class TestChunkLocatorMetadata:
+    """Issue #35：三种分块策略的页码 / 章节 / 图表编号提取与标量约束。"""
+
+    @staticmethod
+    def _three_page_pdf_doc() -> ParsedDocument:
+        p1 = "1 引言\n" + ("第一页背景介绍与问题阐述。" * 6)
+        p2 = "3.2 实验设置\nTable 2 对比了各方法在基准测试上的准确率。\n" + (
+            "第二页核心实验参数与消融分析内容。" * 5
+        )
+        p3 = "4 结论\n" + "\n".join(
+            f"第三页第 {i} 条总结覆盖长期可扩展性与消融结论分析。" for i in range(1, 6)
+        )
+        text = "\n\n".join([p1, p2, p3])
+        return ParsedDocument(
+            doc_id="pdf-3p-doc",
+            source="paper.pdf",
+            doc_type=DocumentType.PDF,
+            text=text,
+            sections=[
+                {"level": 1, "title": "第 1 页", "content": p1, "page": 1},
+                {"level": 1, "title": "第 2 页", "content": p2, "page": 2},
+                {"level": 1, "title": "第 3 页", "content": p3, "page": 3},
+            ],
+        )
+
+    def test_three_page_pdf_locators_across_all_strategies(self) -> None:
+        chunker = DocumentChunker(chunk_size=110, chunk_overlap=30)
+        doc = self._three_page_pdf_doc()
+
+        for strategy in (
+            ChunkStrategy.RECURSIVE,
+            ChunkStrategy.SLIDING_WINDOW,
+            ChunkStrategy.SEMANTIC,
+        ):
+            chunks = chunker.chunk(doc, strategy=strategy)
+            assert chunks, f"{strategy.value} 应至少产生 1 个分块"
+
+            # 向量库兼容性：所有 metadata 值必须为标量
+            for chunk in chunks:
+                for key, val in chunk.metadata.items():
+                    assert isinstance(
+                        val, (str, int, float, bool)
+                    ), f"{strategy.value} metadata[{key!r}] 非标量：{type(val)}"
+                assert chunk.metadata.get("section_title") != "第 1 页"
+
+            page_starts = [c.metadata["page_start"] for c in chunks]
+            assert min(page_starts) == 1
+            assert any(c.metadata["page_start"] == 3 for c in chunks)
+            assert any(c.metadata.get("section_title") == "3.2 实验设置" for c in chunks)
+            assert any(c.metadata.get("table_ref") == "Table 2" for c in chunks)
+            if strategy in (ChunkStrategy.RECURSIVE, ChunkStrategy.SLIDING_WINDOW):
+                assert any(
+                    c.metadata["page_end"] > c.metadata["page_start"] for c in chunks
+                ), f"{strategy.value} 应覆盖跨页分块"
+
+    def test_markdown_retains_real_section_title(self) -> None:
+        chunker = _make_chunker()
+        md_text = "## 实验设计与消融\n\n表 1 汇总了主要实验指标。"
+        doc = DocumentParser().parse_text(md_text, doc_id="md-doc")
+        doc = ParsedDocument(
+            doc_id="md-doc",
+            source="notes.md",
+            doc_type=DocumentType.MARKDOWN,
+            text=md_text,
+            sections=[
+                {"level": 2, "title": "实验设计与消融", "content": "表 1 汇总了主要实验指标。"}
+            ],
+        )
+
+        chunks = chunker.chunk(doc, strategy=ChunkStrategy.SEMANTIC)
+        assert chunks
+        assert chunks[0].metadata.get("section_title") == "实验设计与消融"
+        assert chunks[0].metadata.get("table_ref") == "表 1"

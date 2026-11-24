@@ -64,6 +64,17 @@ class TaskCommand(StrEnum):
     """
 
 
+class EvidenceLocator(BaseModel):
+    """原文细粒度定位（Issue #35）：仅对全文分片有效，外部题录/摘要保持 None。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    page_start: int | None = Field(default=None, ge=1)
+    page_end: int | None = Field(default=None, ge=1)
+    section_title: str | None = Field(default=None, max_length=160)
+    table_ref: str | None = Field(default=None, max_length=64)
+
+
 class Evidence(BaseModel):
     """一条可回溯证据：绑定文档/分块/来源 URL 与原文片段。
 
@@ -89,6 +100,8 @@ class Evidence(BaseModel):
     excerpt: str = Field(min_length=1, max_length=2000)
     kind: Literal["excerpt", "metadata"] = "excerpt"
     """证据类型；默认 ``excerpt`` 以保持既有知识库证据 100% 向后兼容。"""
+    locator: EvidenceLocator | None = None
+    """原文页码/章节/图表定位（Issue #35）；仅 kind='excerpt' 时填充。"""
 
 
 class EvidenceContext(BaseModel):
@@ -215,6 +228,8 @@ class ClaimCheckResult(BaseModel):
     evidence_scope: Literal["full_text", "abstract_only"] | None = None
     #: 命中 quote 所在的完整片段（前端据此展示上下文并做模糊高亮）
     evidence_passage: str | None = Field(default=None, max_length=2000)
+    #: 命中片段在原文中的页码/章节/图表定位（Issue #35）
+    locator: EvidenceLocator | None = None
 
 
 class ValidationReport(BaseModel):

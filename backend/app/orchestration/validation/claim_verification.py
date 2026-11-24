@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from app.core.logging import get_logger
 from app.llm.models import Message, MessageRole
-from app.orchestration.contracts import ClaimCheckResult, Evidence
+from app.orchestration.contracts import ClaimCheckResult, Evidence, EvidenceLocator
 from app.orchestration.validation.citation_consistency import CitedClaim
 
 if TYPE_CHECKING:  # pragma: no cover - 仅类型引用
@@ -91,6 +91,7 @@ class ClaimEvidence:
     claim: CitedClaim
     passages: tuple[str, ...]
     scope: Literal["full_text", "abstract_only"]
+    locators: tuple[EvidenceLocator | None, ...] = ()
 
     @property
     def cache_key(self) -> str:
@@ -101,6 +102,10 @@ class ClaimEvidence:
                 "refs": list(self.claim.cited_ref_ids),
                 "scope": self.scope,
                 "passages": [_digest(_normalize_ws(p)) for p in self.passages],
+                "locators": [
+                    loc.model_dump(mode="json") if loc is not None else None
+                    for loc in self.locators
+                ],
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -132,6 +137,7 @@ def build_claim_evidence(
             mapped.setdefault(position, []).append(item)
 
     passages: list[str] = []
+    locators: list[EvidenceLocator | None] = []
     has_full_text = False
     budget = MAX_EVIDENCE_CHARS_PER_CLAIM
     for ref_no in claim.cited_ref_ids:
@@ -143,12 +149,16 @@ def build_claim_evidence(
             passage = _truncate(item.excerpt, min(MAX_PASSAGE_CHARS, budget))
             if passage and passage not in passages:
                 passages.append(passage)
+                locators.append(
+                    item.locator if (item.kind == "excerpt" and item.chunk_id is not None) else None
+                )
                 budget -= len(passage)
 
     return ClaimEvidence(
         claim=claim,
         passages=tuple(passages),
         scope="full_text" if has_full_text else "abstract_only",
+        locators=tuple(locators),
     )
 
 
@@ -334,10 +344,25 @@ class ClaimVerifier:
         confidence = min(1.0, max(0.0, confidence))
 
         quote = data.get("evidence_quote")
+        matched_idx = 0
         if quote is not None:
             quote = str(quote).strip()
-            haystack = _normalize_ws(" ".join(item.passages))
-            quote = quote if quote and _normalize_ws(quote) in haystack else None
+            norm_quote = _normalize_ws(quote)
+            found = False
+            if norm_quote:
+                for idx, passage in enumerate(item.passages):
+                    if norm_quote in _normalize_ws(passage):
+                        matched_idx = idx
+                        found = True
+                        break
+            quote = quote if found else None
+
+        matched_passage = item.passages[matched_idx] if item.passages else None
+        matched_locator = (
+            item.locators[matched_idx]
+            if item.scope == "full_text" and matched_idx < len(item.locators)
+            else None
+        )
 
         rationale = str(data.get("rationale") or "").strip()[:1000]
         fix = data.get("suggested_fix")
@@ -355,7 +380,8 @@ class ClaimVerifier:
             rationale=rationale or "模型未给出理由",
             suggested_fix=fix,
             evidence_scope=item.scope,
-            evidence_passage=item.passages[0] if item.passages else None,
+            evidence_passage=matched_passage,
+            locator=matched_locator,
         )
 
 

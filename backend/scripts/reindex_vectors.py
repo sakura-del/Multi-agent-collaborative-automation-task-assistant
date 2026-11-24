@@ -50,6 +50,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="只对账缺项与孤儿，不重算已同步向量",
     )
+    parser.add_argument(
+        "--backfill-locators",
+        action="store_true",
+        help="从原文档解析并回填存量 DocChunk 的页码/章节/图表定位（不重切分块）",
+    )
     parser.add_argument("--batch-size", type=int, default=500, help="每批条数（默认 500）")
     parser.add_argument("--user-id", default=None, help="只重建指定用户（UUID）")
     parser.add_argument(
@@ -71,7 +76,7 @@ async def _main() -> int:
     args = _parse_args()
 
     from app.db.session import AsyncSessionLocal
-    from app.knowledge.services.factory import get_index_manager, init_kb
+    from app.knowledge.services.factory import get_index_manager, get_storage, init_kb
     from app.knowledge.services.reindex import reindex_from_chunks
 
     user_id = None
@@ -86,6 +91,7 @@ async def _main() -> int:
     init_kb()
     # 向量库本体在 IndexManager 里（`get_kb()` 是门面，没有写入接口）
     vector_store = get_index_manager()._vector_store
+    storage = get_storage() if args.backfill_locators else None
     async with AsyncSessionLocal() as session:
         result = await reindex_from_chunks(
             session=session,
@@ -95,6 +101,8 @@ async def _main() -> int:
             dry_run=args.dry_run,
             limit=args.limit,
             reconcile=args.reconcile,
+            backfill_locators=args.backfill_locators,
+            storage=storage,
         )
 
     if args.json:

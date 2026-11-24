@@ -17,6 +17,8 @@
 from __future__ import annotations
 
 import hashlib
+import re
+from typing import Any
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -27,6 +29,14 @@ logger = get_logger(__name__)
 # 递归分块的分隔符层级：从语义强到弱
 # 段落分隔 > 换行 > 句号 > 空格
 _RECURSIVE_SEPARATORS: list[str] = ["\n\n", "\n", "。", "！", "？", ".", "!", "?", " ", ""]
+
+# 轻量识别块内图表编号（Table 2 / 表 1 / Fig. 3 / 图 2）与 PDF 数字小节标题（3.2 实验设置）
+_TABLE_FIG_RE = re.compile(
+    r"\b(?:Table|Tab\.|Figure|Fig\.)\s*\d+[A-Za-z]?\b|(?:表|图)\s*\d+(?:\.\d+)?",
+    re.IGNORECASE,
+)
+_PDF_SECTION_RE = re.compile(r"^(?:\d+(?:\.\d+){0,3})\s+([^\n]{2,60})$", re.MULTILINE)
+_GENERIC_PAGE_TITLE_RE = re.compile(r"^第\s*\d+\s*页$")
 
 
 class DocumentChunker:
@@ -141,10 +151,12 @@ class DocumentChunker:
         document: ParsedDocument,
         pieces: list[tuple[str, int, int]],
     ) -> list[TextChunk]:
-        """将切分片段组装为 TextChunk，附确定性 ID。"""
+        """将切分片段组装为 TextChunk，附确定性 ID 与页码/章节/图表定位元数据。"""
+        spans = _index_section_spans(document)
         chunks: list[TextChunk] = []
         for idx, (text, start, end) in enumerate(pieces):
             chunk_id = _make_chunk_id(document.doc_id, idx)
+            locator_meta = _resolve_chunk_locator(text, start, end, spans)
             chunks.append(
                 TextChunk(
                     chunk_id=chunk_id,
@@ -155,6 +167,7 @@ class DocumentChunker:
                         "doc_type": document.doc_type.value,
                         "chunk_index": idx,
                         **document.metadata,
+                        **locator_meta,
                     },
                     start_offset=start,
                     end_offset=end,
@@ -297,3 +310,64 @@ def _make_chunk_id(doc_id: str, index: int) -> str:
     """生成确定性分块 ID。"""
     raw = f"{doc_id}:{index}"
     return hashlib.md5(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def _index_section_spans(document: ParsedDocument) -> list[dict[str, Any]]:
+    """把 document.sections 映射为原文字符区间，供任意分块策略反查页码与章节。"""
+    spans: list[dict[str, Any]] = []
+    cursor = 0
+    for section in document.sections:
+        content = str(section.get("content") or "").strip()
+        if not content:
+            continue
+        start = document.text.find(content, cursor)
+        if start < 0:
+            start = cursor
+        end = start + len(content)
+        cursor = end
+        raw_page = section.get("page")
+        page = (
+            int(raw_page)
+            if isinstance(raw_page, int) and not isinstance(raw_page, bool) and raw_page > 0
+            else None
+        )
+        raw_title = str(section.get("title") or "").strip()
+        title = "" if _GENERIC_PAGE_TITLE_RE.match(raw_title) else raw_title[:120]
+        spans.append({"start": start, "end": end, "page": page, "title": title})
+    return spans
+
+
+def _resolve_chunk_locator(
+    chunk_text: str,
+    start: int,
+    end: int,
+    spans: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """根据字符区间反查页码范围、章节标题与图表编号（仅输出标量，兼容向量库 metadata）。"""
+    pages: list[int] = []
+    section_title = ""
+    for span in spans:
+        if span["end"] <= start or span["start"] >= end:
+            continue
+        if span["page"] is not None:
+            pages.append(span["page"])
+        if span["title"] and not section_title:
+            section_title = span["title"]
+
+    if not section_title:
+        heading = _PDF_SECTION_RE.search(chunk_text)
+        if heading:
+            section_title = heading.group(0).strip()[:120]
+
+    table_match = _TABLE_FIG_RE.search(chunk_text)
+    table_ref = table_match.group(0).strip()[:64] if table_match else ""
+
+    meta: dict[str, Any] = {}
+    if pages:
+        meta["page_start"] = min(pages)
+        meta["page_end"] = max(pages)
+    if section_title:
+        meta["section_title"] = section_title
+    if table_ref:
+        meta["table_ref"] = table_ref
+    return meta

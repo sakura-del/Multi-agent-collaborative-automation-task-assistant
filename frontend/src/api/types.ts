@@ -174,6 +174,14 @@ export type ClaimVerdict =
   | "contradicted"
   | "unverifiable";
 
+/** 原文页码/章节/图表定位（Issue #35）。 */
+export interface EvidenceLocator {
+  page_start?: number | null;
+  page_end?: number | null;
+  section_title?: string | null;
+  table_ref?: string | null;
+}
+
 /** 单条论断的核验结论（后端 `ClaimCheckResult`）。 */
 export interface ClaimCheckResult {
   claim_id: string;
@@ -189,6 +197,8 @@ export interface ClaimCheckResult {
   evidence_scope?: "full_text" | "abstract_only" | null;
   /** 命中 quote 所在的完整片段 */
   evidence_passage?: string | null;
+  /** 命中片段的页码/章节/图表定位（Issue #35） */
+  locator?: EvidenceLocator | null;
 }
 
 export interface ClaimStats {

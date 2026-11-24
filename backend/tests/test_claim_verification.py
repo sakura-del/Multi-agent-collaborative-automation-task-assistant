@@ -286,3 +286,83 @@ class TestValidatorClaimGate:
         parsed = ValidatorAgent._evidence_pool({"evidence_pool": pool})
         # 缺可选字段的 Evidence 仍合法；非 dict / 字段类型错的条目被跳过
         assert len(parsed) == 2
+
+
+class TestClaimVerificationLocator:
+    """Issue #35：论断核验按命中片段绑定 locator，题录/摘要强制保持 None。"""
+
+    async def test_binds_locator_of_matched_quote_passage(self) -> None:
+        from app.orchestration.contracts import EvidenceLocator
+
+        loc_p2 = EvidenceLocator(page_start=2, page_end=2, section_title="1 引言")
+        loc_p5 = EvidenceLocator(
+            page_start=5,
+            page_end=6,
+            section_title="3.2 实验设置",
+            table_ref="Table 2",
+        )
+        ev1 = Evidence(
+            kind="excerpt", chunk_id=uuid.uuid4(), excerpt="引言回顾传统方法。", locator=loc_p2
+        )
+        ev2 = Evidence(
+            kind="excerpt",
+            chunk_id=uuid.uuid4(),
+            excerpt="如 Table 2 所示，本方法准确率达到 94.2%。",
+            locator=loc_p5,
+        )
+        item = build_claim_evidence(_claim(refs=(1, 2)), [ev1, ev2])
+        verifier = ClaimVerifier(_ScriptedLLM(quote="准确率达到 94.2%"))  # type: ignore[arg-type]
+
+        [check] = await verifier.verify([item])
+
+        assert check.evidence_scope == "full_text"
+        assert check.evidence_passage == ev2.excerpt
+        assert check.locator == loc_p5
+
+    async def test_metadata_and_abstract_only_keep_locator_none(self) -> None:
+        from app.orchestration.contracts import EvidenceLocator
+
+        forged_loc = EvidenceLocator(page_start=9, section_title="题录不应带页码")
+        meta_ev = Evidence(
+            kind="metadata", excerpt="[E1] 摘要：观察到性能提升。", locator=forged_loc
+        )
+        abstract_excerpt = Evidence(
+            kind="excerpt",
+            chunk_id=None,
+            excerpt="仅摘要分片无 chunk_id。",
+            locator=forged_loc,
+        )
+        verifier = ClaimVerifier(_ScriptedLLM(quote="观察到性能提升"))  # type: ignore[arg-type]
+
+        [check_meta] = await verifier.verify([build_claim_evidence(_claim(), [meta_ev])])
+        [check_abs] = await verifier.verify([build_claim_evidence(_claim(), [abstract_excerpt])])
+        # 混合证据时若命中 metadata 那一段，locator 也必须为 None
+        full_ev = Evidence(
+            kind="excerpt",
+            chunk_id=uuid.uuid4(),
+            excerpt="全文第一段细节。",
+            locator=EvidenceLocator(page_start=3),
+        )
+        [check_mixed] = await verifier.verify(
+            [build_claim_evidence(_claim(refs=(1, 2)), [full_ev, meta_ev])]
+        )
+
+        assert check_meta.evidence_scope == "abstract_only"
+        assert check_meta.locator is None
+        assert check_abs.evidence_scope == "abstract_only"
+        assert check_abs.locator is None
+        assert check_mixed.evidence_scope == "full_text"
+        assert check_mixed.locator is None
+
+    def test_legacy_claim_check_without_locator_validates(self) -> None:
+        restored = ClaimCheckResult.model_validate(
+            {
+                "claim_id": "n1:c1",
+                "sentence_text": "历史结论 [E1]。",
+                "cited_ref_ids": ["E1"],
+                "verdict": "supported",
+                "confidence": 0.9,
+                "rationale": "历史记录",
+            }
+        )
+        assert restored.locator is None
