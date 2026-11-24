@@ -1,0 +1,10 @@
+{
+  "pickerVisible": true,
+  "pickerText": "指定知识库文档（可选）\nIssue 35 溯源验收（3 页 PDF）\nIssue 35 溯源验收（3 页 PDF）\n向量入库诊断\n10_EVOR_Evolving_Retrieval_CodeGen__2402.12317v2\n09_FAIR-RAG_Faithful_Adaptive_Refinement__2510.22344v1\n08_Conventions_MultiAgent_Action_Space__2412.06333v3\n07_AI_Augment_Human_Performed__2504.14689v1\n06_Automated_Literature_Review_NLP_LLM__2411.18583v1\n05_Factually_Wearable_FactCheck__2504.17204v1\n04_ContextAware_Cognitive_Augmentation__2504.13684v1\n03_MultiAgent_Collaborative_RAG__2412.05838v1\n02_Ragas_RAG_Evaluation__2309.15217v2\n01_AR-RAG_Autoregressive_Retrieval__2506.06962v3",
+  "capturedDocumentIds": [
+    "fbe70975-7c84-4316-8236-196c751a022c"
+  ],
+  "capturedTopic": "Issue #35 文档选择器回归验收：页码级论断溯源的可用性",
+  "pageErrors": [],
+  "videoPath": "/tmp/vp-p2-evidence/video/page@d3250d1e39d682d9855710f677b92c27.webm"
+}
