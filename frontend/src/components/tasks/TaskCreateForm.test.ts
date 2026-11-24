@@ -701,4 +701,33 @@ describe("TaskCreateForm 默认模型", () => {
             verify_references: true,
         });
     });
+
+    it("切换到 citation_snowballing 预设：支持填写种子 DOI 与扩展方向并提交", async () => {
+        const wrapper = mountForm();
+        await flushPromises();
+
+        await wrapper
+            .find('[data-test="preset-citation_snowballing"]')
+            .trigger("click");
+        expect(wrapper.find('[data-test="seed-doi-input"]').exists()).toBe(true);
+
+        await wrapper
+            .find('[data-test="topic"]')
+            .setValue("基于经典论文的 RAG 引文滚雪球综述");
+        const seedInput = wrapper.find('[data-test="seed-doi-input"]');
+        await seedInput.setValue("10.1000/rag-seed");
+        await seedInput.trigger("keydown.enter");
+        await wrapper
+            .find('[data-test="snowball-dir-forward"]')
+            .trigger("click");
+        await wrapper.find("form").trigger("submit");
+
+        expect(wrapper.emitted("submit")?.[0][0]).toMatchObject({
+            workflow_preset: "citation_snowballing",
+            seed_dois: ["10.1000/rag-seed"],
+            snowball_direction: "forward",
+            max_documents: 30,
+            verify_references: true,
+        });
+    });
 });

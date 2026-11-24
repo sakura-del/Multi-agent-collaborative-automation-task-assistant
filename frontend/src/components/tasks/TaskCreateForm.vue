@@ -18,6 +18,7 @@ import {
 import type {
     CitationStyleSource,
     LLMCredentialInfo,
+    SnowballDirection,
     TaskCreate,
     WorkflowPreset,
 } from "@/api/types";
@@ -57,9 +58,16 @@ const activePreset = computed(() => getWorkflowPreset(workflowPreset.value));
 const isVerifyCitations = computed(
     () => workflowPreset.value === "verify_citations",
 );
+const isCitationSnowballing = computed(
+    () => workflowPreset.value === "citation_snowballing",
+);
 
 const topic = ref("");
 const draftText = ref("");
+const seedDois = ref<string[]>([]);
+const seedDraft = ref("");
+const snowballDirection = ref<SnowballDirection>("both");
+const SEED_MAX = 5;
 const keywords = ref<string[]>([]);
 const keywordDraft = ref("");
 const maxDocuments = ref(activePreset.value.defaults.maxDocuments);
@@ -172,6 +180,21 @@ function removeKeyword(keyword: string) {
     keywords.value = keywords.value.filter((item) => item !== keyword);
 }
 
+function addSeedDoi() {
+    const value = seedDraft.value.trim().replace(/,$/, "");
+    if (!value) {
+        return;
+    }
+    if (seedDois.value.length < SEED_MAX && !seedDois.value.includes(value)) {
+        seedDois.value = [...seedDois.value, value];
+    }
+    seedDraft.value = "";
+}
+
+function removeSeedDoi(seed: string) {
+    seedDois.value = seedDois.value.filter((item) => item !== seed);
+}
+
 function toggleDocument(id: string, checked: boolean) {
     selectedDocuments.value = checked
         ? [...new Set([...selectedDocuments.value, id])]
@@ -209,7 +232,18 @@ function validate(): string[] {
     const effectiveKeywords = pendingKeyword
         ? [...new Set([...keywords.value, pendingKeyword])]
         : keywords.value;
-    if (effectiveKeywords.length < 1) {
+    const pendingSeed = seedDraft.value.trim();
+    const effectiveSeeds = pendingSeed
+        ? [...new Set([...seedDois.value, pendingSeed])]
+        : seedDois.value;
+    if (isCitationSnowballing.value) {
+        if (effectiveSeeds.length > SEED_MAX) {
+            messages.push(`种子论文最多 ${SEED_MAX} 篇`);
+        }
+        if (effectiveKeywords.length < 1 && effectiveSeeds.length < 1) {
+            messages.push("关键词或种子论文至少填写 1 项");
+        }
+    } else if (effectiveKeywords.length < 1) {
         messages.push("关键词至少 1 个");
     }
     if (effectiveKeywords.length > KEYWORD_MAX) {
@@ -275,11 +309,19 @@ function handleSubmit() {
     }
 
     const pendingKeyword = keywordDraft.value.trim();
+    const effectiveKeywords = pendingKeyword
+        ? [...new Set([...keywords.value, pendingKeyword])]
+        : [...keywords.value];
+    const pendingSeed = seedDraft.value.trim();
+    const effectiveSeeds = pendingSeed
+        ? [...new Set([...seedDois.value, pendingSeed])].slice(0, SEED_MAX)
+        : [...seedDois.value];
     const payload: TaskCreate = {
         topic: topic.value.trim(),
-        keywords: pendingKeyword
-            ? [...new Set([...keywords.value, pendingKeyword])]
-            : [...keywords.value],
+        keywords:
+            effectiveKeywords.length > 0
+                ? effectiveKeywords
+                : effectiveSeeds.slice(0, SEED_MAX),
         workflow_preset: workflowPreset.value,
         max_documents: Number(maxDocuments.value),
         date_from: dateFrom.value || null,
@@ -290,6 +332,12 @@ function handleSubmit() {
         reference_library: useReferenceLibrary.value,
         document_ids: [...selectedDocuments.value],
         verify_references: verifyReferences.value,
+        ...(isCitationSnowballing.value
+            ? {
+                  seed_dois: effectiveSeeds,
+                  snowball_direction: snowballDirection.value,
+              }
+            : {}),
         ...(modelSource.value === "byok" && selectedCredentialInfo.value
             ? { llm_credential_id: selectedCredential.value }
             : {}),
@@ -366,6 +414,73 @@ function handleSubmit() {
         </div>
 
         <template v-if="!isVerifyCitations">
+        <div
+            v-if="isCitationSnowballing"
+            class="grid gap-3 rounded-lg border border-border bg-muted/20 p-3"
+        >
+            <div class="grid gap-1.5">
+                <Label for="task-seed-doi">
+                    种子论文 DOI / 标题（选填，回车添加，最多 {{ SEED_MAX }} 篇）
+                </Label>
+                <Input
+                    id="task-seed-doi"
+                    v-model="seedDraft"
+                    data-test="seed-doi-input"
+                    type="text"
+                    placeholder="例如：10.1145/3442381.3450000 或经典论文题名（留空将自动检索 Top 3 种子）"
+                    @keydown.enter.prevent="addSeedDoi"
+                    @blur="addSeedDoi"
+                />
+                <ul v-if="seedDois.length" class="flex flex-wrap gap-1.5 pt-1">
+                    <li
+                        v-for="seed in seedDois"
+                        :key="seed"
+                        class="inline-flex items-center gap-1 rounded-md bg-secondary px-2 py-0.5 text-xs text-secondary-foreground"
+                    >
+                        <span>{{ seed }}</span>
+                        <button
+                            type="button"
+                            class="rounded-sm text-muted-foreground transition-colors hover:text-foreground"
+                            :aria-label="`移除种子 ${seed}`"
+                            @click="removeSeedDoi(seed)"
+                        >
+                            <X :size="12" aria-hidden="true" />
+                        </button>
+                    </li>
+                </ul>
+            </div>
+
+            <div class="grid gap-1.5">
+                <span class="text-sm font-medium leading-none">扩展方向</span>
+                <div
+                    class="inline-flex w-fit flex-wrap gap-1 rounded-lg bg-muted p-1"
+                    role="group"
+                    aria-label="引文滚雪球扩展方向"
+                >
+                    <button
+                        v-for="option in [
+                            { value: 'both', label: '双向扩展' },
+                            { value: 'backward', label: '查参考文献（向后）' },
+                            { value: 'forward', label: '查施引文献（向前）' },
+                        ] as const"
+                        :key="option.value"
+                        type="button"
+                        :data-test="`snowball-dir-${option.value}`"
+                        :aria-pressed="snowballDirection === option.value"
+                        :class="[
+                            'rounded-md px-3 py-1 text-xs font-medium transition-colors',
+                            snowballDirection === option.value
+                                ? 'bg-background text-foreground shadow-xs'
+                                : 'text-muted-foreground hover:text-foreground',
+                        ]"
+                        @click="snowballDirection = option.value"
+                    >
+                        {{ option.label }}
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <div class="grid gap-1.5">
             <Label for="task-keyword">关键词（回车添加，1–10 个）</Label>
             <Input

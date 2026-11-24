@@ -266,8 +266,15 @@ class TaskEvent(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
-#: 预设工作流标识（Issue #32）：文献综述 / 研究空白分析 / 验证引用。
-WorkflowPreset = Literal["literature_review", "research_gaps", "verify_citations"]
+#: 预设工作流标识（Issue #32）：文献综述 / 研究空白分析 / 验证引用 / 引文滚雪球。
+WorkflowPreset = Literal[
+    "literature_review",
+    "research_gaps",
+    "verify_citations",
+    "citation_snowballing",
+]
+#: 引文滚雪球扩展方向：双向 / 向后查参考文献 / 向前查施引文献
+SnowballDirection = Literal["both", "backward", "forward"]
 
 
 # ===== 任务调用契约（HTTP 层映射，编排层不依赖 app.schemas）=====
@@ -283,6 +290,9 @@ class LiteratureReviewRequest(BaseModel):
     workflow_preset: WorkflowPreset = "literature_review"
     #: 验证引用模式（verify_citations）下的待核验草稿正文（含 [E#] 或参考文献列表）
     draft_text: str | None = Field(default=None, max_length=30000)
+    #: 引文滚雪球模式（citation_snowballing）下的种子论文 DOI 或标题（选填，最多 5 篇）
+    seed_dois: list[str] = Field(default_factory=list, max_length=5)
+    snowball_direction: SnowballDirection = "both"
     date_from: date | None = None
     date_to: date | None = None
     max_documents: int = Field(default=20, ge=1, le=50)
@@ -357,6 +367,12 @@ class LiteratureReviewRequest(BaseModel):
                 raise ValueError("验证引用模式需提供待核验草稿（draft_text）或至少一篇知识库文档")
             if not self.keywords:
                 self.keywords = ["引用核验"]
+        elif self.workflow_preset == "citation_snowballing":
+            self.seed_dois = [item.strip() for item in self.seed_dois if item.strip()][:5]
+            if not self.keywords and self.seed_dois:
+                self.keywords = list(self.seed_dois[:5])
+            if len(self.keywords) < 1:
+                raise ValueError("keywords 或 seed_dois 至少需要提供 1 项")
         elif len(self.keywords) < 1:
             raise ValueError("keywords 至少需要 1 个关键词")
         return self

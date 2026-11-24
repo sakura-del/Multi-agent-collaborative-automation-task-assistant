@@ -81,6 +81,158 @@ class OpenAlexSearchSource(OpenAlexClient):
         self._cache.set(key, records)
         return list(records)
 
+    # ===== 引文图谱遍历（Issue #32 Phase 2B：引文滚雪球）=====
+
+    async def resolve_work(self, doi_or_title: str) -> tuple[str, LiteratureRecord] | None:
+        """将种子论文（DOI 或标题）解析为 OpenAlex short work ID（如 W2741809807）与记录。"""
+        raw = doi_or_title.strip()
+        if not raw:
+            return None
+
+        doi = normalize_doi(raw)
+        if doi and doi.startswith("10."):
+            await self._throttle.wait()
+            response = await self._get(
+                f"/works/https://doi.org/{doi}",
+                params=self._polite_params(),
+                operation="resolve_work_doi",
+            )
+            if response.status_code == 404:
+                return None
+            self._ensure_success(response, operation="resolve_work_doi")
+            payload = _parse_json_object(response)
+            record = self._parse_result(payload)
+            return _short_work_id(_text(payload.get("id"))), record
+
+        await self._throttle.wait()
+        params: dict[str, str] = {
+            "search": raw,
+            "per_page": "1",
+            "sort": "relevance_score:desc",
+        }
+        if polite := self._polite_params():
+            params.update(polite)
+        response = await self._get(
+            "/works",
+            params=params,
+            operation="resolve_work_title",
+        )
+        self._ensure_success(response, operation="resolve_work_title")
+        payload = _parse_json_object(response)
+        results = payload.get("results")
+        if not isinstance(results, list) or not results:
+            return None
+        first = results[0]
+        record = self._parse_result(first)
+        return _short_work_id(_text(first.get("id"))), record
+
+    async def fetch_references(
+        self, work_id: str, *, max_results: int = 25
+    ) -> list[LiteratureRecord]:
+        """向后滚雪球：拉取指定论文的 `referenced_works` 并批量归一化为 LiteratureRecord。"""
+        short_id = _short_work_id(work_id)
+        if not short_id:
+            return []
+        limit = max(1, min(max_results, 50))
+        cache_key = f"oa:refs:{short_id}:{limit}"
+        cached = self._cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        await self._throttle.wait()
+        response = await self._get(
+            f"/works/{short_id}",
+            params=self._polite_params(),
+            operation="fetch_work_references",
+        )
+        if response.status_code == 404:
+            return []
+        self._ensure_success(response, operation="fetch_work_references")
+        payload = _parse_json_object(response)
+        raw_refs = payload.get("referenced_works")
+        if not isinstance(raw_refs, list) or not raw_refs:
+            self._cache.set(cache_key, [])
+            return []
+
+        ref_ids = [
+            rid for item in raw_refs if isinstance(item, str) and (rid := _short_work_id(item))
+        ][:limit]
+        if not ref_ids:
+            self._cache.set(cache_key, [])
+            return []
+
+        await self._throttle.wait()
+        params: dict[str, str] = {
+            "filter": f"openalex:{'|'.join(ref_ids)}",
+            "per_page": str(min(len(ref_ids), 50)),
+        }
+        if polite := self._polite_params():
+            params.update(polite)
+        batch_response = await self._get(
+            "/works",
+            params=params,
+            operation="fetch_references_batch",
+        )
+        self._ensure_success(batch_response, operation="fetch_references_batch")
+        batch_payload = _parse_json_object(batch_response)
+        results = batch_payload.get("results")
+        if not isinstance(results, list):
+            return []
+
+        records = self._parse_results_lenient(results)[:limit]
+        self._cache.set(cache_key, records)
+        return list(records)
+
+    async def fetch_citing_works(
+        self,
+        work_id: str,
+        *,
+        max_results: int = 25,
+        sort: str = "cited_by_count:desc",
+    ) -> list[LiteratureRecord]:
+        """向前滚雪球（反向引文检索）：调用 `/works?filter=cites:<work_id>` 拉取施引文献。"""
+        short_id = _short_work_id(work_id)
+        if not short_id:
+            return []
+        limit = max(1, min(max_results, 50))
+        cache_key = f"oa:cites:{short_id}:{sort}:{limit}"
+        cached = self._cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        await self._throttle.wait()
+        params: dict[str, str] = {
+            "filter": f"cites:{short_id}",
+            "sort": sort,
+            "per_page": str(limit),
+        }
+        if polite := self._polite_params():
+            params.update(polite)
+        response = await self._get(
+            "/works",
+            params=params,
+            operation="fetch_citing_works",
+        )
+        self._ensure_success(response, operation="fetch_citing_works")
+        payload = _parse_json_object(response)
+        results = payload.get("results")
+        if not isinstance(results, list):
+            return []
+
+        records = self._parse_results_lenient(results)[:limit]
+        self._cache.set(cache_key, records)
+        return list(records)
+
+    def _parse_results_lenient(self, items: list[Any]) -> list[LiteratureRecord]:
+        """批量解析引文记录时跳过单条缺日期/残缺条目，避免单篇脏元数据打断整批滚雪球。"""
+        parsed: list[LiteratureRecord] = []
+        for item in items:
+            try:
+                parsed.append(self._parse_result(item))
+            except ValidationException:
+                continue
+        return parsed
+
     # ===== 内部实现 =====
 
     def _search_params(self, search: LiteratureSearch) -> dict[str, str]:
@@ -148,9 +300,19 @@ def _text(value: Any) -> str:
     return value if isinstance(value, str) else ""
 
 
+def _short_work_id(work_id: str) -> str:
+    """`https://openalex.org/W2741809807` / `openalex:W2741809807` → `W2741809807`。"""
+    cleaned = work_id.strip().rstrip("/")
+    if cleaned.lower().startswith("openalex:"):
+        cleaned = cleaned.split(":", 1)[1].strip()
+    if "/" in cleaned:
+        cleaned = cleaned.rsplit("/", 1)[-1].strip()
+    return cleaned
+
+
 def _openalex_source_id(work_id: str) -> str:
     """`https://openalex.org/W2741809807` → `openalex:W2741809807`（≤64 字符）。"""
-    suffix = work_id.rstrip("/").rsplit("/", 1)[-1].strip() or work_id.strip()
+    suffix = _short_work_id(work_id) or work_id.strip()
     return f"openalex:{suffix}"[:_MAX_SOURCE_ID_LENGTH]
 
 

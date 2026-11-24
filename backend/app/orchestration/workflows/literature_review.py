@@ -57,6 +57,24 @@ logger = get_logger(__name__)
 DEFAULT_SEARCH_RESULTS = 10
 
 
+def _find_openalex_source(source: Any) -> Any | None:
+    """从单源或 MultiSourceLiteratureSource 中提取支持引文图谱遍历的 OpenAlex 源。"""
+    if source is None:
+        return None
+    if all(
+        callable(getattr(source, attr, None))
+        for attr in ("resolve_work", "fetch_references", "fetch_citing_works")
+    ):
+        return source
+    nested = getattr(source, "sources", None)
+    if isinstance(nested, list):
+        for item in nested:
+            found = _find_openalex_source(item)
+            if found is not None:
+                return found
+    return None
+
+
 def clamp_max_results(raw: Any) -> int:
     """把 LLM 给的 `max_results` **夹到** `LiteratureSearch` 的合法区间。
 
@@ -567,7 +585,21 @@ class LiteratureReviewWorkflow:
             raise HumanActionRequiredError("缺少文献检索源（arXiv 或离线清单）")
         query = self._query_for(task, node, plan)
         max_results = clamp_max_results(node.input.get("max_results"))
-        records = await self._source.search(LiteratureSearch(query=query, max_results=max_results))
+        config = getattr(task, "config", None) or {}
+        preset = config.get("workflow_preset") if isinstance(config, dict) else None
+        warnings: list[str] = []
+
+        if preset == "citation_snowballing":
+            records, snow_warnings = await self._execute_snowball_search(
+                query=query,
+                config=config if isinstance(config, dict) else {},
+                max_results=max_results,
+            )
+            warnings.extend(snow_warnings)
+        else:
+            records = await self._source.search(
+                LiteratureSearch(query=query, max_results=max_results)
+            )
         await self._record_screening(task, query, records)
         content = "\n".join(
             f"- {record.title} ({record.source_id}) {record.source_url}" for record in records
@@ -576,9 +608,114 @@ class LiteratureReviewWorkflow:
             node_id=node.id,
             content=content,
             artifacts=[record.model_dump(mode="json") for record in records],
+            warnings=warnings,
             duration_ms=0,
             node_type=node.type,
         )
+
+    async def _execute_snowball_search(
+        self,
+        *,
+        query: str,
+        config: dict[str, Any],
+        max_results: int,
+    ) -> tuple[list[LiteratureRecord], list[str]]:
+        """引文滚雪球（Issue #32 Phase 2B）：1 跳向后/向前扩展 + 三键去重。"""
+        from app.orchestration.services.task_refresh import record_keys
+
+        warnings: list[str] = []
+        openalex = _find_openalex_source(self._source)
+        if openalex is None:
+            warnings.append("当前文献源不含 OpenAlex，引文滚雪球已降级为普通检索。")
+            assert self._source is not None
+            records = await self._source.search(
+                LiteratureSearch(query=query, max_results=max_results)
+            )
+            return records, warnings
+
+        raw_seeds = config.get("seed_dois") or []
+        seed_inputs = [str(item).strip() for item in raw_seeds if str(item).strip()][:5]
+        direction = str(config.get("snowball_direction") or "both")
+        if direction not in {"both", "backward", "forward"}:
+            direction = "both"
+
+        # 上限遵循节点 max_results 与任务 max_documents
+        task_max_docs = config.get("max_documents")
+        cap = (
+            min(max_results, int(task_max_docs))
+            if isinstance(task_max_docs, int) and task_max_docs > 0
+            else max_results
+        )
+
+        seeds: list[tuple[str, LiteratureRecord]] = []
+        for seed_text in seed_inputs:
+            try:
+                resolved = await openalex.resolve_work(seed_text)
+            except Exception as exc:
+                warnings.append(f"种子论文解析失败（{seed_text}）：{exc}")
+                continue
+            if resolved is not None:
+                seeds.append(resolved)
+
+        # 未提供种子或全部解析失败时，先精准检索取 Top 3 作为种子论文
+        if not seeds:
+            assert self._source is not None
+            initial = await self._source.search(LiteratureSearch(query=query, max_results=5))
+            for record in initial[:3]:
+                if record.source_id.lower().startswith("openalex:"):
+                    wid = record.source_id.split(":", 1)[1].strip()
+                    if wid:
+                        seeds.append((wid, record))
+                        continue
+                try:
+                    resolved = await openalex.resolve_work(record.title)
+                except Exception:
+                    resolved = None
+                if resolved is not None:
+                    seeds.append(resolved)
+
+        merged: list[LiteratureRecord] = []
+        seen_keys: set[str] = set()
+
+        def _add_unique(record: LiteratureRecord) -> bool:
+            keys = record_keys(record)
+            if keys and (keys & seen_keys):
+                return False
+            seen_keys.update(keys)
+            merged.append(record)
+            return True
+
+        for _, seed_record in seeds:
+            if len(merged) >= cap:
+                break
+            _add_unique(seed_record)
+
+        per_hop = max(5, cap)
+        for work_id, _ in seeds:
+            if len(merged) >= cap:
+                break
+            if direction in {"both", "backward"}:
+                try:
+                    refs = await openalex.fetch_references(work_id, max_results=per_hop)
+                except Exception as exc:
+                    warnings.append(f"向后引文扩展失败（{work_id}）：{exc}")
+                    refs = []
+                for rec in refs:
+                    if len(merged) >= cap:
+                        break
+                    _add_unique(rec)
+            if direction in {"both", "forward"} and len(merged) < cap:
+                try:
+                    citings = await openalex.fetch_citing_works(work_id, max_results=per_hop)
+                except Exception as exc:
+                    warnings.append(f"向前施引扩展失败（{work_id}）：{exc}")
+                    citings = []
+                for rec in citings:
+                    if len(merged) >= cap:
+                        break
+                    _add_unique(rec)
+
+        return merged[:cap], warnings
 
     async def _record_screening(
         self,

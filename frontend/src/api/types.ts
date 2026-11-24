@@ -70,8 +70,14 @@ export type TaskCommand =
 
 export type PlanNodeType = "search" | "extract" | "write" | "validate" | "review";
 
-/** 预设工作流（Issue #32）：文献综述 / 研究空白分析 / 验证引用。 */
-export type WorkflowPreset = "literature_review" | "research_gaps" | "verify_citations";
+/** 预设工作流（Issue #32）：文献综述 / 研究空白分析 / 验证引用 / 引文滚雪球。 */
+export type WorkflowPreset =
+  | "literature_review"
+  | "research_gaps"
+  | "verify_citations"
+  | "citation_snowballing";
+
+export type SnowballDirection = "both" | "backward" | "forward";
 
 export interface TaskCreate {
   topic: string;
@@ -80,6 +86,9 @@ export interface TaskCreate {
   workflow_preset?: WorkflowPreset;
   /** 验证引用模式（verify_citations）下的待核验草稿文本 */
   draft_text?: string | null;
+  /** 引文滚雪球模式（citation_snowballing）下的种子论文 DOI 或标题（最多 5 篇） */
+  seed_dois?: string[];
+  snowball_direction?: SnowballDirection;
   date_from?: string | null;
   date_to?: string | null;
   max_documents?: number;

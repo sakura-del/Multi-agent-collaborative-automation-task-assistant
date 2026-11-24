@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.orchestration.contracts import (
     LiteratureReviewRequest,
+    SnowballDirection,
     SubtaskSnapshot,
     TaskCommand,
     TaskControlRequest,
@@ -47,6 +48,8 @@ class TaskCreate(BaseModel):
     keywords: list[str] = Field(default_factory=list, max_length=10)
     workflow_preset: WorkflowPreset = "literature_review"
     draft_text: str | None = Field(default=None, max_length=30000)
+    seed_dois: list[str] = Field(default_factory=list, max_length=5)
+    snowball_direction: SnowballDirection = "both"
     date_from: date | None = None
     date_to: date | None = None
     max_documents: int = Field(default=20, ge=1, le=50)
@@ -91,6 +94,12 @@ class TaskCreate(BaseModel):
                 raise ValueError("验证引用模式需提供待核验草稿（draft_text）或至少一篇知识库文档")
             if not self.keywords:
                 self.keywords = ["引用核验"]
+        elif self.workflow_preset == "citation_snowballing":
+            self.seed_dois = [item.strip() for item in self.seed_dois if item.strip()][:5]
+            if not self.keywords and self.seed_dois:
+                self.keywords = list(self.seed_dois[:5])
+            if len(self.keywords) < 1:
+                raise ValueError("keywords 或 seed_dois 至少需要提供 1 项")
         elif len(self.keywords) < 1:
             raise ValueError("keywords 至少需要 1 个关键词")
         return self

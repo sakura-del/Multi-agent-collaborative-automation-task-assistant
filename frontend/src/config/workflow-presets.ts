@@ -61,6 +61,19 @@ export const WORKFLOW_PRESETS: readonly WorkflowPresetOption[] = [
       verifyReferences: true,
     },
   },
+  {
+    id: "citation_snowballing",
+    label: "引文滚雪球",
+    shortLabel: "引文滚雪球",
+    description: "以种子论文为起点，通过 OpenAlex 双向追踪参考文献与后续施引工作。",
+    topicPlaceholder: "例如：以 Lewis et al. (2020) 为种子追踪 RAG 方法演进",
+    promptPlaceholder: "输入种子论文主题，沿引文网络滚雪球追踪…",
+    allowGlobalPrompt: true,
+    defaults: {
+      maxDocuments: 30,
+      verifyReferences: true,
+    },
+  },
 ] as const;
 
 export const GLOBAL_PROMPT_PRESETS: readonly WorkflowPresetOption[] =
