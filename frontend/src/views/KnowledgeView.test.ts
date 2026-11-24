@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
+import { routerKey } from "vue-router";
 
 import KnowledgeView from "@/views/KnowledgeView.vue";
 import DocumentTable from "@/components/knowledge/DocumentTable.vue";
@@ -60,7 +61,7 @@ function stats(overrides: Partial<KnowledgeStats> = {}): KnowledgeStats {
 async function mountWith(
   documents: KnowledgeDocument[],
   stat: KnowledgeStats = stats(),
-  options: { skipTable?: boolean } = {},
+  options: { skipTable?: boolean; routerPush?: ReturnType<typeof vi.fn> } = {},
 ) {
   setActivePinia(createPinia());
   const { useKnowledgeStore } = await import("@/stores/knowledge");
@@ -72,6 +73,9 @@ async function mountWith(
 
   const wrapper = mount(KnowledgeView, {
     global: {
+      provide: {
+        [routerKey as symbol]: options.routerPush ? { push: options.routerPush } : {},
+      },
       stubs: {
         DocumentUpload: true,
         ...(options.skipTable ? { DocumentTable: true } : {}),
@@ -249,6 +253,16 @@ describe("既有契约必须保留", () => {
 });
 
 describe("Issue #36：勾选就绪文档新建论文抽取表", () => {
+  it("知识库页提供「论文抽取表」常驻入口，并导航到列表", async () => {
+    const push = vi.fn();
+    const wrapper = await mountWith([doc()], stats(), { routerPush: push });
+    const button = wrapper.find('[data-test="kb-view-extractions"]');
+    expect(button.exists()).toBe(true);
+    expect(button.text()).toContain("论文抽取表");
+    await button.trigger("click");
+    expect(push).toHaveBeenCalledWith({ name: "extractions" });
+  });
+
   it("仅允许勾选 ready 文档，选中后显示「新建抽取表（已选 N 篇）」按钮", async () => {
     const wrapper = await mountWith([
       doc({ id: "ready-1", title: "已就绪论文", index_status: "ready" }),

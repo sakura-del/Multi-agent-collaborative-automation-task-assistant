@@ -28,6 +28,7 @@ const ROUTE_CRUMBS: Record<string, Crumb[]> = {
   "task-detail": [{ label: "研究任务", to: { name: "tasks" } }, { label: "任务详情" }],
   "task-screening": [{ label: "研究任务", to: { name: "tasks" } }, { label: "PRISMA 筛选" }],
   knowledge: [{ label: "知识库" }],
+  extractions: [{ label: "知识库", to: { name: "knowledge" } }, { label: "论文抽取表" }],
   styles: [{ label: "素材", to: { name: "styles" } }, { label: "引用样式" }],
   templates: [{ label: "素材", to: { name: "templates" } }, { label: "Word 模板" }],
   "reference-import": [{ label: "素材", to: { name: "reference-import" } }, { label: "导入文献" }],

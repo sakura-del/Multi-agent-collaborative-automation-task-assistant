@@ -157,11 +157,23 @@ const isFiltered = computed(() => typeFilter.value !== "all" || keyword.value.tr
 
 <template>
   <section>
-    <PageHeader
-      eyebrow="Evidence library"
-      title="知识库"
-      description="文献综述的证据来源。支持 pdf / docx / md / txt，单文件 ≤ 30 MB。"
-    />
+    <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+      <PageHeader
+        class="mb-0"
+        eyebrow="Evidence library"
+        title="知识库"
+        description="文献综述的证据来源。支持 pdf / docx / md / txt，单文件 ≤ 30 MB。"
+      />
+      <Button
+        variant="outline"
+        size="sm"
+        data-test="kb-view-extractions"
+        @click="router?.push({ name: 'extractions' })"
+      >
+        <Table2 :size="14" aria-hidden="true" />
+        论文抽取表
+      </Button>
+    </div>
 
     <ErrorBanner :message="actionError" />
 
