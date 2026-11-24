@@ -509,12 +509,13 @@ onBeforeUnmount(() => {
         v-else-if="table"
         class="relative overflow-x-auto rounded-lg border border-border bg-card"
       >
-        <table class="w-full border-collapse text-xs" data-test="extraction-table">
+        <table class="w-full border-separate border-spacing-0 text-xs" data-test="extraction-table">
           <thead>
-            <tr class="border-b border-border bg-muted/40 text-left">
+            <tr class="text-left">
               <th
                 scope="col"
-                class="sticky left-0 z-10 min-w-60 border-r border-border bg-muted/90 px-3.5 py-2.5 font-semibold text-foreground backdrop-blur"
+                data-test="extraction-sticky-header"
+                class="sticky left-0 z-20 w-64 min-w-64 max-w-72 border-r border-b border-border-strong bg-muted px-3.5 py-2.5 font-semibold text-foreground shadow-[4px_0_8px_-4px_rgba(0,0,0,0.08)]"
               >
                 论文（{{ table.sources.length }}）
               </th>
@@ -522,7 +523,7 @@ onBeforeUnmount(() => {
                 v-for="col in table.columns"
                 :key="col.key"
                 scope="col"
-                class="min-w-44 px-3.5 py-2.5 font-semibold text-foreground"
+                class="min-w-44 border-b border-border bg-muted/40 px-3.5 py-2.5 font-semibold text-foreground"
                 :title="col.prompt"
               >
                 <div>{{ col.label }}</div>
@@ -536,10 +537,12 @@ onBeforeUnmount(() => {
             <tr
               v-for="src in table.sources"
               :key="`${src.source_type}:${src.source_id}`"
-              class="border-b border-border align-top last:border-b-0 hover:bg-muted/20"
+              class="group align-top hover:bg-muted/20"
               :data-test="`extraction-row-${src.source_id}`"
             >
-              <td class="sticky left-0 z-10 border-r border-border bg-card px-3.5 py-3">
+              <td
+                class="sticky left-0 z-10 w-64 min-w-64 max-w-72 border-r border-b border-r-border-strong border-b-border bg-card px-3.5 py-3 shadow-[4px_0_8px_-4px_rgba(0,0,0,0.08)] group-last:border-b-0"
+              >
                 <p class="font-medium leading-snug text-foreground">{{ src.title }}</p>
                 <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
                   <span v-if="src.year" class="text-[11px] text-muted-foreground tabular-nums">
@@ -557,7 +560,7 @@ onBeforeUnmount(() => {
               <td
                 v-for="col in table.columns"
                 :key="col.key"
-                class="px-3.5 py-3"
+                class="border-b border-border px-3.5 py-3 group-last:border-b-0"
                 :data-test="`extraction-cell-${src.source_id}-${col.key}`"
               >
                 <template v-if="getCell(src, col.key)">

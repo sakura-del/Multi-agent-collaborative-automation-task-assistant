@@ -74,7 +74,7 @@ const summary = computed(() => {
       <div class="flex items-center gap-2">
         <Layers class="size-4 text-muted-foreground" />
         <div class="min-w-0">
-          <h3 class="text-sm font-medium leading-5">Routing coverage</h3>
+          <h3 class="text-sm font-medium leading-5">节点路由覆盖</h3>
           <p v-if="model" class="text-[10px] text-muted-foreground">{{ model }}</p>
         </div>
         <span
@@ -87,12 +87,12 @@ const summary = computed(() => {
 
       <!-- 分段条 -->
       <div class="mt-3">
-        <div class="flex items-baseline justify-between">
+        <div class="flex items-baseline justify-between gap-2">
           <span class="font-mono text-xs tabular-nums">
-            {{ configured }} of {{ capacity }} nodes routed
+            已路由 {{ configured }} / {{ capacity }} 个节点
           </span>
           <span class="font-mono text-xs tabular-nums text-muted-foreground">
-            {{ capacity - configured }} follow task
+            {{ capacity - configured }} 个跟随任务
           </span>
         </div>
         <div class="mt-2 flex h-2.5 gap-1" role="meter" :aria-valuenow="percent" aria-valuemin="0" aria-valuemax="100">

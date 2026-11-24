@@ -14,10 +14,12 @@ import type {
 //
 // Bearer 鉴权由 client.ts 的请求拦截器统一注入。
 
-/** 列出引用库条目（按创建时间倒序，稳定排序由后端保证） */
+/** 列出引用库条目（按创建时间倒序，稳定排序由后端保证；支持关键词与年份筛选） */
 export function listLibraryItems(params?: {
   limit?: number;
   offset?: number;
+  q?: string;
+  year?: number;
 }): Promise<LibraryListOut> {
   return api
     .get<LibraryListOut>("/reference-library", { params })

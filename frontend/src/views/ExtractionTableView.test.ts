@@ -186,4 +186,18 @@ describe("ExtractionTableView（Issue #36）", () => {
       column_keys: ["code_url"],
     });
   });
+
+  it("固定首列使用实色背景与清晰边框分割，不采用模糊渐隐（Issue #56）", async () => {
+    const wrapper = mount(ExtractionTableView, {
+      props: { tableId: "tbl-1" },
+      global: { stubs: { Teleport: true } },
+    });
+    await flushPromises();
+
+    const stickyHeader = wrapper.get('[data-test="extraction-sticky-header"]');
+    const className = stickyHeader.attributes("class") ?? "";
+    expect(className).toContain("bg-muted");
+    expect(className).not.toContain("bg-muted/90");
+    expect(className).not.toContain("backdrop-blur");
+  });
 });

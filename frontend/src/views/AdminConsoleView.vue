@@ -56,7 +56,8 @@ const taskTotal = ref(0);
 const taskOffset = ref(0);
 const taskQuery = ref("");
 const taskStatus = ref("");
-const tasksLoading = ref(false);
+const tasksLoading = ref(true);
+const tasksLoaded = ref(false);
 
 const users = ref<AdminUserRow[]>([]);
 const userTotal = ref(0);
@@ -64,12 +65,16 @@ const userOffset = ref(0);
 const userQuery = ref("");
 const userRole = ref<"" | "admin" | "user">("");
 const usersLoading = ref(false);
+const usersLoaded = ref(false);
 
 const STATUS_OPTIONS = [
   { value: "", label: "全部状态" },
   { value: "planning", label: "规划中" },
   { value: "waiting_approval", label: "待确认" },
   { value: "running", label: "执行中" },
+  { value: "reviewing", label: "复盘中" },
+  { value: "paused", label: "已暂停" },
+  { value: "retrying", label: "重试中" },
   { value: "waiting_human", label: "待人工" },
   { value: "completed", label: "已完成" },
   { value: "failed", label: "失败" },
@@ -136,6 +141,7 @@ async function loadTasks(): Promise<void> {
     });
     tasks.value = page.items;
     taskTotal.value = page.total;
+    tasksLoaded.value = true;
   } catch (err) {
     error.value = (err as Error).message || "任务列表加载失败";
   } finally {
@@ -154,6 +160,7 @@ async function loadUsers(): Promise<void> {
     });
     users.value = page.items;
     userTotal.value = page.total;
+    usersLoaded.value = true;
   } catch (err) {
     error.value = (err as Error).message || "用户列表加载失败";
   } finally {
@@ -354,7 +361,7 @@ onMounted(async () => {
               查询
             </button>
             <span data-test="admin-total" class="ml-auto text-xs text-muted-foreground">
-              共 {{ formatNumber(taskTotal) }} 条
+              {{ tasksLoaded ? `共 ${formatNumber(taskTotal)} 条` : "加载中…" }}
             </span>
           </div>
 
@@ -371,15 +378,15 @@ onMounted(async () => {
             description="换个状态或关键词试试。"
           />
           <div v-else class="overflow-x-auto">
-            <table class="w-full text-sm">
+            <table class="w-full min-w-[46rem] text-sm">
               <thead>
                 <tr class="border-b border-border text-left text-xs text-muted-foreground">
-                  <th class="py-2 pr-3 font-medium">任务</th>
-                  <th class="py-2 pr-3 font-medium">所有者</th>
-                  <th class="py-2 pr-3 font-medium">状态</th>
-                  <th class="py-2 pr-3 font-medium">模型</th>
-                  <th class="py-2 pr-3 text-right font-medium">Token</th>
-                  <th class="py-2 font-medium">创建时间</th>
+                  <th class="py-2 pr-3 font-medium whitespace-nowrap">任务</th>
+                  <th class="py-2 pr-3 font-medium whitespace-nowrap">所有者</th>
+                  <th class="py-2 pr-3 font-medium whitespace-nowrap">状态</th>
+                  <th class="py-2 pr-3 font-medium whitespace-nowrap">模型</th>
+                  <th class="py-2 pr-3 text-right font-medium whitespace-nowrap">Token</th>
+                  <th class="py-2 font-medium whitespace-nowrap">创建时间</th>
                 </tr>
               </thead>
               <tbody>
@@ -389,31 +396,35 @@ onMounted(async () => {
                   data-test="admin-task-row"
                   class="border-b border-border/60 last:border-0"
                 >
-                  <td class="max-w-[22rem] py-2 pr-3">
+                  <td class="max-w-[16rem] py-2 pr-3 xl:max-w-[20rem]">
                     <p class="truncate" :title="row.title">{{ row.title }}</p>
                     <p class="truncate font-mono text-[10px] text-muted-foreground">
                       {{ row.task_id.slice(0, 8) }}
                     </p>
                   </td>
-                  <td class="py-2 pr-3 text-xs">{{ row.owner_username }}</td>
-                  <td class="py-2 pr-3">
+                  <td class="py-2 pr-3 text-xs whitespace-nowrap">{{ row.owner_username }}</td>
+                  <td class="py-2 pr-3 whitespace-nowrap">
                     <span
-                      class="inline-flex items-center rounded border px-1.5 py-0.5 text-[11px]"
+                      class="inline-flex shrink-0 items-center whitespace-nowrap rounded border px-1.5 py-0.5 text-[11px]"
                       :class="statusClass(row.status)"
                     >
                       {{ STATUS_LABEL[row.status] ?? row.status }}
                     </span>
                   </td>
-                  <td class="max-w-[14rem] py-2 pr-3 text-xs">
-                    <span v-if="row.is_byok" class="mr-1 rounded bg-primary/10 px-1 py-0.5 text-[10px] text-primary">
-                      BYOK
-                    </span>
-                    <span class="text-muted-foreground">{{ row.model_label ?? "平台模型" }}</span>
+                  <td class="max-w-[13rem] py-2 pr-3 text-xs">
+                    <div class="flex items-center gap-1 min-w-0">
+                      <span v-if="row.is_byok" class="shrink-0 rounded bg-primary/10 px-1 py-0.5 text-[10px] text-primary">
+                        BYOK
+                      </span>
+                      <span class="truncate text-muted-foreground" :title="row.model_label ?? '平台模型'">
+                        {{ row.model_label ?? "平台模型" }}
+                      </span>
+                    </div>
                   </td>
-                  <td class="py-2 pr-3 text-right text-xs tabular-nums">
+                  <td class="py-2 pr-3 text-right text-xs whitespace-nowrap tabular-nums">
                     {{ formatNumber(row.used_tokens) }}
                   </td>
-                  <td class="py-2 text-xs text-muted-foreground">
+                  <td class="py-2 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
                     {{ formatDateTime(row.created_at) }}
                   </td>
                 </tr>
@@ -472,7 +483,7 @@ onMounted(async () => {
               查询
             </button>
             <span class="ml-auto text-xs text-muted-foreground">
-              共 {{ formatNumber(userTotal) }} 人
+              {{ usersLoaded ? `共 ${formatNumber(userTotal)} 人` : "加载中…" }}
             </span>
           </div>
 

@@ -50,8 +50,9 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
+from typing import Any
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import String, cast, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundException, ValidationException
@@ -346,12 +347,38 @@ class ReferenceLibraryService:
 
     # ===== 查询 =====
 
+    @staticmethod
+    def _filter_conditions(
+        user_id: uuid.UUID,
+        *,
+        query: str | None = None,
+        year: int | None = None,
+    ) -> list[Any]:
+        """构建列表与计数共用的过滤条件（支持关键词与年份筛选，Issue #56）。"""
+        conditions: list[Any] = [ReferenceLibraryItem.user_id == user_id]
+        if year is not None:
+            conditions.append(ReferenceLibraryItem.issued_year == year)
+        clean_query = (query or "").strip()
+        if clean_query:
+            pattern = f"%{clean_query}%"
+            conditions.append(
+                or_(
+                    ReferenceLibraryItem.title.ilike(pattern),
+                    ReferenceLibraryItem.doi.ilike(pattern),
+                    ReferenceLibraryItem.ref_id.ilike(pattern),
+                    cast(ReferenceLibraryItem.payload, String).ilike(pattern),
+                )
+            )
+        return conditions
+
     async def list_items(
         self,
         user_id: uuid.UUID,
         *,
         limit: int = 100,
         offset: int = 0,
+        query: str | None = None,
+        year: int | None = None,
     ) -> list[ReferenceLibraryItem]:
         """列出条目。
 
@@ -360,7 +387,7 @@ class ReferenceLibraryService:
         """
         stmt = (
             select(ReferenceLibraryItem)
-            .where(ReferenceLibraryItem.user_id == user_id)
+            .where(*self._filter_conditions(user_id, query=query, year=year))
             .order_by(
                 ReferenceLibraryItem.created_at.desc(),
                 ReferenceLibraryItem.id.desc(),
@@ -370,11 +397,17 @@ class ReferenceLibraryService:
         )
         return list((await self._db.execute(stmt)).scalars().all())
 
-    async def count(self, user_id: uuid.UUID) -> int:
+    async def count(
+        self,
+        user_id: uuid.UUID,
+        *,
+        query: str | None = None,
+        year: int | None = None,
+    ) -> int:
         stmt = (
             select(func.count())
             .select_from(ReferenceLibraryItem)
-            .where(ReferenceLibraryItem.user_id == user_id)
+            .where(*self._filter_conditions(user_id, query=query, year=year))
         )
         return int((await self._db.execute(stmt)).scalar_one())
 

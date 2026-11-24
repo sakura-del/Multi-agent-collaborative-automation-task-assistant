@@ -32,7 +32,8 @@ import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import PageHeader from "@/components/common/PageHeader.vue";
 
 const overview = ref<ByokOverview | null>(null);
-const days = ref(30);
+// 与后台管理（/admin）统一默认统计近 7 天窗口（Issue #56）
+const days = ref(7);
 const loading = ref(true);
 const error = ref("");
 

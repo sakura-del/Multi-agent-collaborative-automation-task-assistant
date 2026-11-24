@@ -143,17 +143,17 @@ describe("AdminByokView", () => {
     expect(wrapper.get("[data-test='byok-top-user-alice']").text()).toContain("1 / 2");
   });
 
-  it("切换窗口重新请求（7 天）", async () => {
+  it("默认按近 7 天统计（与 /admin 对齐），切换窗口重新请求（30 天）", async () => {
     vi.mocked(getByokOverview).mockResolvedValue(overview() as never);
 
     const wrapper = mount(AdminByokView);
     await flushPromises();
-    expect(getByokOverview).toHaveBeenCalledWith(30);
+    expect(getByokOverview).toHaveBeenCalledWith(7);
 
-    await wrapper.get("[data-test='byok-days-7']").trigger("click");
+    await wrapper.get("[data-test='byok-days-30']").trigger("click");
     await flushPromises();
 
-    expect(getByokOverview).toHaveBeenCalledWith(7);
+    expect(getByokOverview).toHaveBeenCalledWith(30);
   });
 
   it("窗口无任务时显示空态，不渲染一排 0", async () => {

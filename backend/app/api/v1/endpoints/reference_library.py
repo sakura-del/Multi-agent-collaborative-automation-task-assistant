@@ -21,6 +21,7 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from typing import Annotated
 
@@ -36,7 +37,7 @@ from app.db.session import get_db
 from app.knowledge.services.reference_library_service import (
     ReferenceLibraryService,
 )
-from app.tools.csl.models import CslItem
+from app.tools.csl.models import CslItem, CslName
 
 router = APIRouter(prefix="/reference-library", tags=["reference-library"])
 
@@ -163,6 +164,27 @@ CurrentUserDep = Annotated[User, Depends(get_current_active_user)]
 ServiceDep = Annotated[ReferenceLibraryService, Depends(get_reference_library_service)]
 
 
+_CJK_RE = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf]")
+
+
+def _format_author_name(name: CslName) -> str:
+    """将 CSL 作者姓名格式化为人类可读字符串（Issue #56）。
+
+    - 含中文/CJK 字符时保持 `姓+名` 无空格（如「牛耕田」）；
+    - 西文姓名采用 `Given Family` 空格分隔（如「Patrick Lewis」），
+      避免出现 `LewisPatrick`、`EsShahul` 粘连。
+    """
+    if name.literal and name.literal.strip():
+        return name.literal.strip()
+    family = (name.family or "").strip()
+    given = (name.given or "").strip()
+    if family and given:
+        if _CJK_RE.search(family) or _CJK_RE.search(given):
+            return f"{family}{given}"
+        return f"{given} {family}"
+    return family or given
+
+
 def _to_out(row: ReferenceLibraryItem) -> LibraryItemOut:
     """ORM 行 → 响应模型（从 `payload` 取真源字段）。
 
@@ -175,11 +197,7 @@ def _to_out(row: ReferenceLibraryItem) -> LibraryItemOut:
         item_id=str(row.id),
         ref_id=item.id,
         title=item.title,
-        authors=[
-            (name.literal or f"{name.family or ''}{name.given or ''}").strip()
-            or (name.family or "")
-            for name in item.author
-        ],
+        authors=[formatted for name in item.author if (formatted := _format_author_name(name))],
         year=item.issued_year,
         container_title=item.container_title,
         doi=item.doi,
@@ -196,11 +214,19 @@ async def list_library(
     current_user: CurrentUserDep,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
+    q: Annotated[str | None, Query(max_length=120, description="按题名/作者/DOI/期刊搜索")] = None,
+    year: Annotated[int | None, Query(ge=1000, le=2200, description="按出版年份筛选")] = None,
 ) -> LibraryListOut:
-    rows = await service.list_items(current_user.id, limit=limit, offset=offset)
+    rows = await service.list_items(
+        current_user.id,
+        limit=limit,
+        offset=offset,
+        query=q,
+        year=year,
+    )
     return LibraryListOut(
         items=[_to_out(row) for row in rows],
-        total=await service.count(current_user.id),
+        total=await service.count(current_user.id, query=q, year=year),
     )
 
 

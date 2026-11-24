@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 import { CircleCheck, Loader2, MailCheck } from "lucide-vue-next";
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
@@ -9,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { confirmEmailVerification, requestEmailVerification } from "@/api/account";
 import { useAuthStore } from "@/stores/auth";
+import { formatDateTime } from "@/utils/task-status";
 
 // 邮箱验证页（Phase 1 P1-C）：
 //   - 带 token（从邮件链接进入）→ 自动确认
@@ -21,6 +23,7 @@ import { useAuthStore } from "@/stores/auth";
 const props = withDefaults(defineProps<{ token?: string }>(), { token: "" });
 
 const auth = useAuthStore();
+const router = useRouter();
 const confirming = ref(false);
 const requesting = ref(false);
 const message = ref<string | null>(null);
@@ -28,6 +31,10 @@ const error = ref<string | null>(null);
 const confirmed = ref(false);
 // 登录态下预填当前账号邮箱；未登录时（邮件链接过期场景）留空由用户填写
 const email = ref(auth.user?.email ?? "");
+/** 已登录且后端返回 email_verified_at 时，直接呈现已验证态，不再误导用户重复发邮件（Issue #56）。 */
+const isAlreadyVerified = computed(
+  () => !props.token && Boolean(auth.user?.email_verified_at),
+);
 
 onMounted(() => {
   if (props.token) {
@@ -99,28 +106,49 @@ async function handleRequest() {
       <span>正在验证…</span>
     </p>
 
-    <div v-if="!props.token" class="mb-3 space-y-1.5">
-      <Label for="verify-email">注册邮箱</Label>
-      <Input
-        id="verify-email"
-        v-model="email"
-        type="email"
-        placeholder="you@example.com"
-        autocomplete="email"
-        data-test="verify-email-input"
-      />
-    </div>
+    <template v-if="isAlreadyVerified">
+      <Alert variant="success" class="mb-4" data-test="verify-already-verified">
+        <CircleCheck />
+        <div class="space-y-0.5">
+          <p class="font-medium">当前邮箱已通过验证</p>
+          <p class="text-xs opacity-90">
+            {{ auth.user?.email }} · 验证于 {{ formatDateTime(auth.user?.email_verified_at) }}
+          </p>
+        </div>
+      </Alert>
+      <Button
+        type="button"
+        variant="secondary"
+        data-test="verify-back-tasks"
+        @click="router.push({ name: 'tasks' })"
+      >
+        返回工作台
+      </Button>
+    </template>
 
-    <Button
-      v-if="!props.token"
-      type="button"
-      data-test="verify-request"
-      :disabled="requesting"
-      @click="handleRequest"
-    >
-      <Loader2 v-if="requesting" class="animate-spin" aria-hidden="true" />
-      <MailCheck v-else :size="15" aria-hidden="true" />
-      <span>{{ requesting ? "发送中…" : "重发验证邮件" }}</span>
-    </Button>
+    <template v-else-if="!props.token">
+      <div class="mb-3 space-y-1.5">
+        <Label for="verify-email">注册邮箱</Label>
+        <Input
+          id="verify-email"
+          v-model="email"
+          type="email"
+          placeholder="you@example.com"
+          autocomplete="email"
+          data-test="verify-email-input"
+        />
+      </div>
+
+      <Button
+        type="button"
+        data-test="verify-request"
+        :disabled="requesting"
+        @click="handleRequest"
+      >
+        <Loader2 v-if="requesting" class="animate-spin" aria-hidden="true" />
+        <MailCheck v-else :size="15" aria-hidden="true" />
+        <span>{{ requesting ? "发送中…" : "重发验证邮件" }}</span>
+      </Button>
+    </template>
   </section>
 </template>

@@ -189,7 +189,7 @@ function handleLogout() {
         @open-mobile="mobileOpen = true"
         @open-command="commandOpen = true"
       />
-      <main class="min-w-0 flex-1 px-4 py-5 md:px-8 md:py-6">
+      <main class="min-w-0 flex-1 px-4 pt-5 pb-20 md:px-8 md:pt-6 md:pb-20">
         <div class="mx-auto w-full max-w-[1440px]">
           <RouterView />
         </div>

@@ -146,4 +146,26 @@ describe("AdminConsoleView", () => {
     expect(rows[0].text()).toContain("7");
     expect(rows[0].text()).toContain("2");
   });
+
+  it("状态筛选包含「已暂停」，且首屏加载完成前不误报共 0 条（Issue #56）", async () => {
+    let resolveTasks!: (value: unknown) => void;
+    vi.mocked(listAdminTasks).mockReturnValue(
+      new Promise((resolve) => {
+        resolveTasks = resolve;
+      }) as never
+    );
+
+    const wrapper = mount(AdminConsoleView);
+    expect(wrapper.get('[data-test="admin-total"]').text()).toContain("加载中");
+    expect(wrapper.get('[data-test="admin-total"]').text()).not.toContain("共 0 条");
+
+    const options = wrapper
+      .findAll('[data-test="admin-task-status"] option')
+      .map((opt) => ({ value: opt.attributes("value"), label: opt.text() }));
+    expect(options).toContainEqual({ value: "paused", label: "已暂停" });
+
+    resolveTasks(taskPage);
+    await flushPromises();
+    expect(wrapper.get('[data-test="admin-total"]').text()).toContain("共 2 条");
+  });
 });

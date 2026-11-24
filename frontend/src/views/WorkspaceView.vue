@@ -6,7 +6,7 @@ import EmptyState from "@/components/common/EmptyState.vue";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import PageHeader from "@/components/common/PageHeader.vue";
 import { Badge, type BadgeVariants } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -419,17 +419,21 @@ const summary = computed(() => {
         class="rounded-lg border border-border bg-card p-3"
         :data-test="`workspace-row-${workspace.workspace_id}`"
       >
-        <div class="flex flex-wrap items-start justify-between gap-2">
-          <div class="min-w-0">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0 flex-1">
             <RouterLink
               :to="{ name: 'workspace-detail', params: { id: workspace.workspace_id } }"
-              class="text-sm font-medium hover:underline"
+              class="block break-words text-sm font-medium hover:underline"
             >
               {{ workspace.name }}
             </RouterLink>
-            <p class="mt-0.5 text-xs text-muted-foreground">{{ workspace.slug }}</p>
+            <p class="mt-0.5 truncate text-xs text-muted-foreground">{{ workspace.slug }}</p>
           </div>
-          <Badge v-if="workspace.my_role" :variant="ROLE_TONE[workspace.my_role]">
+          <Badge
+            v-if="workspace.my_role"
+            :variant="ROLE_TONE[workspace.my_role]"
+            class="shrink-0 whitespace-nowrap"
+          >
             {{ ROLE_LABELS[workspace.my_role] }}
           </Badge>
         </div>
@@ -472,13 +476,12 @@ const summary = computed(() => {
           >
             生成邀请码
           </Button>
-          <Button variant="ghost" size="sm" as-child>
-            <RouterLink
-              :to="{ name: 'workspace-detail', params: { id: workspace.workspace_id } }"
-            >
-              管理成员
-            </RouterLink>
-          </Button>
+          <RouterLink
+            :to="{ name: 'workspace-detail', params: { id: workspace.workspace_id } }"
+            :class="buttonVariants({ variant: 'ghost', size: 'sm' })"
+          >
+            管理成员
+          </RouterLink>
         </div>
       </li>
     </ul>

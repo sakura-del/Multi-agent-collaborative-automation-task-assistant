@@ -44,6 +44,8 @@ export const useChatStore = defineStore("chat", () => {
 
   const streamingMessageId = ref<string | null>(null);
   const streamingText = ref("");
+  /** 发送阶段互斥锁：覆盖 sendMessage 网络往返窗口，防止双击/连按触发重复入库（Issue #56）。 */
+  const sending = ref(false);
   let controller: AbortController | null = null;
 
   const activeConversation = computed(() => detail.value);
@@ -125,17 +127,31 @@ export const useChatStore = defineStore("chat", () => {
    * @param content 用户输入
    * @param parentId 从任意节点继续（编辑重发/分支）；缺省 = 当前分支末端
    */
+  /** 按 id 幂等写入消息，避免并发/幂等响应导致同一条消息在列表中重复出现。 */
+  function upsertMessage(incoming: ChatMessage): boolean {
+    if (!detail.value) return false;
+    const index = detail.value.messages.findIndex((item) => item.id === incoming.id);
+    if (index >= 0) {
+      detail.value.messages[index] = incoming;
+      return false;
+    }
+    detail.value.messages.push(incoming);
+    return true;
+  }
+
   async function send(
     content: string,
     parentId?: string | null,
     attachments?: ChatAttachment[],
   ) {
     const conversationId = detail.value?.id;
-    if (!conversationId) return;
+    if (!conversationId || sending.value || streamingMessageId.value) return;
+    sending.value = true;
     error.value = null;
     // undefined = 接当前分支末端；null = 明确挂回根（编辑首条消息的分支）
     const effectiveParent =
       parentId === undefined ? (activeLeafId.value ?? undefined) : parentId;
+    let assistantMessageId: string | null = null;
     try {
       const pair = await conversationApi.sendMessage(
         conversationId,
@@ -143,16 +159,24 @@ export const useChatStore = defineStore("chat", () => {
         effectiveParent,
         attachments
       );
-      detail.value?.messages.push(pair.user_message, pair.assistant_message);
-      if (detail.value) detail.value.message_count += 2;
+      const addedUser = upsertMessage(pair.user_message);
+      const addedAssistant = upsertMessage(pair.assistant_message);
+      if (detail.value) {
+        detail.value.message_count += Number(addedUser) + Number(addedAssistant);
+      }
       activeLeafId.value = pair.assistant_message.id;
+      assistantMessageId = pair.assistant_message.id;
       // 分支切换/新消息都回写服务端 leaf（下次打开会话停在这里）
       void conversationApi
         .update(conversationId, { leaf_id: pair.assistant_message.id })
         .catch(() => undefined);
-      await runStream(pair.assistant_message.id);
     } catch (err) {
       error.value = (err as Error).message;
+    } finally {
+      sending.value = false;
+    }
+    if (assistantMessageId) {
+      await runStream(assistantMessageId);
     }
   }
 
@@ -359,6 +383,7 @@ export const useChatStore = defineStore("chat", () => {
     activeConversation,
     activePath,
     loading,
+    sending,
     error,
     streamingMessageId,
     streamingText,

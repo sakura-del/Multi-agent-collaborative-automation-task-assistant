@@ -247,6 +247,9 @@ onBeforeUnmount(() => {
 
 const streamingId = computed(() => store.streamingMessageId);
 const isStreaming = computed(() => Boolean(streamingId.value));
+/** 覆盖 ensureConversation() 建会话窗口，与 store.sending 组成全链路并发互斥锁（Issue #56）。 */
+const submittingLock = ref(false);
+const isBusy = computed(() => submittingLock.value || store.sending || isStreaming.value);
 
 function isStreamingMessage(message: ChatMessage): boolean {
   return streamingId.value === message.id;
@@ -259,27 +262,34 @@ async function ensureConversation(): Promise<string | null> {
 
 async function submit(value: string) {
   const text = value.trim();
-  if (!text || isStreaming.value) return;
+  if (!text || isBusy.value) return;
   if (uploadingCount.value > 0) {
     attachmentError.value = "附件还在上传，请稍候再发送";
     return;
   }
-  const conversationId = await ensureConversation();
-  if (!conversationId) return;
-  const sending = attachments.value.slice();
-  draft.value = "";
-  attachments.value = [];
-  attachmentError.value = null;
-  await store.send(text, undefined, sending);
+  submittingLock.value = true;
+  try {
+    const conversationId = await ensureConversation();
+    if (!conversationId) return;
+    const sending = attachments.value.slice();
+    draft.value = "";
+    attachments.value = [];
+    attachmentError.value = null;
+    await store.send(text, undefined, sending);
+  } finally {
+    submittingLock.value = false;
+  }
 }
 
 function editResend(messageId: string, content: string) {
+  if (isBusy.value) return;
   const target = store.detail?.messages.find((m) => m.id === messageId);
   if (!target) return;
   void store.send(content, target.parent_id, target.attachments ?? []);
 }
 
 function retryAssistant(assistantId: string) {
+  if (isBusy.value) return;
   // 重试 = 同一条 user 消息再生成一个 assistant 分支：
   // 用 user 的内容在它的父节点下重新发送（产生新分支，旧分支保留可切回）
   const assistant = store.detail?.messages.find((m) => m.id === assistantId);
@@ -491,7 +501,8 @@ const panelClass = computed(() => {
             v-for="seed in ['综述 RAG 质量评估方法', '我的套餐还剩几篇？', '导入这篇 BibTeX']"
             :key="seed"
             type="button"
-            class="rounded-full border border-border px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+            :disabled="isBusy"
+            class="rounded-full border border-border px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:border-primary hover:text-primary disabled:opacity-50"
             @click="submit(seed)"
           >
             {{ seed }}
@@ -631,7 +642,7 @@ const panelClass = computed(() => {
         hint="Enter 发送 · Shift+Enter 换行"
         min-height="4rem"
         :submit-on-enter="true"
-        :submitting="isStreaming"
+        :submitting="isBusy"
         @submit="submit"
       />
       <div class="mt-1.5 flex items-center justify-between px-1">

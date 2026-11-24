@@ -23,14 +23,26 @@ vi.mock("vue-router", () => ({
   useRouter: () => ({ push: routerPush, replace: routerPush }),
 }));
 
-// VerifyEmailView 2026-11-13 起读 auth.user 预填重发邮箱；测试里保持未登录
+// VerifyEmailView 2026-11-13 起读 auth.user 预填重发邮箱；默认测试保持未登录
+const mockAuthState: {
+  user: {
+    id: string;
+    username: string;
+    email: string;
+    role: string;
+    is_active: boolean;
+    email_verified_at?: string | null;
+    created_at: string;
+  } | null;
+} = { user: null };
 vi.mock("@/stores/auth", () => ({
-  useAuthStore: () => ({ user: null }),
+  useAuthStore: () => mockAuthState,
 }));
 
 describe("VerifyEmailView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockAuthState.user = null;
   });
 
   it("有 token 时自动确认并展示成功", async () => {
@@ -81,6 +93,27 @@ describe("VerifyEmailView", () => {
     await flushPromises();
 
     expect(wrapper.find('[data-test="verify-error"]').text()).toContain("已被使用");
+  });
+
+  it("已验证登录账号访问时不展示重发表单，明确提示当前邮箱已通过验证（Issue #56）", async () => {
+    mockAuthState.user = {
+      id: "u1",
+      username: "Lingrove",
+      email: "lingrove@example.com",
+      role: "admin",
+      is_active: true,
+      email_verified_at: "2026-11-13T08:00:00Z",
+      created_at: "2026-11-01T00:00:00Z",
+    };
+
+    const wrapper = mount(VerifyEmailView, { props: { token: "" } });
+    await flushPromises();
+
+    const banner = wrapper.find('[data-test="verify-already-verified"]');
+    expect(banner.exists()).toBe(true);
+    expect(banner.text()).toContain("已通过验证");
+    expect(banner.text()).toContain("lingrove@example.com");
+    expect(wrapper.find('[data-test="verify-request"]').exists()).toBe(false);
   });
 });
 

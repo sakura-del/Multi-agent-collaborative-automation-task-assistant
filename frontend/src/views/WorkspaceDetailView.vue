@@ -263,11 +263,11 @@ function formatDate(value: string): string {
     <div v-if="canInvite" class="mb-4 rounded-lg border border-border bg-card p-3">
       <div class="flex flex-wrap items-end gap-1.5">
         <div>
-          <label class="text-xs text-muted-foreground" for="invite-role">受邀者角色</label>
+          <label class="block text-xs text-muted-foreground" for="invite-role">受邀者角色</label>
           <select
             id="invite-role"
             v-model="inviteRole"
-            class="mt-1 block rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+            class="mt-1 h-8 min-w-[11rem] whitespace-nowrap rounded-md border border-input bg-background py-1 pl-2.5 pr-8 text-sm leading-tight"
           >
             <option value="member">成员（可创建任务）</option>
             <option value="viewer">只读（可批注）</option>

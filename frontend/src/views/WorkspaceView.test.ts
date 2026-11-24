@@ -392,4 +392,16 @@ describe("WorkspaceView：真实缺陷修复（2026-10-26）", () => {
     expect(box.exists()).toBe(true);
     expect(box.text()).toMatch(/2026|有效期|过期/);
   });
+
+  it("「管理成员」渲染为独立链接，不存在 button 嵌套 a 的语义冲突（Issue #56）", async () => {
+    vi.mocked(listWorkspaces).mockResolvedValue([workspace()] as never);
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const row = wrapper.get('[data-test="workspace-row-w1"]');
+    expect(row.find("button a").exists()).toBe(false);
+    const manageLink = row.findAll("a").find((link) => link.text().includes("管理成员"));
+    expect(manageLink).toBeTruthy();
+  });
 });

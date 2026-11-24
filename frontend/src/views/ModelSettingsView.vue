@@ -53,24 +53,26 @@ import type {
  */
 const credentials = ref<LLMCredentialInfo[]>([]);
 
-const routeDraft = ref<Record<string, string>>({});
+/** 默认把全部可路由节点初始化为空串（跟随任务勾选），避免加载态下拉框显示空白（Issue #56）。 */
+function emptyRouteDraft(): Record<string, string> {
+  return Object.fromEntries(ROUTABLE_NODE_TYPES.map((item) => [item.value, ""]));
+}
+
+const routeDraft = ref<Record<string, string>>(emptyRouteDraft());
 const routeSaving = ref(false);
 const routeMessage = ref<string | null>(null);
 
 async function loadRouting() {
   try {
     const routes = await listNodeRouting();
-    const draft: Record<string, string> = {};
-    for (const item of ROUTABLE_NODE_TYPES) {
-      draft[item.value] = "";
-    }
+    const draft = emptyRouteDraft();
     for (const route of routes) {
       draft[route.node_type] = route.credential_id;
     }
     routeDraft.value = draft;
   } catch {
     // 路由加载失败不阻塞凭据页：静默保持「全部跟随任务勾选」
-    routeDraft.value = {};
+    routeDraft.value = emptyRouteDraft();
   }
 }
 
@@ -107,7 +109,7 @@ async function saveRouting() {
   }
 }
 const providers = ref<LLMProviderOption[]>([]);
-const loading = ref(false);
+const loading = ref(true);
 const error = ref<string | null>(null);
 const success = ref<string | null>(null);
 
@@ -1007,10 +1009,10 @@ function statusOf(credential: LLMCredentialInfo): {
             </div>
         </form>
 
-        <div v-if="loading" class="min-h-[14rem] space-y-3" aria-busy="true" aria-label="加载中">
+        <div v-if="loading" class="min-h-[16rem] space-y-3" aria-busy="true" aria-label="加载中">
             <div class="h-9 w-64 animate-pulse rounded-md bg-muted/60" />
-            <div class="h-16 animate-pulse rounded-lg border border-border bg-muted/40" />
-            <div class="h-16 animate-pulse rounded-lg border border-border bg-muted/40" />
+            <div class="h-20 animate-pulse rounded-lg border border-border bg-muted/40" />
+            <div class="h-20 animate-pulse rounded-lg border border-border bg-muted/40" />
         </div>
 
         <EmptyState
@@ -1044,7 +1046,7 @@ function statusOf(credential: LLMCredentialInfo): {
                 <li
                     v-for="credential in filteredCredentials"
                     :key="credential.credential_id"
-                    class="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-sm"
+                    class="flex flex-col gap-2.5 px-3.5 py-3 text-sm xl:flex-row xl:items-center xl:justify-between"
                     :data-test="`model-row-${credential.credential_id}`"
                 >
                     <div class="min-w-0 flex-1">
@@ -1081,7 +1083,8 @@ function statusOf(credential: LLMCredentialInfo): {
                         </div>
                         <div
                             v-if="credential.provider === 'custom'"
-                            class="mt-0.5 truncate text-xs text-muted-foreground"
+                            class="mt-0.5 break-all text-xs text-muted-foreground"
+                            :title="credential.base_url"
                         >
                             {{ credential.base_url }}
                         </div>
@@ -1207,7 +1210,7 @@ function statusOf(credential: LLMCredentialInfo): {
             class="mt-4"
             :capacity="ROUTABLE_NODE_TYPES.length"
             :categories="routingMeterCategories"
-            model="节点路由覆盖率"
+            model="按执行阶段独立指定模型"
         />
                 <p
             v-if="routeMessage"

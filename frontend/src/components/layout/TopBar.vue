@@ -40,8 +40,8 @@ const ROUTE_CRUMBS: Record<string, Crumb[]> = {
   "api-keys": [{ label: "设置", to: { name: "api-keys" } }, { label: "API Key" }],
   plan: [{ label: "设置", to: { name: "plan" } }, { label: "我的套餐" }],
   "admin-console": [{ label: "管理", to: { name: "admin-console" } }, { label: "后台控制台" }],
-  "admin-byok": [{ label: "管理", to: { name: "admin-byok" } }, { label: "BYOK 看板" }],
-  "account-verify": [{ label: "账号", to: { name: "account-verify" } }, { label: "邮箱验证" }],
+  "admin-byok": [{ label: "管理", to: { name: "admin-console" } }, { label: "BYOK 看板" }],
+  "account-verify": [{ label: "账号" }, { label: "邮箱验证" }],
 };
 
 const crumbs = computed<Crumb[]>(() => {

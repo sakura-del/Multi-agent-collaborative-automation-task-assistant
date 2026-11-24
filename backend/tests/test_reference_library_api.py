@@ -456,3 +456,63 @@ def test_save_merged_only_is_not_400(library_env: LibraryEnv) -> None:
 
     assert resp.status_code == 201
     assert resp.json()["merged"] == 1
+
+
+# ===== 作者名格式化与搜索筛选（Issue #56）=====
+
+
+def test_list_formats_latin_authors_with_space_and_keeps_cjk_compact(
+    library_env: LibraryEnv,
+) -> None:
+    """西文姓名应按 Given Family 空格分隔，中文姓名保持无空格拼接。"""
+    english = csl_payload(
+        ref_id="doi:10.48550/arxiv.2005.11401",
+        doi="10.48550/arxiv.2005.11401",
+        title="Retrieval-Augmented Generation",
+        issued_year=2020,
+    )
+    english["author"] = [
+        {"family": "Lewis", "given": "Patrick"},
+        {"family": "Es", "given": "Shahul"},
+    ]
+    chinese = csl_payload(
+        ref_id="doi:10.1234/zh-rag",
+        doi="10.1234/zh-rag",
+        title="检索增强生成中文综述",
+        issued_year=2024,
+    )
+    chinese["author"] = [{"family": "牛", "given": "耕田"}]
+    _save(library_env, [english, chinese])
+
+    items = library_env.client.get(API, headers=_auth(TOKEN_A)).json()["items"]
+    by_ref = {item["ref_id"]: item for item in items}
+
+    assert by_ref["doi:10.48550/arxiv.2005.11401"]["authors"] == ["Patrick Lewis", "Shahul Es"]
+    assert by_ref["doi:10.1234/zh-rag"]["authors"] == ["牛耕田"]
+
+
+def test_list_supports_keyword_and_year_filters(library_env: LibraryEnv) -> None:
+    """支持按关键词（题名/作者/DOI）与出版年份筛选，total 同步为过滤后条数。"""
+    first = csl_payload(
+        ref_id="doi:10.48550/arxiv.2005.11401",
+        doi="10.48550/arxiv.2005.11401",
+        title="Retrieval-Augmented Generation",
+        issued_year=2020,
+    )
+    first["author"] = [{"family": "Lewis", "given": "Patrick"}]
+    second = csl_payload(
+        ref_id="doi:10.18653/v1/2024.eacl-demo.16",
+        doi="10.18653/v1/2024.eacl-demo.16",
+        title="RAGAS Evaluation Framework",
+        issued_year=2024,
+    )
+    second["author"] = [{"family": "Es", "given": "Shahul"}]
+    _save(library_env, [first, second])
+
+    by_author = library_env.client.get(API, params={"q": "Lewis"}, headers=_auth(TOKEN_A)).json()
+    assert by_author["total"] == 1
+    assert by_author["items"][0]["ref_id"] == "doi:10.48550/arxiv.2005.11401"
+
+    by_year = library_env.client.get(API, params={"year": 2024}, headers=_auth(TOKEN_A)).json()
+    assert by_year["total"] == 1
+    assert by_year["items"][0]["ref_id"] == "doi:10.18653/v1/2024.eacl-demo.16"

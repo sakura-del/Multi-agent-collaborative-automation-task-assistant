@@ -330,11 +330,42 @@ async def create_message(
             )
         attachment_rows = [item.model_dump(mode="json") for item in payload.attachments]
 
+    clean_content = payload.content.strip()
+
+    # 短窗幂等防连点保护（Issue #56）：未显式指定 parent_id 时，若当前末端恰好是
+    # 5 秒内刚刚创建且仍在 pending/streaming 的 assistant 消息，且其对应 user 消息
+    # 正文与附件完全一致，则判定为前端双击/并发重入，幂等返回已有消息对而不重复落库。
+    if "parent_id" not in payload.model_fields_set and parent_id is not None:
+        tail_assistant = await db.get(Message, parent_id)
+        if (
+            tail_assistant is not None
+            and tail_assistant.conversation_id == conversation.id
+            and tail_assistant.role == "assistant"
+            and tail_assistant.status in ("pending", "streaming")
+            and tail_assistant.parent_id is not None
+        ):
+            tail_created = tail_assistant.created_at
+            now_utc = datetime.now(UTC)
+            if tail_created.tzinfo is None:
+                tail_created = tail_created.replace(tzinfo=UTC)
+            if (now_utc - tail_created) <= timedelta(seconds=5):
+                tail_user = await db.get(Message, tail_assistant.parent_id)
+                if (
+                    tail_user is not None
+                    and tail_user.role == "user"
+                    and tail_user.content == clean_content
+                    and (tail_user.attachments or []) == attachment_rows
+                ):
+                    return MessagePairOut(
+                        user_message=_to_message_out(tail_user),
+                        assistant_message=_to_message_out(tail_assistant),
+                    )
+
     user_message = Message(
         conversation_id=conversation.id,
         parent_id=parent_id,
         role="user",
-        content=payload.content.strip(),
+        content=clean_content,
         status="completed",
         attachments=attachment_rows,
     )

@@ -330,4 +330,32 @@ describe("ReferenceLibraryView 编辑条目", () => {
     expect(wrapper.find('[data-test="library-edit-form-item-1"]').exists()).toBe(false);
     expect(updateLibraryItem).not.toHaveBeenCalled();
   });
+
+  it("支持按关键词与年份筛选并可在无结果时一键清除（Issue #56）", async () => {
+    const wrapper = await mountView();
+    vi.mocked(listLibraryItems).mockResolvedValueOnce({ items: [], total: 0 });
+
+    await wrapper.get('[data-test="library-search"]').setValue("Patrick Lewis");
+    await wrapper.get('[data-test="library-year-filter"]').setValue("2020");
+    await wrapper.get('[data-test="library-filter-bar"]').trigger("submit");
+    await flushPromises();
+
+    expect(listLibraryItems).toHaveBeenLastCalledWith({
+      limit: 20,
+      offset: 0,
+      q: "Patrick Lewis",
+      year: 2020,
+    });
+    expect(wrapper.find('[data-test="library-filtered-empty"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="library-empty"]').exists()).toBe(false);
+
+    vi.mocked(listLibraryItems).mockResolvedValueOnce({
+      items: [libraryItem()],
+      total: 1,
+    });
+    await wrapper.get('[data-test="library-filtered-empty-reset"]').trigger("click");
+    await flushPromises();
+
+    expect(listLibraryItems).toHaveBeenLastCalledWith({ limit: 20, offset: 0 });
+  });
 });

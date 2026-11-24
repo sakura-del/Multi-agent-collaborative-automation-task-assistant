@@ -572,4 +572,24 @@ describe("ModelSettingsView", () => {
             "共 1 把",
         );
     });
+
+    it("路由覆盖卡片使用全中文文案，且加载态下节点路由下拉框不为空白（Issue #56）", async () => {
+        vi.mocked(listLLMCredentials).mockReturnValue(
+            new Promise(() => undefined) as never,
+        );
+        const wrapper = mountView();
+
+        // 加载态下每个节点路由下拉框默认选中空值「跟随任务勾选的模型」
+        const firstSelect = wrapper.get('[data-test="routing-planner"] select')
+            .element as HTMLSelectElement;
+        expect(firstSelect.value).toBe("");
+
+        const meter = wrapper.get('[data-test="context-meter"]').text();
+        expect(meter).toContain("节点路由覆盖");
+        expect(meter).toContain("已路由");
+        expect(meter).toContain("个跟随任务");
+        expect(meter).not.toContain("Routing coverage");
+        expect(meter).not.toContain("nodes routed");
+        expect(meter).not.toContain("follow task");
+    });
 });

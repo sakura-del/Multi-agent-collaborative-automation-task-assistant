@@ -29,7 +29,7 @@
  * 需要改冷门字段时删了重导更直接。
  */
 import { computed, onMounted, ref } from "vue";
-import { Loader2, Pencil, Trash2 } from "lucide-vue-next";
+import { Loader2, Pencil, Search, Trash2, X } from "lucide-vue-next";
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
@@ -83,22 +83,43 @@ onMounted(() => {
 /** 每页条数：与任务列表一致。原来一次拉 200 条，第 201 条起永远看不到。 */
 const PAGE_SIZE = 20;
 const page = ref(1);
-const totalPages = computed(() =>
-  Math.max(1, Math.ceil((summary.value?.total ?? 0) / PAGE_SIZE)),
+// 搜索与年份筛选（Issue #56）
+const searchQuery = ref("");
+const yearFilter = ref("");
+const filteredTotal = ref<number | null>(null);
+const hasActiveFilter = computed(
+  () => searchQuery.value.trim().length > 0 || yearFilter.value.trim().length > 0,
 );
+const effectiveTotal = computed(() => filteredTotal.value ?? summary.value?.total ?? 0);
+const totalPages = computed(() => Math.max(1, Math.ceil(effectiveTotal.value / PAGE_SIZE)));
 
 async function refresh(target = page.value) {
   loading.value = true;
   loadError.value = null;
   const current = Math.max(1, Math.floor(target));
+  const cleanQuery = searchQuery.value.trim();
+  const parsedYear = /^\d{4}$/.test(yearFilter.value.trim())
+    ? Number(yearFilter.value.trim())
+    : undefined;
+  const listParams: { limit: number; offset: number; q?: string; year?: number } = {
+    limit: PAGE_SIZE,
+    offset: (current - 1) * PAGE_SIZE,
+  };
+  if (cleanQuery) {
+    listParams.q = cleanQuery;
+  }
+  if (parsedYear !== undefined) {
+    listParams.year = parsedYear;
+  }
   // 列表与摘要分别处理失败：摘要挂了不该让列表消失（AGENTS §5 #23）
   const [listResult, summaryResult] = await Promise.allSettled([
-    listLibraryItems({ limit: PAGE_SIZE, offset: (current - 1) * PAGE_SIZE }),
+    listLibraryItems(listParams),
     getLibrarySummary(),
   ]);
 
   if (listResult.status === "fulfilled") {
     items.value = listResult.value.items;
+    filteredTotal.value = listResult.value.total;
   } else {
     loadError.value = (listResult.reason as Error).message || "引用库加载失败";
   }
@@ -107,6 +128,16 @@ async function refresh(target = page.value) {
   }
   page.value = current;
   loading.value = false;
+}
+
+function applyFilter() {
+  void refresh(1);
+}
+
+function resetFilter() {
+  searchQuery.value = "";
+  yearFilter.value = "";
+  void refresh(1);
 }
 
 function requestDelete(itemId: string) {
@@ -278,7 +309,75 @@ async function saveEdit(item: LibraryItemOut) {
       </div>
     </div>
 
+    <!-- 搜索与年份筛选栏（Issue #56）：仅在引用库非空或已有筛选条件时展示 -->
+    <form
+      v-if="(summary?.total ?? 0) > 0 || hasActiveFilter"
+      class="mb-3 flex flex-wrap items-center gap-2"
+      data-test="library-filter-bar"
+      @submit.prevent="applyFilter"
+    >
+      <div class="relative min-w-52 flex-1 sm:max-w-xs">
+        <Search
+          :size="14"
+          class="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground"
+          aria-hidden="true"
+        />
+        <Input
+          v-model="searchQuery"
+          data-test="library-search"
+          type="search"
+          placeholder="搜索题名 / 作者 / DOI / 期刊…"
+          aria-label="搜索引用库"
+          class="h-8 pl-8 text-xs"
+        />
+      </div>
+      <Input
+        v-model="yearFilter"
+        data-test="library-year-filter"
+        type="text"
+        inputmode="numeric"
+        maxlength="4"
+        placeholder="年份（如 2024）"
+        aria-label="按年份筛选"
+        class="h-8 w-32 text-xs"
+      />
+      <Button type="submit" variant="outline" size="sm" data-test="library-filter-submit">
+        筛选
+      </Button>
+      <Button
+        v-if="hasActiveFilter"
+        type="button"
+        variant="ghost"
+        size="sm"
+        data-test="library-filter-reset"
+        @click="resetFilter"
+      >
+        <X :size="13" aria-hidden="true" />
+        清除
+      </Button>
+      <span v-if="hasActiveFilter && filteredTotal !== null" class="text-xs text-muted-foreground">
+        匹配 {{ filteredTotal }} 条
+      </span>
+    </form>
+
     <p v-if="loading && !items.length" class="text-sm text-muted-foreground">加载中…</p>
+    <div
+      v-else-if="!items.length && hasActiveFilter"
+      data-test="library-filtered-empty"
+      class="rounded-lg border border-border bg-card px-4 py-8 text-center"
+    >
+      <p class="text-sm font-medium">没有符合条件的文献</p>
+      <p class="mt-1 text-xs text-muted-foreground">试试更换关键词或清空年份筛选。</p>
+      <Button
+        variant="outline"
+        size="sm"
+        class="mt-3"
+        data-test="library-filtered-empty-reset"
+        @click="resetFilter"
+      >
+        清除筛选
+      </Button>
+    </div>
     <EmptyState
       v-else-if="!items.length"
       testid="library-empty"
@@ -418,7 +517,7 @@ async function saveEdit(item: LibraryItemOut) {
       class="mt-3 flex flex-wrap items-center justify-between gap-2"
     >
       <span class="text-xs text-muted-foreground" data-test="library-page-summary">
-        共 {{ summary?.total ?? 0 }} 条 · 第 {{ page }} / {{ totalPages }} 页
+        共 {{ effectiveTotal }} 条 · 第 {{ page }} / {{ totalPages }} 页
       </span>
       <Pagination
         :model-value="page"
