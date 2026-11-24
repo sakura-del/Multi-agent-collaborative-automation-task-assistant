@@ -16,14 +16,31 @@ import { Sparkles, X } from "lucide-vue-next";
 import BePromptInput from "@/components/motion/BePromptInput.vue";
 import { taskApi } from "@/api/tasks";
 import { classifyIntent } from "@/api/intent";
+import {
+  WORKFLOW_PRESETS,
+  getWorkflowPreset,
+} from "@/config/workflow-presets";
+import type { WorkflowPreset } from "@/api/types";
 
 const props = defineProps<{ collapsed: boolean }>();
 const emit = defineEmits<{ expand: [] }>();
 
 const router = useRouter();
 const topic = ref("");
+/** 用户手动点选锁定的预设；null 表示交由 classifyIntent 自动识别。 */
+const lockedPreset = ref<WorkflowPreset | null>(null);
 const submitting = ref(false);
 const error = ref<string | null>(null);
+
+const activePlaceholder = computed(() =>
+  lockedPreset.value
+    ? getWorkflowPreset(lockedPreset.value).promptPlaceholder
+    : getWorkflowPreset("literature_review").promptPlaceholder,
+);
+
+function togglePreset(presetId: WorkflowPreset) {
+  lockedPreset.value = lockedPreset.value === presetId ? null : presetId;
+}
 
 /** 进行中任务条（最多保留 3 条，新的在前） */
 interface ActiveTask {
@@ -54,9 +71,15 @@ async function submit(value: string) {
       error.value = "当前入口只支持文献综述任务；其他自动化能力在路上，敬请期待。";
       return;
     }
+    const resolvedPreset = getWorkflowPreset(
+      lockedPreset.value ?? intent.workflow_preset ?? "literature_review",
+    );
     const created = await taskApi.create({
       topic: intent.topic,
       keywords: intent.keywords.length ? intent.keywords : [text.slice(0, 30)],
+      workflow_preset: resolvedPreset.id,
+      max_documents: resolvedPreset.defaults.maxDocuments,
+      verify_references: resolvedPreset.defaults.verifyReferences,
     });
     topic.value = "";
     // P1-2 不跳页：任务条进入队列并开始轮询状态
@@ -141,12 +164,34 @@ function dismissTask(taskId: string) {
     </span>
   </button>
 
-  <!-- 展开态：紧凑输入条 + 进行中任务条 -->
+  <!-- 展开态：预设 Chip + 紧凑输入条 + 进行中任务条 -->
   <div v-else class="px-2 pb-1 pt-1">
+    <div
+      class="mb-1.5 flex flex-wrap items-center gap-1"
+      role="group"
+      aria-label="选择工作流预设"
+    >
+      <button
+        v-for="preset in WORKFLOW_PRESETS"
+        :key="preset.id"
+        type="button"
+        :data-test="`global-preset-${preset.id}`"
+        :aria-pressed="lockedPreset === preset.id"
+        :class="[
+          'rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors',
+          lockedPreset === preset.id
+            ? 'border-primary bg-primary/10 text-primary'
+            : 'border-border bg-background text-muted-foreground hover:text-foreground',
+        ]"
+        @click="togglePreset(preset.id)"
+      >
+        {{ preset.shortLabel }}
+      </button>
+    </div>
     <BePromptInput
       v-model="topic"
       data-test="global-prompt"
-      placeholder="一句话开始一篇综述…"
+      :placeholder="activePlaceholder"
       hint="Enter 创建任务"
       min-height="3.5rem"
       :submit-on-enter="true"

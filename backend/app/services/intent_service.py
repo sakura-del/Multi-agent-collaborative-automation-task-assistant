@@ -15,16 +15,30 @@ import json
 import re
 
 from app.llm.models import Message, MessageRole
+from app.orchestration.contracts import WorkflowPreset
 from app.schemas.intent import IntentResponse
+
+#: 意图分类可返回的预设白名单（Issue #32 Phase 1）
+_ALLOWED_INTENT_PRESETS: frozenset[str] = frozenset({"literature_review", "research_gaps"})
 
 _CLASSIFY_SYSTEM = (
     "你是学术写作平台的意图路由器。用户会输入一句话，"
-    "判断它是否是要生成文献综述（literature_review）任务，"
-    "并提取规范的研究主题（topic，去口语化，≤60 字）与检索关键词（keywords，2~6 个，"
+    "判断它是否是要生成文献综述或研究空白分析（intent 均为 literature_review）任务，"
+    "并识别预设工作流 workflow_preset："
+    "若用户聚焦寻找研究空白、证据缺口、尚未解决的问题或未来方向，输出 research_gaps；"
+    "其余常规综述请求输出 literature_review。"
+    "同时提取规范的研究主题（topic，去口语化，≤60 字）与检索关键词（keywords，2~6 个，"
     "中英文均可，单个 ≤20 字）。只输出 JSON："
-    '{"intent":"literature_review","topic":"...","keywords":["..."]}，'
+    '{"intent":"literature_review","workflow_preset":"literature_review","topic":"...","keywords":["..."]}，'
     '非综述请求输出 {"intent":"other"}。不要输出任何其他文字。'
 )
+
+
+def _normalize_preset(raw: object) -> WorkflowPreset:
+    """白名单校验 workflow_preset，缺失或非法值一律 fail-open 回落 literature_review。"""
+    if isinstance(raw, str) and raw in _ALLOWED_INTENT_PRESETS:
+        return raw  # type: ignore[return-value]
+    return "literature_review"
 
 
 def fallback(text: str) -> IntentResponse:
@@ -34,6 +48,7 @@ def fallback(text: str) -> IntentResponse:
         topic=text[:60],
         keywords=[text[:30]],
         source="fallback",
+        workflow_preset="literature_review",
     )
 
 
@@ -49,7 +64,13 @@ def parse_llm_json(content: str, text: str) -> IntentResponse | None:
         return None
     intent = data.get("intent")
     if intent == "other":
-        return IntentResponse(intent="other", topic=text[:60], keywords=[], source="llm")
+        return IntentResponse(
+            intent="other",
+            topic=text[:60],
+            keywords=[],
+            source="llm",
+            workflow_preset="literature_review",
+        )
     if intent != "literature_review":
         return None
     topic = str(data.get("topic") or text[:60]).strip()
@@ -62,6 +83,7 @@ def parse_llm_json(content: str, text: str) -> IntentResponse | None:
         topic=topic[:60] or text[:60],
         keywords=keywords or [text[:30]],
         source="llm",
+        workflow_preset=_normalize_preset(data.get("workflow_preset")),
     )
 
 

@@ -142,6 +142,7 @@ describe("TaskCreateForm", () => {
         expect(emitted?.[0][0]).toEqual({
             topic: "检索增强生成与多智能体协作的质量评估",
             keywords: ["RAG", "multi-agent"],
+            workflow_preset: "literature_review",
             max_documents: 15,
             date_from: "2024-01-01",
             date_to: "2025-12-31",
@@ -630,5 +631,40 @@ describe("TaskCreateForm 默认模型", () => {
 
         const byok = wrapper.find('[data-test="model-source-byok"]');
         expect((byok.element as HTMLButtonElement).disabled).toBe(true);
+    });
+
+    // ===== 预设工作流（Issue #32 Phase 1）=====
+
+    it("切换到 research_gaps 预设会联动默认参数并在提交时带上 workflow_preset", async () => {
+        const wrapper = mountForm();
+        await flushPromises();
+
+        const gapsBtn = wrapper.find('[data-test="preset-research_gaps"]');
+        expect(gapsBtn.exists()).toBe(true);
+        await gapsBtn.trigger("click");
+
+        expect(gapsBtn.attributes("aria-checked")).toBe("true");
+        expect(
+            (wrapper.find('[data-test="max-documents"]').element as HTMLInputElement)
+                .value,
+        ).toBe("25");
+        expect(
+            (
+                wrapper.find('[data-test="verify-references"]')
+                    .element as HTMLInputElement
+            ).checked,
+        ).toBe(true);
+        expect(wrapper.find('[data-test="topic"]').attributes("placeholder")).toContain(
+            "研究空白",
+        );
+
+        await fillValidForm(wrapper);
+        await wrapper.find("form").trigger("submit");
+
+        expect(wrapper.emitted("submit")?.[0][0]).toMatchObject({
+            workflow_preset: "research_gaps",
+            max_documents: 25,
+            verify_references: true,
+        });
     });
 });

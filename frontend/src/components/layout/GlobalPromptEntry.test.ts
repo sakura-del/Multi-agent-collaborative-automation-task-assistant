@@ -75,6 +75,9 @@ describe("GlobalPromptEntry（Issue #8 P0 全局入口）", () => {
     expect(createTaskMock).toHaveBeenCalledWith({
       topic: "多智能体协作",
       keywords: ["multi-agent", "software engineering"],
+      workflow_preset: "literature_review",
+      max_documents: 20,
+      verify_references: false,
     });
     // P1-2：提交后不跳页（入口内任务条轮询状态）
     expect(pushMock).not.toHaveBeenCalled();
@@ -122,5 +125,53 @@ describe("GlobalPromptEntry（Issue #8 P0 全局入口）", () => {
     await bePrompt.vm.$emit("submit", "   ");
     await flushPromises();
     expect(createTaskMock).not.toHaveBeenCalled();
+  });
+
+  it("未手动锁定时采纳意图分类返回的 research_gaps 预设及默认参数", async () => {
+    classifyMock.mockResolvedValue({
+      intent: "literature_review",
+      workflow_preset: "research_gaps",
+      topic: "RAG 评估的研究空白",
+      keywords: ["RAG", "evaluation"],
+      source: "llm",
+    });
+    createTaskMock.mockResolvedValue({ task_id: "tid-2", status: "created" });
+    const wrapper = mount(GlobalPromptEntry, { props: { collapsed: false } });
+    const bePrompt = wrapper.findComponent({ name: "BePromptInput" });
+    await bePrompt.vm.$emit("submit", "帮我找 RAG 评估还有哪些研究空白");
+    await flushPromises();
+
+    expect(createTaskMock).toHaveBeenCalledWith({
+      topic: "RAG 评估的研究空白",
+      keywords: ["RAG", "evaluation"],
+      workflow_preset: "research_gaps",
+      max_documents: 25,
+      verify_references: true,
+    });
+  });
+
+  it("手动点选预设 Chip 时锁定用户选择，覆盖意图分类默认值", async () => {
+    classifyMock.mockResolvedValue({
+      intent: "literature_review",
+      workflow_preset: "literature_review",
+      topic: "多智能体研究空白",
+      keywords: ["multi-agent"],
+      source: "llm",
+    });
+    createTaskMock.mockResolvedValue({ task_id: "tid-3", status: "created" });
+    const wrapper = mount(GlobalPromptEntry, { props: { collapsed: false } });
+
+    await wrapper.find('[data-test="global-preset-research_gaps"]').trigger("click");
+    const bePrompt = wrapper.findComponent({ name: "BePromptInput" });
+    await bePrompt.vm.$emit("submit", "多智能体协作");
+    await flushPromises();
+
+    expect(createTaskMock).toHaveBeenCalledWith({
+      topic: "多智能体研究空白",
+      keywords: ["multi-agent"],
+      workflow_preset: "research_gaps",
+      max_documents: 25,
+      verify_references: true,
+    });
   });
 });

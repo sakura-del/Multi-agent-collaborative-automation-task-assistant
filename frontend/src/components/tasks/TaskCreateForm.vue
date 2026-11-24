@@ -10,10 +10,16 @@ import { Label } from "@/components/ui/label";
 import { listCitationStyles } from "@/api/citation-styles";
 import { listLLMCredentials } from "@/api/llm-credentials";
 import { getLibrarySummary } from "@/api/reference-library";
+import {
+    DEFAULT_WORKFLOW_PRESET,
+    WORKFLOW_PRESETS,
+    getWorkflowPreset,
+} from "@/config/workflow-presets";
 import type {
     CitationStyleSource,
     LLMCredentialInfo,
     TaskCreate,
+    WorkflowPreset,
 } from "@/api/types";
 
 // 创建表单：只做校验与 payload 组装，提交动作由父组件负责（保持可测）
@@ -46,10 +52,13 @@ const BUILT_IN_STYLES: StyleOption[] = [
     { style_id: "apa", title: "APA", source: "preset" },
 ];
 
+const workflowPreset = ref<WorkflowPreset>(DEFAULT_WORKFLOW_PRESET);
+const activePreset = computed(() => getWorkflowPreset(workflowPreset.value));
+
 const topic = ref("");
 const keywords = ref<string[]>([]);
 const keywordDraft = ref("");
-const maxDocuments = ref(20);
+const maxDocuments = ref(activePreset.value.defaults.maxDocuments);
 const dateFrom = ref("");
 const dateTo = ref("");
 const language = ref<"zh" | "en">("zh");
@@ -61,7 +70,14 @@ const offlineDataset = ref(false);
 const useReferenceLibrary = ref(false);
 const libraryCount = ref(0);
 // 引用核验默认关闭：与全局默认一致，避免用户无感知地引入外呼延迟（Issue #3 遗留项）
-const verifyReferences = ref(false);
+const verifyReferences = ref(activePreset.value.defaults.verifyReferences);
+
+function selectPreset(presetId: WorkflowPreset) {
+    workflowPreset.value = presetId;
+    const preset = getWorkflowPreset(presetId);
+    maxDocuments.value = preset.defaults.maxDocuments;
+    verifyReferences.value = preset.defaults.verifyReferences;
+}
 const selectedDocuments = ref<string[]>([]);
 const validationMessages = ref<string[]>([]);
 
@@ -207,6 +223,7 @@ function handleSubmit() {
         keywords: pendingKeyword
             ? [...new Set([...keywords.value, pendingKeyword])]
             : [...keywords.value],
+        workflow_preset: workflowPreset.value,
         max_documents: Number(maxDocuments.value),
         date_from: dateFrom.value || null,
         date_to: dateTo.value || null,
@@ -227,6 +244,38 @@ function handleSubmit() {
 <template>
     <Card as="form" class="max-w-3xl gap-4 p-4" @submit.prevent="handleSubmit">
         <div class="grid gap-1.5">
+            <span class="text-sm font-medium leading-none">工作流预设</span>
+            <div
+                role="radiogroup"
+                aria-label="工作流预设"
+                class="grid gap-2 sm:grid-cols-2"
+            >
+                <button
+                    v-for="preset in WORKFLOW_PRESETS"
+                    :key="preset.id"
+                    type="button"
+                    role="radio"
+                    :data-test="`preset-${preset.id}`"
+                    :aria-checked="workflowPreset === preset.id"
+                    :class="[
+                        'flex flex-col items-start gap-1 rounded-lg border p-3 text-left transition-colors',
+                        workflowPreset === preset.id
+                            ? 'border-primary bg-primary/5 text-foreground shadow-xs'
+                            : 'border-border bg-background text-muted-foreground hover:border-border-strong hover:text-foreground',
+                    ]"
+                    @click="selectPreset(preset.id)"
+                >
+                    <span class="text-sm font-medium text-foreground">
+                        {{ preset.label }}
+                    </span>
+                    <span class="text-xs leading-relaxed text-muted-foreground">
+                        {{ preset.description }}
+                    </span>
+                </button>
+            </div>
+        </div>
+
+        <div class="grid gap-1.5">
             <Label for="task-topic">主题</Label>
             <Input
                 id="task-topic"
@@ -235,7 +284,7 @@ function handleSubmit() {
                 type="text"
                 :minlength="TOPIC_MIN"
                 :maxlength="TOPIC_MAX"
-                placeholder="例如：检索增强生成与多智能体协作的质量评估"
+                :placeholder="activePreset.topicPlaceholder"
             />
         </div>
 

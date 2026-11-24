@@ -19,7 +19,7 @@ import uuid
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 from uuid import UUID
 
 from pydantic import ValidationError as PydanticValidationError
@@ -2539,11 +2539,27 @@ class TaskExecution:
         except Exception as exc:  # pragma: no cover - 防御性兜底
             logger.debug("node_metrics_record_failed", error=str(exc))
 
-    @staticmethod
-    def _describe(request: LiteratureReviewRequest) -> str:
+    #: 工作流预设目标指令（Issue #32）：注入动态需求区，不改动静态模板头部以保护前缀缓存
+    _PRESET_DIRECTIVES: ClassVar[dict[str, str]] = {
+        "literature_review": "工作流目标：输出结构清晰、带可回溯引用的文献综述",
+        "research_gaps": (
+            "工作流目标：聚焦研究空白分析，系统识别尚未充分研究的问题、证据薄弱点、"
+            "结论冲突与未来研究方向；所有空白判断必须有检索记录与可回溯证据支撑"
+        ),
+    }
+
+    @classmethod
+    def _preset_directive(cls, preset: Any) -> str:
+        """按预设名取目标指令；历史任务缺失或未知取值时回落 literature_review。"""
+        key = str(preset or "literature_review")
+        return cls._PRESET_DIRECTIVES.get(key, cls._PRESET_DIRECTIVES["literature_review"])
+
+    @classmethod
+    def _describe(cls, request: LiteratureReviewRequest) -> str:
         """把结构化请求压成任务描述（供规划 Agent 作为需求输入）。"""
         parts = [f"研究主题：{request.topic}"]
         parts.append(f"关键词：{', '.join(request.keywords)}")
+        parts.append(cls._preset_directive(request.workflow_preset))
         if request.date_from or request.date_to:
             parts.append(f"时间范围：{request.date_from or '不限'} ~ {request.date_to or '不限'}")
         parts.append(f"文献数量：{request.max_documents}")
@@ -2555,9 +2571,9 @@ class TaskExecution:
             parts.append("使用离线语料")
         return "；".join(parts)
 
-    @staticmethod
-    def _requirement(task: Task) -> str:
-        """从任务记录重建规划需求文本。"""
+    @classmethod
+    def _requirement(cls, task: Task) -> str:
+        """从任务记录重建规划需求文本（旧任务缺失 workflow_preset 时回落默认）。"""
         config = task.config or {}
         keywords = config.get("keywords") or []
         parts = [f"研究主题：{task.title}"]
@@ -2565,7 +2581,7 @@ class TaskExecution:
             parts.append(f"关键词：{', '.join(str(item) for item in keywords)}")
         if config.get("output_language"):
             parts.append(f"输出语言：{config['output_language']}")
-        parts.append("输出带可回溯引用的文献综述")
+        parts.append(cls._preset_directive(config.get("workflow_preset")))
         return "；".join(parts)
 
     @staticmethod

@@ -21,6 +21,7 @@ from app.orchestration.contracts import (
     TaskControlRequest,
     TaskEvent,
     TaskSnapshot,
+    WorkflowPreset,
 )
 
 __all__ = [
@@ -44,6 +45,7 @@ class TaskCreate(BaseModel):
 
     topic: str = Field(min_length=5, max_length=200)
     keywords: list[str] = Field(min_length=1, max_length=10)
+    workflow_preset: WorkflowPreset = "literature_review"
     date_from: date | None = None
     date_to: date | None = None
     max_documents: int = Field(default=20, ge=1, le=50)

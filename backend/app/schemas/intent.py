@@ -6,6 +6,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.orchestration.contracts import WorkflowPreset
+
 
 class IntentRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -18,3 +20,4 @@ class IntentResponse(BaseModel):
     topic: str
     keywords: list[str] = Field(default_factory=list, max_length=6)
     source: Literal["llm", "fallback"]
+    workflow_preset: WorkflowPreset = "literature_review"

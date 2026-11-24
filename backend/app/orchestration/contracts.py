@@ -266,6 +266,10 @@ class TaskEvent(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
+#: 预设工作流标识（Issue #32 Phase 1）：支持文献综述与研究空白分析。
+WorkflowPreset = Literal["literature_review", "research_gaps"]
+
+
 # ===== 任务调用契约（HTTP 层映射，编排层不依赖 app.schemas）=====
 
 
@@ -276,6 +280,7 @@ class LiteratureReviewRequest(BaseModel):
 
     topic: str = Field(min_length=5, max_length=200)
     keywords: list[str] = Field(min_length=1, max_length=10)
+    workflow_preset: WorkflowPreset = "literature_review"
     date_from: date | None = None
     date_to: date | None = None
     max_documents: int = Field(default=20, ge=1, le=50)
