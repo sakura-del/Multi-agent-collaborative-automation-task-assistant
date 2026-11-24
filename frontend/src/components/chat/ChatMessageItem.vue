@@ -18,7 +18,7 @@ import {
   RotateCcw,
   ShieldCheck,
   Wrench,
-} from "lucide-vue-next";
+} from "@/components/icons";
 
 import type { ChatMessage, ChatToolCall } from "@/api/conversations";
 import { renderChatMarkdown, renderMermaidBlocks } from "@/utils/chat-markdown";

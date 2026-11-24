@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { Check, Copy, KeyRound, Plus, Trash2 } from "lucide-vue-next";
+import { Check, Copy, KeyRound, Plus, Trash2 } from "@/components/icons";
 
 import EmptyState from "@/components/common/EmptyState.vue";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";

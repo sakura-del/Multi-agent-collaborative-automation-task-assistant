@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useRoute } from "vue-router";
-import { ChevronRight, Command, Moon, PanelLeftOpen, Sun } from "lucide-vue-next";
+import { ChevronRight, Command, Moon, PanelLeftOpen, Sun } from "@/components/icons";
 
 import { useTheme } from "@/composables/useTheme";
 

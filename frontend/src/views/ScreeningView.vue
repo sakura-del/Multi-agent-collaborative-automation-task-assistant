@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { Check, CircleX, MinusCircle, Sparkles } from "lucide-vue-next";
+import { Check, CircleX, MinusCircle, Sparkles } from "@/components/icons";
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import FunnelChart from "@/components/charts/FunnelChart.vue";

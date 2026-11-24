@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { Download } from "lucide-vue-next";
+import { Download } from "@/components/icons";
 
 import { taskApi } from "@/api/tasks";
 import ClaimEvidenceDrawer from "@/components/tasks/ClaimEvidenceDrawer.vue";

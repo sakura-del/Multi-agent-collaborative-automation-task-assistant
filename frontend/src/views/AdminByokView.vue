@@ -19,7 +19,7 @@
  * `byok-provider-<provider>-<model>` / `byok-top-user-<username>` / `byok-empty`。
  */
 import { computed, onMounted, ref } from "vue";
-import { RefreshCw, ShieldCheck } from "lucide-vue-next";
+import { RefreshCw, ShieldCheck } from "@/components/icons";
 
 import { getByokOverview } from "@/api/admin";
 import type { ByokOverview } from "@/api/types";

@@ -15,7 +15,7 @@ import {
   PanelLeftOpen,
   Search,
   X,
-} from "lucide-vue-next";
+} from "@/components/icons";
 
 import { SPRING_MORPH } from "@/lib/ease";
 

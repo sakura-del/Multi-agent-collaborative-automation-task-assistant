@@ -2,7 +2,7 @@
 import BePromptInput from "@/components/motion/BePromptInput.vue";
 import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
-import { CircleCheck, FileInput, Loader2, RotateCcw, Save } from "lucide-vue-next";
+import { CircleCheck, FileInput, Loader2, RotateCcw, Save } from "@/components/icons";
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import EmptyState from "@/components/common/EmptyState.vue";

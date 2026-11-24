@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { AlertTriangle, CheckCircle2, FileText, Layers, Search } from "lucide-vue-next";
+import { AlertTriangle, CheckCircle2, FileText, Layers, Search } from "@/components/icons";
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import EmptyState from "@/components/common/EmptyState.vue";

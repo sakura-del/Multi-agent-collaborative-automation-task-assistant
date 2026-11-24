@@ -15,7 +15,7 @@
  */
 import { computed, onBeforeUnmount, ref } from "vue";
 import { motion, useReducedMotion } from "motion-v";
-import { Brain, CircleAlert, Pause, Play, Search, Wrench, Clock3 } from "lucide-vue-next";
+import { Brain, CircleAlert, Pause, Play, Search, Wrench, Clock3 } from "@/components/icons";
 
 export interface TraceSpan {
   id: string;

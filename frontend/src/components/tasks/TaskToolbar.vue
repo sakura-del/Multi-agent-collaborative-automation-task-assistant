@@ -7,7 +7,7 @@ import {
   Play,
   RotateCcw,
   Square,
-} from "lucide-vue-next";
+} from "@/components/icons";
 
 import { Alert } from "@/components/ui/alert";
 import { Card } from "@/components/ui/card";

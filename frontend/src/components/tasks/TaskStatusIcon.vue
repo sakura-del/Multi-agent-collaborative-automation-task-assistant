@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { Check, CircleDot, Clock, Loader2, X } from "lucide-vue-next";
+import { Check, CircleDot, Clock, Loader2, X } from "@/components/icons";
 
 import type { TaskStatus } from "@/api/types";
 import { isTerminal, needsUserAction } from "@/utils/task-status";

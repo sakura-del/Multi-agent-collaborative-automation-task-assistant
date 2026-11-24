@@ -29,7 +29,7 @@
  * 需要改冷门字段时删了重导更直接。
  */
 import { computed, onMounted, ref } from "vue";
-import { Loader2, Pencil, Trash2 } from "lucide-vue-next";
+import { Loader2, Pencil, Trash2 } from "@/components/icons";
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import EmptyState from "@/components/common/EmptyState.vue";

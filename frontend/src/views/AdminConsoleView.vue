@@ -21,7 +21,7 @@
  * `admin-prev` / `admin-next` / `admin-total` / `admin-error`。
  */
 import { computed, onMounted, ref, watch } from "vue";
-import { Loader2, RefreshCw } from "lucide-vue-next";
+import { Loader2, RefreshCw } from "@/components/icons";
 
 import {
   getAdminOverview,

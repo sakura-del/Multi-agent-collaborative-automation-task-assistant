@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { X } from "lucide-vue-next";
+import { X } from "@/components/icons";
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import { Button } from "@/components/ui/button";

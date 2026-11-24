@@ -15,7 +15,7 @@
  */
 import { computed } from "vue";
 import { motion } from "motion-v";
-import { Layers } from "lucide-vue-next";
+import { Layers } from "@/components/icons";
 
 export interface RoutingCategory {
   /** 节点类型（extract 等） */

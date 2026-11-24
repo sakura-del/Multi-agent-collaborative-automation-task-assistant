@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { useRouter } from "vue-router";
-import { ArrowRight, BookOpenCheck, Github, Moon, Sun } from "lucide-vue-next";
+import { ArrowRight, BookOpenCheck, Github, Moon, Sun } from "@/components/icons";
 
 import LandingReportDrawer from "@/components/landing/LandingReportDrawer.vue";
 import LandingShowcase, { type ShowcaseTab } from "@/components/landing/LandingShowcase.vue";

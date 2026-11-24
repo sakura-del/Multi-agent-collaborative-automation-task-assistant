@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
-import { Check, Copy, Plus, Users } from "lucide-vue-next";
+import { Check, Copy, Plus, Users } from "@/components/icons";
 
 import EmptyState from "@/components/common/EmptyState.vue";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";

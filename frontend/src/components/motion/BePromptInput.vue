@@ -14,7 +14,7 @@ defineOptions({ inheritAttrs: false });
  */
 import { computed, ref, watch, useAttrs } from "vue";
 import { motion } from "motion-v";
-import { CornerDownLeft, Sparkles } from "lucide-vue-next";
+import { CornerDownLeft, Sparkles } from "@/components/icons";
 
 const props = withDefaults(
   defineProps<{

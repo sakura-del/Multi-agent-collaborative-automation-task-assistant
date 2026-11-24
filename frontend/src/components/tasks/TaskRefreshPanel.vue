@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { Clock, Loader2, Mail, RefreshCw } from "lucide-vue-next";
+import { Clock, Loader2, Mail, RefreshCw } from "@/components/icons";
 
 import { taskApi } from "@/api/tasks";
 import type { TaskRefreshRun, TaskRoutine } from "@/api/types";

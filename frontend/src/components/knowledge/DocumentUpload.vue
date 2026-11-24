@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import { Loader2, Upload } from "lucide-vue-next";
+import { Loader2, Upload } from "@/components/icons";
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import FilePicker from "@/components/common/FilePicker.vue";

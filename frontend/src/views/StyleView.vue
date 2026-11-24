@@ -37,7 +37,7 @@
  * `style-preview-error` / `style-preview-note`。
  */
 import { computed, onMounted, ref } from "vue";
-import { CircleCheck, Loader2, Trash2, Upload } from "lucide-vue-next";
+import { CircleCheck, Loader2, Trash2, Upload } from "@/components/icons";
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import FilePicker from "@/components/common/FilePicker.vue";

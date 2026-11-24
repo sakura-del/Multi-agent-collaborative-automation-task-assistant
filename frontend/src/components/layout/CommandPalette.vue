@@ -18,7 +18,7 @@ import {
   Search,
   Sun,
   Users,
-} from "lucide-vue-next";
+} from "@/components/icons";
 
 import { useTheme } from "@/composables/useTheme";
 import { useAuthStore } from "@/stores/auth";

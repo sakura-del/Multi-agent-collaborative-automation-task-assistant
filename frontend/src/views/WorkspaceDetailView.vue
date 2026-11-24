@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { ArrowLeft, Copy, UserMinus } from "lucide-vue-next";
+import { ArrowLeft, Copy, UserMinus } from "@/components/icons";
 import { useRoute, useRouter } from "vue-router";
 
 import EmptyState from "@/components/common/EmptyState.vue";

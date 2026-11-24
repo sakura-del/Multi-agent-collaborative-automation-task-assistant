@@ -33,7 +33,7 @@ import {
   Trash2,
   Wrench,
   X,
-} from "lucide-vue-next";
+} from "@/components/icons";
 
 import BePromptInput from "@/components/motion/BePromptInput.vue";
 import ChatMessageItem from "@/components/chat/ChatMessageItem.vue";

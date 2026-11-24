@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { ArrowLeft, CircleCheck, KeyRound, Loader2, Send } from "lucide-vue-next";
+import { ArrowLeft, CircleCheck, KeyRound, Loader2, Send } from "@/components/icons";
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import { Alert } from "@/components/ui/alert";

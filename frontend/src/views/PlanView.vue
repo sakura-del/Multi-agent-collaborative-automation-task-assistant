@@ -31,7 +31,7 @@
  * 前端会静默显示旧值。这些字段后端 `Plan` 表本来就有，只是之前没返回。
  */
 import { computed, onMounted, ref } from "vue";
-import { ArrowUpRight, Check, Download, Loader2, X } from "lucide-vue-next";
+import { ArrowUpRight, Check, Download, Loader2, X } from "@/components/icons";
 import DonutChart, { type DonutSegment } from "@/components/charts/DonutChart.vue";
 import PageHeader from "@/components/common/PageHeader.vue";
 

@@ -6,7 +6,7 @@ import {
   updateNodeRouting,
 } from "@/api/llm-routing";
 import { computed, onMounted, ref } from "vue";
-import { Check, Cpu, FileJson, Pencil, Plus, Star, Trash2, Wifi } from "lucide-vue-next";
+import { Check, Cpu, FileJson, Pencil, Plus, Star, Trash2, Wifi } from "@/components/icons";
 
 import EmptyState from "@/components/common/EmptyState.vue";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";

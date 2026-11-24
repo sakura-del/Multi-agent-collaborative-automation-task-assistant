@@ -21,7 +21,7 @@ import {
   Info,
   TriangleAlert,
   X,
-} from "lucide-vue-next";
+} from "@/components/icons";
 import type { Component, HTMLAttributes } from "vue";
 
 import { cn } from "@/lib/utils";
