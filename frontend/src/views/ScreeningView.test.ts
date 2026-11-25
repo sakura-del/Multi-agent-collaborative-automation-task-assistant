@@ -459,4 +459,25 @@ describe("ScreeningView", () => {
       "外部检索文献仅基于摘要抽取，未提及字段将标为未报告",
     );
   });
+
+  it("source_id 已带前缀时不重复拼接 source（避免出现 arxiv:doi:...，Issue #59）", async () => {
+    const row = recordRow({
+      record_id: "r-doi",
+      source: "arxiv",
+      source_id: "doi:10.48550/arxiv.2005.11401",
+      title: "RAG Paper",
+    });
+    vi.mocked(listScreeningRecords).mockResolvedValue([row]);
+    vi.mocked(getPrismaCounts).mockResolvedValue(PRISMA);
+
+    const wrapper = mount(ScreeningView, {
+      props: { taskId: "task-1" },
+      global: { stubs: { Teleport: true } },
+    });
+    await flushPromises();
+
+    const text = wrapper.text();
+    expect(text).toContain("doi:10.48550/arxiv.2005.11401");
+    expect(text).not.toContain("arxiv:doi:");
+  });
 });

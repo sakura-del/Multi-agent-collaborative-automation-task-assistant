@@ -152,6 +152,51 @@ class TestRecordSearch:
 
         assert log.hits_deduped == 2
 
+    async def test_dedupes_across_multiple_search_nodes_in_same_task(
+        self, session: AsyncSession
+    ) -> None:
+        """并发/多检索节点对同一任务落库相同文献时跨节点去重，PRISMA 计数自洽（Issue #59）。"""
+        service = ScreeningService(session)
+        task_id = uuid.uuid4()
+        shared = [
+            _record(
+                "doi:10.48550/arxiv.2005.11401",
+                "Retrieval-Augmented Generation",
+                source_url="https://doi.org/10.48550/arxiv.2005.11401",
+            ),
+            _record(
+                "doi:10.1000/rag.2024",
+                "RAG Evaluation Benchmark",
+                source_url="https://doi.org/10.1000/rag.2024",
+            ),
+        ]
+
+        log1 = await service.record_search(
+            task_id, query="query node n1", sources=["doi"], records=shared
+        )
+        log2 = await service.record_search(
+            task_id, query="query node n2", sources=["doi"], records=shared
+        )
+
+        assert log1.hits_deduped == 2
+        assert log2.hits_deduped == 0
+        rows = await service.list_records(task_id)
+        assert len(rows) == 2
+        assert {row.source for row in rows} == {"doi"}
+
+        counts = await service.prisma_counts(task_id)
+        assert counts["identified_total"] == 4
+        assert counts["duplicates_removed"] == 2
+        assert counts["records_screened"] == 2
+
+    def test_source_of_recognizes_doi_and_library_prefixes(self) -> None:
+        """doi: / library: 前缀不再被误判为 arxiv（Issue #59）。"""
+        from app.knowledge.services.screening_service import source_of
+
+        assert source_of(_record("doi:10.48550/arxiv.2005.11401", "RAG")) == "doi"
+        assert source_of(_record("library:ref-1", "Local Ref")) == "library"
+        assert source_of(_record("openalex:W123", "OpenAlex Paper")) == "openalex"
+
     async def test_derives_hits_by_source_when_not_given(self, session: AsyncSession) -> None:
         """未显式给 `hits_by_source` 时按记录来源推断（单源场景够用）。"""
         service = ScreeningService(session)

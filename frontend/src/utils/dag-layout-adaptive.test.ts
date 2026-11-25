@@ -116,6 +116,24 @@ describe("layoutDagAdaptive：宽度不够时换向纵向", () => {
     expect(layout.orientation).toBe("vertical");
     expect(layout.width).toBeLessThanOrEqual(320);
   });
+
+  it("纵向布局包含 3 个并行节点时动态压缩节点宽度，不超出容器导致横向裁切（Issue #59）", () => {
+    const parallelDag: PlanNode[] = [
+      node("n1"),
+      node("n2"),
+      node("n3", ["n1", "n2"]),
+      node("n4", ["n3"]),
+      node("n5", ["n4"]),
+      node("n6", ["n4"]),
+      node("n7", ["n4"]),
+      node("n8", ["n5", "n6", "n7"]),
+      node("n9", ["n8"]),
+    ];
+    const layout = layoutDagAdaptive(parallelDag, 780);
+    expect(layout.orientation).toBe("vertical");
+    expect(layout.nodeWidth).toBeLessThan(300);
+    expect(layout.width).toBeLessThanOrEqual(780);
+  });
 });
 
 describe("边界", () => {

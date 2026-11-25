@@ -106,6 +106,36 @@ describe("task store", () => {
     expect(store.events).toHaveLength(1);
   });
 
+  it("does not overwrite task-level status with subtask validating events (Issue #59)", () => {
+    const store = useTaskStore();
+    store.snapshot = snapshot({
+      status: "running",
+      subtasks: [
+        {
+          node_id: "n1",
+          title: "检索核心文献",
+          status: "running",
+          retry_count: 0,
+          started_at: null,
+          completed_at: null,
+          error: null,
+          output: null,
+        },
+      ],
+    });
+
+    store.applyEvent({
+      ...event(12, "validating"),
+      subtask_id: "sub-1",
+      event_type: "subtask_status",
+      payload: { node_id: "n1" },
+    });
+
+    // 任务级状态必须保持 running，不能闪烁成 validating；子任务自身状态同步为 validating
+    expect(store.snapshot?.status).toBe("running");
+    expect(store.snapshot?.subtasks[0]?.status).toBe("validating");
+  });
+
   it("does not regress a completed snapshot when replaying historical events (Issue #55)", () => {
     const store = useTaskStore();
     vi.mocked(taskApi.get).mockReset();

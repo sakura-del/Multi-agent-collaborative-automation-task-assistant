@@ -465,7 +465,7 @@ async function submitDecision(
                 <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                   <span>{{ record.authors.join("；") || "（无作者）" }}</span>
                   <code class="rounded bg-muted px-1 py-0.5 text-[11px]">
-                    {{ record.source }}:{{ record.source_id }}
+                    {{ record.source_id.includes(":") ? record.source_id : `${record.source}:${record.source_id}` }}
                   </code>
                   <code v-if="record.doi" class="rounded bg-muted px-1 py-0.5 text-[11px]">
                     doi:{{ record.doi }}

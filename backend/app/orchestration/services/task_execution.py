@@ -2047,16 +2047,22 @@ class TaskExecution:
         调用方（工作流）已经兜住异常并且只记 warning。这里让异常照常抛出，
         是为了在测试里能直接断言失败原因，而不是被静默吞掉。
         """
-        async with self._session_factory() as session:
-            service = ScreeningService(session)
-            if await service.has_search_log(task_id, query):
-                return
-            await service.record_search(
-                task_id,
-                query=query,
-                sources=sorted({source_of(record) for record in records}),
-                records=records,
-            )
+        # 按 task_id 串行化筛选落库：并发检索节点（如 n1/n2）同时落库时避免跨节点去重竞态（Issue #59）
+        locks: dict[UUID, asyncio.Lock] = getattr(self, "_screening_locks", {})
+        if not hasattr(self, "_screening_locks"):
+            self._screening_locks = locks
+        lock = locks.setdefault(task_id, asyncio.Lock())
+        async with lock:
+            async with self._session_factory() as session:
+                service = ScreeningService(session)
+                if await service.has_search_log(task_id, query):
+                    return
+                await service.record_search(
+                    task_id,
+                    query=query,
+                    sources=sorted({source_of(record) for record in records}),
+                    records=records,
+                )
 
     @staticmethod
     def _reference_mode() -> ReferenceCheckMode:

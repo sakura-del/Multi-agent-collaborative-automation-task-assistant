@@ -196,6 +196,21 @@ export const useTaskStore = defineStore("tasks", () => {
   /** 不可逆终态：历史事件回放不得将已完结任务状态倒退回早期阶段，也不应触发重复拉取（Issue #55） */
   const IRREVERSIBLE_TERMINAL_STATUS = new Set<TaskSnapshot["status"]>(["completed", "cancelled"]);
 
+  /** 合法的任务级状态（子任务独有状态如 validating/ready/pending 不得覆写任务级 status，Issue #59） */
+  const TASK_LEVEL_STATUSES = new Set<string>([
+    "created",
+    "planning",
+    "waiting_approval",
+    "running",
+    "reviewing",
+    "paused",
+    "retrying",
+    "waiting_human",
+    "completed",
+    "failed",
+    "cancelled",
+  ]);
+
   function applyEvent(event: TaskEvent): void {
     if (event.event_id <= lastEventId.value) {
       return;
@@ -206,7 +221,6 @@ export const useTaskStore = defineStore("tasks", () => {
       return;
     }
     const previousStatus = snapshot.value.status;
-    const nextStatus = event.status as TaskSnapshot["status"];
     if (IRREVERSIBLE_TERMINAL_STATUS.has(previousStatus)) {
       // 已完成/已取消任务的快照已是最新的终态；回放创建/规划/执行历史事件时只记日志，
       // 避免把页面状态短暂闪烁回「待确认/执行中」并反复触发 GET /tasks/:id
@@ -219,6 +233,25 @@ export const useTaskStore = defineStore("tasks", () => {
       }
       return;
     }
+
+    // 子任务级事件（带 subtask_id 或状态为 validating/ready/pending 等非任务级状态）：
+    // 只同步更新对应子任务状态，绝不污染任务级 snapshot.status（避免右侧属性闪烁「校验中/执行中」，Issue #59）
+    const isSubtaskOnlyEvent =
+      event.subtask_id !== null || !TASK_LEVEL_STATUSES.has(event.status);
+    if (isSubtaskOnlyEvent) {
+      const nodeId = typeof event.payload?.node_id === "string" ? event.payload.node_id : null;
+      if (nodeId) {
+        const nextSubtasks = snapshot.value.subtasks.map((item) =>
+          item.node_id === nodeId
+            ? { ...item, status: event.status as TaskSnapshot["subtasks"][number]["status"] }
+            : item,
+        );
+        snapshot.value = { ...snapshot.value, subtasks: nextSubtasks };
+      }
+      return;
+    }
+
+    const nextStatus = event.status as TaskSnapshot["status"];
     const merged = { ...snapshot.value, status: nextStatus };
     snapshot.value = merged;
     if (needsSnapshotRefresh(previousStatus, nextStatus, event.event_type, merged)) {

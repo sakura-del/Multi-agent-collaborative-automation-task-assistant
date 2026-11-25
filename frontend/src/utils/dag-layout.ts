@@ -13,9 +13,11 @@ export const DAG_NODE_HEIGHT = 84;
 export const DAG_COLUMN_GAP = 96;
 export const DAG_ROW_GAP = 24;
 
-/** 纵向排列时的几何（换向后节点变宽，因为纵向布局横向空间充裕）。 */
+/** 纵向排列时的几何（换向后按同层最大并行数动态自适应，防止并行节点横向裁切）。 */
 export const DAG_VERTICAL_NODE_WIDTH = 300;
+export const DAG_VERTICAL_MIN_NODE_WIDTH = 160;
 export const DAG_VERTICAL_ROW_GAP = 40;
+export const DAG_VERTICAL_COL_GAP = 20;
 
 /**
  * 布局方向。
@@ -35,6 +37,8 @@ export interface DagLayout {
   width: number;
   height: number;
   orientation: DagOrientation;
+  /** 实际渲染使用的节点宽度（横向固定 200；纵向随并行列数与容器宽度自适应）。 */
+  nodeWidth: number;
 }
 
 /** 计算每个节点的绝对坐标；只依赖拓扑结构，因此状态更新不会让节点跳动 */
@@ -102,6 +106,7 @@ export function layoutDagAdaptive(
       width: horizontalBounds.width,
       height: horizontalBounds.height,
       orientation: "horizontal",
+      nodeWidth: DAG_NODE_WIDTH,
     };
   }
 
@@ -123,6 +128,21 @@ export function layoutDagAdaptive(
     return value;
   }
 
+  // 先统计同层最大并行节点数，按容器可用宽度动态压缩节点宽度，避免并行节点横向裁切（Issue #59）
+  const rowCounts = new Map<number, number>();
+  for (const node of nodes) {
+    const row = depth(node.id);
+    rowCounts.set(row, (rowCounts.get(row) ?? 0) + 1);
+  }
+  const maxColumns = Math.max(...rowCounts.values(), 1);
+  const colGap = maxColumns > 1 ? DAG_VERTICAL_COL_GAP : 32;
+  const usableWidth = Math.max(availableWidth, 320);
+  const fittedWidth = Math.floor((usableWidth - (maxColumns - 1) * colGap) / maxColumns);
+  const verticalNodeWidth = Math.max(
+    DAG_VERTICAL_MIN_NODE_WIDTH,
+    Math.min(DAG_VERTICAL_NODE_WIDTH, fittedWidth),
+  );
+
   const columnCursor = new Map<number, number>();
   const vertical: Record<string, DagPoint> = {};
   for (const node of nodes) {
@@ -130,7 +150,7 @@ export function layoutDagAdaptive(
     const column = columnCursor.get(row) ?? 0;
     columnCursor.set(row, column + 1);
     vertical[node.id] = {
-      x: column * (DAG_VERTICAL_NODE_WIDTH + 32),
+      x: column * (verticalNodeWidth + colGap),
       y: row * (DAG_NODE_HEIGHT + DAG_VERTICAL_ROW_GAP),
     };
   }
@@ -139,9 +159,10 @@ export function layoutDagAdaptive(
   const maxY = Math.max(...Object.values(vertical).map((p) => p.y), 0);
   return {
     positions: vertical,
-    width: maxX + DAG_VERTICAL_NODE_WIDTH,
+    width: maxX + verticalNodeWidth,
     height: maxY + DAG_NODE_HEIGHT,
     orientation: "vertical",
+    nodeWidth: verticalNodeWidth,
   };
 }
 

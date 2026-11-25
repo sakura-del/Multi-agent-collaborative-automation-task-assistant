@@ -55,8 +55,10 @@ _NEXT_STAGE: dict[DecisionStage, DecisionStage] = {
     DecisionStage.FULLTEXT: DecisionStage.INCLUDED,
 }
 
-#: 已知来源前缀（`source_id` 形如 `openalex:W123`）；其余按 arxiv 处理。
-_KNOWN_SOURCE_PREFIXES = frozenset({"arxiv", "openalex", "semantic_scholar", "s2", "pubmed"})
+#: 已知来源前缀（`source_id` 形如 `openalex:W123` / `doi:10.xxx` / `library:xxx`）；其余按 arxiv 处理。
+_KNOWN_SOURCE_PREFIXES = frozenset(
+    {"arxiv", "openalex", "semantic_scholar", "s2", "pubmed", "doi", "library", "reference_library"}
+)
 
 
 def _normalize_title(title: str) -> str:
@@ -141,7 +143,37 @@ class ScreeningService:
         显式传入可支持「上游只回了前 N 条、但实际命中更多」的真实场景
         （分页检索时 `records` 只是样本，命中总数由上游报告）。
         """
-        deduped = dedupe_records(records)
+        deduped_batch = dedupe_records(records)
+        # 跨检索节点去重（Issue #59）：同一任务下多个并发/串行 search 节点可能命中同一批文献
+        # （例如引用库模式下 n1/n2 各自拉回相同 2 篇）。过滤掉任务内已存在的记录，
+        # 避免筛选列表翻倍，同时让 SearchLog.hits_deduped 反映真实新增条数，保持 PRISMA 计数自洽。
+        existing_records = await self._repo.list_records(task_id, limit=1000)
+        seen_dois: set[str] = {
+            row.doi.strip().casefold() for row in existing_records if row.doi and row.doi.strip()
+        }
+        seen_source_ids: set[str] = {
+            row.source_id.strip().casefold()
+            for row in existing_records
+            if row.source_id and row.source_id.strip()
+        }
+        seen_titles: set[str] = {
+            _normalize_title(row.title) for row in existing_records if row.title
+        }
+        deduped: list[LiteratureRecord] = []
+        for item in deduped_batch:
+            doi = _record_doi(item)
+            source_id = item.source_id.strip().casefold()
+            title = _normalize_title(item.title)
+            if (doi is not None and doi in seen_dois) or source_id in seen_source_ids:
+                continue
+            if title and title in seen_titles:
+                continue
+            if doi is not None:
+                seen_dois.add(doi)
+            seen_source_ids.add(source_id)
+            if title:
+                seen_titles.add(title)
+            deduped.append(item)
         if hits_by_source is None:
             inferred: dict[str, int] = {}
             for record in records:

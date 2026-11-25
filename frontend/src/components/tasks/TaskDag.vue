@@ -5,7 +5,6 @@ import type { PlanNode, SubtaskStatus } from "@/api/types";
 import {
   DAG_NODE_HEIGHT,
   DAG_NODE_WIDTH,
-  DAG_VERTICAL_NODE_WIDTH,
   layoutDagAdaptive,
   nodeAriaLabel,
   nodeStatusLabel,
@@ -64,20 +63,31 @@ const layout = computed(() => layoutDagAdaptive(props.nodes, availableWidth.valu
 const positions = computed(() => layout.value.positions);
 const bounds = computed(() => ({ width: layout.value.width, height: layout.value.height }));
 const isVertical = computed(() => layout.value.orientation === "vertical");
-const nodeWidth = computed(() =>
-  isVertical.value ? DAG_VERTICAL_NODE_WIDTH : DAG_NODE_WIDTH
-);
+const nodeWidth = computed(() => layout.value.nodeWidth);
 
 let observer: ResizeObserver | null = null;
 
+/** 容器内可用内容宽度（扣除 p-3 的左右 24px 内边距，避免画布刚好溢出触发横向滚动裁切）。 */
+function measureInnerWidth(el: HTMLElement): number {
+  const inner = el.clientWidth - 24;
+  return inner > 0 ? inner : el.clientWidth;
+}
+
 onMounted(() => {
-  if (typeof ResizeObserver === "undefined" || !containerRef.value) {
+  if (!containerRef.value) {
+    return;
+  }
+  const initialWidth = measureInnerWidth(containerRef.value);
+  if (initialWidth > 0) {
+    availableWidth.value = initialWidth;
+  }
+  if (typeof ResizeObserver === "undefined") {
     return;
   }
   observer = new ResizeObserver((entries) => {
     const width = entries[0]?.contentRect.width;
     if (typeof width === "number" && width > 0) {
-      availableWidth.value = width;
+      availableWidth.value = Math.max(0, width - 24);
     }
   });
   observer.observe(containerRef.value);
