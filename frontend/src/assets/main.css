@@ -67,6 +67,14 @@
   --warning: oklch(0.52 0.13 70);
   --warning-foreground: oklch(0.99 0 0);
 
+  /* 图表序列色（OKLCH 浅色画布对比度校准 >= 4.5:1） */
+  --chart-1: oklch(0.51 0.165 262);
+  --chart-2: oklch(0.51 0.095 175);
+  --chart-3: oklch(0.53 0.105 72);
+  --chart-4: oklch(0.50 0.175 295);
+  --chart-5: oklch(0.53 0.16 35);
+  --chart-6: oklch(0.51 0.095 225);
+
   /* 层次阴影：仅用于弹层/命令面板，卡片保持扁平无阴影 */
   --shadow-raised: 0 2px 6px oklch(0 0 0 / 6%), 0 10px 28px oklch(0 0 0 / 8%);
 
@@ -108,6 +116,15 @@
   --success-foreground: oklch(0.145 0.004 260);
   --warning: oklch(0.74 0.14 70);
   --warning-foreground: oklch(0.145 0.004 260);
+
+  /* 图表序列色（深色画布对比度校准 >= 4.5:1） */
+  --chart-1: oklch(0.68 0.16 262);
+  --chart-2: oklch(0.70 0.13 175);
+  --chart-3: oklch(0.74 0.14 72);
+  --chart-4: oklch(0.70 0.17 295);
+  --chart-5: oklch(0.71 0.16 38);
+  --chart-6: oklch(0.71 0.13 222);
+
   --shadow-raised: 0 4px 12px oklch(0 0 0 / 40%), 0 16px 36px oklch(0 0 0 / 50%);
   --surface-brand: oklch(0.125 0.004 260);
 }
@@ -146,6 +163,12 @@
   --color-success-foreground: var(--success-foreground);
   --color-warning: var(--warning);
   --color-warning-foreground: var(--warning-foreground);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-chart-6: var(--chart-6);
 
   /* 圆角：Linear/Notion 紧凑微圆角体系 */
   --radius-sm: calc(var(--radius) - 0.25rem);
@@ -402,5 +425,195 @@
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 0.8125rem;
     line-height: 1.7;
+  }
+
+  /* ============================================================
+     会话气泡内的 Markdown（从 ChatMessageItem.vue scoped 迁入，修复 hsl()）
+     ============================================================ */
+  .chat-markdown p {
+    margin: 0.35em 0;
+  }
+  .chat-markdown :where(h1, h2, h3) {
+    margin: 0.5em 0 0.25em;
+    font-size: 0.95em;
+    font-weight: 600;
+  }
+  .chat-markdown pre {
+    margin: 0.5em 0;
+    overflow-x: auto;
+    border-radius: 0.5rem;
+    background: var(--muted);
+    padding: 0.5rem 0.75rem;
+    font-size: 0.75rem;
+  }
+  .chat-markdown code {
+    font-size: 0.8em;
+  }
+  .chat-markdown table {
+    border-collapse: collapse;
+    font-size: 0.75rem;
+  }
+  .chat-markdown :where(th, td) {
+    border: 1px solid var(--border);
+    padding: 0.25rem 0.5rem;
+  }
+  .chat-markdown a {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  /* 用户气泡里链接与行内代码反色，避免对比度不足 */
+  .chat-markdown--user :where(a, code) {
+    color: inherit;
+  }
+  .chat-markdown .mermaid-figure svg {
+    max-width: 100%;
+    height: auto;
+  }
+
+  /* ============================================================
+     PRISMA 漏斗 GPU 合成层粒子（仅驱动 transform 与 opacity）
+     ============================================================ */
+  .funnel-particles {
+    container-type: size;
+  }
+
+  .funnel-particle {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    width: 3.5px;
+    height: 3.5px;
+    border-radius: 999px;
+    background: var(--foreground);
+    opacity: 0;
+    will-change: transform, opacity;
+    transform: translate3d(-50%, 0, 0);
+    animation: funnel-drop 5.2s linear infinite;
+  }
+
+  /* 第 0 层出口粒子末段变绿：通过 ::after 绿光层 opacity 淡入替代 background 动画 */
+  .funnel-particle.exit-0::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: var(--success);
+    opacity: 0;
+    animation: funnel-particle-success-fade 5.2s linear infinite;
+    animation-delay: inherit;
+  }
+
+  .funnel-particle.exit-1 {
+    animation-name: funnel-drop-exit-1;
+  }
+  .funnel-particle.exit-2 {
+    animation-name: funnel-drop-exit-2;
+  }
+  .funnel-particle.exit-3 {
+    animation-name: funnel-drop-exit-3;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .funnel-particles {
+      display: none;
+    }
+  }
+}
+
+@keyframes funnel-drop {
+  0% {
+    transform: translate3d(calc(var(--x) * 18cqw - 50%), -2cqh, 0);
+    opacity: 0;
+  }
+  6% {
+    opacity: 0.55;
+  }
+  22% {
+    transform: translate3d(calc(var(--x) * 13.5cqw - 50%), 20cqh, 0);
+    opacity: 0.55;
+  }
+  44% {
+    transform: translate3d(calc(var(--x) * 8.5cqw - 50%), 42cqh, 0);
+    opacity: 0.45;
+  }
+  66% {
+    transform: translate3d(calc(var(--x) * 5cqw - 50%), 64cqh, 0);
+    opacity: 0.45;
+  }
+  84% {
+    transform: translate3d(calc(var(--x) * 2.6cqw - 50%), 82cqh, 0);
+    opacity: 0.9;
+  }
+  100% {
+    transform: translate3d(calc(var(--x) * 1.6cqw - 50%), 99cqh, 0);
+    opacity: 0;
+  }
+}
+
+@keyframes funnel-particle-success-fade {
+  0%,
+  66% {
+    opacity: 0;
+  }
+  84%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes funnel-drop-exit-1 {
+  0% {
+    transform: translate3d(calc(var(--x) * 18cqw - 50%), -2cqh, 0);
+    opacity: 0;
+  }
+  6% {
+    opacity: 0.55;
+  }
+  22% {
+    transform: translate3d(calc(var(--x) * 13.5cqw - 50%), 20cqh, 0);
+    opacity: 0.5;
+  }
+  34%,
+  100% {
+    transform: translate3d(calc(var(--x) * 40cqw - 50%), 25cqh, 0);
+    opacity: 0;
+  }
+}
+
+@keyframes funnel-drop-exit-2 {
+  0% {
+    transform: translate3d(calc(var(--x) * 18cqw - 50%), -2cqh, 0);
+    opacity: 0;
+  }
+  6% {
+    opacity: 0.55;
+  }
+  44% {
+    transform: translate3d(calc(var(--x) * 8.5cqw - 50%), 42cqh, 0);
+    opacity: 0.45;
+  }
+  56%,
+  100% {
+    transform: translate3d(calc(var(--x) * 30cqw - 50%), 47cqh, 0);
+    opacity: 0;
+  }
+}
+
+@keyframes funnel-drop-exit-3 {
+  0% {
+    transform: translate3d(calc(var(--x) * 18cqw - 50%), -2cqh, 0);
+    opacity: 0;
+  }
+  6% {
+    opacity: 0.5;
+  }
+  66% {
+    transform: translate3d(calc(var(--x) * 5cqw - 50%), 64cqh, 0);
+    opacity: 0.45;
+  }
+  78%,
+  100% {
+    transform: translate3d(calc(var(--x) * 22cqw - 50%), 69cqh, 0);
+    opacity: 0;
   }
 }

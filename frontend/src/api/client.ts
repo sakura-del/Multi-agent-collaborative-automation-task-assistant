@@ -56,14 +56,129 @@ export interface ApiError extends Error {
   details?: Record<string, unknown>;
 }
 
-function normalizeError(error: unknown): ApiError {
+const MAX_DETAIL_DEPTH = 3;
+
+const HTTP_STATUS_MESSAGES: Record<number, string> = {
+  400: "请求参数有误",
+  401: "登录状态已失效，请重新登录",
+  403: "没有权限执行该操作",
+  404: "请求的资源不存在",
+  408: "请求超时，请稍后重试",
+  422: "提交的数据格式或校验未通过",
+  429: "操作过于频繁，请稍后再试",
+  500: "服务暂时不可用，请稍后重试",
+  502: "服务暂时不可用，请稍后重试",
+  503: "服务暂时不可用，请稍后重试",
+  504: "服务暂时不可用，请稍后重试",
+};
+
+function mapHttpStatusToMessage(status?: number): string | null {
+  if (typeof status !== "number") return null;
+  if (status in HTTP_STATUS_MESSAGES) {
+    return HTTP_STATUS_MESSAGES[status];
+  }
+  if (status >= 400) {
+    return `请求失败（HTTP ${status}）`;
+  }
+  return null;
+}
+
+function resolveFallbackMessage(rawMessage: string, status?: number): string {
+  const trimmed = rawMessage.trim();
+  if (!trimmed || /^Request failed with status code \d+/i.test(trimmed)) {
+    return mapHttpStatusToMessage(status) ?? "请求失败，请稍后重试";
+  }
+  return trimmed;
+}
+
+function extractDetailMessage(detail: unknown, depth = 0): string | null {
+  if (depth >= MAX_DETAIL_DEPTH || detail === null || detail === undefined) {
+    return null;
+  }
+
+  if (typeof detail === "string") {
+    const trimmed = detail.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+
+  if (Array.isArray(detail)) {
+    if (detail.length === 0) return null;
+    const first = detail[0] as { loc?: unknown; msg?: unknown; type?: unknown } | unknown;
+    if (first && typeof first === "object" && ("loc" in first || "msg" in first || "type" in first)) {
+      const item = first as { loc?: unknown; msg?: unknown; type?: unknown };
+      const locParts = Array.isArray(item.loc)
+        ? item.loc
+            .map((part) => String(part))
+            .filter((part) => !["body", "query", "path", "header", "cookie"].includes(part))
+        : [];
+      const field = locParts.join(".");
+      const rawMsg = typeof item.msg === "string" ? item.msg.trim() : "";
+      let cleanMsg = rawMsg.replace(/^Value error,\s*/i, "").trim();
+      if (cleanMsg.toLowerCase() === "field required" || item.type === "missing") {
+        cleanMsg = "该字段为必填项";
+      }
+      if (field && cleanMsg) return `${field}：${cleanMsg}`;
+      if (cleanMsg) return cleanMsg;
+      if (field) return `${field} 参数校验失败`;
+    }
+    return extractDetailMessage(first, depth + 1);
+  }
+
+  if (typeof detail === "object") {
+    const obj = detail as Record<string, unknown>;
+    for (const key of ["message", "msg", "detail", "error"]) {
+      const val = obj[key];
+      if (typeof val === "string") {
+        const trimmed = val.trim();
+        if (trimmed.length > 0) return trimmed;
+      } else if (val !== undefined && val !== null) {
+        const nested = extractDetailMessage(val, depth + 1);
+        if (nested) return nested;
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * 归一化 API 错误：兼容 `data.message`、FastAPI `data.detail`（含 422 校验数组）与超时提示。
+ */
+export function normalizeError(error: unknown): ApiError {
   if (error instanceof AxiosError) {
-    const data = (error.response?.data ?? {}) as {
+    if (error.code === "ECONNABORTED" || error.message.toLowerCase().includes("timeout")) {
+      return new Error("请求超时，请稍后重试") as ApiError;
+    }
+
+    const status = error.response?.status;
+    const rawData = error.response?.data;
+    if (typeof rawData === "string") {
+      const trimmed = rawData.trim();
+      const message =
+        trimmed.length > 0 && !/^\s*</.test(trimmed)
+          ? trimmed
+          : resolveFallbackMessage(error.message, status);
+      return new Error(message) as ApiError;
+    }
+
+    const data = (rawData ?? {}) as {
       message?: unknown;
+      detail?: unknown;
       error_code?: unknown;
       details?: Record<string, unknown>;
     };
-    const apiError = new Error(String(data.message ?? error.message)) as ApiError;
+
+    const primaryMessage =
+      typeof data.message === "string" && data.message.trim().length > 0
+        ? data.message.trim()
+        : null;
+    const fallbackDetail = extractDetailMessage(data.detail);
+    const resolvedMessage = resolveFallbackMessage(
+      primaryMessage ?? fallbackDetail ?? error.message,
+      status,
+    );
+
+    const apiError = new Error(resolvedMessage) as ApiError;
     if (typeof data.error_code === "string") apiError.code = data.error_code;
     if (data.details && typeof data.details === "object") apiError.details = data.details;
     return apiError;

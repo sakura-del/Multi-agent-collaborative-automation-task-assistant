@@ -9,11 +9,11 @@ import { cva, type VariantProps } from "class-variance-authority";
  * 尺寸偏紧凑（h-8/h-9）：工作台信息密度高，不适合大按钮。
  */
 export const buttonVariants = cva(
-  // 基础类：布局、焦点、禁用态、过渡
+  // 基础类：布局、焦点、禁用态、过渡（按压缩放写入 size 分支以避免裸调冲突）
   [
     "inline-flex items-center justify-center gap-1.5 whitespace-nowrap",
     "rounded-md text-sm font-medium",
-    "transition-colors duration-150",
+    "transition-[color,background-color,border-color,transform] duration-100 motion-reduce:active:scale-100 motion-reduce:transition-none",
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
     "disabled:pointer-events-none disabled:opacity-50",
     "[&_svg]:pointer-events-none [&_svg]:shrink-0",
@@ -31,11 +31,11 @@ export const buttonVariants = cva(
         link: "text-primary underline-offset-4 hover:underline",
       },
       size: {
-        sm: "h-8 px-3 text-xs",
-        default: "h-9 px-4",
-        lg: "h-10 px-6",
-        icon: "size-9",
-        "icon-sm": "size-8",
+        sm: "h-8 px-3 text-xs active:scale-[0.985]",
+        default: "h-9 px-4 active:scale-[0.985]",
+        lg: "h-10 px-6 active:scale-[0.985]",
+        icon: "size-9 active:scale-95",
+        "icon-sm": "size-8 active:scale-95",
       },
     },
     defaultVariants: {

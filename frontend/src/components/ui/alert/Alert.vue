@@ -25,6 +25,7 @@ import {
 import type { Component, HTMLAttributes } from "vue";
 
 import { cn } from "@/lib/utils";
+import { DURATION, EASE_IN, EASE_OUT, OFFSET } from "@/lib/ease";
 import { type AlertVariants, alertVariants } from "./variants";
 
 const props = withDefaults(
@@ -119,14 +120,17 @@ function close() {
       :ref="setSurface"
       :role="role"
       :data-variant="props.variant"
-      :initial="{ opacity: 0, y: reduced ? 0 : -6 }"
+      :initial="{ opacity: 0, y: reduced ? 0 : OFFSET.alertY }"
       :animate="{ opacity: 1, y: 0 }"
       :exit="{
         opacity: 0,
-        y: reduced ? 0 : -6,
-        transition: { duration: 0.12 },
+        y: reduced ? 0 : OFFSET.alertY,
+        transition: { duration: reduced ? DURATION.micro : DURATION.fast, ease: EASE_IN },
       }"
-      :transition="{ opacity: { duration: 0.18 }, y: { duration: 0.2 } }"
+      :transition="{
+        opacity: { duration: reduced ? DURATION.micro : DURATION.normal, ease: EASE_OUT },
+        y: { duration: DURATION.normal, ease: EASE_OUT },
+      }"
       :layout="!reduced"
       :class="cn(alertVariants({ variant: props.variant }), props.class)"
       :style="{ originY: 0 }"
@@ -140,15 +144,15 @@ function close() {
           <AnimatePresence :initial="false" mode="popLayout">
             <Motion
               :key="String(props.variant)"
-              :initial="{ opacity: 0, y: reduced ? 0 : 4, scale: reduced ? 1 : 0.9 }"
+              :initial="{ opacity: 0, y: reduced ? 0 : OFFSET.microY, scale: reduced ? 1 : 0.9 }"
               :animate="{ opacity: 1, y: 0, scale: 1 }"
               :exit="{
                 opacity: 0,
-                y: reduced ? 0 : -4,
+                y: reduced ? 0 : -OFFSET.microY,
                 scale: reduced ? 1 : 0.9,
-                transition: { duration: 0.1 },
+                transition: { duration: DURATION.micro, ease: EASE_IN },
               }"
-              :transition="{ duration: 0.18 }"
+              :transition="{ duration: reduced ? DURATION.micro : DURATION.normal, ease: EASE_OUT }"
               class="inline-flex [&>svg]:size-4"
             >
               <component :is="autoIcon" />

@@ -1,7 +1,20 @@
 <script setup lang="ts">
-// 根组件只负责渲染路由出口，布局由 AppLayout 承担
+import "vue-sonner/style.css";
+import { Toaster } from "vue-sonner";
+
+import { useTheme } from "@/composables/useTheme";
+
+const { isDark } = useTheme();
 </script>
 
 <template>
   <RouterView />
+  <Toaster
+    position="top-right"
+    :theme="isDark ? 'dark' : 'light'"
+    rich-colors
+    :duration="2800"
+    :visible-toasts="4"
+    :toast-options="{ style: { borderRadius: 'var(--radius)' } }"
+  />
 </template>
