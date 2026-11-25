@@ -404,7 +404,7 @@ function handleSubmit() {
 <template>
     <Card
         as="form"
-        class="max-w-3xl gap-4 p-4"
+        class="min-w-0 max-w-3xl gap-4 p-4"
         @submit.prevent
         @keydown="onFormKeydown"
     >
@@ -811,7 +811,8 @@ function handleSubmit() {
 
         <fieldset
             v-if="props.documents.length"
-            class="grid gap-2 rounded-lg border border-border p-3"
+            data-test="task-documents-fieldset"
+            class="grid min-w-0 gap-2 rounded-lg border border-border p-3"
         >
             <legend class="px-1 text-sm font-medium">
                 指定知识库文档（可选）
@@ -819,12 +820,12 @@ function handleSubmit() {
             <label
                 v-for="document in props.documents"
                 :key="document.id"
-                class="flex items-center gap-2 text-sm"
+                class="flex min-w-0 items-start gap-2 text-sm"
             >
                 <input
                     type="checkbox"
                     :data-test="`doc-${document.id}`"
-                    class="size-4 rounded border-input accent-primary"
+                    class="mt-0.5 size-4 shrink-0 rounded border-input accent-primary"
                     @change="
                         toggleDocument(
                             document.id,
@@ -832,7 +833,7 @@ function handleSubmit() {
                         )
                     "
                 />
-                <span>{{ document.title }}</span>
+                <span class="min-w-0 flex-1 break-all leading-snug">{{ document.title }}</span>
             </label>
         </fieldset>
 

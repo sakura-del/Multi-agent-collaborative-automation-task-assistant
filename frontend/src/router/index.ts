@@ -64,12 +64,12 @@ export const router = createRouter({
       component: LoginView,
       meta: { public: true },
     },
-    // 设计演示页（不进导航）：新配色 + beUI 时间线，确认后再往生产页面铺
+    // 内部设计演示页（不进导航）：仅管理员鉴权访问，禁止生产匿名暴露（Issue #62）
     {
       path: "/design/timeline",
       name: "design-timeline",
       component: DesignTimelineView,
-      meta: { public: true },
+      meta: { requiresAdmin: true },
     },
     {
       path: "/verify-email",

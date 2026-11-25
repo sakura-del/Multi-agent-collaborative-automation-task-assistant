@@ -861,4 +861,21 @@ describe("TaskCreateForm 默认模型", () => {
                 .value,
         ).toBe("2");
     });
+
+    it("指定知识库文档列表对超长无空格文件名应用 min-w-0 与 break-all 防止移动端横向溢出（Issue #62）", async () => {
+        const longTitle = "10_EVOR_Evolving_Retrieval_CodeGen__2402.12317v2";
+        const wrapper = mountForm({
+            documents: [{ id: "doc-long", title: longTitle }],
+        });
+        await flushPromises();
+
+        const fieldset = wrapper.find('[data-test="task-documents-fieldset"]');
+        expect(fieldset.exists()).toBe(true);
+        expect(fieldset.classes()).toContain("min-w-0");
+
+        const titleSpan = fieldset.find("label span");
+        expect(titleSpan.text()).toBe(longTitle);
+        expect(titleSpan.classes()).toContain("min-w-0");
+        expect(titleSpan.classes()).toContain("break-all");
+    });
 });
