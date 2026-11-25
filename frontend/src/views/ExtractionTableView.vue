@@ -350,12 +350,12 @@ onBeforeUnmount(() => {
             <div class="flex items-start justify-between gap-2">
               <button
                 type="button"
-                class="text-left text-sm font-semibold text-foreground hover:underline"
+                class="min-w-0 text-left text-sm font-semibold text-foreground break-words hover:underline"
                 @click="openTable(item.id)"
               >
                 {{ item.title }}
               </button>
-              <Badge :variant="STATUS_VARIANTS[item.status]">
+              <Badge :variant="STATUS_VARIANTS[item.status]" class="shrink-0">
                 {{ STATUS_LABELS[item.status] }}
               </Badge>
             </div>
@@ -366,11 +366,16 @@ onBeforeUnmount(() => {
               更新于 {{ formatDateTime(item.updated_at) }}
             </p>
           </div>
-          <div class="mt-3 flex items-center justify-between border-t border-border pt-2.5">
+          <!-- 移动端操作按钮左对齐，避免卡片右侧删除按钮与全局右下角会话悬浮球重叠（Issue #63） -->
+          <div
+            data-test="extraction-card-actions"
+            class="mt-3 flex items-center justify-start gap-3 border-t border-border pt-2.5 sm:justify-between"
+          >
             <Button size="sm" variant="outline" @click="openTable(item.id)">打开对比表</Button>
             <Button
               size="icon-sm"
               variant="ghost"
+              :data-test="`extraction-delete-${item.id}`"
               aria-label="删除抽取表"
               @click="handleDelete(item.id)"
             >

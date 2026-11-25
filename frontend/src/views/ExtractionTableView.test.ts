@@ -15,8 +15,10 @@ vi.mock("@/api/extractions", () => ({
 
 import {
   addExtractionColumn,
+  deleteExtractionTable,
   exportExtractionTableCsv,
   getExtractionTable,
+  listExtractionTables,
   runExtractionTable,
 } from "@/api/extractions";
 
@@ -199,5 +201,52 @@ describe("ExtractionTableView（Issue #36）", () => {
     expect(className).toContain("bg-muted");
     expect(className).not.toContain("bg-muted/90");
     expect(className).not.toContain("backdrop-blur");
+  });
+
+  it("列表模式卡片操作栏在移动端左对齐避让右下角悬浮会话球，并支持删除（Issue #63）", async () => {
+    vi.mocked(listExtractionTables).mockResolvedValue([
+      {
+        id: "tbl-1",
+        task_id: null,
+        title: "RAG 论文对比表",
+        status: "completed",
+        column_count: 2,
+        source_count: 3,
+        created_at: "2026-11-24T05:00:00Z",
+        updated_at: "2026-11-24T05:05:00Z",
+      },
+      {
+        id: "tbl-2",
+        task_id: null,
+        title: "多智能体评测表",
+        status: "draft",
+        column_count: 4,
+        source_count: 5,
+        created_at: "2026-11-24T06:00:00Z",
+        updated_at: "2026-11-24T06:05:00Z",
+      },
+    ]);
+    vi.mocked(deleteExtractionTable).mockResolvedValue(undefined);
+
+    const wrapper = mount(ExtractionTableView, {
+      global: { stubs: { Teleport: true } },
+    });
+    await flushPromises();
+
+    expect(wrapper.find('[data-test="extraction-table-list"]').exists()).toBe(true);
+    const actions = wrapper.findAll('[data-test="extraction-card-actions"]');
+    expect(actions).toHaveLength(2);
+
+    const actionClasses = (actions[0].attributes("class") ?? "").split(/\s+/);
+    // 移动端使用左对齐，桌面端（sm 及以上）保持两端对齐，避免删除按钮落入右下角 FAB 区域
+    expect(actionClasses).toContain("justify-start");
+    expect(actionClasses).toContain("sm:justify-between");
+    expect(actionClasses).not.toContain("justify-between");
+
+    await wrapper.get('[data-test="extraction-delete-tbl-1"]').trigger("click");
+    await flushPromises();
+    expect(deleteExtractionTable).toHaveBeenCalledWith("tbl-1");
+    expect(wrapper.find('[data-test="extraction-list-item-tbl-1"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="extraction-list-item-tbl-2"]').exists()).toBe(true);
   });
 });

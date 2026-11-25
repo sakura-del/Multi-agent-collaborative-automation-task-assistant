@@ -109,4 +109,25 @@ describe("LandingView（Elicit 风格落地页）", () => {
     expect(drawer?.textContent).toContain("Crossref / OpenAlex 四态引文核验报告");
     wrapper.unmount();
   });
+
+  it("Hero 顶部特性胶囊在窄屏不将绿点与文本拆成上下两行（Issue #63）", async () => {
+    const { wrapper } = await mountLanding();
+
+    const eyebrow = wrapper.get('[data-test="landing-eyebrow"]');
+    const eyebrowClasses = (eyebrow.attributes("class") ?? "").split(/\s+/);
+    expect(eyebrowClasses).toContain("inline-flex");
+    expect(eyebrowClasses).toContain("max-w-full");
+    expect(eyebrowClasses).not.toContain("flex-wrap");
+
+    const dotClasses = (
+      wrapper.get('[data-test="landing-eyebrow-dot"]').attributes("class") ?? ""
+    ).split(/\s+/);
+    expect(dotClasses).toContain("shrink-0");
+
+    const textEl = wrapper.get('[data-test="landing-eyebrow-text"]');
+    const textClasses = (textEl.attributes("class") ?? "").split(/\s+/);
+    expect(textClasses).toContain("min-w-0");
+    expect(textEl.text()).toContain("arXiv");
+    expect(textEl.text()).toContain("GB/T 7714-2025");
+  });
 });

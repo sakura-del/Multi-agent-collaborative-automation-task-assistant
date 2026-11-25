@@ -123,13 +123,19 @@ function jumpToShowcase(tab: ShowcaseTab) {
     <main class="mx-auto max-w-[1160px] px-4 pt-12 pb-16 sm:px-6 sm:pt-16 sm:pb-20">
       <!-- ==================== HERO 四段式（定稿文案） ==================== -->
       <section class="mx-auto max-w-3xl text-center">
-        <!-- 1. Eyebrow Badge -->
+        <!-- 1. Eyebrow Badge（禁用外层 flex-wrap，避免窄屏下绿点孤立独占首行，Issue #63） -->
         <p
           data-test="landing-eyebrow"
-          class="inline-flex flex-wrap items-center justify-center gap-1.5 rounded-full border border-[#E5E7EB] bg-white px-3.5 py-1 text-xs font-medium text-[#374151] shadow-2xs dark:border-border dark:bg-card dark:text-muted-foreground"
+          class="inline-flex max-w-full items-center gap-2 rounded-2xl border border-[#E5E7EB] bg-white px-3.5 py-1.5 text-left text-xs leading-snug font-medium text-[#374151] shadow-2xs sm:rounded-full sm:py-1 sm:text-center dark:border-border dark:bg-card dark:text-muted-foreground"
         >
-          <span class="size-1.5 rounded-full bg-[#0F4C3A] dark:bg-success" aria-hidden="true" />
-          arXiv · PubMed · OpenAlex · Semantic Scholar · GB/T 7714-2025
+          <span
+            data-test="landing-eyebrow-dot"
+            class="size-1.5 shrink-0 rounded-full bg-[#0F4C3A] dark:bg-success"
+            aria-hidden="true"
+          />
+          <span data-test="landing-eyebrow-text" class="min-w-0">
+            arXiv · PubMed · OpenAlex · Semantic Scholar · GB/T 7714-2025
+          </span>
         </p>
 
         <!-- 2. 主标题（思源宋体，无标点，两行双色） -->
