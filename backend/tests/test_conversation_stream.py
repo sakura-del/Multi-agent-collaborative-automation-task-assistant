@@ -102,3 +102,14 @@ class TestSseResponseHeaders:
         assert '"Connection"' not in source
         assert "no-transform" in source
         assert "X-Accel-Buffering" in source
+
+
+class TestConversationsDocstring:
+    def test_module_docstring_documents_stop_endpoint_without_stale_note(self) -> None:
+        """模块头文档必须反映已实现的 POST .../stop 协同取消端点，不含过期描述。"""
+        import app.api.v1.endpoints.conversations as conv_mod
+
+        doc = conv_mod.__doc__ or ""
+        assert "/stop" in doc
+        assert "没有 stop 端点" not in doc
+        assert "**没有** stop 端点" not in doc

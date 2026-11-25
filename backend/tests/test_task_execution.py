@@ -634,3 +634,207 @@ class TestTransientRetry:
             )
 
         assert calls["n"] == 1
+
+
+@pytest.mark.asyncio
+class TestPlanningAndWaitingReasonPersistence:
+    """M0-3/M0-4：规划/节点转人工原因持久化与阶段进度事件。"""
+
+    async def test_planning_failure_persists_waiting_reason_in_snapshot_without_subtasks(
+        self, tmp_path: Path
+    ) -> None:
+        engine, factory = await _setup_engine(tmp_path)
+        planner = _DeterministicPlanner(invalid=True)
+        execution, container = _make_execution(factory, planner)
+        user_id = uuid.uuid4()
+        try:
+            task_id = await execution.submit(user_id, _request())
+            await _wait_for_status(execution, user_id, task_id, {TaskStatus.WAITING_HUMAN.value})
+
+            # 模拟进程重启：重新构造 TaskExecution 实例读库
+            restarted = TaskExecution(container)
+            snap = await restarted.get_snapshot(user_id, task_id)
+            assert snap.status == TaskStatus.WAITING_HUMAN.value
+            assert snap.subtasks == []
+            assert snap.waiting_reason is not None and "规划失败" in snap.waiting_reason
+            assert snap.error is None
+            assert snap.workflow_preset == "literature_review"
+        finally:
+            await container.close()
+            await engine.dispose()
+
+    async def test_replan_clears_previous_waiting_reason_and_error(self, tmp_path: Path) -> None:
+        from app.orchestration.contracts import TaskCommand, TaskControlRequest
+
+        engine, factory = await _setup_engine(tmp_path)
+        fail_planner = _DeterministicPlanner(invalid=True)
+        execution, container = _make_execution(factory, fail_planner)
+        user_id = uuid.uuid4()
+        try:
+            task_id = await execution.submit(user_id, _request())
+            snap_waiting = await _wait_for_status(
+                execution, user_id, task_id, {TaskStatus.WAITING_HUMAN.value}
+            )
+            assert snap_waiting.waiting_reason is not None
+
+            # replan 切回 PLANNING 时立即清空旧原因，进入 WAITING_APPROVAL 后仍为 None
+            gate = asyncio.Event()
+            container._planner_factory = lambda: _DeterministicPlanner(gate=gate)
+            replan_snap = await execution.control(
+                user_id, task_id, TaskControlRequest(command=TaskCommand.REPLAN)
+            )
+            assert replan_snap.status == TaskStatus.PLANNING.value
+            assert replan_snap.waiting_reason is None
+            assert replan_snap.error is None
+
+            gate.set()
+            approved_snap = await _wait_for_status(
+                execution, user_id, task_id, {TaskStatus.WAITING_APPROVAL.value}
+            )
+            assert approved_snap.waiting_reason is None
+            assert approved_snap.error is None
+        finally:
+            await container.close()
+            await engine.dispose()
+
+    async def test_node_exhaustion_populates_snapshot_waiting_reason_and_event_reason(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from app.db.models.log import ExecutionLog
+        from app.orchestration.retry import RetryPolicy
+        from app.orchestration.scheduler import TaskScheduler
+
+        class _AlwaysFailExecutor(BaseAgent):
+            @property
+            def agent_type(self) -> str:
+                return "executor"
+
+            async def _run(self, input_data: dict[str, Any]) -> dict[str, Any]:
+                raise RuntimeError("上游节点执行超时")
+
+        orig_init = TaskScheduler.__init__
+
+        def _fast_retry_init(self: Any, *args: Any, **kwargs: Any) -> None:
+            if kwargs.get("retry_policy") is None:
+                kwargs["retry_policy"] = RetryPolicy(max_retries=1, backoff_times=[0.0])
+            orig_init(self, *args, **kwargs)
+
+        monkeypatch.setattr(TaskScheduler, "__init__", _fast_retry_init)
+
+        engine, factory = await _setup_engine(tmp_path)
+        planner = _DeterministicPlanner()
+        publisher = _RecordingPublisher()
+        container = RuntimeContainer(
+            session_factory=factory,
+            planner_factory=lambda: planner,
+            agent_factory=lambda agent_type: (
+                _AlwaysFailExecutor()
+                if agent_type == "executor"
+                else (_PassingValidator() if agent_type == "validator" else _StaticReviewer())
+            ),
+            event_publisher=publisher,
+        )
+        execution = TaskExecution(container)
+        user_id = uuid.uuid4()
+        try:
+            task_id = await execution.submit(user_id, _request())
+            await _wait_for_status(execution, user_id, task_id, {TaskStatus.WAITING_APPROVAL.value})
+            await execution.approve_plan(user_id, task_id, 1)
+            snap = await _wait_for_status(
+                execution, user_id, task_id, {TaskStatus.WAITING_HUMAN.value}
+            )
+            assert snap.waiting_reason is not None and "上游节点执行超时" in snap.waiting_reason
+            assert snap.error is None
+
+            async with factory() as session:
+                logs = (
+                    (
+                        await session.execute(
+                            select(ExecutionLog).where(
+                                ExecutionLog.task_id == task_id,
+                                ExecutionLog.event_type == "task_waiting_human",
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                assert logs
+                assert "上游节点执行超时" in str((logs[-1].context or {}).get("reason") or "")
+        finally:
+            await container.close()
+            await engine.dispose()
+
+    async def test_planning_emits_stage_progress_events(self, tmp_path: Path) -> None:
+        engine, factory = await _setup_engine(tmp_path)
+        planner = _DeterministicPlanner()
+        publisher = _RecordingPublisher()
+        execution, container = _make_execution(factory, planner, publisher=publisher)
+        user_id = uuid.uuid4()
+        try:
+            task_id = await execution.submit(user_id, _request())
+            await _wait_for_status(execution, user_id, task_id, {TaskStatus.WAITING_APPROVAL.value})
+
+            stage_events = [e for e in publisher.events if e.event_type == "stage_progress"]
+            assert stage_events, "规划过程应发出至少一条 stage_progress 事件"
+            assert any(
+                e.status == TaskStatus.PLANNING.value
+                and e.subtask_id is None
+                and e.payload.get("stage") == "planning_llm"
+                and e.payload.get("message")
+                for e in stage_events
+            )
+        finally:
+            await container.close()
+            await engine.dispose()
+
+    async def test_retry_transient_emits_stage_progress_with_delay(self, tmp_path: Path) -> None:
+        engine, factory = await _setup_engine(tmp_path)
+        planner = _DeterministicPlanner()
+        publisher = _RecordingPublisher()
+        execution, container = _make_execution(factory, planner, publisher=publisher)
+        user_id = uuid.uuid4()
+        try:
+            async with factory() as session:
+                task = Task(
+                    user_id=user_id,
+                    title="瞬态重试事件测试",
+                    description="d",
+                    status=TaskStatus.PLANNING.value,
+                    config={},
+                )
+                session.add(task)
+                await session.commit()
+                await session.refresh(task)
+                task_id = task.id
+
+            calls = {"n": 0}
+
+            class _Boom(Exception):
+                status_code = 503
+
+            async def op() -> str:
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    raise _Boom("Service temporarily unavailable")
+                return "ok"
+
+            result = await execution._retry_transient(
+                op, task_id=task_id, stage="planning", attempts=3, base_delay=0.01
+            )
+            assert result == "ok"
+
+            retry_events = [
+                e
+                for e in publisher.events
+                if e.event_type == "stage_progress" and e.payload.get("stage") == "planning_retry"
+            ]
+            assert len(retry_events) == 1
+            evt = retry_events[0]
+            assert evt.status == TaskStatus.PLANNING.value
+            assert evt.subtask_id is None
+            assert evt.payload["retry_delay_s"] == 0.01
+            assert evt.payload["attempt"] == 1
+        finally:
+            await container.close()
+            await engine.dispose()

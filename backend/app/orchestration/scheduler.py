@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -141,6 +142,21 @@ class TaskScheduler:
         self._completed: set[str] = set()
         # 已完成节点输出：供后继节点作为 dependency_outputs
         self._completed_outputs: dict[str, dict[str, Any]] = {}
+        self._observer_supports_metadata = self._check_observer_metadata(self._observer)
+
+    @staticmethod
+    def _check_observer_metadata(observer: ScheduleObserver) -> bool:
+        """检查 observer.on_transition 是否接收 metadata 关键字参数（兼容 4 参观察者）。"""
+        fn = getattr(observer, "on_transition", None)
+        if fn is None:
+            return False
+        try:
+            params = inspect.signature(fn).parameters
+        except (ValueError, TypeError):
+            return False
+        if "metadata" in params:
+            return True
+        return any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
 
     def get_state_machine(self, node_id: str) -> TaskStateMachine:
         """获取或创建节点的状态机。"""
@@ -240,23 +256,45 @@ class TaskScheduler:
         )
         return result
 
+    async def _notify_transition(
+        self,
+        task_id: str,
+        node_id: str,
+        old: SubtaskStatus,
+        new: SubtaskStatus,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """兼容 4 参观察者与支持 metadata 关键字参数的观察者。"""
+        if metadata and self._observer_supports_metadata:
+            await self._observer.on_transition(  # type: ignore[call-arg]
+                task_id, node_id, old, new, metadata=metadata
+            )
+            return
+        await self._observer.on_transition(task_id, node_id, old, new)
+
     async def _transition(
         self,
         task_id: str,
         node_id: str,
         state_machine: TaskStateMachine,
         target: SubtaskStatus,
+        *,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """调度器驱动的状态转换：先改状态，再等待 observer 持久化完成。"""
         old = state_machine.status
         state_machine.transition(target)
-        await self._observer.on_transition(task_id, node_id, old, target)
+        await self._notify_transition(task_id, node_id, old, target, metadata=metadata)
 
     def _transition_notifier(self, task_id: str, node_id: str):
         """构造 RetryExecutor 使用的异步转换回调（保证观察者顺序一致）。"""
 
-        async def notify(old: SubtaskStatus, new: SubtaskStatus) -> None:
-            await self._observer.on_transition(task_id, node_id, old, new)
+        async def notify(
+            old: SubtaskStatus,
+            new: SubtaskStatus,
+            metadata: dict[str, Any] | None = None,
+        ) -> None:
+            await self._notify_transition(task_id, node_id, old, new, metadata=metadata)
 
         return notify
 
@@ -428,7 +466,22 @@ class TaskScheduler:
                 regeneration=regeneration,
             )
             await self._transition(task_id, node_id, sm, SubtaskStatus.FAILED)
-            await self._transition(task_id, node_id, sm, SubtaskStatus.RETRYING)
+            await self._transition(
+                task_id,
+                node_id,
+                sm,
+                SubtaskStatus.RETRYING,
+                metadata={
+                    "stage": "regeneration",
+                    "regeneration_attempt": regeneration,
+                    "max_regenerations": self.max_regenerations,
+                    "validation_feedback": validation_feedback[:500],
+                    "level": "warning",
+                    "message": (
+                        f"校验未通过，正在进行第 {regeneration}/{self.max_regenerations} 次定向重做"
+                    ),
+                },
+            )
             await self._transition(task_id, node_id, sm, SubtaskStatus.READY)
 
     def get_completed_nodes(self) -> set[str]:

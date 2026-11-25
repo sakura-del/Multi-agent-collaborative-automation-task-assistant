@@ -158,3 +158,148 @@ class TestExecutionBuildsSnapshotWithOutput:
             None, _FakeSession(), _FakeTask(final_output=None)
         )
         assert snapshot.final_output is None
+
+
+class TestSnapshotTopLevelReasons:
+    def test_snapshot_defaults_new_fields_to_none_and_forbids_extras(self) -> None:
+        from pydantic import ValidationError
+
+        snapshot = TaskSnapshot(task_id=uuid.uuid4(), status="pending", title="t")
+        assert snapshot.error is None
+        assert snapshot.waiting_reason is None
+        assert snapshot.workflow_preset is None
+        with pytest.raises(ValidationError):
+            TaskSnapshot(task_id=uuid.uuid4(), status="pending", title="t", unknown_x=1)
+
+    @pytest.mark.asyncio
+    async def test_builder_populates_workflow_preset_waiting_reason_and_error(self) -> None:
+        from app.orchestration.services.task_execution import TaskExecution
+
+        waiting_task = _FakeTask(
+            status="waiting_human",
+            config={
+                "workflow_preset": "research_gaps",
+                "_waiting_reason": "规划失败: 模型连接超时",
+            },
+        )
+        waiting_snap = await TaskExecution._build_snapshot(  # type: ignore[arg-type]
+            None, _FakeSession(), waiting_task
+        )
+        assert waiting_snap.workflow_preset == "research_gaps"
+        assert waiting_snap.waiting_reason == "规划失败: 模型连接超时"
+        assert waiting_snap.error is None
+
+        failed_task = _FakeTask(
+            status="failed",
+            config={
+                "workflow_preset": "verify_citations",
+                "_error": "引用一致性校验未通过：缺少 [E2]",
+            },
+        )
+        failed_snap = await TaskExecution._build_snapshot(  # type: ignore[arg-type]
+            None, _FakeSession(), failed_task
+        )
+        assert failed_snap.workflow_preset == "verify_citations"
+        assert failed_snap.error == "引用一致性校验未通过：缺少 [E2]"
+        assert failed_snap.waiting_reason is None
+
+    @pytest.mark.asyncio
+    async def test_builder_gates_reasons_by_current_status(self) -> None:
+        from app.orchestration.services.task_execution import TaskExecution
+
+        for status in ("completed", "running", "planning", "waiting_approval"):
+            task = _FakeTask(
+                status=status,
+                config={
+                    "_waiting_reason": "旧等待原因",
+                    "_error": "旧失败原因",
+                },
+            )
+            snap = await TaskExecution._build_snapshot(  # type: ignore[arg-type]
+                None, _FakeSession(), task
+            )
+            assert snap.waiting_reason is None
+            assert snap.error is None
+
+    @pytest.mark.asyncio
+    async def test_builder_fallbacks_to_subtask_and_execution_log_when_config_missing(self) -> None:
+        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+        import app.db.models  # noqa: F401
+        from app.db.base import Base
+        from app.db.models.task import Subtask, Task
+        from app.db.repositories.event import EventRepository
+        from app.orchestration.services.task_execution import TaskExecution
+
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+
+        try:
+            async with factory() as session:
+                # 1) waiting_human 有失败子节点但 config 无 _waiting_reason
+                t1 = Task(
+                    user_id=uuid.uuid4(),
+                    title="子任务失败兜底",
+                    description="d",
+                    status="waiting_human",
+                    config={"workflow_preset": "literature_review"},
+                )
+                # 2) waiting_human 规划失败无子节点、无 config._waiting_reason，仅 ExecutionLog 有记录
+                t2 = Task(
+                    user_id=uuid.uuid4(),
+                    title="规划日志兜底",
+                    description="d",
+                    status="waiting_human",
+                    config={},
+                )
+                # 3) failed 任务无 config._error，仅 ExecutionLog 有 task_failed
+                t3 = Task(
+                    user_id=uuid.uuid4(),
+                    title="失败日志兜底",
+                    description="d",
+                    status="failed",
+                    config={},
+                )
+                session.add_all([t1, t2, t3])
+                await session.flush()
+
+                session.add(
+                    Subtask(
+                        task_id=t1.id,
+                        node_id="n2",
+                        title="提取证据",
+                        description="d",
+                        status="waiting_human",
+                        output_data={"error": "节点超时未返回"},
+                    )
+                )
+                event_repo = EventRepository(session)
+                await event_repo.append(
+                    t2.id,
+                    event_type="task_waiting_human",
+                    status="waiting_human",
+                    payload={"reason": "规划失败: 401"},
+                )
+                await event_repo.append(
+                    t3.id,
+                    event_type="task_failed",
+                    status="failed",
+                    payload={"reason": "引用缺失"},
+                )
+                await session.commit()
+
+                exec_stub = TaskExecution.__new__(TaskExecution)
+                snap1 = await TaskExecution._build_snapshot(exec_stub, session, t1)
+                snap2 = await TaskExecution._build_snapshot(exec_stub, session, t2)
+                snap3 = await TaskExecution._build_snapshot(exec_stub, session, t3)
+
+                assert snap1.waiting_reason is not None and "节点超时未返回" in snap1.waiting_reason
+                assert snap1.error is None
+                assert snap2.waiting_reason == "规划失败: 401"
+                assert snap2.error is None
+                assert snap3.error == "引用缺失"
+                assert snap3.waiting_reason is None
+        finally:
+            await engine.dispose()

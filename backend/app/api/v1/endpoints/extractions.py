@@ -20,7 +20,7 @@ from typing import Annotated, Any, Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, Response, status
-from sqlalchemy import select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -318,22 +318,58 @@ async def list_extraction_tables(
     if task_id is not None:
         stmt = stmt.where(ExtractionTable.task_id == task_id)
     rows = (await db.execute(stmt)).scalars().all()
-    return ExtractionTableListOut(
-        items=[
+    if not rows:
+        return ExtractionTableListOut(items=[])
+
+    # 单次聚合查询全部可见表的细胞进度，避免 N+1 或拉取大文本列
+    table_ids = [row.id for row in rows]
+    agg_stmt = (
+        select(
+            ExtractionCell.table_id,
+            func.coalesce(
+                func.sum(
+                    case(
+                        (ExtractionCell.status.in_(("extracted", "not_reported")), 1),
+                        else_=0,
+                    )
+                ),
+                0,
+            ),
+            func.coalesce(
+                func.sum(case((ExtractionCell.status == "error", 1), else_=0)),
+                0,
+            ),
+            func.count(ExtractionCell.id),
+        )
+        .where(ExtractionCell.table_id.in_(table_ids))
+        .group_by(ExtractionCell.table_id)
+    )
+    counts_by_table: dict[uuid.UUID, tuple[int, int, int]] = {}
+    for tid, completed, failed, total in (await db.execute(agg_stmt)).all():
+        counts_by_table[tid] = (int(completed or 0), int(failed or 0), int(total or 0))
+
+    items: list[ExtractionTableSummaryOut] = []
+    for row in rows:
+        col_count = len(row.columns or [])
+        src_count = len(row.sources or [])
+        completed_cells, failed_cells, cell_total = counts_by_table.get(row.id, (0, 0, 0))
+        items.append(
             ExtractionTableSummaryOut(
                 id=row.id,
                 task_id=row.task_id,
                 title=row.title,
                 status=row.status,  # type: ignore[arg-type]
                 error=row.error,
-                column_count=len(row.columns or []),
-                source_count=len(row.sources or []),
+                column_count=col_count,
+                source_count=src_count,
+                completed_cells=completed_cells,
+                failed_cells=failed_cells,
+                total_cells=max(cell_total, col_count * src_count),
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             )
-            for row in rows
-        ]
-    )
+        )
+    return ExtractionTableListOut(items=items)
 
 
 @router.get("/{table_id}", response_model=ExtractionTableOut)

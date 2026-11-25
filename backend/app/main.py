@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -20,8 +21,11 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
@@ -35,6 +39,122 @@ from app.core.redis import RedisManager
 from app.db.session import engine
 
 logger = get_logger(__name__)
+
+# ===== 统一错误响应映射（M0-2）=====
+
+_HTTP_STATUS_ERROR_CODES: dict[int, str] = {
+    400: "BAD_REQUEST",
+    401: "UNAUTHORIZED",
+    403: "FORBIDDEN",
+    404: "NOT_FOUND",
+    405: "METHOD_NOT_ALLOWED",
+    409: "CONFLICT",
+    413: "PAYLOAD_TOO_LARGE",
+    422: "VALIDATION_ERROR",
+    429: "RATE_LIMITED",
+    500: "INTERNAL_ERROR",
+    502: "BAD_GATEWAY",
+    503: "SERVICE_UNAVAILABLE",
+    504: "GATEWAY_TIMEOUT",
+}
+
+_HTTP_STATUS_DEFAULT_MESSAGES: dict[int, str] = {
+    400: "请求参数错误",
+    401: "未认证或登录已失效",
+    403: "没有权限执行该操作",
+    404: "请求的资源不存在",
+    405: "请求方法不被允许",
+    409: "资源状态冲突",
+    413: "请求内容过大",
+    422: "请求参数校验失败",
+    429: "请求过于频繁，请稍后重试",
+    500: "服务内部错误",
+    502: "上游服务响应异常",
+    503: "服务暂不可用，请稍后重试",
+    504: "上游服务响应超时",
+}
+
+_STARLETTE_DEFAULT_PHRASES = frozenset({"not found", "method not allowed"})
+
+
+def _extract_http_error_message(status_code: int, detail: Any) -> tuple[str, dict[str, Any]]:
+    """从原生 HTTPException.detail 提取中文友好 message 与结构化 details。"""
+    default_msg = _HTTP_STATUS_DEFAULT_MESSAGES.get(status_code, f"请求失败（HTTP {status_code}）")
+    if isinstance(detail, str):
+        text = detail.strip()
+        if not text or text.lower() in _STARLETTE_DEFAULT_PHRASES:
+            return default_msg, {}
+        return text, {}
+    if isinstance(detail, dict):
+        encoded = jsonable_encoder(detail)
+        for key in ("message", "msg", "detail", "error"):
+            candidate = encoded.get(key)
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate.strip(), encoded
+        return default_msg, encoded
+    if isinstance(detail, list) and detail:
+        first = detail[0]
+        if isinstance(first, dict):
+            for key in ("message", "msg", "detail"):
+                candidate = first.get(key)
+                if isinstance(candidate, str) and candidate.strip():
+                    return candidate.strip(), {}
+        elif isinstance(first, str) and first.strip():
+            return first.strip(), {}
+    return default_msg, {}
+
+
+def _format_validation_error_message(errors: list[dict[str, Any]]) -> str:
+    """将 FastAPI/Pydantic v2 首条校验错误格式化为中文友好提示。"""
+    if not errors:
+        return "请求参数校验失败"
+    err = errors[0]
+    raw_loc = err.get("loc") or ()
+    parts = [
+        str(part) for part in raw_loc if part not in ("body", "query", "path", "header", "cookie")
+    ]
+    field = ".".join(parts) if parts else ("请求体" if "body" in raw_loc else "")
+
+    raw_msg = str(err.get("msg") or "").strip()
+    if raw_msg.startswith("Value error, "):
+        raw_msg = raw_msg[len("Value error, ") :].strip()
+    if raw_msg and re.search(r"[\u4e00-\u9fff]", raw_msg):
+        return raw_msg
+
+    err_type = str(err.get("type") or "")
+    raw_ctx = err.get("ctx")
+    ctx: dict[str, Any] = raw_ctx if isinstance(raw_ctx, dict) else {}
+    target = field or "请求参数"
+    if err_type == "missing":
+        return f"缺少必填参数 {target}"
+    if err_type == "extra_forbidden":
+        return f"包含不支持的多余字段：{target}"
+    if err_type == "string_too_short":
+        return f"参数 {target} 长度不能少于 {ctx.get('min_length', 1)} 个字符"
+    if err_type == "string_too_long":
+        return f"参数 {target} 长度不能超过 {ctx.get('max_length', '')} 个字符"
+    if err_type == "too_short":
+        return f"参数 {target} 至少需要 {ctx.get('min_length', 1)} 项"
+    if err_type == "too_long":
+        return f"参数 {target} 最多允许 {ctx.get('max_length', '')} 项"
+    if err_type in ("greater_than_equal", "greater_than"):
+        return f"参数 {target} 数值过小"
+    if err_type in ("less_than_equal", "less_than"):
+        return f"参数 {target} 数值过大"
+    if err_type in ("literal_error", "enum"):
+        return f"参数 {target} 取值不在允许范围内"
+    if err_type == "uuid_parsing":
+        return f"参数 {target} 的 UUID 格式不正确"
+    if err_type in ("int_parsing", "float_parsing", "bool_parsing"):
+        return f"参数 {target} 类型格式不正确"
+    if err_type == "string_pattern_mismatch":
+        return f"参数 {target} 格式不符合要求"
+    if err_type == "json_invalid":
+        return "请求体 JSON 格式不合法"
+    if field and raw_msg:
+        return f"参数 {field} 校验失败：{raw_msg}"
+    return "请求参数校验失败"
+
 
 # ===== 应用生命周期 =====
 
@@ -298,6 +418,43 @@ def create_app() -> FastAPI:
                 "details": exc.details,
             },
             headers=headers or None,
+        )
+
+    # 兼容统一原生 HTTPException 与 Starlette 路由 404/405：保留原 detail 与 headers，
+    # 同时补充 error_code / 中文 message / details，供新旧调用方一致消费。
+    @app.exception_handler(StarletteHTTPException)
+    async def handle_http_exception(_: Request, exc: StarletteHTTPException) -> JSONResponse:
+        encoded_detail = jsonable_encoder(exc.detail)
+        message, details = _extract_http_error_message(exc.status_code, exc.detail)
+        error_code = _HTTP_STATUS_ERROR_CODES.get(exc.status_code, f"HTTP_{exc.status_code}")
+        raw_headers = getattr(exc, "headers", None)
+        headers = dict(raw_headers) if raw_headers else None
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "error_code": error_code,
+                "message": message,
+                "details": details,
+                "detail": encoded_detail,
+            },
+            headers=headers,
+        )
+
+    # 兼容统一 422 请求校验错误：先用 jsonable_encoder 处理（避免 Pydantic v2 ctx['error']
+    # 中的 ValueError 实例不可 JSON 序列化导致 500），再提取首条中文 message。
+    @app.exception_handler(RequestValidationError)
+    async def handle_validation_exception(_: Request, exc: RequestValidationError) -> JSONResponse:
+        encoded_errors = jsonable_encoder(exc.errors())
+        error_list = encoded_errors if isinstance(encoded_errors, list) else []
+        message = _format_validation_error_message(error_list)
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error_code": "VALIDATION_ERROR",
+                "message": message,
+                "details": {"errors": encoded_errors},
+                "detail": encoded_errors,
+            },
         )
 
     # 路由挂载

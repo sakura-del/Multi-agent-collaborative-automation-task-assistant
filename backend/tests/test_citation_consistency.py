@@ -170,3 +170,30 @@ async def test_guard_passes_and_leaves_task_untouched(factory) -> None:
         row = await session.get(Task, task.id)
         assert row is not None and row.status == "reviewing"
         assert harness.settled == []
+
+
+async def test_guard_fails_task_populates_snapshot_error_and_replan_clears_it(factory) -> None:
+    from app.orchestration.contracts import TaskCommand, TaskControlRequest
+
+    task = await _reviewing_task(factory)
+    harness = _Harness(factory)
+
+    ok = await harness._guard_citation_consistency(
+        task.id,
+        {"final_markdown": "正文 [E1] [E9]。", "bibliography": [_entry(1)]},
+    )
+    assert ok is False
+
+    snap = await harness.get_snapshot(task.user_id, task.id)
+    assert snap.status == "failed"
+    assert snap.error is not None and "引用一致性" in snap.error
+    assert snap.waiting_reason is None
+
+    # replan 必须清空旧 error（防止新规划期间误显示旧失败原因）
+    harness.container.track = lambda _tid, coro, **_kwargs: coro.close()
+    replan_snap = await harness.control(
+        task.user_id, task.id, TaskControlRequest(command=TaskCommand.REPLAN)
+    )
+    assert replan_snap.status == "planning"
+    assert replan_snap.error is None
+    assert replan_snap.waiting_reason is None

@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
@@ -79,6 +80,8 @@ class DatabaseScheduleObserver:
         node_id: str,
         old: SubtaskStatus,
         new: SubtaskStatus,
+        *,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """持久化一次子任务状态转换。"""
         parsed = _parse_task_id(task_id)
@@ -104,12 +107,22 @@ class DatabaseScheduleObserver:
                 if new in _TERMINAL_STATUSES and subtask.completed_at is None:
                     subtask.completed_at = now
 
+                payload: dict[str, Any] = {
+                    "node_id": node_id,
+                    "from": old.value,
+                    "to": new.value,
+                }
+                if metadata:
+                    for key, value in metadata.items():
+                        if key not in ("node_id", "from", "to"):
+                            payload[key] = value
+
                 event = await EventRepository(session).append(
                     parsed,
                     event_type="node_status",
                     status=new.value,
                     subtask_id=subtask.id,
-                    payload={"node_id": node_id, "from": old.value, "to": new.value},
+                    payload=payload,
                 )
                 await session.commit()
         except Exception:

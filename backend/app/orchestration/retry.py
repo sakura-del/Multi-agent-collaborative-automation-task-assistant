@@ -25,8 +25,8 @@ from app.orchestration.task_state import SubtaskStatus, TaskStateMachine
 
 logger = get_logger(__name__)
 
-# 状态转换异步通知：调度器可注入 observer 持久化每次转换
-AsyncTransitionCallback = Callable[[SubtaskStatus, SubtaskStatus], Awaitable[None]]
+# 状态转换异步通知：调度器可注入 observer 持久化每次转换（兼容 2 参或带 metadata 的 3 参回调）
+AsyncTransitionCallback = Callable[..., Awaitable[None]]
 
 # 默认退避序列：1s → 3s → 9s（3^0, 3^1, 3^2）
 _DEFAULT_BACKOFF: list[float] = [1.0, 3.0, 9.0]
@@ -114,11 +114,33 @@ class RetryExecutor:
     def __init__(self, policy: RetryPolicy | None = None) -> None:
         self.policy = policy or RetryPolicy()
 
+    @staticmethod
+    def _accepts_metadata(callback: AsyncTransitionCallback) -> bool:
+        """探测回调是否支持传入第 3 参数或 metadata 关键字参数。"""
+        try:
+            params = inspect.signature(callback).parameters
+        except (ValueError, TypeError):
+            return False
+        if "metadata" in params:
+            return True
+        if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+            return True
+        positional = [
+            p
+            for p in params.values()
+            if p.kind
+            in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+        ]
+        return len(positional) >= 3 or any(
+            p.kind is inspect.Parameter.VAR_POSITIONAL for p in params.values()
+        )
+
     async def _advance(
         self,
         state_machine: TaskStateMachine | None,
         target: SubtaskStatus,
         on_transition: AsyncTransitionCallback | None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """执行一次状态转换，并等待可选的异步通知完成。"""
         if state_machine is None:
@@ -126,7 +148,10 @@ class RetryExecutor:
         old = state_machine.status
         state_machine.transition(target)
         if on_transition is not None:
-            await on_transition(old, target)
+            if metadata and self._accepts_metadata(on_transition):
+                await on_transition(old, target, metadata)
+            else:
+                await on_transition(old, target)
 
     async def execute(
         self,
@@ -191,9 +216,26 @@ class RetryExecutor:
                 await self._advance(state_machine, SubtaskStatus.FAILED, on_transition)
                 if attempt < max_retries:
                     # 准备重试：FAILED → RETRYING → READY，等待退避后下一轮 → RUNNING
-                    await self._advance(state_machine, SubtaskStatus.RETRYING, on_transition)
-                    await self._advance(state_machine, SubtaskStatus.READY, on_transition)
                     backoff = self.policy.get_backoff(attempt)
+                    next_strategy = self.policy.get_strategy(attempt)
+                    retry_meta = {
+                        "stage": "node_retry",
+                        "attempt": attempt + 1,
+                        "max_retries": max_retries,
+                        "retry_delay_s": backoff,
+                        "strategy": next_strategy.get("strategy"),
+                        "level": "warning",
+                        "message": (
+                            f"节点执行失败，{backoff:.0f}s 后进行第 {attempt + 1}/{max_retries} 次重试"
+                        ),
+                    }
+                    await self._advance(
+                        state_machine,
+                        SubtaskStatus.RETRYING,
+                        on_transition,
+                        metadata=retry_meta,
+                    )
+                    await self._advance(state_machine, SubtaskStatus.READY, on_transition)
                     await asyncio.sleep(backoff)
                 else:
                     # 重试耗尽：FAILED → WAITING_HUMAN

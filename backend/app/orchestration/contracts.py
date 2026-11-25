@@ -525,5 +525,11 @@ class TaskSnapshot(BaseModel):
     #:
     #: `None`（而非空串）表示「还没产出」，调用方靠它区分状态。
     final_output: str | None = None
+    error: str | None = None
+    """任务级失败原因（仅 status == 'failed' 时填充，其余为 None）。"""
+    waiting_reason: str | None = None
+    """任务等待人工介入原因（仅 status == 'waiting_human' 时填充，其余为 None）。"""
+    workflow_preset: str | None = None
+    """工作流预设标识（来自 task.config['workflow_preset']）。"""
     created_at: datetime | None = None
     updated_at: datetime | None = None

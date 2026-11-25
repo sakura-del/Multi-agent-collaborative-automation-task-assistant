@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Awaitable, Callable
 from typing import Any
 from uuid import UUID
 
@@ -246,7 +247,13 @@ class LiteratureReviewWorkflow:
 
     # ===== 缝 1：规划 =====
 
-    async def plan(self, task: Any, *, repair: dict[str, Any] | None = None) -> TaskPlan:
+    async def plan(
+        self,
+        task: Any,
+        *,
+        repair: dict[str, Any] | None = None,
+        on_progress: Callable[[str, str], Awaitable[None]] | None = None,
+    ) -> TaskPlan:
         """生成并校验文献计划；失败时只做一次修复请求，再失败要求人工介入。"""
         requirement = self._requirement(task)
         if not requirement:
@@ -265,6 +272,11 @@ class LiteratureReviewWorkflow:
             ValueError,
         ) as first_error:
             logger.warning("literature_plan_repair", error=str(first_error))
+            if on_progress is not None:
+                try:
+                    await on_progress("planning_repair", "规划格式校验未通过，正在自动修复...")
+                except Exception:
+                    pass
             repair_payload = {
                 "error": str(first_error),
                 "previous_output": getattr(first_error, "raw_output", ""),

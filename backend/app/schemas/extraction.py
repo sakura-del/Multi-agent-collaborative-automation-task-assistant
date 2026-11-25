@@ -120,6 +120,9 @@ class ExtractionTableSummaryOut(BaseModel):
     error: str | None = None
     column_count: int
     source_count: int
+    completed_cells: int = 0
+    failed_cells: int = 0
+    total_cells: int = 0
     created_at: datetime
     updated_at: datetime
 

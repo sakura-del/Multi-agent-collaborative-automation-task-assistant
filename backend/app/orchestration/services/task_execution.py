@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import re
 import uuid
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -79,6 +80,57 @@ def _safe_download_stem(title: str) -> str:
     cleaned = re.sub(r'[\\/:*?"<>|\x00-\x1f]', " ", title or "")
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return (cleaned or "literature")[:60]
+
+
+def _set_task_reason(
+    task: Task,
+    *,
+    waiting_reason: str | None = None,
+    error: str | None = None,
+) -> None:
+    """在 task.config 中写入当前等待/失败原因并清除另一方（触发 SQLAlchemy dirty 检测）。"""
+    cfg = dict(task.config) if isinstance(task.config, dict) else {}
+    if waiting_reason is not None:
+        cfg["_waiting_reason"] = waiting_reason[:2000]
+        cfg.pop("_error", None)
+    elif error is not None:
+        cfg["_error"] = error[:2000]
+        cfg.pop("_waiting_reason", None)
+    task.config = cfg
+
+
+def _clear_task_reasons(task: Task) -> None:
+    """清理 task.config 中残留的等待/失败原因。"""
+    if not isinstance(task.config, dict):
+        return
+    if "_waiting_reason" not in task.config and "_error" not in task.config:
+        return
+    cfg = dict(task.config)
+    cfg.pop("_waiting_reason", None)
+    cfg.pop("_error", None)
+    task.config = cfg
+
+
+def _summarize_waiting_reason(result: Any) -> str:
+    """从调度结果中汇总需要人工介入的可读原因。"""
+    waiting_ids = [str(nid) for nid in (getattr(result, "waiting_human", None) or [])]
+    node_results = getattr(result, "node_results", None) or {}
+    parts: list[str] = []
+    for nid in waiting_ids:
+        nr = node_results.get(nid)
+        err = getattr(nr, "error", None) if nr is not None else None
+        if isinstance(err, str) and err.strip():
+            parts.append(f"{nid}: {err.strip()}")
+    if not parts and isinstance(node_results, dict):
+        for nid, nr in node_results.items():
+            err = getattr(nr, "error", None)
+            if isinstance(err, str) and err.strip():
+                parts.append(f"{nid}: {err.strip()}")
+    if parts:
+        return "；".join(parts)[:2000]
+    if waiting_ids:
+        return f"节点 {', '.join(waiting_ids)} 执行需要人工介入"[:2000]
+    return "任务执行需要人工介入"
 
 
 # 可被 recover() 重新调度的执行中状态
@@ -1567,6 +1619,13 @@ class TaskExecution:
 
             await self._publish(start_event)
             await self._bind_task_llm(task)
+            await self._emit_stage_progress(
+                task_id,
+                status=TaskStatus.RUNNING.value,
+                stage="verifying_references",
+                message="正在核验引用文献与论断支撑...",
+                extra={"workflow_preset": "verify_citations"},
+            )
 
             reviewer = self.container.create_agent("reviewer")
             # verify_citations 的核心目的即引用核验；仅离线模式且未显式开启时跳过外呼
@@ -1604,6 +1663,14 @@ class TaskExecution:
             if not await self._guard_citation_consistency(task_id, review_report):
                 return
 
+            await self._emit_stage_progress(
+                task_id,
+                status=TaskStatus.REVIEWING.value,
+                stage="exporting_artifacts",
+                message="引用一致性校验通过，正在导出 Markdown 与 DOCX 产物...",
+                extra={"workflow_preset": "verify_citations"},
+            )
+
             artifacts = self._export_literature_artifacts(
                 user_id, task_id, review_report, citation_style=citation_style
             )
@@ -1616,6 +1683,7 @@ class TaskExecution:
                 task.review_report = review_report
                 task.final_output = str(review_report.get("final_markdown") or "")
                 task.artifacts = artifacts
+                _clear_task_reasons(task)
                 await repo.transition(task, {TaskStatus.REVIEWING}, TaskStatus.COMPLETED)
                 done_event = await self._append_event(
                     session,
@@ -1670,18 +1738,47 @@ class TaskExecution:
 
             # 规划阶段就要用对模型：用户选了 BYOK，规划也必须走他的 key
             await self._bind_task_llm(task)
+            await self._emit_stage_progress(
+                task_id,
+                status=TaskStatus.PLANNING.value,
+                stage="planning_llm",
+                message="正在生成研究规划与任务 DAG...",
+            )
+
+            async def _on_plan_progress(stage_name: str, msg: str) -> None:
+                await self._emit_stage_progress(
+                    task_id,
+                    status=TaskStatus.PLANNING.value,
+                    stage=stage_name,
+                    message=msg,
+                    level="warning",
+                )
 
             if task_type == "literature_review":
                 # 文献场景：由工作流承担规划 + 一次契约修复；失败抛 HumanActionRequiredError
                 workflow = self._literature_workflow(task)
-                plan = await self._retry_transient(
-                    lambda: workflow.plan(task), task_id=task_id, stage="planning"
-                )
+                plan_params: Mapping[str, Any] = {}
+                try:
+                    plan_params = inspect.signature(workflow.plan).parameters
+                except (ValueError, TypeError):
+                    plan_params = {}
+                if "on_progress" in plan_params:
+                    plan = await self._retry_transient(
+                        lambda: workflow.plan(task, on_progress=_on_plan_progress),
+                        task_id=task_id,
+                        stage="planning",
+                    )
+                else:
+                    plan = await self._retry_transient(
+                        lambda: workflow.plan(task), task_id=task_id, stage="planning"
+                    )
                 dag = PlannerAgent.build_dag(plan)
             else:
                 planner = self.container.create_planner()
                 plan, dag = await self._retry_transient(
-                    lambda: self._generate_plan(planner, requirement, trace_id),
+                    lambda: self._generate_plan(
+                        planner, requirement, trace_id, on_progress=_on_plan_progress
+                    ),
                     task_id=task_id,
                     stage="planning",
                 )
@@ -1695,6 +1792,7 @@ class TaskExecution:
                 if task.status != TaskStatus.PLANNING.value:
                     return  # 已被取消/暂停
                 await repo.replace_plan(task, plan, dag)
+                _clear_task_reasons(task)
                 await repo.transition(
                     task,
                     {TaskStatus.PLANNING},
@@ -1758,6 +1856,27 @@ class TaskExecution:
                     delay_s=delay,
                     error=str(exc)[:200],
                 )
+                stage_status = (
+                    TaskStatus.PLANNING.value
+                    if stage == "planning"
+                    else (
+                        TaskStatus.REVIEWING.value
+                        if stage == "reviewing"
+                        else TaskStatus.RUNNING.value
+                    )
+                )
+                await self._emit_stage_progress(
+                    task_id,
+                    status=stage_status,
+                    stage=f"{stage}_retry",
+                    level="warning",
+                    message=f"上游服务暂时不可用，{delay:.0f}s 后进行第 {attempt + 1}/{attempts} 次重试",
+                    extra={
+                        "retry_delay_s": delay,
+                        "attempt": attempt,
+                        "max_attempts": attempts,
+                    },
+                )
                 await asyncio.sleep(delay)
         raise last_error if last_error else RuntimeError("重试未执行")
 
@@ -1805,6 +1924,8 @@ class TaskExecution:
         planner: Any,
         requirement: str,
         trace_id: str,
+        *,
+        on_progress: Callable[[str, str], Awaitable[None]] | None = None,
     ) -> tuple[TaskPlan, TaskDAG]:
         """调用 Planner；第一次失败后执行且仅执行一次 schema 修复调用。"""
         try:
@@ -1815,6 +1936,11 @@ class TaskExecution:
                 "planner_retry_with_schema_repair",
                 error=str(first_error),
             )
+            if on_progress is not None:
+                try:
+                    await on_progress("planning_repair", "规划格式校验未通过，正在自动修复...")
+                except Exception:
+                    pass
             repair = {
                 "error": str(first_error),
                 "previous_output": getattr(first_error, "raw_output", ""),
@@ -2143,11 +2269,13 @@ class TaskExecution:
         转人工意味着**本段执行结束**（用户可能随时放弃），因此按已用额度结算预扣；
         若之后 `retry_node` / `supply_input` 继续执行，会重新预扣（见 `_prereserve_quota`）。
         """
+        waiting_reason = _summarize_waiting_reason(result)
         async with self._session_factory() as session:
             repo = TaskRepository(session)
             task = await repo.lock_for_update(task_id)
             if task.status != TaskStatus.RUNNING.value:
                 return
+            _set_task_reason(task, waiting_reason=waiting_reason)
             await repo.transition(task, {TaskStatus.RUNNING}, TaskStatus.WAITING_HUMAN)
             event = await self._append_event(
                 session,
@@ -2157,6 +2285,7 @@ class TaskExecution:
                 payload={
                     "completed": result.completed,
                     "waiting_human": result.waiting_human,
+                    "reason": waiting_reason,
                 },
             )
             await session.commit()
@@ -2215,6 +2344,7 @@ class TaskExecution:
             task = await repo.lock_for_update(task_id)
             if task.status != TaskStatus.REVIEWING.value:
                 return
+            _set_task_reason(task, error=reason)
             await repo.transition(task, {TaskStatus.REVIEWING}, TaskStatus.FAILED)
             event = await self._append_event(
                 session,
@@ -2270,6 +2400,12 @@ class TaskExecution:
         reviewer = self.container.create_agent("reviewer")
         # R6 复盘路径：离线清单任务摘掉核验器（否则最终参考文献逐条外呼，离线演示不再可复现）
         self._apply_reference_verification(reviewer, task)
+        await self._emit_stage_progress(
+            task_id,
+            status=TaskStatus.REVIEWING.value,
+            stage="review_aggregating",
+            message="正在汇总各节点成果并核验引用...",
+        )
         if task_type == "literature_review":
             execution_results = self._ordered_execution_results(result, ordered_nodes or [])
             validations = self._ordered_validations(result, ordered_nodes or [])
@@ -2287,6 +2423,12 @@ class TaskExecution:
             # Issue #25 沉淀项 1：Agent 产出**落库前**强制校验引用一致性。
             if not await self._guard_citation_consistency(task_id, review_report):
                 return
+            await self._emit_stage_progress(
+                task_id,
+                status=TaskStatus.REVIEWING.value,
+                stage="exporting_artifacts",
+                message="引用一致性校验通过，正在导出 Markdown 与 DOCX 产物...",
+            )
             artifacts = self._export_literature_artifacts(
                 user_id, task_id, review_report, citation_style=citation_style
             )
@@ -2317,6 +2459,7 @@ class TaskExecution:
                 review_report.get("final_markdown") or review_report.get("summary") or ""
             )
             task.artifacts = artifacts
+            _clear_task_reasons(task)
             await repo.transition(task, {TaskStatus.REVIEWING}, TaskStatus.COMPLETED)
             event = await self._append_event(
                 session,
@@ -2549,6 +2692,7 @@ class TaskExecution:
     ) -> TaskEvent:
         if status in _TERMINAL_STATUSES or status not in _CANCELLABLE_STATUSES:
             raise ValidationException("当前状态不允许取消", details={"status": status.value})
+        _clear_task_reasons(task)
         await repo.transition(task, {status}, TaskStatus.CANCELLED)
         return await self._append_event(
             session,
@@ -2577,6 +2721,7 @@ class TaskExecution:
             raise NotFoundException("子任务不存在")
         subtask.status = "ready"
         subtask.completed_at = None
+        _clear_task_reasons(task)
         await TaskRepository(session).transition(
             task,
             {TaskStatus.WAITING_HUMAN, TaskStatus.FAILED},
@@ -2623,6 +2768,7 @@ class TaskExecution:
         # 旧规划与旧子任务必须一起清：只清 plan 会留下上一版 DAG 的节点，
         # 新规划成功前用户点开执行页看到的是过期状态。
         task.plan = None
+        _clear_task_reasons(task)
         await session.execute(delete(Subtask).where(Subtask.task_id == task.id))
         if status is TaskStatus.FAILED:
             task.completed_at = None
@@ -2643,7 +2789,10 @@ class TaskExecution:
         status: TaskStatus,
         human_input: dict[str, Any] | None,
     ) -> TaskEvent:
-        task.config = {**(task.config or {}), "human_input": human_input or {}}
+        updated_cfg = {**(task.config or {}), "human_input": human_input or {}}
+        updated_cfg.pop("_waiting_reason", None)
+        updated_cfg.pop("_error", None)
+        task.config = updated_cfg
         new_status = status
         if status is TaskStatus.WAITING_HUMAN:
             await repo.transition(task, {TaskStatus.WAITING_HUMAN}, TaskStatus.RUNNING)
@@ -2696,6 +2845,76 @@ class TaskExecution:
                 model = ModelSelectionSnapshot(**snapshot)
             except Exception:  # 历史脏数据不该让整个详情接口 500
                 logger.warning("task_model_snapshot_invalid", task_id=str(task.id))
+
+        raw_config = getattr(task, "config", None)
+        config = raw_config if isinstance(raw_config, dict) else {}
+        raw_preset = config.get("workflow_preset")
+        workflow_preset = (
+            raw_preset.strip() if isinstance(raw_preset, str) and raw_preset.strip() else None
+        )
+
+        # 按当前状态门控错误/等待原因：仅对应状态透出，并兼容历史库缺 config 键回溯
+        waiting_reason: str | None = None
+        error: str | None = None
+        if task.status == TaskStatus.WAITING_HUMAN.value:
+            raw_reason = config.get("_waiting_reason")
+            if isinstance(raw_reason, str) and raw_reason.strip():
+                waiting_reason = raw_reason.strip()
+            else:
+                for sub in subtasks:
+                    if sub.status in {"waiting_human", "failed"} and isinstance(sub.error, str):
+                        if sub.error.strip():
+                            waiting_reason = f"{sub.node_id}: {sub.error.strip()}"
+                            break
+                if waiting_reason is None:
+                    log_rows = (
+                        (
+                            await session.execute(
+                                select(ExecutionLog)
+                                .where(
+                                    ExecutionLog.task_id == task.id,
+                                    ExecutionLog.event_type == "task_waiting_human",
+                                )
+                                .order_by(ExecutionLog.event_seq.desc())
+                                .limit(1)
+                            )
+                        )
+                        .scalars()
+                        .all()
+                    )
+                    if log_rows:
+                        ctx = getattr(log_rows[0], "context", None)
+                        if isinstance(ctx, dict):
+                            log_reason = ctx.get("reason")
+                            if isinstance(log_reason, str) and log_reason.strip():
+                                waiting_reason = log_reason.strip()
+        elif task.status == TaskStatus.FAILED.value:
+            raw_error = config.get("_error")
+            if isinstance(raw_error, str) and raw_error.strip():
+                error = raw_error.strip()
+            else:
+                log_rows = (
+                    (
+                        await session.execute(
+                            select(ExecutionLog)
+                            .where(
+                                ExecutionLog.task_id == task.id,
+                                ExecutionLog.event_type == "task_failed",
+                            )
+                            .order_by(ExecutionLog.event_seq.desc())
+                            .limit(1)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                if log_rows:
+                    ctx = getattr(log_rows[0], "context", None)
+                    if isinstance(ctx, dict):
+                        log_err = ctx.get("reason")
+                        if isinstance(log_err, str) and log_err.strip():
+                            error = log_err.strip()
+
         return TaskSnapshot(
             task_id=task.id,
             status=task.status,
@@ -2713,6 +2932,9 @@ class TaskExecution:
             # 正文必须随快照下发：MCP/开放 API 的 get_task_output 读的就是它。
             # 曾经漏掉 → MCP 永远返回 markdown: null（tests 用 dict 替身掩盖了）。
             final_output=task.final_output,
+            error=error,
+            waiting_reason=waiting_reason,
+            workflow_preset=workflow_preset,
             created_at=created_at,
             updated_at=updated_at,
         )
@@ -2769,6 +2991,50 @@ class TaskExecution:
                 event_type=event.event_type,
             )
 
+    async def _emit_stage_progress(
+        self,
+        task_id: UUID,
+        *,
+        status: str,
+        stage: str,
+        message: str,
+        level: str = "info",
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        """发出任务级长耗时阶段进度事件（fail-open，兼容 __new__ 单测替身）。"""
+        session_factory = getattr(self, "_session_factory", None)
+        container = getattr(self, "container", None)
+        if session_factory is None or container is None:
+            return
+        payload: dict[str, Any] = {
+            "stage": stage,
+            "message": message,
+            "level": level,
+        }
+        if extra:
+            payload.update(extra)
+        event: TaskEvent | None = None
+        try:
+            async with session_factory() as session:
+                event = await self._append_event(
+                    session,
+                    task_id,
+                    event_type="stage_progress",
+                    status=status,
+                    subtask_id=None,
+                    payload=payload,
+                )
+                await session.commit()
+        except Exception as exc:
+            logger.debug(
+                "stage_progress_persist_skipped",
+                task_id=str(task_id),
+                stage=stage,
+                error=str(exc),
+            )
+            return
+        await self._publish(event)
+
     async def _mark_waiting_human(self, task_id: UUID, reason: str) -> None:
         """把执行中任务标记为 WAITING_HUMAN 并记录失败原因。"""
         try:
@@ -2785,6 +3051,7 @@ class TaskExecution:
                     TaskStatus.RETRYING,
                 }:
                     return
+                _set_task_reason(task, waiting_reason=reason)
                 await repo.transition(task, {current}, TaskStatus.WAITING_HUMAN)
                 event = await self._append_event(
                     session,

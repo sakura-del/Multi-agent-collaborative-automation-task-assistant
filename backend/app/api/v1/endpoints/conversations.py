@@ -4,18 +4,22 @@
 | --- | --- | --- |
 | `POST` | `/conversations` | 新建会话 |
 | `GET` | `/conversations` | 我的会话列表（默认不含归档） |
+| `GET` | `/conversations/capabilities` | 会话附件/语音能力 |
 | `GET` | `/conversations/{id}` | 详情：会话 + 全部消息（扁平，前端建树） |
 | `PATCH` | `/conversations/{id}` | 改名 / 归档 / 切换分支末端 |
 | `DELETE` | `/conversations/{id}` | 删除（消息级联） |
 | `POST` | `/conversations/{id}/messages` | 发送用户消息 → 生成 assistant 占位 |
+| `POST` | `/conversations/{id}/messages/{mid}/tool-confirm` | 确认/取消待执行的写工具 |
+| `POST` | `/conversations/{id}/messages/{mid}/stop` | 协同停止生成（写入停止标志并落库 `interrupted`） |
 | `GET` | `/conversations/{id}/messages/{mid}/stream` | **SSE** 流式生成（delta/done/error） |
 
 ## 停止生成的约定
 
-**没有** stop 端点：前端 abort 掉 SSE 连接即为停止——服务端
-`StreamingResponse` 的生成器会被 cancel，`CancelledError` 分支把已生成内容
-落库为 `interrupted`。加一个需要轮询协同的 stop 端点只会引入「停了但还在写」
-的竞态，不如让「连接即生成」这一个真相说了算。
+提供 `POST /conversations/{id}/messages/{mid}/stop` 协同取消端点：由于服务端
+生成循环挂在 LLM `await` 上时客户端仅 abort SSE 连接无法立刻感知，stop 端点会
+写入进程内停止标志（`request_stop`），使循环在下一个 delta/wait 迭代内退出并落库
+`interrupted`；若生成循环已不在运行，则由 stop 端点直接将该消息收敛为 `interrupted`。
+另在 `GET /conversations/{id}` 中兜底收敛超过 5 分钟仍停留在 `pending`/`streaming` 的消息。
 
 ## 分支与树
 
@@ -547,7 +551,7 @@ async def stream_message(
     工具的结果回灌给模型继续生成同一条消息——多步写链（建任务 → 确认规划 →
     重试节点）靠它才能连贯。必须与 `tools=1` 同用。
 
-    客户端 abort 即中断（落库 interrupted）。
+    客户端 abort 或调用 POST .../stop 协同取消均会中断生成并落库 interrupted。
     """
     await _owned(db, current_user.id, conversation_id)
 

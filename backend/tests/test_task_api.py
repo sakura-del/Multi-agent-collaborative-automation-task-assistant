@@ -702,3 +702,110 @@ class TestEvents:
         ).json()
         assert tail["events"] == []
         assert tail["next_event_id"] == body["next_event_id"]
+
+
+class TestSnapshotReasonAndPermissions:
+    """M0-3：GET /tasks/{id} 对 owner 与工作区成员透出原因与 preset，对非成员仍返回 404。"""
+
+    def test_get_snapshot_exposes_waiting_reason_error_and_preset_for_owner_and_workspace_member(
+        self, api_env
+    ) -> None:
+        from app.collaboration.services.workspace_service import WorkspaceService
+        from app.db.models.task import Task
+        from app.main import app
+
+        class _FailingPlanner(BaseAgent):
+            @property
+            def agent_type(self) -> str:
+                return "planner"
+
+            async def _run(self, input_data: dict[str, Any]) -> dict[str, Any]:
+                raise ValueError("规划模型不可用")
+
+        client, install_runtime = api_env
+        install_runtime(planner=_FailingPlanner())
+
+        owner_token = _register_and_login(client, "ws_reason_owner")
+        member_token = _register_and_login(client, "ws_reason_member")
+
+        owner_id = uuid.UUID(client.get("/api/v1/auth/me", headers=_auth(owner_token)).json()["id"])
+        member_id = uuid.UUID(
+            client.get("/api/v1/auth/me", headers=_auth(member_token)).json()["id"]
+        )
+
+        # 1) 创建带 preset 的任务，规划失败进入 waiting_human
+        created = _create(
+            client,
+            owner_token,
+            workflow_preset="research_gaps",
+            topic="研究空白分析等待原因测试",
+            keywords=["LLM", "gap"],
+        )
+        assert created.status_code == 201, created.text
+        task_id = created.json()["task_id"]
+        waiting_snap = _wait_status(client, owner_token, task_id, {TaskStatus.WAITING_HUMAN.value})
+        assert waiting_snap["workflow_preset"] == "research_gaps"
+        assert waiting_snap["waiting_reason"] and "规划失败" in waiting_snap["waiting_reason"]
+        assert waiting_snap["error"] is None
+
+        # 2) 将任务挂入工作区，工作区成员仅调用 GET /tasks/{id} 也能直接看到 waiting_reason
+        session_factory = app.state.container.session_factory
+
+        async def _attach_workspace() -> None:
+            ws_service = WorkspaceService(session_factory)
+            ws = await ws_service.create(
+                owner_id, name="协作组", slug=f"ws-{uuid.uuid4().hex[:6]}", seat_limit=5
+            )
+            invite = await ws_service.create_invite(owner_id, ws.id, role="member")
+            await ws_service.accept_invite(member_id, invite.code)
+            async with session_factory() as session:
+                task = await session.get(Task, uuid.UUID(task_id))
+                assert task is not None
+                task.workspace_id = ws.id
+                await session.commit()
+
+        client.portal.call(_attach_workspace)
+
+        member_resp = client.get(f"/api/v1/tasks/{task_id}", headers=_auth(member_token))
+        assert member_resp.status_code == 200
+        member_snap = member_resp.json()
+        assert member_snap["workflow_preset"] == "research_gaps"
+        assert member_snap["waiting_reason"] and "规划失败" in member_snap["waiting_reason"]
+        assert member_snap["error"] is None
+
+        # 3) 模拟任务处于 failed 状态时，应透出 error 且 waiting_reason 为 None
+        async def _mark_failed() -> None:
+            async with session_factory() as session:
+                task = await session.get(Task, uuid.UUID(task_id))
+                assert task is not None
+                task.status = TaskStatus.FAILED.value
+                task.config = {**(task.config or {}), "_error": "引用一致性校验未通过：缺少 [E3]"}
+                await session.commit()
+
+        client.portal.call(_mark_failed)
+
+        failed_snap = client.get(f"/api/v1/tasks/{task_id}", headers=_auth(member_token)).json()
+        assert failed_snap["status"] == TaskStatus.FAILED.value
+        assert failed_snap["error"] == "引用一致性校验未通过：缺少 [E3]"
+        assert failed_snap["waiting_reason"] is None
+
+    def test_get_snapshot_with_reasons_still_returns_404_for_outsider(self, api_env) -> None:
+        class _FailingPlanner(BaseAgent):
+            @property
+            def agent_type(self) -> str:
+                return "planner"
+
+            async def _run(self, input_data: dict[str, Any]) -> dict[str, Any]:
+                raise ValueError("绝密内部原因")
+
+        client, install_runtime = api_env
+        install_runtime(planner=_FailingPlanner())
+        owner_token = _register_and_login(client, "ws_iso_owner")
+        outsider_token = _register_and_login(client, "ws_iso_outsider")
+
+        task_id = _create(client, owner_token).json()["task_id"]
+        _wait_status(client, owner_token, task_id, {TaskStatus.WAITING_HUMAN.value})
+
+        outsider_resp = client.get(f"/api/v1/tasks/{task_id}", headers=_auth(outsider_token))
+        assert outsider_resp.status_code == 404
+        assert "绝密内部原因" not in outsider_resp.text

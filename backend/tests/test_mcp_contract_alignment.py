@@ -125,3 +125,31 @@ def test_snapshot_contract_keeps_core_fields(field: str) -> None:
     """顺带锁住 MCP 依赖的其它字段（防止未来重构改字段名）。"""
     payload = _snapshot().model_dump(mode="json")
     assert field in payload
+
+
+def test_mcp_tools_compatible_with_extended_task_snapshot() -> None:
+    """带 error/waiting_reason/workflow_preset 新字段的真实快照可被 MCP 工具消费。"""
+    client_failed = _ContractClient(
+        _snapshot(
+            status="failed",
+            error="引用一致性校验未通过",
+            workflow_preset="research_gaps",
+            final_output=None,
+        )
+    )
+    status_res = get_task_status(client_failed, "t1")  # type: ignore[arg-type]
+    output_res = get_task_output(client_failed, "t1")  # type: ignore[arg-type]
+    assert status_res["status"] == "failed"
+    assert status_res["has_output"] is False
+    assert output_res["markdown"] is None
+
+    client_waiting = _ContractClient(
+        _snapshot(
+            status="waiting_human",
+            waiting_reason="规划失败: 模型超限",
+            workflow_preset="literature_review",
+            final_output=None,
+        )
+    )
+    waiting_status = get_task_status(client_waiting, "t1")  # type: ignore[arg-type]
+    assert waiting_status["status"] == "waiting_human"

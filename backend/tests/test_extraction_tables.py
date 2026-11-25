@@ -767,6 +767,9 @@ class TestExtractionApiEndpoints:
         assert listed.status_code == 200
         assert len(listed.json()["items"]) == 1
         assert listed.json()["items"][0]["column_count"] == 3
+        assert listed.json()["items"][0]["completed_cells"] == 6
+        assert listed.json()["items"][0]["failed_cells"] == 0
+        assert listed.json()["items"][0]["total_cells"] == 6
 
         exported = client.get(
             f"/api/v1/extractions/{table_id}/export?format=csv&include_quotes=true",
@@ -785,3 +788,114 @@ class TestExtractionApiEndpoints:
         assert (
             client.get(f"/api/v1/extractions/{table_id}", headers=_auth(token_a)).status_code == 404
         )
+
+    def test_list_tables_aggregates_cell_progress_and_isolates_owners(
+        self, client: TestClient
+    ) -> None:
+        """列表接口聚合各表完成/失败/总单元格数，支持空表与追加列，并严格隔离跨用户。"""
+        token_a, user_a = _register_and_login(client, "extract_prog_a")
+        token_b, user_b = _register_and_login(client, "extract_prog_b")
+        session_factory = client.session_factory  # type: ignore[attr-defined]
+
+        doc_a1 = asyncio.run(_seed_knowledge_doc(session_factory, user_a, title="论文A1"))
+        doc_a2 = asyncio.run(_seed_knowledge_doc(session_factory, user_a, title="论文A2"))
+        doc_b1 = asyncio.run(_seed_knowledge_doc(session_factory, user_b, title="论文B1"))
+
+        # 1) 用户 A 创建 2 列 × 2 源 = 4 格表（auto_run=False）
+        created_a = client.post(
+            "/api/v1/extractions",
+            headers=_auth(token_a),
+            json={
+                "title": "进度聚合测试表",
+                "columns": [
+                    {"key": "sample_size", "label": "样本量", "prompt": "提取样本量"},
+                    {"key": "metrics", "label": "指标", "prompt": "提取主指标"},
+                ],
+                "sources": [
+                    {"source_type": "knowledge_doc", "source_id": str(doc_a1)},
+                    {"source_type": "knowledge_doc", "source_id": str(doc_a2)},
+                ],
+                "auto_run": False,
+            },
+        )
+        assert created_a.status_code == 201, created_a.text
+        table_a_id = uuid.UUID(created_a.json()["id"])
+
+        async def _seed_cell_statuses_and_empty_table() -> uuid.UUID:
+            async with session_factory() as session:
+                cells = (
+                    (
+                        await session.execute(
+                            select(ExtractionCell)
+                            .where(ExtractionCell.table_id == table_a_id)
+                            .order_by(ExtractionCell.source_id, ExtractionCell.column_key)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                assert len(cells) == 4
+                cells[0].status = "extracted"
+                cells[1].status = "not_reported"
+                cells[2].status = "error"
+                cells[3].status = "pending"
+
+                empty_table = ExtractionTable(
+                    user_id=user_a,
+                    title="零行列空表",
+                    columns=[],
+                    sources=[],
+                    status="draft",
+                )
+                session.add(empty_table)
+                await session.commit()
+                return empty_table.id
+
+        empty_table_id = asyncio.run(_seed_cell_statuses_and_empty_table())
+
+        listed_a1 = client.get("/api/v1/extractions", headers=_auth(token_a))
+        assert listed_a1.status_code == 200
+        by_id = {item["id"]: item for item in listed_a1.json()["items"]}
+        assert by_id[str(table_a_id)]["completed_cells"] == 2
+        assert by_id[str(table_a_id)]["failed_cells"] == 1
+        assert by_id[str(table_a_id)]["total_cells"] == 4
+        assert by_id[str(empty_table_id)]["completed_cells"] == 0
+        assert by_id[str(empty_table_id)]["failed_cells"] == 0
+        assert by_id[str(empty_table_id)]["total_cells"] == 0
+
+        # 2) 追加 1 列（auto_run=False）后总格数更新为 6，完成/失败计数不变
+        add_col = client.post(
+            f"/api/v1/extractions/{table_a_id}/columns",
+            headers=_auth(token_a),
+            json={
+                "column": {"key": "baseline", "label": "基线", "prompt": "提取基线方法"},
+                "auto_run": False,
+            },
+        )
+        assert add_col.status_code == 200, add_col.text
+        listed_a2 = client.get("/api/v1/extractions", headers=_auth(token_a))
+        by_id_2 = {item["id"]: item for item in listed_a2.json()["items"]}
+        assert by_id_2[str(table_a_id)]["completed_cells"] == 2
+        assert by_id_2[str(table_a_id)]["failed_cells"] == 1
+        assert by_id_2[str(table_a_id)]["total_cells"] == 6
+
+        # 3) 用户 B 隔离：新建前为空列表；新建 1×1 表不混入用户 A 计数
+        assert client.get("/api/v1/extractions", headers=_auth(token_b)).json()["items"] == []
+        created_b = client.post(
+            "/api/v1/extractions",
+            headers=_auth(token_b),
+            json={
+                "title": "用户B的表",
+                "columns": [{"key": "sample_size", "label": "样本量", "prompt": "提取样本量"}],
+                "sources": [{"source_type": "knowledge_doc", "source_id": str(doc_b1)}],
+                "auto_run": False,
+            },
+        )
+        assert created_b.status_code == 201, created_b.text
+        listed_b = client.get("/api/v1/extractions", headers=_auth(token_b))
+        assert len(listed_b.json()["items"]) == 1
+        item_b = listed_b.json()["items"][0]
+        assert item_b["id"] == created_b.json()["id"]
+        assert item_b["completed_cells"] == 0
+        assert item_b["failed_cells"] == 0
+        assert item_b["total_cells"] == 1

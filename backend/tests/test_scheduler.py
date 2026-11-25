@@ -576,3 +576,126 @@ class TestTargetedRegeneration:
         n2_calls = [call for call in executor.calls if call["node_id"] == "n2"]
         assert len(n2_calls) == 1  # 不可重试：不重生成
         assert result.node_results["n2"].status is SubtaskStatus.WAITING_HUMAN
+
+
+@pytest.mark.asyncio
+class TestRegenerationAndRetryEvents:
+    """M0-4：定向重做与节点瞬态重试时，在 FAILED→RETRYING 的 node_status 附带可选 payload。"""
+
+    async def _setup_db_observer(self, node_ids: tuple[str, ...]):
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool)
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        task_id = uuid.uuid4()
+        async with session_factory() as session:
+            session.add(
+                Task(
+                    id=task_id,
+                    user_id=uuid.uuid4(),
+                    title="调度事件增强测试",
+                    description="d",
+                    status="running",
+                )
+            )
+            for nid in node_ids:
+                session.add(
+                    Subtask(
+                        task_id=task_id,
+                        node_id=nid,
+                        title=f"节点 {nid}",
+                        description="d",
+                        status="pending",
+                    )
+                )
+            await session.commit()
+        publisher = _RecordingPublisher()
+        observer = DatabaseScheduleObserver(session_factory=session_factory, publisher=publisher)
+        return engine, task_id, observer, publisher
+
+    async def test_regeneration_emits_node_status_with_attempt_and_feedback(self) -> None:
+        engine, task_id, observer, publisher = await self._setup_db_observer(("n1", "n2"))
+        executor = _RegeneratingExecutor()
+        validator = _RegeneratingValidator()
+        dag = TestTargetedRegeneration._dag()
+        scheduler = TaskScheduler(
+            agent_factory=lambda t: executor if t == "executor" else validator,
+            observer=observer,
+        )
+        try:
+            result = await scheduler.run(dag, task_id=str(task_id))
+            assert result.success
+            retrying_events = [
+                e
+                for e in publisher.events
+                if e.event_type == "node_status" and e.payload.get("to") == "retrying"
+            ]
+            assert len(retrying_events) == 1
+            payload = retrying_events[0].payload
+            assert payload["node_id"] == "n2"
+            assert payload["from"] == "failed"
+            assert payload["to"] == "retrying"
+            assert payload["stage"] == "regeneration"
+            assert payload["regeneration_attempt"] == 1
+            assert "缺少引用标记" in str(payload["validation_feedback"])
+        finally:
+            await engine.dispose()
+
+    async def test_retry_executor_emits_node_status_with_retry_delay(self) -> None:
+        engine, task_id, observer, publisher = await self._setup_db_observer(("n1",))
+        attempts = {"n": 0}
+
+        class _FlakyExec(BaseAgent):
+            @property
+            def agent_type(self) -> str:
+                return "executor"
+
+            async def _run(self, input_data: dict) -> dict:
+                attempts["n"] += 1
+                if attempts["n"] == 1:
+                    raise RuntimeError("瞬态失败")
+                return {"result": "ok"}
+
+        class _PassVal(BaseAgent):
+            @property
+            def agent_type(self) -> str:
+                return "validator"
+
+            async def _run(self, input_data: dict) -> dict:
+                return {"passed": True}
+
+        dag = TaskDAG()
+        dag.add_node("n1", title="节点1", description="d")
+        scheduler = TaskScheduler(
+            agent_factory=lambda t: _FlakyExec() if t == "executor" else _PassVal(),
+            retry_policy=RetryPolicy(max_retries=1, backoff_times=[0.01]),
+            observer=observer,
+        )
+        try:
+            result = await scheduler.run(dag, task_id=str(task_id))
+            assert result.success
+            retrying_events = [
+                e
+                for e in publisher.events
+                if e.event_type == "node_status" and e.payload.get("to") == "retrying"
+            ]
+            assert len(retrying_events) == 1
+            payload = retrying_events[0].payload
+            assert payload["stage"] == "node_retry"
+            assert payload["attempt"] == 1
+            assert payload["retry_delay_s"] == 0.01
+        finally:
+            await engine.dispose()
+
+    async def test_four_arg_observer_remains_compatible(self) -> None:
+        """只有 4 个位置参数的既有观察者必须同时兼容定向重做与执行重试。"""
+        observer = _RecordingObserver()
+        executor = _RegeneratingExecutor()
+        validator = _RegeneratingValidator()
+        scheduler = TaskScheduler(
+            agent_factory=lambda t: executor if t == "executor" else validator,
+            observer=observer,
+        )
+        result = await scheduler.run(TestTargetedRegeneration._dag(), task_id="t-4arg")
+        assert result.success
+        assert ("t-4arg", "n2", "failed", "retrying") in observer.transitions
