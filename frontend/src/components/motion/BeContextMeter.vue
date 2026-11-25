@@ -11,11 +11,13 @@
  * （分段间 gap-1，颜色循环 slate/sky/emerald/violet/amber）；
  * header 右侧大号百分比 tabular-nums；未选中分段 opacity-30；
  * 分类列表行（色点+名称+token 数→这里改为「已配置」徽章）；
- * 动效 0.25s EASE_OUT [0.16,1,0.3,1]。
+ * 动效 0.25s EASE_OUT。
  */
 import { computed } from "vue";
-import { motion } from "motion-v";
+import { motion, useReducedMotion } from "motion-v";
 import { Layers } from "lucide-vue-next";
+
+import { EASE_OUT } from "@/lib/ease";
 
 export interface RoutingCategory {
   /** 节点类型（extract 等） */
@@ -31,6 +33,8 @@ const props = defineProps<{
   categories: RoutingCategory[];
   model?: string;
 }>();
+
+const reduced = useReducedMotion();
 
 const PALETTE = ["bg-slate-400", "bg-sky-500", "bg-emerald-500", "bg-violet-500", "bg-amber-400"];
 
@@ -79,7 +83,7 @@ const summary = computed(() => {
         </div>
         <span
           class="ml-auto text-xl font-medium tabular-nums"
-          :class="percent >= 100 ? 'text-emerald-600' : 'text-foreground'"
+          :class="percent >= 100 ? 'text-emerald-600 dark:text-emerald-400' : 'text-foreground'"
         >
           {{ percent }}%
         </span>
@@ -101,11 +105,10 @@ const summary = computed(() => {
             :key="seg.id"
             class="h-full rounded-full"
             :class="seg.configured ? seg.color : 'bg-muted'"
-            :style="{ width: seg.width }"
-            :initial="{ scaleX: 0 }"
+            :style="{ width: seg.width, transformOrigin: 'left center' }"
+            :initial="{ scaleX: reduced ? 1 : 0 }"
             :animate="{ scaleX: 1 }"
-            :transition="{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }"
-            style="transform-origin: left center"
+            :transition="{ duration: reduced ? 0 : 0.25, ease: EASE_OUT }"
             :title="`${seg.label}${seg.model ? ` → ${seg.model}` : ' → 跟随任务'}`"
           />
         </div>

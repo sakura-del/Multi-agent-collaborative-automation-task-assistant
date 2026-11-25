@@ -7,6 +7,16 @@ vi.mock("@/api/admin", () => ({
   getByokOverview: vi.fn(),
 }));
 
+const { toastSuccess } = vi.hoisted(() => ({
+  toastSuccess: vi.fn(),
+}));
+vi.mock("@/lib/toast", () => ({
+  toastSuccess,
+  toastError: vi.fn(),
+  toastInfo: vi.fn(),
+  toastWarning: vi.fn(),
+}));
+
 import { getByokOverview } from "@/api/admin";
 
 function overview(overrides: Record<string, unknown> = {}) {
@@ -111,6 +121,7 @@ function overview(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.mocked(getByokOverview).mockReset();
+  toastSuccess.mockReset();
 });
 
 describe("AdminByokView", () => {
@@ -223,5 +234,54 @@ describe("AdminByokView", () => {
     await flushPromises();
 
     expect(wrapper.find("[data-test='byok-dormant-empty']").exists()).toBe(true);
+  });
+
+  it("首屏使用延迟骨架屏不直接显示「正在统计…」，手动刷新弹 toastSuccess 且 ErrorBanner 可关闭复位", async () => {
+    vi.useFakeTimers();
+    try {
+      let resolveOverview!: (v: unknown) => void;
+      vi.mocked(getByokOverview).mockReturnValueOnce(
+        new Promise((r) => {
+          resolveOverview = r;
+        }) as never,
+      );
+
+      const wrapper = mount(AdminByokView);
+      await flushPromises();
+      // 0~180ms 内不出现「正在统计…」也不闪烁空态
+      expect(wrapper.text()).not.toContain("正在统计…");
+      expect(wrapper.find("[data-test='byok-empty']").exists()).toBe(false);
+
+      // 超过 180ms 出现带 motion-reduce:animate-none 的骨架屏
+      await vi.advanceTimersByTimeAsync(200);
+      expect(wrapper.find(".animate-pulse").classes()).toContain("motion-reduce:animate-none");
+
+      resolveOverview(overview());
+      await flushPromises();
+      await vi.advanceTimersByTimeAsync(300);
+      await flushPromises();
+      expect(toastSuccess).not.toHaveBeenCalled();
+
+      // 手动刷新触发 toastSuccess
+      vi.mocked(getByokOverview).mockResolvedValueOnce(overview() as never);
+      await wrapper.get("[data-test='byok-refresh']").trigger("click");
+      await flushPromises();
+      expect(toastSuccess).toHaveBeenCalledWith("已更新 BYOK 统计");
+
+      // ErrorBanner @dismiss 清空后可再现同文错误
+      vi.mocked(getByokOverview).mockRejectedValueOnce(new Error("统计服务超时"));
+      await wrapper.get("[data-test='byok-refresh']").trigger("click");
+      await flushPromises();
+      expect(wrapper.get("[data-test='byok-error']").text()).toContain("统计服务超时");
+
+      await wrapper.get("[data-test='byok-error'] button").trigger("click");
+      await flushPromises();
+      vi.mocked(getByokOverview).mockRejectedValueOnce(new Error("统计服务超时"));
+      await wrapper.get("[data-test='byok-refresh']").trigger("click");
+      await flushPromises();
+      expect(wrapper.get("[data-test='byok-error']").text()).toContain("统计服务超时");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

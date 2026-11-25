@@ -1,18 +1,84 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import { ArrowRight, BookOpenCheck, Github, Moon, Sun } from "lucide-vue-next";
+import { AnimatePresence, Motion, useReducedMotion } from "motion-v";
+import { ArrowRight, BookOpenCheck, Check, ChevronDown, Github, Monitor, Moon, Sun } from "lucide-vue-next";
 
 import LandingReportDrawer from "@/components/landing/LandingReportDrawer.vue";
 import LandingShowcase, { type ShowcaseTab } from "@/components/landing/LandingShowcase.vue";
 import { TRUST_SOURCES } from "@/components/landing/landing-demo-data";
-import { useTheme } from "@/composables/useTheme";
+import { useTheme, type ThemeMode } from "@/composables/useTheme";
+import { DURATION, EASE_IN, EASE_OUT, OFFSET } from "@/lib/ease";
 
 const GITHUB_REPO_URL =
   "https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant";
 
 const router = useRouter();
-const { isDark, toggleTheme } = useTheme();
+const reduced = useReducedMotion();
+const { mode, isDark, setTheme, toggleTheme } = useTheme();
+
+const themeMenuOpen = ref(false);
+const themeMenuWrap = ref<HTMLElement | null>(null);
+const themeModeTrigger = ref<HTMLButtonElement | null>(null);
+
+const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
+  { value: "light", label: "浅色" },
+  { value: "dark", label: "深色" },
+  { value: "system", label: "跟随系统" },
+];
+
+const themeModeLabel = computed(() => {
+  if (mode.value === "system") return "跟随系统";
+  return mode.value === "dark" ? "深色" : "浅色";
+});
+
+const toggleTitle = computed(() => {
+  const currentText =
+    mode.value === "system"
+      ? `跟随系统（当前${isDark.value ? "深色" : "浅色"}）`
+      : isDark.value
+        ? "深色模式"
+        : "浅色模式";
+  const nextText = isDark.value ? "切换到浅色模式" : "切换到深色模式";
+  return `${currentText} · ${nextText}`;
+});
+
+function selectThemeMode(next: ThemeMode) {
+  setTheme(next);
+  themeMenuOpen.value = false;
+  themeModeTrigger.value?.focus({ preventScroll: true });
+}
+
+function onDocumentPointerDown(event: Event) {
+  if (!themeMenuOpen.value) return;
+  const target = event.target as Node | null;
+  if (target && themeMenuWrap.value?.contains(target)) return;
+  themeMenuOpen.value = false;
+}
+
+function onThemeMenuKeydown(event: KeyboardEvent) {
+  if (!themeMenuOpen.value || event.isComposing || event.keyCode === 229) return;
+  if (event.key === "Escape") {
+    event.preventDefault();
+    event.stopPropagation();
+    themeMenuOpen.value = false;
+    themeModeTrigger.value?.focus({ preventScroll: true });
+  }
+}
+
+onMounted(() => {
+  if (typeof document !== "undefined") {
+    document.addEventListener("pointerdown", onDocumentPointerDown);
+    window.addEventListener("keydown", onThemeMenuKeydown);
+  }
+});
+
+onBeforeUnmount(() => {
+  if (typeof document !== "undefined") {
+    document.removeEventListener("pointerdown", onDocumentPointerDown);
+    window.removeEventListener("keydown", onThemeMenuKeydown);
+  }
+});
 
 const activeTab = ref<ShowcaseTab>("prisma");
 const reportOpen = ref(false);
@@ -24,12 +90,13 @@ function goRegister() {
 
 function jumpToShowcase(tab: ShowcaseTab) {
   activeTab.value = tab;
-  const reduced =
-    typeof window !== "undefined" &&
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const prefersReduced =
+    reduced.value ||
+    (typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches);
   showcaseAnchor.value?.scrollIntoView({
-    behavior: reduced ? "auto" : "smooth",
+    behavior: prefersReduced ? "auto" : "smooth",
     block: "center",
   });
 }
@@ -45,7 +112,7 @@ function jumpToShowcase(tab: ShowcaseTab) {
         <RouterLink
           to="/"
           data-test="landing-brand"
-          class="flex items-center gap-2.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-[#0F4C3A]"
+          class="flex items-center gap-2.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-[#0F4C3A] dark:focus-visible:ring-ring"
         >
           <img src="/logo.svg" alt="" aria-hidden="true" class="size-7" />
           <span class="text-sm font-semibold tracking-tight text-[#111827] dark:text-foreground">
@@ -93,13 +160,103 @@ function jumpToShowcase(tab: ShowcaseTab) {
           <button
             type="button"
             data-test="landing-theme-toggle"
-            :aria-label="isDark ? '切换到浅色模式' : '切换到深色模式'"
+            :aria-label="toggleTitle"
+            :title="toggleTitle"
             class="inline-flex size-8 items-center justify-center rounded-md text-[#4B5563] transition-colors hover:bg-black/5 hover:text-[#111827] dark:text-muted-foreground dark:hover:bg-muted dark:hover:text-foreground"
             @click="toggleTheme"
           >
-            <Sun v-if="isDark" :size="15" aria-hidden="true" />
-            <Moon v-else :size="15" aria-hidden="true" />
+            <AnimatePresence mode="wait" :initial="false">
+              <Motion
+                v-if="isDark"
+                key="sun"
+                as="span"
+                class="inline-flex items-center justify-center"
+                :initial="{ opacity: 0, scale: reduced ? 1 : 0.85 }"
+                :animate="{ opacity: 1, scale: 1 }"
+                :exit="{ opacity: 0, scale: reduced ? 1 : 0.85 }"
+                :transition="{ duration: DURATION.micro, ease: EASE_OUT }"
+              >
+                <Sun :size="15" aria-hidden="true" />
+              </Motion>
+              <Motion
+                v-else
+                key="moon"
+                as="span"
+                class="inline-flex items-center justify-center"
+                :initial="{ opacity: 0, scale: reduced ? 1 : 0.85 }"
+                :animate="{ opacity: 1, scale: 1 }"
+                :exit="{ opacity: 0, scale: reduced ? 1 : 0.85 }"
+                :transition="{ duration: DURATION.micro, ease: EASE_OUT }"
+              >
+                <Moon :size="15" aria-hidden="true" />
+              </Motion>
+            </AnimatePresence>
           </button>
+
+          <!-- 三态主题模式选择：浅色 / 深色 / 跟随系统（与 TopBar 同构） -->
+          <div ref="themeMenuWrap" class="relative">
+            <button
+              ref="themeModeTrigger"
+              type="button"
+              data-test="landing-theme-mode-select"
+              aria-haspopup="listbox"
+              :aria-expanded="themeMenuOpen"
+              :aria-label="`主题模式：${themeModeLabel}`"
+              :title="`主题模式：${themeModeLabel}`"
+              class="inline-flex h-8 items-center gap-1 rounded-md border border-[#E5E7EB] bg-white/80 px-2 text-[11px] font-medium text-[#4B5563] transition-colors hover:bg-black/5 hover:text-[#111827] dark:border-border dark:bg-muted/40 dark:text-muted-foreground dark:hover:bg-muted dark:hover:text-foreground"
+              @click="themeMenuOpen = !themeMenuOpen"
+            >
+              <Monitor v-if="mode === 'system'" :size="12" aria-hidden="true" />
+              <Moon v-else-if="mode === 'dark'" :size="12" aria-hidden="true" />
+              <Sun v-else :size="12" aria-hidden="true" />
+              <span class="hidden sm:inline">{{ themeModeLabel }}</span>
+              <ChevronDown :size="11" aria-hidden="true" />
+            </button>
+
+            <AnimatePresence :initial="false">
+              <Motion
+                v-if="themeMenuOpen"
+                key="landing-theme-menu"
+                as="ul"
+                role="listbox"
+                aria-label="选择主题模式"
+                :initial="{ opacity: 0, y: reduced ? 0 : -OFFSET.microY }"
+                :animate="{
+                  opacity: 1,
+                  y: 0,
+                  transition: { duration: reduced ? DURATION.micro : DURATION.fast, ease: EASE_OUT },
+                }"
+                :exit="{
+                  opacity: 0,
+                  y: reduced ? 0 : -OFFSET.microY,
+                  transition: { duration: DURATION.micro, ease: EASE_IN },
+                }"
+                class="absolute right-0 top-full z-40 mt-1.5 w-32 rounded-lg border border-[#E5E7EB] bg-white p-1 text-[#111827] shadow-raised dark:border-border-strong dark:bg-popover dark:text-popover-foreground"
+              >
+                <li
+                  v-for="option in THEME_OPTIONS"
+                  :key="option.value"
+                  role="option"
+                  :aria-selected="mode === option.value"
+                >
+                  <button
+                    type="button"
+                    :data-test="`landing-theme-mode-${option.value}`"
+                    class="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs transition-colors"
+                    :class="
+                      mode === option.value
+                        ? 'bg-[#0F4C3A]/10 font-medium text-[#0F4C3A] dark:bg-accent dark:text-accent-foreground'
+                        : 'text-[#111827] hover:bg-black/5 dark:text-foreground dark:hover:bg-muted/70'
+                    "
+                    @click="selectThemeMode(option.value)"
+                  >
+                    <span>{{ option.label }}</span>
+                    <Check v-if="mode === option.value" :size="12" aria-hidden="true" />
+                  </button>
+                </li>
+              </Motion>
+            </AnimatePresence>
+          </div>
 
           <RouterLink
             :to="{ name: 'login' }"

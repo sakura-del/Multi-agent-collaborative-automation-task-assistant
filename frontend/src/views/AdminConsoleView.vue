@@ -20,7 +20,8 @@
  * `admin-user-search` / `admin-user-role` / `admin-user-row` /
  * `admin-prev` / `admin-next` / `admin-total` / `admin-error`。
  */
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref, useId, watch } from "vue";
+import { Motion, useReducedMotion } from "motion-v";
 import { Loader2, RefreshCw } from "lucide-vue-next";
 
 import {
@@ -32,19 +33,28 @@ import {
   type AdminUserRow,
 } from "@/api/admin";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, StatCard } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Pagination } from "@/components/ui/pagination";
 import EmptyState from "@/components/common/EmptyState.vue";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import PageHeader from "@/components/common/PageHeader.vue";
+import { useDelayedLoading } from "@/composables/useDelayedLoading";
+import { SPRING_LAYOUT } from "@/lib/ease";
+import { toastSuccess } from "@/lib/toast";
 import { formatDateTime } from "@/utils/task-status";
 
 const DAY_OPTIONS = [7, 30, 90] as const;
 const PAGE_SIZE = 20;
+const instanceId = useId();
+const reduced = useReducedMotion();
 
 // ===== KPI =====
 const overview = ref<AdminOverview | null>(null);
 const days = ref<number>(7);
 const overviewLoading = ref(true);
+const showOverviewSkeleton = useDelayedLoading(overviewLoading);
 const error = ref("");
 
 // ===== 表 =====
@@ -57,6 +67,7 @@ const taskOffset = ref(0);
 const taskQuery = ref("");
 const taskStatus = ref("");
 const tasksLoading = ref(true);
+const showTasksSkeleton = useDelayedLoading(tasksLoading);
 const tasksLoaded = ref(false);
 
 const users = ref<AdminUserRow[]>([]);
@@ -65,6 +76,7 @@ const userOffset = ref(0);
 const userQuery = ref("");
 const userRole = ref<"" | "admin" | "user">("");
 const usersLoading = ref(false);
+const showUsersSkeleton = useDelayedLoading(usersLoading);
 const usersLoaded = ref(false);
 
 const STATUS_OPTIONS = [
@@ -97,10 +109,12 @@ const STATUS_LABEL: Record<string, string> = {
 
 /** 状态色只表语义且都带文字；不用纯色点。 */
 function statusClass(status: string): string {
-  if (status === "completed") return "border-emerald-500/40 text-emerald-700 bg-emerald-500/10";
+  if (status === "completed") {
+    return "border-emerald-500/40 text-emerald-700 dark:text-emerald-400 bg-emerald-500/10";
+  }
   if (status === "failed") return "border-destructive/40 text-destructive bg-destructive/10";
   if (status === "waiting_approval" || status === "waiting_human")
-    return "border-amber-500/40 text-amber-700 bg-amber-500/10";
+    return "border-amber-500/40 text-amber-700 dark:text-amber-400 bg-amber-500/10";
   if (status === "cancelled") return "border-border text-muted-foreground bg-muted";
   return "border-primary/30 text-primary bg-primary/5";
 }
@@ -179,28 +193,24 @@ function applyUserFilter(): void {
   void loadUsers();
 }
 
-function prevTaskPage(): void {
-  if (taskOffset.value <= 0) return;
-  taskOffset.value = Math.max(0, taskOffset.value - PAGE_SIZE);
+function onTaskPageChange(page: number): void {
+  taskOffset.value = (page - 1) * PAGE_SIZE;
   void loadTasks();
 }
 
-function nextTaskPage(): void {
-  if (taskOffset.value + PAGE_SIZE >= taskTotal.value) return;
-  taskOffset.value += PAGE_SIZE;
-  void loadTasks();
-}
-
-function prevUserPage(): void {
-  if (userOffset.value <= 0) return;
-  userOffset.value = Math.max(0, userOffset.value - PAGE_SIZE);
+function onUserPageChange(page: number): void {
+  userOffset.value = (page - 1) * PAGE_SIZE;
   void loadUsers();
 }
 
-function nextUserPage(): void {
-  if (userOffset.value + PAGE_SIZE >= userTotal.value) return;
-  userOffset.value += PAGE_SIZE;
-  void loadUsers();
+async function refreshManual(): Promise<void> {
+  await Promise.all([
+    loadOverview(),
+    tab.value === "tasks" ? loadTasks() : loadUsers(),
+  ]);
+  if (!error.value) {
+    toastSuccess("已刷新后台数据");
+  }
 }
 
 watch(days, () => void loadOverview());
@@ -217,42 +227,41 @@ onMounted(async () => {
 <template>
   <div data-test="admin-console">
     <PageHeader
-      eyebrow="Admin"
+      eyebrow="管理后台"
       title="后台管理"
       description="全站概览与跨用户任务/用户查询（只读）。仅管理员可见。"
     />
 
     <div class="mb-4 flex flex-wrap items-center gap-2">
-      <button
+      <Button
         v-for="option in DAY_OPTIONS"
         :key="option"
         type="button"
+        :variant="days === option ? 'default' : 'outline'"
+        size="sm"
         :data-test="`admin-days-${option}`"
-        class="inline-flex h-8 items-center rounded-md border px-2.5 text-xs transition-colors"
-        :class="
-          days === option
-            ? 'border-primary bg-primary/10 text-primary'
-            : 'border-border text-muted-foreground hover:text-foreground'
-        "
         @click="days = option"
       >
         近 {{ option }} 天
-      </button>
-      <button
+      </Button>
+      <Button
         type="button"
-        class="ml-auto inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
-        @click="
-          () => {
-            void loadOverview();
-            void (tab === 'tasks' ? loadTasks() : loadUsers());
-          }
-        "
+        variant="outline"
+        size="sm"
+        class="ml-auto"
+        :disabled="overviewLoading || tasksLoading || usersLoading"
+        @click="refreshManual"
       >
-        <RefreshCw class="size-3.5" /> 刷新
-      </button>
+        <RefreshCw
+          class="size-3.5"
+          :class="overviewLoading || tasksLoading || usersLoading ? 'animate-spin motion-reduce:animate-none' : ''"
+          aria-hidden="true"
+        />
+        刷新
+      </Button>
     </div>
 
-    <ErrorBanner v-if="error" data-test="admin-error" :message="error" class="mb-4" />
+    <ErrorBanner data-test="admin-error" :message="error" class="mb-4" @dismiss="error = ''" />
 
     <!-- KPI 条：一屏看全，数字同快照 -->
     <section class="mb-5 grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
@@ -300,9 +309,9 @@ onMounted(async () => {
       />
       <!-- 骨架屏：等宽占位，避免数字跳变 -->
       <div
-        v-for="index in overviewLoading ? 6 : 0"
+        v-for="index in showOverviewSkeleton && overviewLoading ? 6 : 0"
         :key="`skeleton-${index}`"
-        class="h-[86px] animate-pulse rounded-xl border border-border bg-muted/40"
+        class="h-[86px] animate-pulse rounded-xl border border-border bg-muted/40 motion-reduce:animate-none"
       />
     </section>
 
@@ -314,70 +323,85 @@ onMounted(async () => {
             <button
               type="button"
               data-test="admin-tab-tasks"
-              class="rounded px-2.5 py-1 text-xs transition-colors"
-              :class="tab === 'tasks' ? 'bg-primary/10 text-primary' : 'text-muted-foreground'"
+              class="relative rounded px-2.5 py-1 text-xs transition-colors"
+              :class="tab === 'tasks' ? 'font-medium text-primary' : 'text-muted-foreground hover:text-foreground'"
               @click="tab = 'tasks'"
             >
-              任务
+              <Motion
+                v-if="tab === 'tasks'"
+                :layout-id="reduced ? undefined : `admin-tab-${instanceId}`"
+                :transition="SPRING_LAYOUT"
+                aria-hidden="true"
+                class="absolute inset-0 rounded bg-primary/10"
+              />
+              <span class="relative z-10">任务</span>
             </button>
             <button
               type="button"
               data-test="admin-tab-users"
-              class="rounded px-2.5 py-1 text-xs transition-colors"
-              :class="tab === 'users' ? 'bg-primary/10 text-primary' : 'text-muted-foreground'"
+              class="relative rounded px-2.5 py-1 text-xs transition-colors"
+              :class="tab === 'users' ? 'font-medium text-primary' : 'text-muted-foreground hover:text-foreground'"
               @click="tab = 'users'"
             >
-              用户
+              <Motion
+                v-if="tab === 'users'"
+                :layout-id="reduced ? undefined : `admin-tab-${instanceId}`"
+                :transition="SPRING_LAYOUT"
+                aria-hidden="true"
+                class="absolute inset-0 rounded bg-primary/10"
+              />
+              <span class="relative z-10">用户</span>
             </button>
           </div>
         </div>
       </CardHeader>
       <CardContent>
-        <!-- ===== 任务 ===== -->
         <template v-if="tab === 'tasks'">
+          <!-- ===== 任务 ===== -->
           <div class="mb-3 flex flex-wrap items-center gap-2">
             <select
               v-model="taskStatus"
               data-test="admin-task-status"
-              class="h-8 rounded-md border border-border bg-background px-2 text-xs"
+              class="h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               @change="applyTaskFilter"
             >
               <option v-for="option in STATUS_OPTIONS" :key="option.value" :value="option.value">
                 {{ option.label }}
               </option>
             </select>
-            <input
+            <Input
               v-model="taskQuery"
               data-test="admin-task-search"
-              class="h-8 w-56 rounded-md border border-border bg-background px-2 text-xs"
+              class="h-8 w-56 text-xs"
               placeholder="按标题搜索（回车）"
               @keyup.enter="applyTaskFilter"
             />
-            <button
+            <Button
               type="button"
-              class="h-8 rounded-md border border-border px-2.5 text-xs text-muted-foreground hover:text-foreground"
+              variant="outline"
+              size="sm"
               @click="applyTaskFilter"
             >
               查询
-            </button>
+            </Button>
             <span data-test="admin-total" class="ml-auto text-xs text-muted-foreground">
               {{ tasksLoaded ? `共 ${formatNumber(taskTotal)} 条` : "加载中…" }}
             </span>
           </div>
 
-          <div v-if="tasksLoading" class="space-y-2">
+          <div v-if="showTasksSkeleton" class="space-y-2">
             <div
               v-for="index in 5"
               :key="`task-skeleton-${index}`"
-              class="h-9 animate-pulse rounded bg-muted/40"
+              class="h-9 animate-pulse rounded bg-muted/40 motion-reduce:animate-none"
             />
           </div>
           <EmptyState
-            v-else-if="tasks.length === 0"
+            v-else-if="!tasksLoading && !showTasksSkeleton && tasks.length === 0"
             title="没有符合条件的任务"
             description="换个状态或关键词试试。"
           />
-          <div v-else class="overflow-x-auto">
+          <div v-else-if="!tasksLoading && !showTasksSkeleton" class="overflow-x-auto">
             <table class="w-full min-w-[46rem] text-sm">
               <thead>
                 <tr class="border-b border-border text-left text-xs text-muted-foreground">
@@ -432,74 +456,65 @@ onMounted(async () => {
             </table>
           </div>
 
-          <div class="mt-3 flex items-center justify-end gap-2 text-xs text-muted-foreground">
-            <button
-              type="button"
-              data-test="admin-prev"
-              class="h-7 rounded border border-border px-2 disabled:opacity-40"
-              :disabled="taskOffset <= 0 || tasksLoading"
-              @click="prevTaskPage"
-            >
-              上一页
-            </button>
-            <span>{{ taskPage }} / {{ taskPages }}</span>
-            <button
-              type="button"
-              data-test="admin-next"
-              class="h-7 rounded border border-border px-2 disabled:opacity-40"
-              :disabled="taskOffset + PAGE_SIZE >= taskTotal || tasksLoading"
-              @click="nextTaskPage"
-            >
-              下一页
-            </button>
+          <div class="mt-3 flex justify-end">
+            <Pagination
+              :model-value="taskPage"
+              :total-pages="taskPages"
+              :disabled="tasksLoading"
+              prev-testid="admin-prev"
+              next-testid="admin-next"
+              aria-label="任务列表分页"
+              @change="onTaskPageChange"
+            />
           </div>
         </template>
 
-        <!-- ===== 用户 ===== -->
         <template v-else>
+          <!-- ===== 用户 ===== -->
           <div class="mb-3 flex flex-wrap items-center gap-2">
             <select
               v-model="userRole"
               data-test="admin-user-role"
-              class="h-8 rounded-md border border-border bg-background px-2 text-xs"
+              class="h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               @change="applyUserFilter"
             >
               <option value="">全部角色</option>
               <option value="admin">管理员</option>
               <option value="user">普通用户</option>
             </select>
-            <input
+            <Input
               v-model="userQuery"
               data-test="admin-user-search"
-              class="h-8 w-56 rounded-md border border-border bg-background px-2 text-xs"
+              class="h-8 w-56 text-xs"
               placeholder="用户名 / 邮箱（回车）"
               @keyup.enter="applyUserFilter"
             />
-            <button
+            <Button
               type="button"
-              class="h-8 rounded-md border border-border px-2.5 text-xs text-muted-foreground hover:text-foreground"
+              variant="outline"
+              size="sm"
               @click="applyUserFilter"
             >
               查询
-            </button>
+            </Button>
             <span class="ml-auto text-xs text-muted-foreground">
               {{ usersLoaded ? `共 ${formatNumber(userTotal)} 人` : "加载中…" }}
             </span>
           </div>
 
-          <div v-if="usersLoading" class="space-y-2">
+          <div v-if="showUsersSkeleton" class="space-y-2">
             <div
               v-for="index in 5"
               :key="`user-skeleton-${index}`"
-              class="h-9 animate-pulse rounded bg-muted/40"
+              class="h-9 animate-pulse rounded bg-muted/40 motion-reduce:animate-none"
             />
           </div>
           <EmptyState
-            v-else-if="users.length === 0"
+            v-else-if="!usersLoading && !showUsersSkeleton && users.length === 0"
             title="没有符合条件的用户"
             description="换个角色或关键词试试。"
           />
-          <div v-else class="overflow-x-auto">
+          <div v-else-if="!usersLoading && !showUsersSkeleton" class="overflow-x-auto">
             <table class="w-full text-sm">
               <thead>
                 <tr class="border-b border-border text-left text-xs text-muted-foreground">
@@ -529,7 +544,7 @@ onMounted(async () => {
                     </Badge>
                   </td>
                   <td class="py-2 pr-3 text-xs">
-                    <span :class="row.is_active ? 'text-emerald-700' : 'text-destructive'">
+                    <span :class="row.is_active ? 'text-emerald-700 dark:text-emerald-400' : 'text-destructive'">
                       {{ row.is_active ? "正常" : "已停用" }}
                     </span>
                   </td>
@@ -550,29 +565,21 @@ onMounted(async () => {
             </table>
           </div>
 
-          <div class="mt-3 flex items-center justify-end gap-2 text-xs text-muted-foreground">
-            <button
-              type="button"
-              class="h-7 rounded border border-border px-2 disabled:opacity-40"
-              :disabled="userOffset <= 0 || usersLoading"
-              @click="prevUserPage"
-            >
-              上一页
-            </button>
-            <span>{{ userPage }} / {{ userPages }}</span>
-            <button
-              type="button"
-              class="h-7 rounded border border-border px-2 disabled:opacity-40"
-              :disabled="userOffset + PAGE_SIZE >= userTotal || usersLoading"
-              @click="nextUserPage"
-            >
-              下一页
-            </button>
+          <div class="mt-3 flex justify-end">
+            <Pagination
+              :model-value="userPage"
+              :total-pages="userPages"
+              :disabled="usersLoading"
+              prev-testid="admin-user-prev"
+              next-testid="admin-user-next"
+              aria-label="用户列表分页"
+              @change="onUserPageChange"
+            />
           </div>
         </template>
 
         <p v-if="tab === 'tasks' && tasksLoading" class="sr-only">
-          <Loader2 class="animate-spin" /> 加载中
+          <Loader2 class="animate-spin motion-reduce:animate-none" /> 加载中
         </p>
       </CardContent>
     </Card>

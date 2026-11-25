@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
+import { AnimatePresence, Motion, useReducedMotion } from "motion-v";
 import { Check, ShieldCheck } from "lucide-vue-next";
+
+import { DURATION, EASE_IN, EASE_OUT, OFFSET } from "@/lib/ease";
 
 /**
  * 认证流共用左侧品牌展示面板（登录 / 注册 / 密码重置统一使用，Issue #39）。
@@ -32,6 +35,7 @@ const AUTH_PROOFS = {
   },
 } as const;
 
+const reduced = useReducedMotion();
 const activeProofIndex = ref<1 | 2>(1);
 const activeProof = computed(() => AUTH_PROOFS[activeProofIndex.value]);
 
@@ -53,7 +57,7 @@ const TRUST_ITEMS = ["arXiv", "PubMed", "OpenAlex", "PRISMA 2020", "GB/T 7714-20
       to="/"
       data-test="brand-home"
       aria-label="VeriPaper 首页"
-      class="relative flex w-fit items-center gap-2.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-[#0F4C3A]"
+      class="relative flex w-fit items-center gap-2.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-[#0F4C3A] dark:focus-visible:ring-ring"
     >
       <img src="/logo.svg" alt="" aria-hidden="true" class="size-7" />
       <span class="text-sm font-semibold tracking-tight text-[#111827] dark:text-foreground">
@@ -98,7 +102,7 @@ const TRUST_ITEMS = ["arXiv", "PubMed", "OpenAlex", "PRISMA 2020", "GB/T 7714-20
               :class="
                 activeProofIndex === 1
                   ? 'bg-[#0F4C3A] text-white dark:bg-primary dark:text-primary-foreground'
-                  : 'bg-[#0F4C3A]/10 text-[#0F4C3A] hover:bg-[#0F4C3A]/20 dark:bg-primary/15 dark:text-primary'
+                  : 'bg-[#0F4C3A]/10 text-[#0F4C3A] hover:bg-[#0F4C3A]/20 dark:bg-primary/15 dark:text-primary dark:hover:bg-primary/25'
               "
               @click="activeProofIndex = 1"
             >[1]</button>；而在多智能体筛选阶段，结构化审议协议将人工复核工时降低了 68.2%<button
@@ -109,7 +113,7 @@ const TRUST_ITEMS = ["arXiv", "PubMed", "OpenAlex", "PRISMA 2020", "GB/T 7714-20
               :class="
                 activeProofIndex === 2
                   ? 'bg-[#0F4C3A] text-white dark:bg-primary dark:text-primary-foreground'
-                  : 'bg-[#0F4C3A]/10 text-[#0F4C3A] hover:bg-[#0F4C3A]/20 dark:bg-primary/15 dark:text-primary'
+                  : 'bg-[#0F4C3A]/10 text-[#0F4C3A] hover:bg-[#0F4C3A]/20 dark:bg-primary/15 dark:text-primary dark:hover:bg-primary/25'
               "
               @click="activeProofIndex = 2"
             >[2]</button>。
@@ -120,18 +124,35 @@ const TRUST_ITEMS = ["arXiv", "PubMed", "OpenAlex", "PRISMA 2020", "GB/T 7714-20
           data-test="login-proof-footer"
           class="border-t border-[#E5E7EB] bg-[#F9FAFB] px-4 py-3 text-xs dark:border-border dark:bg-muted/40"
         >
-          <div class="flex flex-wrap items-center justify-between gap-2">
-            <span class="font-medium text-[#374151] dark:text-foreground">
-              [{{ activeProofIndex }}] {{ activeProof.source }}
-            </span>
-            <span class="inline-flex items-center gap-1 rounded-full bg-[#0F4C3A]/10 px-2 py-0.5 text-[11px] font-medium text-[#0F4C3A] dark:bg-success/15 dark:text-success">
-              <Check :size="11" :stroke-width="2.4" aria-hidden="true" />
-              {{ activeProof.badge }}
-            </span>
-          </div>
-          <p class="mt-1.5 font-mono text-[10.5px] leading-relaxed break-words text-[#6B7280] dark:text-muted-foreground">
-            {{ activeProof.citation }}
-          </p>
+          <AnimatePresence mode="popLayout" :initial="false">
+            <Motion
+              :key="activeProofIndex"
+              :initial="{ opacity: 0, y: reduced ? 0 : OFFSET.microY }"
+              :animate="{
+                opacity: 1,
+                y: 0,
+                transition: { duration: reduced ? DURATION.micro : DURATION.fast, ease: EASE_OUT },
+              }"
+              :exit="{
+                opacity: 0,
+                y: reduced ? 0 : -OFFSET.microY,
+                transition: { duration: DURATION.micro, ease: EASE_IN },
+              }"
+            >
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <span class="font-medium text-[#374151] dark:text-foreground">
+                  [{{ activeProofIndex }}] {{ activeProof.source }}
+                </span>
+                <span class="inline-flex items-center gap-1 rounded-full bg-[#0F4C3A]/10 px-2 py-0.5 text-[11px] font-medium text-[#0F4C3A] dark:bg-success/15 dark:text-success">
+                  <Check :size="11" :stroke-width="2.4" aria-hidden="true" />
+                  {{ activeProof.badge }}
+                </span>
+              </div>
+              <p class="mt-1.5 font-mono text-[10.5px] leading-relaxed break-words text-[#6B7280] dark:text-muted-foreground">
+                {{ activeProof.citation }}
+              </p>
+            </Motion>
+          </AnimatePresence>
         </div>
       </div>
     </div>

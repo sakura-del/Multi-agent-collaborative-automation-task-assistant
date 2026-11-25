@@ -63,4 +63,29 @@ describe("Pagination", () => {
     const wrapper = mountPager();
     expect(wrapper.get("nav").attributes("aria-label")).toBe("分页");
   });
+
+  it("透传 prevTestid 与 nextTestid，且 disabled=true 时禁用全部分页按钮并拦截跳转", async () => {
+    const wrapper = mount(Pagination, {
+      props: {
+        modelValue: 10,
+        totalPages: 30,
+        prevTestid: "admin-prev",
+        nextTestid: "admin-next",
+        disabled: true,
+      },
+    });
+
+    const prev = wrapper.get('[data-test="admin-prev"]');
+    const next = wrapper.get('[data-test="admin-next"]');
+    expect(prev.attributes("disabled")).toBeDefined();
+    expect(next.attributes("disabled")).toBeDefined();
+    expect(wrapper.get('[aria-label="第 11 页"]').attributes("disabled")).toBeDefined();
+    expect(wrapper.get('[aria-label="向前 5 页"]').attributes("disabled")).toBeDefined();
+
+    await prev.trigger("click");
+    await next.trigger("click");
+    await wrapper.get('[aria-label="第 11 页"]').trigger("click");
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+    expect(wrapper.emitted("change")).toBeUndefined();
+  });
 });

@@ -38,7 +38,7 @@ const normalized = computed(() => {
       <div
         v-for="seg in normalized"
         :key="seg.id"
-        class="h-full border-r border-background/80 last:border-r-0 transition-all duration-300"
+        class="h-full border-r border-background/80 last:border-r-0 transition-opacity duration-300 motion-reduce:transition-none"
         :style="{ width: seg.width, backgroundColor: seg.color }"
         :title="`${seg.label}：${seg.value}（${seg.percent}%）`"
       />

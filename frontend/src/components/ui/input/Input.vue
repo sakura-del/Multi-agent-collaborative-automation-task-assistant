@@ -19,7 +19,6 @@ const props = withDefaults(
     disabled?: boolean;
     placeholder?: string;
     id?: string;
-    "aria-label"?: string;
   }>(),
   {
     modelValue: undefined,
@@ -29,7 +28,6 @@ const props = withDefaults(
     disabled: false,
     placeholder: undefined,
     id: undefined,
-    "aria-label": undefined,
   }
 );
 
@@ -50,7 +48,6 @@ const model = useVModel(props, "modelValue", emits, {
     :type="props.type"
     :disabled="props.disabled"
     :placeholder="props.placeholder"
-    :aria-label="props['aria-label']"
     :class="
       cn(
         'flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs',

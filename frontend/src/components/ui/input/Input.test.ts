@@ -44,4 +44,22 @@ describe("Input 原语透传与 aria-invalid 行为", () => {
     await input.setValue("新内容");
     expect(wrapper.emitted("update:modelValue")?.[0]).toEqual(["新内容"]);
   });
+
+  it("透传 :aria-label 与静态 aria-label 到原生 input，且不再用 props 拦截 aria-label", () => {
+    const dynamicWrapper = mount(Input, { attrs: { "aria-label": "搜索模型凭据" } });
+    expect(dynamicWrapper.get("input").attributes("aria-label")).toBe("搜索模型凭据");
+
+    const staticWrapper = mount({
+      components: { Input },
+      template: '<Input aria-label="静态标签" />',
+    });
+    expect(staticWrapper.get("input").attributes("aria-label")).toBe("静态标签");
+
+    const omittedWrapper = mount(Input);
+    expect(omittedWrapper.get("input").attributes("aria-label")).toBeUndefined();
+
+    // 确认 aria-label 已从 Input 声明 props 中移除，交由 Vue $attrs 原生透传
+    const declaredProps = (Input as { props?: Record<string, unknown> }).props ?? {};
+    expect("aria-label" in declaredProps).toBe(false);
+  });
 });

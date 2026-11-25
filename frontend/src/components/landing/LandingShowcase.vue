@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from "vue";
+import { computed, onBeforeUnmount, ref, useId } from "vue";
+import { Motion, useReducedMotion } from "motion-v";
 import {
   ArrowRight,
   Check,
@@ -17,6 +18,9 @@ import {
   X,
 } from "lucide-vue-next";
 
+import { Button } from "@/components/ui/button";
+import { SPRING_LAYOUT, TRANSITION_ENTER } from "@/lib/ease";
+import { toastInfo } from "@/lib/toast";
 import {
   DEMO_AGENT_STAGES,
   DEMO_CITATIONS,
@@ -28,6 +32,9 @@ import {
 } from "./landing-demo-data";
 
 export type ShowcaseTab = "prisma" | "matrix" | "review";
+
+const instanceId = useId();
+const reduced = useReducedMotion();
 
 const props = withDefaults(
   defineProps<{
@@ -102,6 +109,7 @@ const activeCitation = computed(
 function triggerExportHint() {
   stopReplay();
   exportNotice.value = true;
+  toastInfo("示范模式仅预览，注册后可上传并导出自定义 .docx 模板");
 }
 
 // ===== 自动流程回放（真实研究流程 4 步演示，用户随时可接管） =====
@@ -217,7 +225,7 @@ onBeforeUnmount(() => {
           :class="
             replaying
               ? 'border-[#0F4C3A] bg-[#0F4C3A]/10 text-[#0F4C3A] dark:border-primary dark:bg-primary/15 dark:text-primary'
-              : 'border-[#E5E7EB] bg-white text-[#374151] hover:border-[#0F4C3A]/40 hover:text-[#0F4C3A] dark:border-border dark:bg-background dark:text-foreground'
+              : 'border-[#E5E7EB] bg-white text-[#374151] hover:border-[#0F4C3A]/40 hover:text-[#0F4C3A] dark:border-border dark:bg-background dark:text-foreground dark:hover:border-primary/40 dark:hover:text-primary'
           "
           @click="toggleReplay"
         >
@@ -238,23 +246,40 @@ onBeforeUnmount(() => {
             role="tab"
             :data-test="`showcase-tab-${tab.id}`"
             :aria-selected="currentTab === tab.id"
-            class="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors"
+            class="relative inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors"
             :class="
               currentTab === tab.id
-                ? 'bg-[#0F4C3A] text-white dark:bg-primary dark:text-primary-foreground'
+                ? 'text-white dark:text-primary-foreground'
                 : 'text-[#4B5563] hover:text-[#111827] dark:text-muted-foreground dark:hover:text-foreground'
             "
             @click="selectTabManual(tab.id)"
           >
-            <component :is="tab.icon" :size="13" aria-hidden="true" />
-            <span>{{ tab.label }}</span>
+            <Motion
+              v-if="currentTab === tab.id"
+              :layout-id="reduced ? undefined : `showcase-tab-${instanceId}`"
+              :transition="SPRING_LAYOUT"
+              aria-hidden="true"
+              class="absolute inset-0 rounded-full bg-[#0F4C3A] dark:bg-primary"
+            />
+            <span class="relative z-10 inline-flex items-center gap-1.5">
+              <component :is="tab.icon" :size="13" aria-hidden="true" />
+              <span>{{ tab.label }}</span>
+            </span>
           </button>
         </div>
       </div>
     </div>
 
-    <!-- ==================== TAB 1：PRISMA 2020 智能筛选 ==================== -->
-    <div v-if="currentTab === 'prisma'" data-test="showcase-panel-prisma" class="p-4 sm:p-6">
+    <Motion
+      v-if="currentTab === 'prisma'"
+      key="panel-prisma"
+      data-test="showcase-panel-prisma"
+      :initial="{ opacity: reduced ? 1 : 0 }"
+      :animate="{ opacity: 1 }"
+      :transition="TRANSITION_ENTER"
+      class="p-4 sm:p-6"
+    >
+      <!-- ==================== TAB 1：PRISMA 2020 智能筛选 ==================== -->
       <!-- 横向精简版 PRISMA 漏斗进度 -->
       <div
         class="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-[#E5E7EB] bg-[#FAF9F6] px-3.5 py-2.5 text-xs dark:border-border dark:bg-muted/30"
@@ -262,15 +287,15 @@ onBeforeUnmount(() => {
         <span class="text-[#4B5563] dark:text-muted-foreground">
           多库检索 <strong class="font-semibold text-[#111827] tabular-nums dark:text-foreground">1,248</strong> 篇
         </span>
-        <ArrowRight :size="12" class="text-[#9CA3AF]" aria-hidden="true" />
+        <ArrowRight :size="12" class="text-[#9CA3AF] dark:text-muted-foreground" aria-hidden="true" />
         <span class="text-[#4B5563] dark:text-muted-foreground">
           自动去重 <strong class="font-semibold text-[#111827] tabular-nums dark:text-foreground">892</strong> 篇
         </span>
-        <ArrowRight :size="12" class="text-[#9CA3AF]" aria-hidden="true" />
+        <ArrowRight :size="12" class="text-[#9CA3AF] dark:text-muted-foreground" aria-hidden="true" />
         <span class="text-[#4B5563] dark:text-muted-foreground">
           标题/摘要初筛 <strong class="font-semibold text-[#111827] tabular-nums dark:text-foreground">64</strong> 篇
         </span>
-        <ArrowRight :size="12" class="text-[#9CA3AF]" aria-hidden="true" />
+        <ArrowRight :size="12" class="text-[#9CA3AF] dark:text-muted-foreground" aria-hidden="true" />
         <span
           data-test="prisma-included-counter"
           class="inline-flex items-center gap-1 rounded-full bg-[#0F4C3A]/10 px-2.5 py-0.5 font-semibold text-[#0F4C3A] tabular-nums dark:bg-success/15 dark:text-success"
@@ -323,7 +348,7 @@ onBeforeUnmount(() => {
               :class="
                 verdicts[paper.id] === 'include'
                   ? 'border-[#0F4C3A] bg-[#0F4C3A] text-white dark:border-success dark:bg-success dark:text-success-foreground'
-                  : 'border-[#E5E7EB] bg-white text-[#4B5563] hover:border-[#0F4C3A]/40 hover:text-[#0F4C3A] dark:border-border dark:bg-background dark:text-muted-foreground'
+                  : 'border-[#E5E7EB] bg-white text-[#4B5563] hover:border-[#0F4C3A]/40 hover:text-[#0F4C3A] dark:border-border dark:bg-background dark:text-muted-foreground dark:hover:border-success/40 dark:hover:text-success'
               "
               @click="setVerdict(paper.id, 'include')"
             >
@@ -338,7 +363,7 @@ onBeforeUnmount(() => {
               :class="
                 verdicts[paper.id] === 'maybe'
                   ? 'border-[#D97706]/40 bg-[#FEF3C7] text-[#92400E] dark:border-warning/40 dark:bg-warning/20 dark:text-warning'
-                  : 'border-[#E5E7EB] bg-white text-[#4B5563] hover:border-[#D97706]/40 hover:text-[#92400E] dark:border-border dark:bg-background dark:text-muted-foreground'
+                  : 'border-[#E5E7EB] bg-white text-[#4B5563] hover:border-[#D97706]/40 hover:text-[#92400E] dark:border-border dark:bg-background dark:text-muted-foreground dark:hover:border-warning/40 dark:hover:text-warning'
               "
               @click="setVerdict(paper.id, 'maybe')"
             >
@@ -353,7 +378,7 @@ onBeforeUnmount(() => {
               :class="
                 verdicts[paper.id] === 'exclude'
                   ? 'border-[#E11D48]/30 bg-[#FFF1F2] text-[#BE123C] dark:border-destructive/40 dark:bg-destructive/15 dark:text-destructive'
-                  : 'border-[#E5E7EB] bg-white text-[#4B5563] hover:border-[#E11D48]/30 hover:text-[#BE123C] dark:border-border dark:bg-background dark:text-muted-foreground'
+                  : 'border-[#E5E7EB] bg-white text-[#4B5563] hover:border-[#E11D48]/30 hover:text-[#BE123C] dark:border-border dark:bg-background dark:text-muted-foreground dark:hover:border-destructive/40 dark:hover:text-destructive'
               "
               @click="setVerdict(paper.id, 'exclude')"
             >
@@ -363,10 +388,18 @@ onBeforeUnmount(() => {
           </div>
         </li>
       </ul>
-    </div>
+    </Motion>
 
-    <!-- ==================== TAB 2：文献提取表格 & 多智能体编排 ==================== -->
-    <div v-else-if="currentTab === 'matrix'" data-test="showcase-panel-matrix" class="p-4 sm:p-6">
+    <Motion
+      v-else-if="currentTab === 'matrix'"
+      key="panel-matrix"
+      data-test="showcase-panel-matrix"
+      :initial="{ opacity: reduced ? 1 : 0 }"
+      :animate="{ opacity: 1 }"
+      :transition="TRANSITION_ENTER"
+      class="p-4 sm:p-6"
+    >
+      <!-- ==================== TAB 2：文献提取表格 & 多智能体编排 ==================== -->
       <!-- 四阶段协作编排条 -->
       <div
         class="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-[#E5E7EB] bg-[#FAF9F6] px-3.5 py-2.5 text-xs dark:border-border dark:bg-muted/30"
@@ -395,7 +428,7 @@ onBeforeUnmount(() => {
           <ArrowRight
             v-if="idx < DEMO_AGENT_STAGES.length - 1"
             :size="12"
-            class="text-[#9CA3AF]"
+            class="text-[#9CA3AF] dark:text-muted-foreground"
             aria-hidden="true"
           />
         </template>
@@ -438,12 +471,12 @@ onBeforeUnmount(() => {
                 <button
                   type="button"
                   :data-test="`matrix-cell-${row.id}-${col.key}`"
-                  class="block w-full rounded-md p-1.5 text-left leading-relaxed text-[#374151] transition-colors hover:bg-[#0F4C3A]/6 focus-visible:outline-2 focus-visible:outline-[#0F4C3A] dark:text-foreground/90 dark:hover:bg-primary/10"
+                  class="block w-full rounded-md p-1.5 text-left leading-relaxed text-[#374151] transition-colors hover:bg-[#0F4C3A]/6 focus-visible:outline-2 focus-visible:outline-[#0F4C3A] dark:text-foreground/90 dark:hover:bg-primary/10 dark:focus-visible:outline-ring"
                   @click="inspectCell(row.title, col.label, col.data)"
                 >
                   {{ col.data.text }}
                   <span
-                    class="pointer-events-none mt-1.5 inline-flex items-center gap-1 rounded bg-[#111827] px-1.5 py-0.5 text-[10px] font-medium text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 dark:bg-foreground dark:text-background"
+                    class="pointer-events-none mt-1.5 inline-flex items-center gap-1 rounded bg-[#111827] px-1.5 py-0.5 text-[10px] font-medium text-white opacity-75 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 motion-reduce:transition-none dark:bg-foreground dark:text-background"
                   >
                     点击定位至原文片段
                   </span>
@@ -468,19 +501,29 @@ onBeforeUnmount(() => {
             “{{ selectedCell.quote }}”
           </p>
         </div>
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon-sm"
           aria-label="关闭原文片段"
-          class="rounded p-1 text-[#6B7280] hover:bg-black/5 hover:text-[#111827] dark:text-muted-foreground"
+          class="shrink-0 text-[#6B7280] hover:bg-black/5 hover:text-[#111827] dark:text-muted-foreground dark:hover:bg-muted dark:hover:text-foreground"
           @click="selectedCell = null"
         >
           <X :size="14" aria-hidden="true" />
-        </button>
+        </Button>
       </div>
-    </div>
+    </Motion>
 
-    <!-- ==================== TAB 3：可溯源综述 & 模板导出 ==================== -->
-    <div v-else data-test="showcase-panel-review" class="p-4 sm:p-6">
+    <Motion
+      v-else
+      key="panel-review"
+      data-test="showcase-panel-review"
+      :initial="{ opacity: reduced ? 1 : 0 }"
+      :animate="{ opacity: 1 }"
+      :transition="TRANSITION_ENTER"
+      class="p-4 sm:p-6"
+    >
+      <!-- ==================== TAB 3：可溯源综述 & 模板导出 ==================== -->
       <!-- 综述顶部工具栏：CSL 样式切换 + Word 模板导出 -->
       <div
         class="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[#E5E7EB] bg-[#FAF9F6] px-3.5 py-2 dark:border-border dark:bg-muted/30"
@@ -493,7 +536,7 @@ onBeforeUnmount(() => {
             id="landing-csl-select"
             v-model="selectedCsl"
             data-test="demo-csl-select"
-            class="h-7 rounded-md border border-[#E5E7EB] bg-white px-2 text-xs font-medium text-[#111827] outline-none focus-visible:border-[#0F4C3A] dark:border-border dark:bg-background dark:text-foreground"
+            class="h-7 rounded-md border border-[#E5E7EB] bg-white px-2 text-xs font-medium text-[#111827] outline-none focus-visible:border-[#0F4C3A] dark:border-border dark:bg-background dark:text-foreground dark:focus-visible:border-ring"
           >
             <option v-for="opt in DEMO_CSL_OPTIONS" :key="opt.value" :value="opt.value">
               {{ opt.label }}
@@ -520,13 +563,26 @@ onBeforeUnmount(() => {
         <span>
           已按 <strong>{{ DEMO_CSL_OPTIONS.find((o) => o.value === selectedCsl)?.label }}</strong> 样式就绪。免费注册后可上传任意高校/期刊 Word 模板并一键导出成稿。
         </span>
-        <button
-          type="button"
-          class="font-semibold underline underline-offset-2"
-          @click="emit('start')"
-        >
-          去免费体验 →
-        </button>
+        <div class="flex items-center gap-2">
+          <button
+            type="button"
+            class="font-semibold underline underline-offset-2"
+            @click="emit('start')"
+          >
+            去免费体验 →
+          </button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="关闭导出提示"
+            data-test="demo-export-notice-close"
+            class="text-[#0F4C3A] hover:bg-[#0F4C3A]/10 dark:text-primary dark:hover:bg-primary/15"
+            @click="exportNotice = false"
+          >
+            <X :size="14" aria-hidden="true" />
+          </Button>
+        </div>
       </div>
 
       <!-- 左 65% 正文预览 + 右 35% 溯源核验侧边栏 -->
@@ -551,7 +607,7 @@ onBeforeUnmount(() => {
                 :class="
                   activeCitationIndex === 1
                     ? 'bg-[#0F4C3A] text-white dark:bg-primary dark:text-primary-foreground'
-                    : 'bg-[#0F4C3A]/10 text-[#0F4C3A] hover:bg-[#0F4C3A]/20 dark:bg-primary/15 dark:text-primary'
+                    : 'bg-[#0F4C3A]/10 text-[#0F4C3A] hover:bg-[#0F4C3A]/20 dark:bg-primary/15 dark:text-primary dark:hover:bg-primary/25'
                 "
                 @click="activeCitationIndex = 1"
               >[1]</button>。
@@ -565,7 +621,7 @@ onBeforeUnmount(() => {
                 :class="
                   activeCitationIndex === 2
                     ? 'bg-[#0F4C3A] text-white dark:bg-primary dark:text-primary-foreground'
-                    : 'bg-[#0F4C3A]/10 text-[#0F4C3A] hover:bg-[#0F4C3A]/20 dark:bg-primary/15 dark:text-primary'
+                    : 'bg-[#0F4C3A]/10 text-[#0F4C3A] hover:bg-[#0F4C3A]/20 dark:bg-primary/15 dark:text-primary dark:hover:bg-primary/25'
                 "
                 @click="activeCitationIndex = 2"
               >[2]</button>，为高质量综述的规模化产出提供了可复现的工程路径。
@@ -629,6 +685,6 @@ onBeforeUnmount(() => {
           </div>
         </aside>
       </div>
-    </div>
+    </Motion>
   </div>
 </template>

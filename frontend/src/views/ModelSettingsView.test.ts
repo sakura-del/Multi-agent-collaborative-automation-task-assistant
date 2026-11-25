@@ -13,6 +13,18 @@ vi.mock("@/api/llm-credentials", () => ({
     testLLMCredential: vi.fn(),
 }));
 
+const { updateNodeRouting } = vi.hoisted(() => ({
+    updateNodeRouting: vi.fn(),
+}));
+vi.mock("@/api/llm-routing", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("@/api/llm-routing")>();
+    return {
+        ...actual,
+        listNodeRouting: vi.fn().mockResolvedValue([]),
+        updateNodeRouting,
+    };
+});
+
 import {
     createLLMCredential,
     deleteLLMCredential,
@@ -591,5 +603,70 @@ describe("ModelSettingsView", () => {
         expect(meter).not.toContain("Routing coverage");
         expect(meter).not.toContain("nodes routed");
         expect(meter).not.toContain("follow task");
+    });
+
+    it("删除确认条位于 model-row 内部，支持取消且删除失败时不关闭", async () => {
+        vi.mocked(listLLMCredentials).mockResolvedValue([credential()] as never);
+        vi.mocked(deleteLLMCredential).mockRejectedValueOnce(new Error("删除受限"));
+
+        const wrapper = mountView();
+        await flushPromises();
+
+        await wrapper.get('[data-test="model-delete-c1"]').trigger("click");
+        await flushPromises();
+
+        const row = wrapper.get('[data-test="model-row-c1"]');
+        const confirmBtn = row.find('[data-test="model-confirm-delete-c1"]');
+        const cancelBtn = row.find('[data-test="model-cancel-delete-c1"]');
+        expect(confirmBtn.exists()).toBe(true);
+        expect(cancelBtn.exists()).toBe(true);
+        expect(row.text()).toContain("不影响历史任务");
+
+        // 点击取消销毁确认条
+        await cancelBtn.trigger("click");
+        await flushPromises();
+        expect(row.find('[data-test="model-confirm-delete-c1"]').exists()).toBe(false);
+        expect(deleteLLMCredential).not.toHaveBeenCalled();
+
+        // 再次点击删除并确认，失败时保留确认条且展示 ErrorBanner
+        await wrapper.get('[data-test="model-delete-c1"]').trigger("click");
+        await flushPromises();
+        await wrapper.get('[data-test="model-confirm-delete-c1"]').trigger("click");
+        await flushPromises();
+        expect(wrapper.find('[data-test="models-error"]').text()).toContain("删除受限");
+        expect(row.find('[data-test="model-confirm-delete-c1"]').exists()).toBe(true);
+    });
+
+    it("推理档位删除按钮不再使用裸 ✕ 文案", async () => {
+        vi.mocked(listLLMCredentials).mockResolvedValue([] as never);
+        const wrapper = mountView();
+        await flushPromises();
+        await openCreate(wrapper);
+
+        await wrapper.get('[data-test="model-tier-add"]').trigger("click");
+        const removeBtn = wrapper.get('button[aria-label="删除档位 1"]');
+        expect(removeBtn.text()).not.toContain("✕");
+    });
+
+    it("保存节点路由失败显示 ErrorBanner(routing-error) 并可关闭，不再渲染成灰字 routing-message", async () => {
+        vi.mocked(listLLMCredentials).mockResolvedValue([credential()] as never);
+        updateNodeRouting.mockRejectedValueOnce(new Error("路由保存异常"));
+
+        const wrapper = mountView();
+        await flushPromises();
+
+        await wrapper.get('[data-test="routing-save"]').trigger("click");
+        await flushPromises();
+
+        expect(wrapper.find('[data-test="routing-message"]').exists()).toBe(false);
+        const err = wrapper.get('[data-test="routing-error"]');
+        expect(err.text()).toContain("路由保存异常");
+
+        await err.get("button").trigger("click");
+        await flushPromises();
+        updateNodeRouting.mockRejectedValueOnce(new Error("路由保存异常"));
+        await wrapper.get('[data-test="routing-save"]').trigger("click");
+        await flushPromises();
+        expect(wrapper.get('[data-test="routing-error"]').text()).toContain("路由保存异常");
     });
 });

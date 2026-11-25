@@ -9,6 +9,16 @@ vi.mock("@/api/admin", () => ({
   listAdminUsers: vi.fn(),
 }));
 
+const { toastSuccess } = vi.hoisted(() => ({
+  toastSuccess: vi.fn(),
+}));
+vi.mock("@/lib/toast", () => ({
+  toastSuccess,
+  toastError: vi.fn(),
+  toastInfo: vi.fn(),
+  toastWarning: vi.fn(),
+}));
+
 import { getAdminOverview, listAdminTasks, listAdminUsers } from "@/api/admin";
 
 function overview(overrides: Record<string, unknown> = {}) {
@@ -85,6 +95,46 @@ describe("AdminConsoleView", () => {
     vi.mocked(getAdminOverview).mockResolvedValue(overview() as never);
     vi.mocked(listAdminTasks).mockResolvedValue(taskPage as never);
     vi.mocked(listAdminUsers).mockResolvedValue(userPage as never);
+  });
+
+  it("使用 Pagination 分页（点击 admin-next 翻页）并在手动刷新后调用 toastSuccess", async () => {
+    vi.mocked(listAdminTasks).mockResolvedValue({ ...taskPage, total: 45 } as never);
+    const wrapper = mount(AdminConsoleView);
+    await flushPromises();
+
+    // 使用 Pagination 组件（含 nav[aria-label='任务列表分页'] 与 admin-next）
+    expect(wrapper.find('nav[aria-label="任务列表分页"]').exists()).toBe(true);
+    await wrapper.get('[data-test="admin-next"]').trigger("click");
+    await flushPromises();
+    expect(listAdminTasks).toHaveBeenCalledWith(
+      expect.objectContaining({ offset: 20, limit: 20 }),
+    );
+
+    // 手动刷新触发 toastSuccess
+    expect(toastSuccess).not.toHaveBeenCalled();
+    await wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("刷新"))!
+      .trigger("click");
+    await flushPromises();
+    expect(toastSuccess).toHaveBeenCalledWith("已刷新后台数据");
+  });
+
+  it("ErrorBanner 关闭后可复现同文报错", async () => {
+    vi.mocked(getAdminOverview).mockRejectedValue(new Error("权限失效"));
+    const wrapper = mount(AdminConsoleView);
+    await flushPromises();
+
+    expect(wrapper.get('[data-test="admin-error"]').text()).toContain("权限失效");
+    await wrapper.get('[data-test="admin-error"] button').trigger("click");
+    await flushPromises();
+
+    await wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("刷新"))!
+      .trigger("click");
+    await flushPromises();
+    expect(wrapper.get('[data-test="admin-error"]').text()).toContain("权限失效");
   });
 
   it("渲染 6 张 KPI 卡", async () => {

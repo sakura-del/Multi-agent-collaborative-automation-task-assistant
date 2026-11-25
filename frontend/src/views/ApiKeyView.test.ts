@@ -9,6 +9,16 @@ vi.mock("@/api/api-keys", () => ({
   revokeApiKey: vi.fn(),
 }));
 
+const { toastSuccess } = vi.hoisted(() => ({
+  toastSuccess: vi.fn(),
+}));
+vi.mock("@/lib/toast", () => ({
+  toastSuccess,
+  toastError: vi.fn(),
+  toastInfo: vi.fn(),
+  toastWarning: vi.fn(),
+}));
+
 import { createApiKey, listApiKeys, revokeApiKey } from "@/api/api-keys";
 
 function keyInfo(overrides: Record<string, unknown> = {}) {
@@ -33,10 +43,11 @@ beforeEach(() => {
   vi.mocked(listApiKeys).mockReset();
   vi.mocked(createApiKey).mockReset();
   vi.mocked(revokeApiKey).mockReset();
+  toastSuccess.mockReset();
 });
 
 describe("ApiKeyView", () => {
-  it("展示 Key 列表（前缀 + scope + 状态）", async () => {
+  it("展示 Key 列表（前缀 + 中文与权限码双显 scope + 状态）", async () => {
     vi.mocked(listApiKeys).mockResolvedValue([keyInfo()] as never);
 
     const wrapper = mountView();
@@ -46,7 +57,8 @@ describe("ApiKeyView", () => {
     expect(row.exists()).toBe(true);
     expect(row.text()).toContain("我的同步脚本");
     expect(row.text()).toContain("maa_7Kx9mQ2p");
-    expect(row.text()).toContain("tasks:read");
+    expect(row.text()).toContain("读取任务 (tasks:read)");
+    expect(row.text()).toContain("创建与控制任务 (tasks:write)");
     expect(row.text()).toContain("可用");
   });
 
@@ -189,19 +201,77 @@ describe("ApiKeyView", () => {
     expect(wrapper.find('[data-test="apikeys-error"]').text()).toContain("权限范围");
   });
 
-  it("吊销后刷新列表", async () => {
+  it("吊销需 ConfirmBar 二次确认：可取消，确认后才吊销并刷新列表", async () => {
     vi.mocked(listApiKeys).mockResolvedValue([keyInfo()] as never);
     vi.mocked(revokeApiKey).mockResolvedValue(undefined as never);
 
     const wrapper = mountView();
     await flushPromises();
 
+    // 首次点击吊销仅弹出 ConfirmBar，不立即调用接口
+    await wrapper.get('[data-test="apikey-revoke-k1"]').trigger("click");
+    await flushPromises();
+    expect(revokeApiKey).not.toHaveBeenCalled();
+    expect(wrapper.find('[data-test="apikey-revoke-confirm-k1"]').exists()).toBe(true);
+    expect(wrapper.get('[data-test="apikey-row-k1"]').text()).toContain("401");
+
+    // 点击取消销毁 ConfirmBar，且恢复吊销按钮
+    await wrapper.get('[data-test="apikey-revoke-cancel-k1"]').trigger("click");
+    await flushPromises();
+    expect(revokeApiKey).not.toHaveBeenCalled();
+    expect(wrapper.find('[data-test="apikey-revoke-confirm-k1"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="apikey-revoke-k1"]').exists()).toBe(true);
+
+    // 再次触发并确认吊销
     vi.mocked(listApiKeys).mockResolvedValue([] as never);
     await wrapper.get('[data-test="apikey-revoke-k1"]').trigger("click");
     await flushPromises();
+    await wrapper.get('[data-test="apikey-revoke-confirm-k1"]').trigger("click");
+    await flushPromises();
 
     expect(revokeApiKey).toHaveBeenCalledWith("k1");
+    expect(toastSuccess).toHaveBeenCalled();
     expect(wrapper.find('[data-test="apikey-row-k1"]').exists()).toBe(false);
+  });
+
+  it("复制密钥触发 toastSuccess，且 ErrorBanner 关闭可复位错误状态", async () => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+    });
+    vi.mocked(listApiKeys).mockResolvedValue([] as never);
+    vi.mocked(createApiKey).mockResolvedValue({
+      ...keyInfo(),
+      key: "maa_COPY_TEST_KEY",
+    } as never);
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    // 触发校验错误，验证 ErrorBanner 关闭后可复现同文错误
+    await wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("生成 Key"))!
+      .trigger("click");
+    await wrapper.get('[data-test="apikey-create-form"]').trigger("submit");
+    await flushPromises();
+    expect(wrapper.find('[data-test="apikeys-error"]').text()).toContain("请填写 Key 名称");
+
+    await wrapper.get('[data-test="apikeys-error"] button').trigger("click");
+    await flushPromises();
+    await wrapper.get('[data-test="apikey-create-form"]').trigger("submit");
+    await flushPromises();
+    expect(wrapper.find('[data-test="apikeys-error"]').text()).toContain("请填写 Key 名称");
+
+    // 创建并复制
+    await wrapper.get('[data-test="apikey-name"]').setValue("复制测试");
+    await wrapper.get('[data-test="apikey-create-form"]').trigger("submit");
+    await flushPromises();
+
+    await wrapper.get('[data-test="apikey-copy"]').trigger("click");
+    await flushPromises();
+    expect(toastSuccess).toHaveBeenCalledWith("已复制密钥");
+    expect(wrapper.get('[data-test="apikey-copy"]').text()).toContain("已复制");
   });
 
   it("已吊销的 Key 显示「已吊销」且不显示吊销按钮", async () => {

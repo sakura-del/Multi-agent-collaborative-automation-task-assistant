@@ -6,7 +6,7 @@
  * 做出来给你确认。配色在这里用局部 token 覆盖，**不影响**其它页面的
  * 现有青绿主题。
  *
- * 路由：`/design/timeline`（public，可直接打开）。
+ * 路由：`/design/timeline`（requiresAdmin，仅管理员可访问，Issue #62）。
  * 确认后再把 token 提升为全局，并按方案逐页迁移。
  */
 import { ref } from "vue";
@@ -14,6 +14,7 @@ import { ArrowLeft } from "lucide-vue-next";
 
 import BeTimeline, { type BeTimelineEvent } from "@/components/motion/BeTimeline.vue";
 import { Alert } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import { Pagination } from "@/components/ui/pagination";
 import {
   Card,
@@ -138,17 +139,17 @@ const STATUS_LABEL: Record<DemoStatus, string> = {
 };
 
 function mediaTone(status: DemoStatus): string {
-  if (status === "running") return "bg-[#E9EEFF] text-[#2447D6]";
-  if (status === "needs-review") return "bg-[#FBF3E4] text-[#8A5A0B]";
-  if (status === "failed") return "bg-[#FBE9E7] text-[#A63A2B]";
-  return "bg-[#EEF0F3] text-[#4B4E56]";
+  if (status === "running") return "bg-primary/10 text-primary";
+  if (status === "needs-review") return "bg-warning/15 text-warning";
+  if (status === "failed") return "bg-destructive/15 text-destructive";
+  return "bg-muted text-muted-foreground";
 }
 
 function barColor(status: DemoStatus): string {
-  if (status === "running") return "bg-[#2F5BFF]";
-  if (status === "needs-review") return "bg-[#C98A12]";
-  if (status === "failed") return "bg-[#D2503C]";
-  return "bg-[#17181A]";
+  if (status === "running") return "bg-primary";
+  if (status === "needs-review") return "bg-warning";
+  if (status === "failed") return "bg-destructive";
+  return "bg-foreground";
 }
 
 function onSelect(id: string) {
@@ -158,37 +159,31 @@ function onSelect(id: string) {
 
 <template>
   <div
-    class="design-demo min-h-screen overflow-x-hidden bg-background px-5 py-10 text-foreground sm:px-8"
+    class="min-h-screen overflow-x-hidden bg-background px-5 py-10 text-foreground sm:px-8"
   >
     <div class="mx-auto w-full max-w-6xl">
       <header class="mb-8 flex flex-wrap items-start justify-between gap-4">
         <div>
           <p class="mb-2 text-[10px] font-semibold tracking-[0.16em] text-primary uppercase">
-            Design preview · beUI
+            设计预览 · 时间线
           </p>
           <h1 class="font-display text-3xl font-medium tracking-[-0.035em]">研究时间线</h1>
           <p class="mt-2 max-w-xl text-sm text-muted-foreground">
-            新配色（纯白 + 钴蓝）、beUI 时间线与新表面的设计演示。拖拽、滚轮或方向键浏览；
-            生产页面暂未改动。
+            全局双主题 token、时间线与新版表面组件设计演示。拖拽、滚轮或方向键浏览。
           </p>
         </div>
-        <button
+        <Button
           type="button"
-          class="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+          variant="outline"
+          size="sm"
           @click="$router.back()"
         >
           <ArrowLeft :size="13" aria-hidden="true" />
           返回
-        </button>
+        </Button>
       </header>
 
-      <!--
-        演示页局部覆盖设计 token：确认后这套值会替换全局 main.css 的
-        青绿主题，这里先用 scope 限定，避免影响生产页面。
-      -->
-      <div
-        class="rounded-3xl border border-border bg-card p-2 [--primary:#2F5BFF] [--ring:#2F5BFF]"
-      >
+      <div class="rounded-3xl border border-border bg-card p-2">
         <BeTimeline
           :events="TASKS"
           :height="560"
@@ -209,11 +204,11 @@ function onSelect(id: string) {
                 <p class="text-[11px] font-medium tracking-wide uppercase">
                   {{ STATUS_LABEL[(event as DemoTask).status] }}
                 </p>
-                <div class="mt-1.5 h-1.5 rounded-full bg-foreground/10">
+                <div class="mt-1.5 h-1.5 overflow-hidden rounded-full bg-foreground/10">
                   <div
-                    class="h-full rounded-full"
+                    class="h-full w-full origin-left rounded-full transition-transform duration-200 ease-out motion-reduce:transition-none"
                     :class="barColor((event as DemoTask).status)"
-                    :style="{ width: `${(event as DemoTask).progress}%` }"
+                    :style="{ transform: `scaleX(${(event as DemoTask).progress / 100})` }"
                   />
                 </div>
               </div>
@@ -254,22 +249,16 @@ function onSelect(id: string) {
       </section>
 
       <section class="mt-6 flex flex-wrap items-center gap-3">
-        <button
-          type="button"
-          class="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-transform active:scale-[0.98]"
-        >
+        <Button type="button" class="rounded-xl">
           新建任务
-        </button>
-        <button
-          type="button"
-          class="rounded-xl border border-border bg-card px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
-        >
+        </Button>
+        <Button type="button" variant="outline" class="rounded-xl">
           次要操作
-        </button>
-        <span class="inline-flex items-center gap-1.5 rounded-full bg-[#E9EEFF] px-2.5 py-1 text-xs font-medium text-[#2447D6]">
+        </Button>
+        <span class="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
           运行中
         </span>
-        <span class="inline-flex items-center gap-1.5 rounded-full bg-[#EEF0F3] px-2.5 py-1 text-xs font-medium text-[#4B4E56]">
+        <span class="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
           已完成
         </span>
       </section>
@@ -277,18 +266,19 @@ function onSelect(id: string) {
       <section class="mt-10">
         <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div>
-            <p class="text-xs text-muted-foreground">动画警报（beUI Animated Alert）</p>
+            <p class="text-xs text-muted-foreground">动画警报（Animated Alert）</p>
             <p class="mt-1 text-sm text-muted-foreground">
               淡入 + 上移 6px；关闭有退出动画；warning/destructive 用 alert 角色。
             </p>
           </div>
-          <button
+          <Button
             type="button"
-            class="rounded-md border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+            variant="outline"
+            size="sm"
             @click="alertVersion += 1"
           >
             重新展示
-          </button>
+          </Button>
         </div>
         <div class="grid gap-2">
           <Alert
@@ -302,7 +292,7 @@ function onSelect(id: string) {
       </section>
 
       <section class="mt-10">
-        <p class="mb-2 text-xs text-muted-foreground">分页（beUI Motion Pagination）</p>
+        <p class="mb-2 text-xs text-muted-foreground">分页（Motion Pagination）</p>
         <p class="text-xs text-muted-foreground">
           当前页是一个共享胶囊，翻页时滑过去；省略号悬停变双箭头，点一次跳 5 页。
         </p>
@@ -316,7 +306,7 @@ function onSelect(id: string) {
 
       <section class="mt-10">
         <p class="mb-2 text-xs text-muted-foreground">
-          卡片（beUI Motion Card 结构：部件自管水平内边距、可选交互态）
+          卡片（Motion Card 结构：部件自管水平内边距、可选交互态）
         </p>
         <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
           <Card>
@@ -335,18 +325,12 @@ function onSelect(id: string) {
               根容器只管垂直间距，每个部件自己管左右内边距——少放一个部件也不会破坏边缘。
             </CardContent>
             <CardFooter class="justify-end">
-              <button
-                type="button"
-                class="rounded-md border border-border px-2.5 py-1 text-xs font-medium"
-              >
+              <Button type="button" variant="outline" size="sm">
                 取消
-              </button>
-              <button
-                type="button"
-                class="rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground"
-              >
+              </Button>
+              <Button type="button" size="sm">
                 确认
-              </button>
+              </Button>
             </CardFooter>
           </Card>
 
@@ -406,22 +390,3 @@ function onSelect(id: string) {
     </div>
   </div>
 </template>
-
-<style scoped>
-/* 演示页专属 token 覆盖：确认后迁移到全局 main.css */
-.design-demo {
-  --background: #ffffff;
-  --foreground: #17181a;
-  --card: #ffffff;
-  --card-foreground: #17181a;
-  --muted: #f5f5f6;
-  --muted-foreground: #5f6066;
-  --border: rgba(23, 24, 26, 0.12);
-  --border-strong: rgba(23, 24, 26, 0.18);
-  --primary: #2f5bff;
-  --primary-foreground: #ffffff;
-  --accent: #e9eeff;
-  --accent-foreground: #2447d6;
-  --ring: #2f5bff;
-}
-</style>

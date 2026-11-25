@@ -73,4 +73,43 @@ describe("重置密码页", () => {
     expect(submitClasses).toContain("w-full");
     expect(submitClasses).toContain("bg-[#0F4C3A]");
   });
+
+  it("ErrorBanner 绑定 @dismiss 关闭后可再现同文错误", async () => {
+    const { wrapper } = await mountReset();
+
+    await wrapper.get('[data-test="reset-email"]').setValue("invalid");
+    await wrapper.get('[data-test="reset-request-form"]').trigger("submit");
+    await flushPromises();
+    expect(wrapper.find('[data-test="reset-error"]').text()).toContain("有效");
+
+    await wrapper.get('[data-test="reset-error"] button').trigger("click");
+    await flushPromises();
+    await wrapper.get('[data-test="reset-request-form"]').trigger("submit");
+    await flushPromises();
+    expect(wrapper.find('[data-test="reset-error"]').text()).toContain("有效");
+  });
+
+  it("申请阶段与确认阶段双向切换及点击「返回登录」均不触发运行时崩溃", async () => {
+    const { wrapper, router } = await mountReset();
+
+    expect(wrapper.find('[data-test="reset-request-form"]').exists()).toBe(true);
+
+    await wrapper.setProps({ token: "reset-tok-123" });
+    await flushPromises();
+    expect(wrapper.find('[data-test="reset-confirm-form"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="reset-request-form"]').exists()).toBe(false);
+
+    await wrapper.setProps({ token: "" });
+    await flushPromises();
+    expect(wrapper.find('[data-test="reset-request-form"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="reset-confirm-form"]').exists()).toBe(false);
+
+    await wrapper.setProps({ token: "reset-tok-456" });
+    await flushPromises();
+    expect(wrapper.find('[data-test="reset-confirm-form"]').exists()).toBe(true);
+
+    await wrapper.get('[data-test="reset-back-to-login"]').trigger("click");
+    await flushPromises();
+    expect(router.currentRoute.value.name).toBe("login");
+  });
 });

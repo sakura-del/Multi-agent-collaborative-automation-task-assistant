@@ -168,4 +168,68 @@ describe("登录/注册一体流（Email OTP + Magic Link）", () => {
     expect(wrapper.get('[data-test="login-proof-footer"]').text()).toContain("J. Biomed. Inform. 2025");
     expect(wrapper.text()).toContain("你负责判断，系统负责");
   });
+
+  it("OAuth 入口文案全中文化，验证码重发按钮带 tabular-nums 与最小宽度防抖，ErrorBanner 可关闭复位", async () => {
+    const { wrapper } = await mountLogin();
+
+    expect(wrapper.get('[data-test="oauth-google-btn"]').text()).toBe("使用 Google 账号继续");
+    expect(wrapper.get('[data-test="oauth-github-btn"]').text()).toBe("使用 GitHub 账号继续");
+
+    // 验证码步骤检查倒计时防抖类与 ErrorBanner @dismiss
+    mocks.verifyEmailOtp.mockRejectedValue(new Error("验证码错误"));
+    await wrapper.get('[data-test="otp-email-input"]').setValue("alice@example.com");
+    await wrapper.get("form").trigger("submit.prevent");
+    await flushPromises();
+
+    const resendBtn = wrapper.get('[data-test="otp-resend-btn"]');
+    expect(resendBtn.classes()).toContain("tabular-nums");
+    expect(resendBtn.classes()).toContain("min-w-[6.5rem]");
+
+    await wrapper.get('[data-test="otp-code-input"]').setValue("000000");
+    await wrapper.get("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(wrapper.find('[role="alert"]').text()).toContain("验证码错误");
+
+    await wrapper.get('[role="alert"] button').trigger("click");
+    await flushPromises();
+    await wrapper.get("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(wrapper.find('[role="alert"]').text()).toContain("验证码错误");
+  });
+
+  it("从 Step 2（验证码）点击「更换邮箱」返回 Step 1 时不触发运行时崩溃", async () => {
+    const { wrapper } = await mountLogin();
+
+    await wrapper.get('[data-test="otp-email-input"]').setValue("alice@example.com");
+    await wrapper.get("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(wrapper.find('[data-test="otp-code-input"]').exists()).toBe(true);
+
+    await wrapper.get('[data-test="otp-change-email"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find('[data-test="otp-email-input"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="otp-code-input"]').exists()).toBe(false);
+    expect(wrapper.get('[data-test="auth-title"]').text()).toBe("登录或创建账号");
+  });
+
+  it("从 Step 2 切换至 Step 3（账号密码）再返回 Step 1 时不触发运行时崩溃", async () => {
+    const { wrapper } = await mountLogin();
+
+    await wrapper.get('[data-test="otp-email-input"]').setValue("alice@example.com");
+    await wrapper.get("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(wrapper.find('[data-test="otp-code-input"]').exists()).toBe(true);
+
+    await wrapper.get('[data-test="toggle-password-login"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.find("#account").exists()).toBe(true);
+    expect(wrapper.find('[data-test="otp-code-input"]').exists()).toBe(false);
+
+    await wrapper.get('[data-test="back-to-otp"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.find('[data-test="otp-email-input"]').exists()).toBe(true);
+    expect(wrapper.find("#account").exists()).toBe(false);
+    expect(wrapper.get('[data-test="auth-title"]').text()).toBe("登录或创建账号");
+  });
 });

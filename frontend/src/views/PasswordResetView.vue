@@ -82,7 +82,7 @@ async function handleConfirm() {
           <RouterLink
             to="/"
             aria-label="VeriPaper 首页"
-            class="flex w-fit items-center gap-2 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-[#0F4C3A]"
+            class="flex w-fit items-center gap-2 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-[#0F4C3A] dark:focus-visible:ring-ring"
           >
             <img src="/logo.svg" alt="" aria-hidden="true" class="size-7" />
             <span class="text-sm font-semibold tracking-tight">VeriPaper</span>
@@ -102,7 +102,7 @@ async function handleConfirm() {
         </header>
 
         <div class="mt-6 space-y-4">
-          <ErrorBanner :message="error" testid="reset-error" />
+          <ErrorBanner :message="error" testid="reset-error" @dismiss="error = null" />
 
           <Alert
             v-if="message && isConfirmPhase"
@@ -117,13 +117,13 @@ async function handleConfirm() {
             <span>{{ message }}</span>
           </Alert>
 
-          <!-- 申请阶段 -->
           <form
             v-if="!isConfirmPhase"
             class="flex flex-col gap-3.5"
             data-test="reset-request-form"
             @submit.prevent="handleRequest"
           >
+            <!-- 申请阶段 -->
             <div class="grid gap-1.5">
               <Label for="reset-email" class="text-xs">注册邮箱</Label>
               <Input
@@ -134,7 +134,7 @@ async function handleConfirm() {
                 autocomplete="email"
                 placeholder="name@university.edu"
                 required
-                class="h-10 rounded-lg border-neutral-200 focus-visible:border-[#0F4C3A] focus-visible:ring-1 focus-visible:ring-[#0F4C3A]/20 focus-visible:outline-none dark:border-input"
+                class="h-10 rounded-lg border-neutral-200 focus-visible:border-[#0F4C3A] focus-visible:ring-1 focus-visible:ring-[#0F4C3A]/20 focus-visible:outline-none dark:border-input dark:focus-visible:border-ring dark:focus-visible:ring-ring/20"
               />
             </div>
             <Button
@@ -143,19 +143,19 @@ async function handleConfirm() {
               :disabled="requesting"
               class="h-10 w-full rounded-lg bg-[#0F4C3A] text-white hover:bg-[#135D47] dark:bg-primary dark:text-primary-foreground dark:hover:bg-primary/90"
             >
-              <Loader2 v-if="requesting" class="animate-spin" aria-hidden="true" />
+              <Loader2 v-if="requesting" class="animate-spin motion-reduce:animate-none" aria-hidden="true" />
               <Send v-else :size="15" aria-hidden="true" />
               <span>{{ requesting ? "发送中…" : "发送重置邮件" }}</span>
             </Button>
           </form>
 
-          <!-- 确认阶段 -->
           <form
             v-else
             class="flex flex-col gap-3.5"
             data-test="reset-confirm-form"
             @submit.prevent="handleConfirm"
           >
+            <!-- 确认阶段 -->
             <div class="grid gap-1.5">
               <Label for="reset-password" class="text-xs">新密码（至少 {{ MIN_PASSWORD }} 位）</Label>
               <Input
@@ -167,7 +167,7 @@ async function handleConfirm() {
                 autocomplete="new-password"
                 placeholder="至少 8 位"
                 required
-                class="h-10 rounded-lg border-neutral-200 focus-visible:border-[#0F4C3A] focus-visible:ring-1 focus-visible:ring-[#0F4C3A]/20 focus-visible:outline-none dark:border-input"
+                class="h-10 rounded-lg border-neutral-200 focus-visible:border-[#0F4C3A] focus-visible:ring-1 focus-visible:ring-[#0F4C3A]/20 focus-visible:outline-none dark:border-input dark:focus-visible:border-ring dark:focus-visible:ring-ring/20"
               />
             </div>
             <Button
@@ -176,14 +176,14 @@ async function handleConfirm() {
               :disabled="confirming"
               class="h-10 w-full rounded-lg bg-[#0F4C3A] text-white hover:bg-[#135D47] dark:bg-primary dark:text-primary-foreground dark:hover:bg-primary/90"
             >
-              <Loader2 v-if="confirming" class="animate-spin" aria-hidden="true" />
+              <Loader2 v-if="confirming" class="animate-spin motion-reduce:animate-none" aria-hidden="true" />
               <KeyRound v-else :size="15" aria-hidden="true" />
               <span>{{ confirming ? "提交中…" : "设置新密码" }}</span>
             </Button>
           </form>
 
-          <!-- 重置成功后直接给下一步：此前用户要自己想起再回 /login -->
           <p v-if="message && isConfirmPhase" class="text-center text-xs">
+            <!-- 重置成功后直接给下一步：此前用户要自己想起再回 /login -->
             <RouterLink
               :to="{ name: 'login' }"
               data-test="reset-go-login"

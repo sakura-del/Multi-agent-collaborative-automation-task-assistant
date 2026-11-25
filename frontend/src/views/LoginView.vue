@@ -178,7 +178,7 @@ onBeforeUnmount(() => {
           <RouterLink
             to="/"
             aria-label="VeriPaper 首页"
-            class="flex w-fit items-center gap-2 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-[#0F4C3A]"
+            class="flex w-fit items-center gap-2 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-[#0F4C3A] dark:focus-visible:ring-ring"
           >
             <img src="/logo.svg" alt="" aria-hidden="true" class="size-7" />
             <span class="text-sm font-semibold tracking-tight">VeriPaper</span>
@@ -197,23 +197,23 @@ onBeforeUnmount(() => {
           </p>
         </header>
 
-        <!-- Magic Link 自动核验态 -->
         <div
           v-if="magicChecking"
           data-test="magic-checking"
           class="mt-6 flex items-center gap-2.5 rounded-lg border border-border bg-muted/40 px-4 py-5 text-sm text-muted-foreground"
         >
-          <Loader2 class="size-4 animate-spin text-[#0F4C3A]" aria-hidden="true" />
+          <!-- Magic Link 自动核验态 -->
+          <Loader2 class="size-4 animate-spin text-[#0F4C3A] dark:text-primary motion-reduce:animate-none" aria-hidden="true" />
           <span>正在验证一键登录链接…</span>
         </div>
 
-        <!-- Step 1：OAuth 一键登录 + 单输入框邮箱登录注册一体流 -->
         <div v-else-if="step === 'email'" class="mt-6 space-y-4">
+          <!-- Step 1：OAuth 一键登录 + 单输入框邮箱登录注册一体流 -->
           <div class="grid gap-2">
             <a
               :href="googleAuthUrl"
               data-test="oauth-google-btn"
-              class="inline-flex h-10 w-full items-center justify-center gap-2.5 rounded-lg border border-neutral-200 bg-card px-4 text-xs font-medium text-foreground transition-colors hover:bg-muted/60 focus-visible:outline-2 focus-visible:outline-[#0F4C3A] dark:border-input"
+              class="inline-flex h-10 w-full items-center justify-center gap-2.5 rounded-lg border border-neutral-200 bg-card px-4 text-xs font-medium text-foreground transition-colors hover:bg-muted/60 focus-visible:outline-2 focus-visible:outline-[#0F4C3A] dark:border-input dark:focus-visible:outline-ring"
             >
               <svg class="size-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
                 <path
@@ -233,16 +233,16 @@ onBeforeUnmount(() => {
                   d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96Z"
                 />
               </svg>
-              <span>Continue with Google</span>
+              <span>使用 Google 账号继续</span>
             </a>
 
             <a
               :href="githubAuthUrl"
               data-test="oauth-github-btn"
-              class="inline-flex h-10 w-full items-center justify-center gap-2.5 rounded-lg border border-neutral-200 bg-card px-4 text-xs font-medium text-foreground transition-colors hover:bg-muted/60 focus-visible:outline-2 focus-visible:outline-[#0F4C3A] dark:border-input"
+              class="inline-flex h-10 w-full items-center justify-center gap-2.5 rounded-lg border border-neutral-200 bg-card px-4 text-xs font-medium text-foreground transition-colors hover:bg-muted/60 focus-visible:outline-2 focus-visible:outline-[#0F4C3A] dark:border-input dark:focus-visible:outline-ring"
             >
               <Github :size="15" aria-hidden="true" />
-              <span>Continue with GitHub</span>
+              <span>使用 GitHub 账号继续</span>
             </a>
           </div>
 
@@ -263,11 +263,11 @@ onBeforeUnmount(() => {
                 required
                 autocomplete="email"
                 placeholder="name@university.edu"
-                class="h-10 rounded-lg border-neutral-200 focus-visible:border-[#0F4C3A] focus-visible:ring-1 focus-visible:ring-[#0F4C3A]/20 focus-visible:outline-none dark:border-input"
+                class="h-10 rounded-lg border-neutral-200 focus-visible:border-[#0F4C3A] focus-visible:ring-1 focus-visible:ring-[#0F4C3A]/20 focus-visible:outline-none dark:border-input dark:focus-visible:border-ring dark:focus-visible:ring-ring/20"
               />
             </div>
 
-            <ErrorBanner :message="errorMessage" />
+            <ErrorBanner :message="errorMessage" @dismiss="errorMessage = ''" />
 
             <Button
               type="submit"
@@ -275,19 +275,19 @@ onBeforeUnmount(() => {
               :disabled="loading"
               class="h-10 w-full rounded-lg bg-[#0F4C3A] text-white hover:bg-[#135D47] dark:bg-primary dark:text-primary-foreground dark:hover:bg-primary/90"
             >
-              <Loader2 v-if="loading" class="animate-spin" aria-hidden="true" />
+              <Loader2 v-if="loading" class="animate-spin motion-reduce:animate-none" aria-hidden="true" />
               <span>{{ loading ? "发送中…" : "继续" }}</span>
               <ArrowRight v-if="!loading" :size="14" aria-hidden="true" />
             </Button>
           </form>
         </div>
 
-        <!-- Step 2：输入 6 位验证码 -->
         <form
           v-else-if="step === 'code'"
           class="mt-6 flex flex-col gap-3.5"
           @submit.prevent="handleVerifyOtp"
         >
+          <!-- Step 2：输入 6 位验证码 -->
           <div
             v-if="statusMessage"
             data-test="otp-sent-notice"
@@ -310,11 +310,11 @@ onBeforeUnmount(() => {
               minlength="6"
               maxlength="6"
               placeholder="请输入 6 位验证码"
-              class="h-10 rounded-lg border-neutral-200 font-mono text-base tracking-[0.35em] focus-visible:border-[#0F4C3A] focus-visible:ring-1 focus-visible:ring-[#0F4C3A]/20 focus-visible:outline-none dark:border-input"
+              class="h-10 rounded-lg border-neutral-200 font-mono text-base tracking-[0.35em] focus-visible:border-[#0F4C3A] focus-visible:ring-1 focus-visible:ring-[#0F4C3A]/20 focus-visible:outline-none dark:border-input dark:focus-visible:border-ring dark:focus-visible:ring-ring/20"
             />
           </div>
 
-          <ErrorBanner :message="errorMessage" />
+          <ErrorBanner :message="errorMessage" @dismiss="errorMessage = ''" />
 
           <Button
             type="submit"
@@ -322,7 +322,7 @@ onBeforeUnmount(() => {
             :disabled="loading"
             class="h-10 w-full rounded-lg bg-[#0F4C3A] text-white hover:bg-[#135D47] dark:bg-primary dark:text-primary-foreground dark:hover:bg-primary/90"
           >
-            <Loader2 v-if="loading" class="animate-spin" aria-hidden="true" />
+            <Loader2 v-if="loading" class="animate-spin motion-reduce:animate-none" aria-hidden="true" />
             <span>{{ loading ? "验证中…" : "验证并进入工作台" }}</span>
             <ArrowRight v-if="!loading" :size="14" aria-hidden="true" />
           </Button>
@@ -341,7 +341,7 @@ onBeforeUnmount(() => {
               type="button"
               data-test="otp-resend-btn"
               :disabled="cooldown > 0 || loading"
-              class="text-muted-foreground hover:text-foreground disabled:opacity-50"
+              class="min-w-[6.5rem] text-right tabular-nums text-muted-foreground hover:text-foreground disabled:opacity-50"
               @click="handleResendOtp"
             >
               {{ cooldown > 0 ? `${cooldown}s 后可重发` : "重新发送验证码" }}
@@ -349,12 +349,12 @@ onBeforeUnmount(() => {
           </div>
         </form>
 
-        <!-- 密码登录兜底（兼容管理员或老密码账号） -->
         <form
           v-else
           class="mt-6 flex flex-col gap-3.5"
           @submit.prevent="handlePasswordLogin"
         >
+          <!-- 密码登录兜底（兼容管理员或老密码账号） -->
           <div class="grid gap-1.5">
             <Label for="account" class="text-xs">用户名 / 邮箱</Label>
             <Input
@@ -364,7 +364,7 @@ onBeforeUnmount(() => {
               required
               autocomplete="username"
               placeholder="请输入用户名或邮箱"
-              class="h-10 rounded-lg border-neutral-200 focus-visible:border-[#0F4C3A] focus-visible:ring-1 focus-visible:ring-[#0F4C3A]/20 focus-visible:outline-none dark:border-input"
+              class="h-10 rounded-lg border-neutral-200 focus-visible:border-[#0F4C3A] focus-visible:ring-1 focus-visible:ring-[#0F4C3A]/20 focus-visible:outline-none dark:border-input dark:focus-visible:border-ring dark:focus-visible:ring-ring/20"
             />
           </div>
 
@@ -377,18 +377,18 @@ onBeforeUnmount(() => {
               required
               placeholder="请输入密码"
               autocomplete="current-password"
-              class="h-10 rounded-lg border-neutral-200 focus-visible:border-[#0F4C3A] focus-visible:ring-1 focus-visible:ring-[#0F4C3A]/20 focus-visible:outline-none dark:border-input"
+              class="h-10 rounded-lg border-neutral-200 focus-visible:border-[#0F4C3A] focus-visible:ring-1 focus-visible:ring-[#0F4C3A]/20 focus-visible:outline-none dark:border-input dark:focus-visible:border-ring dark:focus-visible:ring-ring/20"
             />
           </div>
 
-          <ErrorBanner :message="errorMessage" />
+          <ErrorBanner :message="errorMessage" @dismiss="errorMessage = ''" />
 
           <Button
             type="submit"
             :disabled="loading"
             class="h-10 w-full rounded-lg bg-[#0F4C3A] text-white hover:bg-[#135D47] dark:bg-primary dark:text-primary-foreground dark:hover:bg-primary/90"
           >
-            <Loader2 v-if="loading" class="animate-spin" aria-hidden="true" />
+            <Loader2 v-if="loading" class="animate-spin motion-reduce:animate-none" aria-hidden="true" />
             <span>{{ loading ? "登录中…" : "登录" }}</span>
             <ArrowRight v-if="!loading" :size="14" aria-hidden="true" />
           </Button>

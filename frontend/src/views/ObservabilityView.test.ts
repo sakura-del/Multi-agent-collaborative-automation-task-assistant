@@ -7,6 +7,16 @@ vi.mock("@/api/observability", () => ({
   getObservabilityOverview: vi.fn(),
 }));
 
+const { toastSuccess } = vi.hoisted(() => ({
+  toastSuccess: vi.fn(),
+}));
+vi.mock("@/lib/toast", () => ({
+  toastSuccess,
+  toastError: vi.fn(),
+  toastInfo: vi.fn(),
+  toastWarning: vi.fn(),
+}));
+
 // 行点击要跳任务详情：把 router 换成可断言的 spy
 const push = vi.fn();
 vi.mock("vue-router", () => ({
@@ -51,6 +61,7 @@ function mountView() {
 beforeEach(() => {
   vi.mocked(getObservabilityOverview).mockReset();
   push.mockReset();
+  toastSuccess.mockReset();
 });
 
 describe("ObservabilityView", () => {
@@ -304,5 +315,33 @@ describe("ObservabilityView", () => {
     expect(cancelledColor).toBeTruthy();
     expect(approvalColor).not.toBe(humanColor);
     expect(pausedColor).not.toBe(cancelledColor);
+    // 状态色点全部使用语义/图表 CSS 变量（不再硬编码 hex）
+    expect(humanColor).toContain("var(--");
+    expect(approvalColor).toContain("var(--");
+    expect(pausedColor).toContain("var(--");
+    expect(cancelledColor).toContain("var(--");
+  });
+
+  it("首屏静默加载不弹 Toast，手动刷新成功弹 toastSuccess，且 ErrorBanner 关闭可复位", async () => {
+    vi.mocked(getObservabilityOverview).mockRejectedValueOnce(new Error("网络异常"));
+    const wrapper = mountView();
+    await flushPromises();
+    expect(toastSuccess).not.toHaveBeenCalled();
+    expect(wrapper.find('[data-test="observability-error"]').text()).toContain("网络异常");
+
+    // 关闭错误横幅后同文报错可再现
+    await wrapper.get('[data-test="observability-error"] button').trigger("click");
+    await flushPromises();
+    vi.mocked(getObservabilityOverview).mockRejectedValueOnce(new Error("网络异常"));
+    await wrapper.get('[data-test="observability-refresh"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.find('[data-test="observability-error"]').text()).toContain("网络异常");
+    expect(toastSuccess).not.toHaveBeenCalled();
+
+    // 手动刷新成功触发 toastSuccess
+    vi.mocked(getObservabilityOverview).mockResolvedValueOnce(overview() as never);
+    await wrapper.get('[data-test="observability-refresh"]').trigger("click");
+    await flushPromises();
+    expect(toastSuccess).toHaveBeenCalledWith("已更新用量数据");
   });
 });

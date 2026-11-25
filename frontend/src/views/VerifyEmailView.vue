@@ -85,7 +85,7 @@ async function handleRequest() {
       </p>
     </header>
 
-    <ErrorBanner :message="error" testid="verify-error" />
+    <ErrorBanner :message="error" testid="verify-error" @dismiss="error = null" />
 
     <Alert
       v-if="message && confirmed"
@@ -101,8 +101,19 @@ async function handleRequest() {
       <span>{{ message }}</span>
     </Alert>
 
+    <Button
+      v-if="confirmed"
+      type="button"
+      size="sm"
+      class="mb-3"
+      data-test="verify-next-cta"
+      @click="router.push({ name: auth.user ? 'tasks' : 'login' })"
+    >
+      {{ auth.user ? "进入工作台" : "前往登录" }}
+    </Button>
+
     <p v-if="confirming" class="flex items-center gap-2 text-sm text-muted-foreground">
-      <Loader2 class="size-4 animate-spin" aria-hidden="true" />
+      <Loader2 class="size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
       <span>正在验证…</span>
     </p>
 
@@ -145,7 +156,7 @@ async function handleRequest() {
         :disabled="requesting"
         @click="handleRequest"
       >
-        <Loader2 v-if="requesting" class="animate-spin" aria-hidden="true" />
+        <Loader2 v-if="requesting" class="animate-spin motion-reduce:animate-none" aria-hidden="true" />
         <MailCheck v-else :size="15" aria-hidden="true" />
         <span>{{ requesting ? "发送中…" : "重发验证邮件" }}</span>
       </Button>

@@ -33,6 +33,14 @@ const emit = defineEmits<{
 
 const hoveredKey = ref<string | null>(null);
 
+function onBarClick(key: string) {
+  if (props.clickable) {
+    emit("select", key);
+  } else {
+    hoveredKey.value = hoveredKey.value === key ? null : key;
+  }
+}
+
 const maxTotal = computed(() =>
   Math.max(1, ...props.items.map((item) => Math.max(0, item.total))),
 );
@@ -151,11 +159,19 @@ function formatCompact(value: number): string {
       <g
         v-for="bar in bars"
         :key="bar.key"
+        tabindex="0"
+        :role="props.clickable ? 'button' : 'graphics-symbol'"
+        :aria-label="`${bar.label} ${formatCompact(bar.total)}`"
         :data-test="bar.testid"
+        class="outline-none focus-visible:outline-2 focus-visible:outline-ring"
         :class="props.clickable ? 'cursor-pointer' : ''"
         @mouseenter="hoveredKey = bar.key"
         @mouseleave="hoveredKey = null"
-        @click="props.clickable && emit('select', bar.key)"
+        @focus="hoveredKey = bar.key"
+        @blur="hoveredKey = null"
+        @click="onBarClick(bar.key)"
+        @keydown.enter.prevent="onBarClick(bar.key)"
+        @keydown.space.prevent="onBarClick(bar.key)"
       >
         <!-- 透明命中热区，方便小柱子悬停与点击 -->
         <rect
@@ -175,7 +191,7 @@ function formatCompact(value: number): string {
           :height="bar.totalH"
           rx="3"
           fill="var(--primary)"
-          class="transition-opacity duration-150"
+          class="transition-opacity duration-150 motion-reduce:transition-none"
           :class="hoveredKey === bar.key ? 'opacity-35' : 'opacity-20'"
         />
 
@@ -188,7 +204,7 @@ function formatCompact(value: number): string {
           :height="bar.primaryH"
           rx="3"
           fill="var(--primary)"
-          class="transition-opacity duration-150"
+          class="transition-opacity duration-150 motion-reduce:transition-none"
           :class="hoveredKey && hoveredKey !== bar.key ? 'opacity-50' : 'opacity-100'"
         />
 

@@ -31,7 +31,8 @@
  * 前端会静默显示旧值。这些字段后端 `Plan` 表本来就有，只是之前没返回。
  */
 import { computed, onMounted, ref } from "vue";
-import { ArrowUpRight, Check, Download, Loader2, X } from "lucide-vue-next";
+import { useReducedMotion } from "motion-v";
+import { ArrowUpRight, Check, Download, X } from "lucide-vue-next";
 import DonutChart, { type DonutSegment } from "@/components/charts/DonutChart.vue";
 import PageHeader from "@/components/common/PageHeader.vue";
 
@@ -47,6 +48,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import EmptyState from "@/components/common/EmptyState.vue";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
+import { toastSuccess } from "@/lib/toast";
+
+const reduced = useReducedMotion();
 
 const usage = ref<BillingUsage | null>(null);
 const plans = ref<BillingPlan[]>([]);
@@ -202,6 +206,7 @@ async function exportUsage() {
     anchor.download = `veripaper-usage-${current.period_key}.csv`;
     anchor.click();
     URL.revokeObjectURL(url);
+    toastSuccess("已导出用量账单 CSV");
   } catch (err) {
     error.value = (err as Error).message || "导出失败";
   } finally {
@@ -247,7 +252,15 @@ function formatWorkspaces(count: number): string {
 
 /** 滚动到套餐对比区（升级引导的落地动作）。 */
 function scrollToPlans() {
-  plansSection.value?.scrollIntoView({ behavior: "smooth", block: "start" });
+  const prefersReduced =
+    reduced.value ||
+    (typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  plansSection.value?.scrollIntoView({
+    behavior: prefersReduced ? "auto" : "smooth",
+    block: "start",
+  });
 }
 
 /**
@@ -307,26 +320,34 @@ onMounted(load);
 <template>
   <div class="space-y-6">
     <PageHeader
-      eyebrow="Subscription & usage"
+      eyebrow="订阅与额度"
       title="我的套餐"
       description="当前套餐、本月用量与可选套餐对比。"
     />
 
-    <ErrorBanner v-if="error" :message="error" />
+    <ErrorBanner :message="error" @dismiss="error = ''" />
 
-    <!-- 加载态：明确告知「正在取数据」，不要空白页（缺陷 5） -->
+    <!-- 加载态：0ms 即刻占位且不用 useDelayedLoading（守卫 PlanView.test.ts:473-482），结构匹配当前套餐卡 + 4 张对比卡 -->
     <div
       v-if="loading"
       data-test="plan-loading"
-      class="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-8 text-sm text-muted-foreground"
+      aria-busy="true"
+      class="space-y-6"
     >
-      <Loader2 :size="16" class="animate-spin motion-reduce:animate-none" aria-hidden="true" />
-      <span>正在加载套餐信息…</span>
+      <span class="sr-only">正在加载套餐信息…</span>
+      <div class="h-56 animate-pulse rounded-lg border border-border bg-muted/40 motion-reduce:animate-none" />
+      <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div
+          v-for="idx in 4"
+          :key="`plan-skel-${idx}`"
+          class="h-52 animate-pulse rounded-lg border border-border bg-muted/40 motion-reduce:animate-none"
+        />
+      </div>
     </div>
 
     <template v-else>
-      <!-- 当前套餐：名字 + 月费 + 用量 + **权益** + 到期日 -->
       <Card v-if="usage" class="rounded-lg" data-test="plan-current">
+        <!-- 当前套餐：名字 + 月费 + 用量 + **权益** + 到期日 -->
         <CardHeader>
           <CardTitle class="flex flex-wrap items-center gap-2 text-base">
             <span>{{ usage.plan_name }}</span>
@@ -366,11 +387,17 @@ onMounted(load);
               aria-valuemin="0"
               aria-valuemax="100"
             >
-              <!-- 用尽才变警示色（缺陷 3）：语义 token，不写一次性颜色 -->
+              <!-- 用尽才变警示色（缺陷 3）：语义 token，统一 GPU scaleX 动画，兼顾 '--progress' 测试断言 -->
               <div
                 data-test="plan-progress-bar"
-                :class="['h-full rounded-full transition-all', progressBarClass]"
-                :style="{ width: `${usedPercent}%` }"
+                :class="[
+                  'h-full w-full origin-left rounded-full transition-transform duration-200 ease-out motion-reduce:transition-none',
+                  progressBarClass,
+                ]"
+                :style="{
+                  transform: `scaleX(${usedPercent / 100})`,
+                  '--progress': `${usedPercent}%`,
+                }"
               />
             </div>
           </div>
@@ -420,20 +447,20 @@ onMounted(load);
             <p class="text-sm text-foreground">
               本月额度已用完。升级套餐可立即继续，或等 {{ usage.period_key }} 周期结束后自动重置。
             </p>
-            <button
+            <Button
               type="button"
+              size="sm"
               data-test="plan-upgrade-action"
-              class="inline-flex items-center gap-1 rounded-md bg-foreground px-2.5 py-1 text-xs font-medium text-background transition-colors hover:opacity-90"
+              class="bg-foreground text-background hover:bg-foreground/90 focus:outline-solid focus:outline-2 focus:outline-ring focus:outline-offset-2 focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
               @click="scrollToPlans"
             >
               查看可升级套餐
               <ArrowUpRight :size="12" aria-hidden="true" />
-            </button>
+            </Button>
           </div>
         </CardContent>
       </Card>
 
-      <!-- 真·空态：只在两个接口都失败且没有任何数据时出现 -->
       <EmptyState
         v-else-if="!error"
         testid="plan-empty"

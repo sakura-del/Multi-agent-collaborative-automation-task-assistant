@@ -18,7 +18,7 @@
  * `byok-credential-penetration` / `byok-credentials` / `byok-trend-row-<date>` /
  * `byok-provider-<provider>-<model>` / `byok-top-user-<username>` / `byok-empty`。
  */
-import { computed, onMounted, ref } from "vue";
+import { computed, defineComponent, h, onMounted, ref } from "vue";
 import { RefreshCw, ShieldCheck } from "lucide-vue-next";
 
 import { getByokOverview } from "@/api/admin";
@@ -26,16 +26,46 @@ import type { ByokOverview } from "@/api/types";
 import BarTrendChart, { type BarTrendItem } from "@/components/charts/BarTrendChart.vue";
 import DonutChart, { type DonutSegment } from "@/components/charts/DonutChart.vue";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, StatCard } from "@/components/ui/card";
 import EmptyState from "@/components/common/EmptyState.vue";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import PageHeader from "@/components/common/PageHeader.vue";
+import { useAnimatedNumber } from "@/composables/useAnimatedNumber";
+import { useDelayedLoading } from "@/composables/useDelayedLoading";
+import { toastSuccess } from "@/lib/toast";
 
 const overview = ref<ByokOverview | null>(null);
 // 与后台管理（/admin）统一默认统计近 7 天窗口（Issue #56）
 const days = ref(7);
 const loading = ref(true);
+const showSkeleton = useDelayedLoading(loading);
 const error = ref("");
+
+/**
+ * 局部百分比动态 KPI 卡（RECHECK-B4）：仅在 `v-else-if="overview"` 内挂载，
+ * 保证首屏异步返回同步呈现目标值，仅后续切换时间窗口或手动刷新时平滑插值。
+ */
+const AnimatedPercentStatCard = defineComponent({
+  name: "AnimatedPercentStatCard",
+  props: {
+    label: { type: String, required: true },
+    share: { type: Number, required: true },
+    hint: { type: String, default: undefined },
+    valueTestid: { type: String, default: undefined },
+  },
+  setup(cardProps) {
+    const animated = useAnimatedNumber(() => cardProps.share * 100);
+    const displayValue = computed(() => `${animated.value.toFixed(1)}%`);
+    return () =>
+      h(StatCard, {
+        label: cardProps.label,
+        value: displayValue.value,
+        hint: cardProps.hint,
+        valueTestid: cardProps.valueTestid,
+      });
+  },
+});
 
 const DAY_OPTIONS = [7, 30, 90] as const;
 
@@ -105,11 +135,14 @@ function formatDate(value: string | null): string {
   return Number.isNaN(parsed.getTime()) ? "—" : parsed.toLocaleDateString("zh-CN");
 }
 
-async function load(): Promise<void> {
+async function load(manual = false): Promise<void> {
   loading.value = true;
   error.value = "";
   try {
     overview.value = await getByokOverview(days.value);
+    if (manual) {
+      toastSuccess("已更新 BYOK 统计");
+    }
   } catch (err) {
     error.value = (err as Error).message || "看板加载失败";
   } finally {
@@ -120,43 +153,41 @@ async function load(): Promise<void> {
 function selectDays(value: number): void {
   if (days.value === value) return;
   days.value = value;
-  void load();
+  void load(false);
 }
 
-onMounted(load);
+onMounted(() => void load(false));
 </script>
 
 <template>
   <section>
     <PageHeader
-      eyebrow="Admin · BYOK"
+      eyebrow="管理后台 · 自带模型"
       title="BYOK 渗透率"
       description="用户自带模型的接入与使用情况。只统计窗口内数据，管理员可见。"
     >
       <div class="flex items-center gap-2">
         <div class="flex rounded-md border border-border p-0.5">
-          <button
+          <Button
             v-for="option in DAY_OPTIONS"
             :key="option"
             type="button"
+            :variant="days === option ? 'default' : 'ghost'"
+            size="sm"
             :data-test="`byok-days-${option}`"
-            class="rounded px-2 py-1 text-xs transition-colors"
-            :class="
-              days === option
-                ? 'bg-foreground font-medium text-background'
-                : 'text-muted-foreground hover:text-foreground'
-            "
+            class="h-7 px-2 text-xs"
             @click="selectDays(option)"
           >
             {{ option }} 天
-          </button>
+          </Button>
         </div>
-        <button
+        <Button
           type="button"
+          variant="outline"
+          size="sm"
           data-test="byok-refresh"
-          class="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-60"
           :disabled="loading"
-          @click="load"
+          @click="load(true)"
         >
           <RefreshCw
             :size="13"
@@ -164,22 +195,32 @@ onMounted(load);
             aria-hidden="true"
           />
           {{ loading ? "刷新中…" : "刷新" }}
-        </button>
+        </Button>
       </div>
     </PageHeader>
 
-    <ErrorBanner :message="error" testid="byok-error" />
+    <ErrorBanner :message="error" testid="byok-error" @dismiss="error = ''" />
 
-    <div
-      v-if="loading && !overview"
-      class="mt-3 flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-8 text-sm text-muted-foreground"
-    >
-      <RefreshCw :size="15" class="animate-spin motion-reduce:animate-none" aria-hidden="true" />
-      正在统计…
+    <!-- 延迟骨架屏：匹配 4 卡渗透率 KPI + 成本与双栏图表 -->
+    <div v-if="showSkeleton && !overview" class="mt-3 space-y-3" aria-busy="true" aria-label="加载中">
+      <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        <div
+          v-for="idx in 4"
+          :key="`byok-kpi-skel-${idx}`"
+          class="h-24 animate-pulse rounded-lg border border-border bg-muted/40 motion-reduce:animate-none"
+        />
+      </div>
+      <div class="grid gap-4 lg:grid-cols-2">
+        <div
+          v-for="idx in 2"
+          :key="`byok-chart-skel-${idx}`"
+          class="h-56 animate-pulse rounded-lg border border-border bg-muted/40 motion-reduce:animate-none"
+        />
+      </div>
     </div>
 
     <EmptyState
-      v-else-if="overview && isEmpty"
+      v-else-if="!loading && !showSkeleton && overview && isEmpty"
       data-test="byok-empty"
       title="窗口内还没有任务"
       description="等有任务跑过之后，这里会显示 BYOK 任务占比与用户渗透率。"
@@ -188,30 +229,30 @@ onMounted(load);
     <template v-else-if="overview">
       <!-- 四个渗透率：每个数字都带分母，避免「0%」歧义 -->
       <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard
+        <AnimatedPercentStatCard
           label="BYOK 任务占比"
-          :value="percent(overview.totals.byok_task_share)"
+          :share="overview.totals.byok_task_share"
           value-testid="byok-task-share"
           :hint="`${overview.totals.byok_tasks} / ${overview.totals.tasks} 个任务`"
         />
 
-        <StatCard
+        <AnimatedPercentStatCard
           label="BYOK Token 占比"
-          :value="percent(overview.totals.byok_token_share)"
+          :share="overview.totals.byok_token_share"
           value-testid="byok-token-share"
           :hint="`${formatTokens(overview.totals.byok_tokens)} / ${formatTokens(overview.totals.tokens)} tokens`"
         />
 
-        <StatCard
+        <AnimatedPercentStatCard
           label="BYOK 用户渗透率"
-          :value="percent(overview.users.byok_penetration)"
+          :share="overview.users.byok_penetration"
           value-testid="byok-user-penetration"
           :hint="`跑过 BYOK：${overview.users.byok_active} / 活跃 ${overview.users.active} 人`"
         />
 
-        <StatCard
+        <AnimatedPercentStatCard
           label="有凭据用户占比"
-          :value="percent(overview.users.credential_penetration)"
+          :share="overview.users.credential_penetration"
           value-testid="byok-credential-penetration"
           :hint="`有凭据：${overview.users.with_credentials} / 活跃 ${overview.users.active} 人`"
         />

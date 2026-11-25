@@ -115,6 +115,35 @@ describe("VerifyEmailView", () => {
     expect(banner.text()).toContain("lingrove@example.com");
     expect(wrapper.find('[data-test="verify-request"]').exists()).toBe(false);
   });
+
+  it("验证成功后按 auth.user 渲染后续引导 CTA（未登录→前往登录，已登录→进入工作台）", async () => {
+    vi.mocked(confirmEmailVerification).mockResolvedValue({ message: "邮箱验证成功。" });
+
+    const guestWrapper = mount(VerifyEmailView, { props: { token: "tok-guest" } });
+    await flushPromises();
+    const guestCta = guestWrapper.get('[data-test="verify-next-cta"]');
+    expect(guestCta.text()).toBe("前往登录");
+    await guestCta.trigger("click");
+    expect(routerPush).toHaveBeenCalledWith({ name: "login" });
+
+    routerPush.mockReset();
+    mockAuthState.user = {
+      id: "u1",
+      username: "Lingrove",
+      email: "lingrove@example.com",
+      role: "user",
+      is_active: true,
+      email_verified_at: null,
+      created_at: "2026-11-01T00:00:00Z",
+    };
+
+    const userWrapper = mount(VerifyEmailView, { props: { token: "tok-user" } });
+    await flushPromises();
+    const userCta = userWrapper.get('[data-test="verify-next-cta"]');
+    expect(userCta.text()).toBe("进入工作台");
+    await userCta.trigger("click");
+    expect(routerPush).toHaveBeenCalledWith({ name: "tasks" });
+  });
 });
 
 describe("PasswordResetView", () => {

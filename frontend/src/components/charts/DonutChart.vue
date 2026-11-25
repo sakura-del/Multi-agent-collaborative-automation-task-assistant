@@ -84,18 +84,26 @@ const activeArc = computed(() =>
         <circle
           v-for="arc in arcs"
           :key="arc.id"
+          tabindex="0"
+          role="button"
+          :aria-label="`${arc.label} ${arc.percentText}`"
           :cx="props.size / 2"
           :cy="props.size / 2"
           :r="radius"
           fill="none"
           :stroke="arc.color"
-          :stroke-width="hoveredId === arc.id ? props.strokeWidth + 2 : props.strokeWidth"
+          :stroke-width="props.strokeWidth"
           :stroke-dasharray="arc.dasharray"
           :stroke-dashoffset="arc.dashoffset"
-          class="cursor-pointer transition-all duration-150"
+          class="cursor-pointer outline-none transition-opacity duration-150 focus-visible:outline-2 focus-visible:outline-ring motion-reduce:transition-none"
           :class="hoveredId && hoveredId !== arc.id ? 'opacity-35' : 'opacity-100'"
           @mouseenter="hoveredId = arc.id"
           @mouseleave="hoveredId = null"
+          @focus="hoveredId = arc.id"
+          @blur="hoveredId = null"
+          @click="hoveredId = hoveredId === arc.id ? null : arc.id"
+          @keydown.enter.prevent="hoveredId = hoveredId === arc.id ? null : arc.id"
+          @keydown.space.prevent="hoveredId = hoveredId === arc.id ? null : arc.id"
         />
       </svg>
 
@@ -113,10 +121,18 @@ const activeArc = computed(() =>
       <li
         v-for="item in props.segments"
         :key="item.id"
-        class="flex items-center justify-between gap-2 rounded px-1.5 py-0.5 transition-colors"
+        tabindex="0"
+        role="button"
+        :aria-label="`${item.label} ${item.hint ?? item.value}`"
+        class="flex cursor-pointer items-center justify-between gap-2 rounded px-1.5 py-0.5 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
         :class="hoveredId === item.id ? 'bg-muted/70' : 'hover:bg-muted/40'"
         @mouseenter="hoveredId = item.id"
         @mouseleave="hoveredId = null"
+        @focus="hoveredId = item.id"
+        @blur="hoveredId = null"
+        @click="hoveredId = hoveredId === item.id ? null : item.id"
+        @keydown.enter.prevent="hoveredId = hoveredId === item.id ? null : item.id"
+        @keydown.space.prevent="hoveredId = hoveredId === item.id ? null : item.id"
       >
         <span class="flex min-w-0 items-center gap-2">
           <span

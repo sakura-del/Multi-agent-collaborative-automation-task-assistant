@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, defineComponent, h, onMounted, ref, type PropType } from "vue";
 import { useRouter } from "vue-router";
 import { Coins, RefreshCw, TriangleAlert } from "lucide-vue-next";
 
@@ -11,7 +11,11 @@ import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import PageHeader from "@/components/common/PageHeader.vue";
 import StatusBadge from "@/components/common/StatusBadge.vue";
 import { Badge, type BadgeVariants } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, StatCard } from "@/components/ui/card";
+import { useAnimatedNumber } from "@/composables/useAnimatedNumber";
+import { useDelayedLoading } from "@/composables/useDelayedLoading";
+import { toastSuccess } from "@/lib/toast";
 import { getObservabilityOverview } from "@/api/observability";
 import type { ObservabilityOverview } from "@/api/types";
 import { formatDateTime } from "@/utils/task-status";
@@ -45,8 +49,42 @@ import { formatDateTime } from "@/utils/task-status";
  */
 const overview = ref<ObservabilityOverview | null>(null);
 const loading = ref(false);
+const showSkeleton = useDelayedLoading(loading);
 const error = ref<string | null>(null);
 const router = useRouter();
+
+/**
+ * 局部动态 KPI 卡（RECHECK-B4）：仅在 `v-else-if="overview"` 内挂载，
+ * 使首屏异步返回同步直达目标值，仅后续刷新时平滑插值。
+ */
+const AnimatedStatCard = defineComponent({
+  name: "AnimatedStatCard",
+  props: {
+    label: { type: String, default: undefined },
+    numericValue: { type: Number, required: true },
+    formatter: {
+      type: Function as PropType<(value: number) => string | number>,
+      required: true,
+    },
+    hint: { type: String, default: undefined },
+    valueTestid: { type: String, default: undefined },
+  },
+  setup(cardProps, { slots }) {
+    const animated = useAnimatedNumber(() => cardProps.numericValue);
+    const displayValue = computed(() => cardProps.formatter(animated.value));
+    return () =>
+      h(
+        StatCard,
+        {
+          label: cardProps.label,
+          value: displayValue.value,
+          hint: cardProps.hint,
+          valueTestid: cardProps.valueTestid,
+        },
+        slots,
+      );
+  },
+});
 
 /** 状态 → Badge 语义变体（查表字面量，禁止动态拼类名，见 AGENTS §6.5.5）。 */
 const STATUS_TONE: Record<string, NonNullable<BadgeVariants["variant"]>> = {
@@ -134,15 +172,15 @@ const statusSum = computed(() => statusBadges.value.reduce((total, item) => tota
 const STATUS_CHART_COLOR: Record<string, string> = {
   completed: "var(--success)",
   failed: "var(--destructive)",
-  cancelled: "#9ca3af",
-  waiting_human: "#ea580c",
-  waiting_approval: "#eab308",
+  cancelled: "var(--muted-foreground)",
+  waiting_human: "var(--chart-5)",
+  waiting_approval: "var(--chart-3)",
   running: "var(--primary)",
-  reviewing: "#0284c7",
-  planning: "#7c3aed",
+  reviewing: "var(--chart-6)",
+  planning: "var(--chart-4)",
   created: "var(--border-strong)",
-  paused: "#64748b",
-  retrying: "#f59e0b",
+  paused: "var(--chart-2)",
+  retrying: "var(--warning)",
 };
 
 const statusSegments = computed<DonutSegment[]>(() =>
@@ -227,14 +265,17 @@ function openTask(taskId: string) {
 }
 
 onMounted(() => {
-  void refresh();
+  void refresh(false);
 });
 
-async function refresh() {
+async function refresh(manual = false) {
   loading.value = true;
   error.value = null;
   try {
     overview.value = await getObservabilityOverview();
+    if (manual) {
+      toastSuccess("已更新用量数据");
+    }
   } catch (err) {
     error.value = (err as Error).message || "用量数据加载失败";
   } finally {
@@ -246,16 +287,16 @@ async function refresh() {
 <template>
   <section>
     <PageHeader
-      eyebrow="Usage & health"
+      eyebrow="用量与健康"
       title="用量与健康"
       description="你的任务成功率与 token 消耗。数据由服务端统计，只包含你自己的任务。"
     >
-      <button
-        type="button"
+      <Button
+        variant="outline"
+        size="sm"
         data-test="observability-refresh"
-        class="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-60"
         :disabled="loading"
-        @click="refresh"
+        @click="refresh(true)"
       >
         <RefreshCw
           :size="13"
@@ -263,13 +304,31 @@ async function refresh() {
           aria-hidden="true"
         />
         {{ loading ? "刷新中…" : "刷新" }}
-      </button>
+      </Button>
     </PageHeader>
 
-    <ErrorBanner :message="error" testid="observability-error" />
+    <ErrorBanner :message="error" testid="observability-error" @dismiss="error = null" />
+
+    <!-- 延迟骨架屏：匹配 4 卡 KPI + 双栏图表结构，防 0~180ms 闪空态 -->
+    <div v-if="showSkeleton && !overview" class="space-y-4" aria-busy="true" aria-label="加载中">
+      <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        <div
+          v-for="idx in 4"
+          :key="`kpi-skel-${idx}`"
+          class="h-24 animate-pulse rounded-lg border border-border bg-muted/40 motion-reduce:animate-none"
+        />
+      </div>
+      <div class="grid gap-4 lg:grid-cols-2">
+        <div
+          v-for="idx in 2"
+          :key="`chart-skel-${idx}`"
+          class="h-60 animate-pulse rounded-xl border border-border bg-muted/40 motion-reduce:animate-none"
+        />
+      </div>
+    </div>
 
     <EmptyState
-      v-if="!loading && isEmpty && !error"
+      v-else-if="!loading && !showSkeleton && isEmpty && !error"
       data-test="observability-empty"
       title="还没有任务数据"
       description="创建一个任务后，这里会显示任务成功率与 token 用量统计。"
@@ -278,15 +337,17 @@ async function refresh() {
     <template v-else-if="overview">
       <!-- 概览：四项。成功率带分母，token 带口径说明 —— 孤零零的数字无法核对。 -->
       <div class="mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard
+        <AnimatedStatCard
           label="任务总数"
-          :value="overview.tasks.total"
+          :numeric-value="overview.tasks.total"
+          :formatter="(n) => Math.round(n)"
           value-testid="observability-total"
         />
 
-        <StatCard
+        <AnimatedStatCard
           label="成功率"
-          :value="successRateText"
+          :numeric-value="(overview.success_rate ?? 0) * 100"
+          :formatter="(n) => `${n.toFixed(1)}%`"
           value-testid="observability-success-rate"
         >
           <!-- 分母必须露出来：76.9% 是 20/26 还是 20/27，用户要能自己核对；含待人工时显式标明口径（Issue #57） -->
@@ -300,9 +361,13 @@ async function refresh() {
               >（含 {{ overview.tasks.waiting_human }} 个待人工）</template>
             </p>
           </template>
-        </StatCard>
+        </AnimatedStatCard>
 
-        <StatCard :value="formatTokens(overview.tokens.total_used)" value-testid="observability-token-total">
+        <AnimatedStatCard
+          :numeric-value="overview.tokens.total_used"
+          :formatter="(n) => formatTokens(Math.round(n))"
+          value-testid="observability-token-total"
+        >
           <template #label>
             <span class="flex items-center gap-1">
               <Coins :size="11" aria-hidden="true" /> 累计 token
@@ -326,11 +391,12 @@ async function refresh() {
               {{ recordedTaskCount }} 个任务有用量记录
             </p>
           </template>
-        </StatCard>
+        </AnimatedStatCard>
 
-        <StatCard
+        <AnimatedStatCard
           label="平均每任务 token"
-          :value="formatTokens(overview.tokens.avg_per_task)"
+          :numeric-value="overview.tokens.avg_per_task"
+          :formatter="(n) => formatTokens(Math.round(n))"
           value-testid="observability-token-avg"
           hint="仅统计有用量记录的任务"
         />

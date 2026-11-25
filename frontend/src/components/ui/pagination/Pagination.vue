@@ -29,6 +29,9 @@ const props = withDefaults(
     /** 点省略号一次跨几页。 */
     jump?: number;
     ariaLabel?: string;
+    prevTestid?: string;
+    nextTestid?: string;
+    disabled?: boolean;
     class?: string;
   }>(),
   {
@@ -36,6 +39,10 @@ const props = withDefaults(
     boundaries: 1,
     jump: 5,
     ariaLabel: "分页",
+    prevTestid: undefined,
+    nextTestid: undefined,
+    disabled: false,
+    class: undefined,
   },
 );
 
@@ -63,6 +70,7 @@ const fade = computed(() => ({
 }));
 
 function go(page: number) {
+  if (props.disabled) return;
   const target = Math.min(total.value, Math.max(1, Math.round(page)));
   if (target === current.value) return;
   emit("update:modelValue", target);
@@ -81,6 +89,7 @@ function isCurrent(item: number | string): boolean {
         <li>
           <button
             type="button"
+            :data-test="props.prevTestid"
             :class="
               cn(
                 CONTROL,
@@ -88,7 +97,7 @@ function isCurrent(item: number | string): boolean {
               )
             "
             aria-label="上一页"
-            :disabled="current === 1"
+            :disabled="props.disabled || current === 1"
             @click="go(current - 1)"
           >
             <ChevronLeft class="size-4" aria-hidden="true" />
@@ -106,21 +115,22 @@ function isCurrent(item: number | string): boolean {
             :exit="{ opacity: 0, scale: reduced ? 1 : 0.8 }"
             :transition="{ layout: SPRING_LAYOUT, opacity: fade, scale: SPRING_LAYOUT }"
           >
-            <!-- 省略号：点击一次跨 jump 页 -->
             <button
               v-if="typeof item === 'string'"
               type="button"
               :class="
                 cn(
                   CONTROL,
-                  'group text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
+                  'group text-muted-foreground hover:bg-foreground/5 hover:text-foreground disabled:pointer-events-none disabled:opacity-40',
                 )
               "
               :aria-label="
                 item === 'ellipsis-start' ? `向前 ${props.jump} 页` : `向后 ${props.jump} 页`
               "
+              :disabled="props.disabled"
               @click="go(item === 'ellipsis-start' ? current - props.jump : current + props.jump)"
             >
+              <!-- 省略号：点击一次跨 jump 页 -->
               <span
                 aria-hidden="true"
                 class="transition-[opacity,transform] duration-150 ease-out group-hover:scale-75 group-hover:opacity-0 group-focus-visible:scale-75 group-focus-visible:opacity-0 motion-reduce:transform-none"
@@ -139,19 +149,19 @@ function isCurrent(item: number | string): boolean {
               />
             </button>
 
-            <!-- 页码 -->
             <button
               v-else
               type="button"
-              :class="cn(CONTROL, isCurrent(item) ? 'font-medium text-background' : 'text-muted-foreground hover:bg-foreground/5 hover:text-foreground')"
+              :class="cn(CONTROL, 'disabled:pointer-events-none disabled:opacity-60', isCurrent(item) ? 'font-medium text-background' : 'text-muted-foreground hover:bg-foreground/5 hover:text-foreground')"
               :aria-current="isCurrent(item) ? 'page' : undefined"
               :aria-label="`第 ${item} 页`"
+              :disabled="props.disabled"
               @click="go(item)"
             >
-              <!-- 共享胶囊：整条分页里只有一个，翻页时滑过去 -->
+              <!-- 页码；共享胶囊：整条分页里只有一个，翻页时滑过去 -->
               <Motion
                 v-if="isCurrent(item)"
-                :layout-id="reduced ? undefined : 'pagination-current'"
+                :layout-id="reduced ? undefined : `pagination-current-${groupId}`"
                 :transition="SPRING_LAYOUT"
                 aria-hidden="true"
                 class="absolute inset-0 rounded-full bg-foreground"
@@ -164,6 +174,7 @@ function isCurrent(item: number | string): boolean {
         <li>
           <button
             type="button"
+            :data-test="props.nextTestid"
             :class="
               cn(
                 CONTROL,
@@ -171,7 +182,7 @@ function isCurrent(item: number | string): boolean {
               )
             "
             aria-label="下一页"
-            :disabled="current === total"
+            :disabled="props.disabled || current === total"
             @click="go(current + 1)"
           >
             <ChevronRight class="size-4" aria-hidden="true" />

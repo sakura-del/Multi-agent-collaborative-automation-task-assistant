@@ -1,7 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { AnimatePresence, Motion, useReducedMotion } from "motion-v";
 import { Check, Copy, KeyRound, Plus, Trash2 } from "lucide-vue-next";
 
+import AnimatedCollapse from "@/components/common/AnimatedCollapse.vue";
+import ConfirmBar from "@/components/common/ConfirmBar.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import PageHeader from "@/components/common/PageHeader.vue";
@@ -9,6 +12,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useDelayedLoading } from "@/composables/useDelayedLoading";
+import { DURATION, EASE_OUT } from "@/lib/ease";
+import { toastSuccess } from "@/lib/toast";
 import { createApiKey, listApiKeys, revokeApiKey } from "@/api/api-keys";
 import type { ApiKeyInfo, ApiKeyScope } from "@/api/types";
 
@@ -28,8 +34,9 @@ import type { ApiKeyInfo, ApiKeyScope } from "@/api/types";
  */
 const keys = ref<ApiKeyInfo[]>([]);
 const loading = ref(false);
+const showSkeleton = useDelayedLoading(loading);
 const error = ref<string | null>(null);
-const success = ref<string | null>(null);
+const reduced = useReducedMotion();
 
 const showCreate = ref(false);
 const newName = ref("");
@@ -40,8 +47,10 @@ const creating = ref(false);
 /** 刚生成的明文（只显示一次，关闭后清空）。 */
 const createdKey = ref<string | null>(null);
 const copied = ref(false);
+let copyResetTimer: ReturnType<typeof setTimeout> | null = null;
 
 const busyId = ref<string | null>(null);
+const confirmRevokeId = ref<string | null>(null);
 
 /** scope 的中文说明（用户不该去读文档才知道每个 scope 干什么）。 */
 const SCOPE_INFO: { value: ApiKeyScope; label: string; hint: string }[] = [
@@ -51,10 +60,27 @@ const SCOPE_INFO: { value: ApiKeyScope; label: string; hint: string }[] = [
   { value: "annotations:write", label: "写批注", hint: "给任务加导师批注" },
 ];
 
+const SCOPE_LABEL_MAP = new Map<ApiKeyScope, string>(
+  SCOPE_INFO.map((item) => [item.value, item.label]),
+);
+
+function formatScopes(scopes: ApiKeyScope[]): string {
+  return scopes
+    .map((scope) => `${SCOPE_LABEL_MAP.get(scope) ?? scope} (${scope})`)
+    .join(" · ");
+}
+
 const isEmpty = computed(() => keys.value.length === 0);
 
 onMounted(() => {
   void refresh();
+});
+
+onBeforeUnmount(() => {
+  if (copyResetTimer !== null) {
+    clearTimeout(copyResetTimer);
+    copyResetTimer = null;
+  }
 });
 
 async function refresh() {
@@ -115,6 +141,12 @@ async function copyKey() {
   try {
     await navigator.clipboard.writeText(createdKey.value);
     copied.value = true;
+    toastSuccess("已复制密钥");
+    if (copyResetTimer !== null) clearTimeout(copyResetTimer);
+    copyResetTimer = setTimeout(() => {
+      copied.value = false;
+      copyResetTimer = null;
+    }, 1800);
   } catch {
     error.value = "复制失败，请手动选中 Key 复制";
   }
@@ -124,7 +156,11 @@ async function copyKey() {
 function dismissCreated() {
   createdKey.value = null;
   copied.value = false;
-  success.value = "Key 已生成。请确认已保存，之后无法再次查看。";
+  if (copyResetTimer !== null) {
+    clearTimeout(copyResetTimer);
+    copyResetTimer = null;
+  }
+  toastSuccess("Key 已生成，请确认已妥善保存");
 }
 
 async function handleRevoke(key: ApiKeyInfo) {
@@ -132,7 +168,8 @@ async function handleRevoke(key: ApiKeyInfo) {
   error.value = null;
   try {
     await revokeApiKey(key.key_id);
-    success.value = `已吊销「${key.name}」`;
+    confirmRevokeId.value = null;
+    toastSuccess(`已吊销「${key.name}」`);
     await refresh();
   } catch (err) {
     error.value = (err as Error).message || "吊销失败";
@@ -167,7 +204,7 @@ function formatTime(value: string | null): string {
 <template>
   <section>
     <PageHeader
-      eyebrow="Developer settings"
+      eyebrow="开发者配置"
       title="API Key"
       description="用 Key 从脚本、MCP 客户端或其他系统调用本服务。Key 只显示一次，请妥善保存。"
     >
@@ -177,16 +214,7 @@ function formatTime(value: string | null): string {
       </Button>
     </PageHeader>
 
-    <ErrorBanner :message="error" testid="apikeys-error" />
-
-    <p
-      v-if="success"
-      class="mb-3 flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-2 text-sm"
-      data-test="apikeys-success"
-    >
-      <Check class="size-4 text-primary" />
-      {{ success }}
-    </p>
+    <ErrorBanner :message="error" testid="apikeys-error" @dismiss="error = null" />
 
     <!-- 刚生成的明文：唯一一次展示 -->
     <div
@@ -200,8 +228,33 @@ function formatTime(value: string | null): string {
       <div class="mt-1.5 flex flex-wrap items-center gap-2">
         <code class="break-all rounded bg-card px-2 py-1 text-xs">{{ createdKey }}</code>
         <Button variant="ghost" size="sm" data-test="apikey-copy" @click="copyKey">
-          <Copy />
-          {{ copied ? "已复制" : "复制" }}
+          <AnimatePresence mode="wait" :initial="false">
+            <Motion
+              v-if="copied"
+              key="check"
+              as="span"
+              class="inline-flex items-center"
+              :initial="{ opacity: 0, scale: reduced ? 1 : 0.85 }"
+              :animate="{ opacity: 1, scale: 1 }"
+              :exit="{ opacity: 0, scale: reduced ? 1 : 0.85 }"
+              :transition="{ duration: DURATION.micro, ease: EASE_OUT }"
+            >
+              <Check class="size-3.5 text-success" aria-hidden="true" />
+            </Motion>
+            <Motion
+              v-else
+              key="copy"
+              as="span"
+              class="inline-flex items-center"
+              :initial="{ opacity: 0, scale: reduced ? 1 : 0.85 }"
+              :animate="{ opacity: 1, scale: 1 }"
+              :exit="{ opacity: 0, scale: reduced ? 1 : 0.85 }"
+              :transition="{ duration: DURATION.micro, ease: EASE_OUT }"
+            >
+              <Copy class="size-3.5" aria-hidden="true" />
+            </Motion>
+          </AnimatePresence>
+          <span>{{ copied ? "已复制" : "复制" }}</span>
         </Button>
         <Button variant="secondary" size="sm" data-test="apikey-dismiss" @click="dismissCreated">
           我已保存
@@ -209,114 +262,140 @@ function formatTime(value: string | null): string {
       </div>
     </div>
 
-    <!-- 创建表单 -->
-    <form
-      v-if="showCreate"
-      class="mb-4 rounded-lg border border-border bg-card p-3"
-      data-test="apikey-create-form"
-      @submit.prevent="submitCreate"
-    >
-      <div class="grid gap-2 sm:grid-cols-2">
-        <div>
-          <Label for="apikey-name">名称（用于辨认）</Label>
-          <Input
-            id="apikey-name"
-            v-model="newName"
-            placeholder="例如：我的同步脚本"
-            data-test="apikey-name"
-          />
-        </div>
-        <div>
-          <Label for="apikey-expires">有效期（天，留空=永久）</Label>
-          <Input
-            id="apikey-expires"
-            v-model.number="expiresInDays"
-            type="number"
-            min="1"
-            max="3650"
-            placeholder="留空为永久"
-          />
-        </div>
-      </div>
-
-      <fieldset class="mt-2">
-        <legend class="text-xs text-muted-foreground">权限范围（最小权限原则）</legend>
-        <div class="mt-1 grid gap-1 sm:grid-cols-2">
-          <label
-            v-for="scope in SCOPE_INFO"
-            :key="scope.value"
-            class="flex cursor-pointer items-start gap-1.5 rounded-md border border-border px-2 py-1.5 text-sm"
-          >
-            <input
-              type="checkbox"
-              class="mt-0.5"
-              :checked="selectedScopes.includes(scope.value)"
-              :data-test="`apikey-scope-${scope.value}`"
-              @change="toggleScope(scope.value)"
+    <!-- 创建表单（平滑折叠展开） -->
+    <AnimatedCollapse :open="showCreate">
+      <form
+        class="mb-4 rounded-lg border border-border bg-card p-3"
+        data-test="apikey-create-form"
+        @submit.prevent="submitCreate"
+      >
+        <div class="grid gap-2 sm:grid-cols-2">
+          <div>
+            <Label for="apikey-name">名称（用于辨认）</Label>
+            <Input
+              id="apikey-name"
+              v-model="newName"
+              placeholder="例如：我的同步脚本"
+              data-test="apikey-name"
             />
-            <span>
-              <span class="font-medium">{{ scope.label }}</span>
-              <span class="block text-xs text-muted-foreground">{{ scope.hint }}</span>
-            </span>
-          </label>
+          </div>
+          <div>
+            <Label for="apikey-expires">有效期（天，留空=永久）</Label>
+            <Input
+              id="apikey-expires"
+              v-model.number="expiresInDays"
+              type="number"
+              min="1"
+              max="3650"
+              placeholder="留空为永久"
+            />
+          </div>
         </div>
-      </fieldset>
 
-      <div class="mt-2 flex gap-1.5">
-        <Button
-          type="submit"
-          size="sm"
-          :disabled="creating"
-          data-test="apikey-create-submit"
-        >
-          {{ creating ? "生成中…" : "生成" }}
-        </Button>
-        <Button type="button" variant="ghost" size="sm" @click="showCreate = false">
-          取消
-        </Button>
-      </div>
-    </form>
+        <fieldset class="mt-2">
+          <legend class="text-xs text-muted-foreground">权限范围（最小权限原则）</legend>
+          <div class="mt-1 grid gap-1 sm:grid-cols-2">
+            <label
+              v-for="scope in SCOPE_INFO"
+              :key="scope.value"
+              class="flex cursor-pointer items-start gap-1.5 rounded-md border border-border px-2 py-1.5 text-sm"
+            >
+              <input
+                type="checkbox"
+                class="mt-0.5"
+                :checked="selectedScopes.includes(scope.value)"
+                :data-test="`apikey-scope-${scope.value}`"
+                @change="toggleScope(scope.value)"
+              />
+              <span>
+                <span class="font-medium">{{ scope.label }}</span>
+                <span class="block text-xs text-muted-foreground">{{ scope.hint }}</span>
+              </span>
+            </label>
+          </div>
+        </fieldset>
 
-    <p v-if="loading" class="text-sm text-muted-foreground">加载中…</p>
+        <div class="mt-2 flex gap-1.5">
+          <Button
+            type="submit"
+            size="sm"
+            :disabled="creating"
+            data-test="apikey-create-submit"
+          >
+            {{ creating ? "生成中…" : "生成" }}
+          </Button>
+          <Button type="button" variant="ghost" size="sm" @click="showCreate = false">
+            取消
+          </Button>
+        </div>
+      </form>
+    </AnimatedCollapse>
+
+    <div v-if="showSkeleton" class="space-y-2" aria-busy="true" aria-label="加载中">
+      <div
+        v-for="idx in 3"
+        :key="`apikey-skel-${idx}`"
+        class="h-14 animate-pulse rounded-lg border border-border bg-muted/40 motion-reduce:animate-none"
+      />
+    </div>
 
     <EmptyState
-      v-else-if="isEmpty && !error"
+      v-else-if="!loading && !showSkeleton && isEmpty && !error"
       data-test="apikeys-empty"
       title="还没有 API Key"
       description="生成一个 Key 后，就可以从脚本或 MCP 客户端调用本服务了。"
     />
 
-    <ul v-else class="divide-y divide-border rounded-lg border border-border" data-test="apikeys-list">
+    <ul
+      v-else-if="!loading && !showSkeleton"
+      class="divide-y divide-border rounded-lg border border-border"
+      data-test="apikeys-list"
+    >
       <li
         v-for="key in keys"
         :key="key.key_id"
-        class="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm"
+        class="flex flex-col gap-2 px-3 py-2 text-sm"
         :data-test="`apikey-row-${key.key_id}`"
       >
-        <div class="min-w-0 flex-1">
-          <div class="flex flex-wrap items-center gap-1.5">
-            <KeyRound class="size-3.5 text-muted-foreground" />
-            <span class="font-medium">{{ key.name }}</span>
-            <Badge :variant="statusOf(key).variant">{{ statusOf(key).label }}</Badge>
-            <code class="rounded bg-muted px-1 py-0.5 text-xs">{{ key.prefix }}…</code>
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="min-w-0 flex-1">
+            <div class="flex flex-wrap items-center gap-1.5">
+              <KeyRound class="size-3.5 text-muted-foreground" />
+              <span class="font-medium">{{ key.name }}</span>
+              <Badge :variant="statusOf(key).variant">{{ statusOf(key).label }}</Badge>
+              <code class="rounded bg-muted px-1 py-0.5 text-xs">{{ key.prefix }}…</code>
+            </div>
+            <div class="mt-0.5 flex flex-wrap gap-2 text-xs text-muted-foreground">
+              <span>{{ formatScopes(key.scopes) }}</span>
+              <span>最后使用：{{ formatTime(key.last_used_at) }}</span>
+              <span v-if="key.expires_at">过期：{{ formatTime(key.expires_at) }}</span>
+            </div>
           </div>
-          <div class="mt-0.5 flex flex-wrap gap-2 text-xs text-muted-foreground">
-            <span>{{ key.scopes.join(" · ") }}</span>
-            <span>最后使用：{{ formatTime(key.last_used_at) }}</span>
-            <span v-if="key.expires_at">过期：{{ formatTime(key.expires_at) }}</span>
-          </div>
+          <Button
+            v-if="!key.revoked_at && confirmRevokeId !== key.key_id"
+            variant="ghost"
+            size="sm"
+            :disabled="busyId === key.key_id"
+            :data-test="`apikey-revoke-${key.key_id}`"
+            @click="confirmRevokeId = key.key_id"
+          >
+            <Trash2 />
+            吊销
+          </Button>
         </div>
-        <Button
-          v-if="!key.revoked_at"
-          variant="ghost"
-          size="sm"
-          :disabled="busyId === key.key_id"
-          :data-test="`apikey-revoke-${key.key_id}`"
-          @click="handleRevoke(key)"
-        >
-          <Trash2 />
-          吊销
-        </Button>
+
+        <ConfirmBar
+          v-if="confirmRevokeId === key.key_id"
+          title="确认吊销该 API Key？"
+          consequence="吊销后立即永久失效，所有使用该密钥的调用脚本与 MCP 客户端将立即收到 401 错误。"
+          confirm-label="确认吊销"
+          cancel-label="取消"
+          :confirm-testid="`apikey-revoke-confirm-${key.key_id}`"
+          :cancel-testid="`apikey-revoke-cancel-${key.key_id}`"
+          :loading="busyId === key.key_id"
+          @confirm="handleRevoke(key)"
+          @cancel="confirmRevokeId = null"
+        />
       </li>
     </ul>
   </section>

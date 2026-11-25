@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from "vue";
+import { ref } from "vue";
 import { ArrowRight, CheckCircle2, FileText, ShieldCheck, X } from "lucide-vue-next";
 
+import { Button } from "@/components/ui/button";
+import { MotionDrawer } from "@/components/ui/drawer";
 import {
   DEMO_CITATIONS,
   DEMO_CSL_OPTIONS,
@@ -23,78 +25,50 @@ const selectedCsl = ref<DemoCslStyle>("gbt7714");
 function close() {
   emit("update:open", false);
 }
-
-function onKeydown(event: KeyboardEvent) {
-  if (event.key === "Escape" && props.open) {
-    event.preventDefault();
-    close();
-  }
-}
-
-watch(
-  () => props.open,
-  (isOpen) => {
-    if (typeof window === "undefined") return;
-    if (isOpen) {
-      window.addEventListener("keydown", onKeydown);
-    } else {
-      window.removeEventListener("keydown", onKeydown);
-    }
-  },
-  { immediate: true },
-);
-
-onBeforeUnmount(() => {
-  if (typeof window !== "undefined") {
-    window.removeEventListener("keydown", onKeydown);
-  }
-});
 </script>
 
 <template>
-  <Teleport to="body">
-    <div
-      v-if="props.open"
-      class="fixed inset-0 z-50 flex justify-end bg-black/35 backdrop-blur-[1px]"
-      data-test="landing-report-backdrop"
-      @click.self="close"
-    >
-      <aside
-        data-test="landing-report-drawer"
-        role="dialog"
-        aria-modal="true"
-        aria-label="真实示范综述报告"
-        class="flex h-full w-full max-w-2xl flex-col border-l border-[#E5E7EB] bg-[#FAF9F6] text-[#111827] shadow-raised dark:border-border dark:bg-background dark:text-foreground"
-      >
-        <!-- 抽屉顶栏 -->
-        <header class="flex items-start justify-between gap-3 border-b border-[#E5E7EB] bg-white px-5 py-4 dark:border-border dark:bg-card">
-          <div class="min-w-0">
-            <div class="flex flex-wrap items-center gap-2 text-[11px] text-[#6B7280] dark:text-muted-foreground">
-              <span class="inline-flex items-center gap-1 rounded bg-[#0F4C3A]/10 px-1.5 py-0.5 font-medium text-[#0F4C3A] dark:bg-primary/15 dark:text-primary">
-                <FileText :size="11" aria-hidden="true" />
-                示范任务快照
-              </span>
-              <span class="tabular-nums">检索 {{ DEMO_FULL_REPORT.searchedCount }} 篇</span>
-              <span>·</span>
-              <span class="tabular-nums">纳入 {{ DEMO_FULL_REPORT.includedCount }} 篇</span>
-              <span>·</span>
-              <span class="tabular-nums">耗时 {{ DEMO_FULL_REPORT.durationText }}</span>
-            </div>
-            <h2 class="mt-1.5 font-display text-base leading-snug font-semibold text-[#111827] dark:text-foreground">
-              {{ DEMO_FULL_REPORT.title }}
-            </h2>
-          </div>
+  <MotionDrawer
+    :open="props.open"
+    side="right"
+    width-class="w-full max-w-2xl"
+    aria-label="真实示范综述报告"
+    :backdrop-attrs="{ 'data-test': 'landing-report-backdrop' }"
+    :panel-attrs="{ 'data-test': 'landing-report-drawer' }"
+    class="border-[#E5E7EB] bg-[#FAF9F6] text-[#111827] dark:border-border dark:bg-background dark:text-foreground"
+    @update:open="emit('update:open', $event)"
+  >
+    <!-- 抽屉顶栏 -->
+    <header class="flex items-start justify-between gap-3 border-b border-[#E5E7EB] bg-white px-5 py-4 dark:border-border dark:bg-card">
+      <div class="min-w-0">
+        <div class="flex flex-wrap items-center gap-2 text-[11px] text-[#6B7280] dark:text-muted-foreground">
+          <span class="inline-flex items-center gap-1 rounded bg-[#0F4C3A]/10 px-1.5 py-0.5 font-medium text-[#0F4C3A] dark:bg-primary/15 dark:text-primary">
+            <FileText :size="11" aria-hidden="true" />
+            示范任务快照
+          </span>
+          <span class="tabular-nums">检索 {{ DEMO_FULL_REPORT.searchedCount }} 篇</span>
+          <span>·</span>
+          <span class="tabular-nums">纳入 {{ DEMO_FULL_REPORT.includedCount }} 篇</span>
+          <span>·</span>
+          <span class="tabular-nums">耗时 {{ DEMO_FULL_REPORT.durationText }}</span>
+        </div>
+        <h2 class="mt-1.5 font-display text-base leading-snug font-semibold text-[#111827] dark:text-foreground">
+          {{ DEMO_FULL_REPORT.title }}
+        </h2>
+      </div>
 
-          <button
-            type="button"
-            data-test="close-report-drawer"
-            aria-label="关闭示范报告"
-            class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-[#6B7280] transition-colors hover:bg-black/5 hover:text-[#111827] dark:text-muted-foreground dark:hover:bg-muted dark:hover:text-foreground"
-            @click="close"
-          >
-            <X :size="15" aria-hidden="true" />
-          </button>
-        </header>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        data-test="close-report-drawer"
+        aria-label="关闭示范报告"
+        class="shrink-0 text-[#6B7280] hover:bg-black/5 hover:text-[#111827] dark:text-muted-foreground dark:hover:bg-muted dark:hover:text-foreground"
+        @click="close"
+      >
+        <X :size="15" aria-hidden="true" />
+      </Button>
+    </header>
 
         <!-- 主体滚动区 -->
         <div class="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
@@ -163,7 +137,7 @@ onBeforeUnmount(() => {
                     v-model="selectedCsl"
                     data-test="drawer-csl-select"
                     aria-label="切换示范报告引用格式"
-                    class="h-7 rounded-md border border-[#E5E7EB] bg-[#FAF9F6] px-2 text-xs font-medium outline-none focus-visible:border-[#0F4C3A] dark:border-border dark:bg-background"
+                    class="h-7 rounded-md border border-[#E5E7EB] bg-[#FAF9F6] px-2 text-xs font-medium text-[#111827] outline-none focus-visible:border-[#0F4C3A] dark:border-border dark:bg-background dark:text-foreground dark:focus-visible:border-ring"
                   >
                     <option v-for="opt in DEMO_CSL_OPTIONS" :key="opt.value" :value="opt.value">
                       {{ opt.label }}
@@ -197,7 +171,7 @@ onBeforeUnmount(() => {
           <button
             type="button"
             data-test="drawer-start-cta"
-            class="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#0F4C3A] px-3.5 text-xs font-medium text-white transition-colors hover:bg-[#135D47] dark:bg-primary dark:text-primary-foreground"
+            class="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#0F4C3A] px-3.5 text-xs font-medium text-white transition-colors hover:bg-[#135D47] dark:bg-primary dark:text-primary-foreground dark:hover:bg-primary/90"
             @click="
               close();
               emit('start');
@@ -207,7 +181,5 @@ onBeforeUnmount(() => {
             <ArrowRight :size="13" aria-hidden="true" />
           </button>
         </footer>
-      </aside>
-    </div>
-  </Teleport>
+  </MotionDrawer>
 </template>

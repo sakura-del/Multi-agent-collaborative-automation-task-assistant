@@ -10,6 +10,16 @@ vi.mock("@/api/billing", () => ({
   getBillingUsageCost: vi.fn(),
 }));
 
+const { toastSuccess } = vi.hoisted(() => ({
+  toastSuccess: vi.fn(),
+}));
+vi.mock("@/lib/toast", () => ({
+  toastSuccess,
+  toastError: vi.fn(),
+  toastInfo: vi.fn(),
+  toastWarning: vi.fn(),
+}));
+
 import {
   exportBillingUsageCsv,
   getBillingUsage,
@@ -151,6 +161,7 @@ beforeEach(() => {
   vi.mocked(listBillingPlans).mockReset();
   vi.mocked(exportBillingUsageCsv).mockReset();
   vi.mocked(getBillingUsageCost).mockReset();
+  toastSuccess.mockReset();
 });
 
 describe("PlanView", () => {
@@ -639,5 +650,51 @@ describe("PlanView 重设计（2026-10-26）", () => {
     const row = wrapper.get("[data-test='cost-row-custom-my-private-model']");
     expect(row.text()).toContain("未收录单价");
     expect(wrapper.get("[data-test='cost-unpriced']").text()).toContain("2,000");
+  });
+
+  it("进度条采用 scaleX 且无 transition-all，升级按钮带聚焦轮廓兜底，导出 CSV 弹 toastSuccess，ErrorBanner 支持关闭复位", async () => {
+    vi.mocked(getBillingUsage).mockRejectedValueOnce(new Error("用量临时故障"));
+    vi.mocked(listBillingPlans).mockResolvedValue(PLANS as never);
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    // ErrorBanner 无外层 v-if 阻断且 @dismiss 可清除
+    const banner = wrapper.get('[data-test="error-banner"]');
+    expect(banner.text()).toContain("用量临时故障");
+    await banner.get("button").trigger("click");
+    await flushPromises();
+    expect(wrapper.find('[data-test="error-banner"]').exists()).toBe(false);
+
+    // 用尽状态：检查 scaleX 进度条、focus:outline-solid 按钮与导出 CSV Toast
+    vi.mocked(getBillingUsage).mockResolvedValue(
+      usage({ plan_id: "free", reviews_used: 1, monthly_reviews: 2, reviews_remaining: 0 }) as never,
+    );
+    vi.mocked(exportBillingUsageCsv).mockResolvedValue(
+      new Blob(["类型,周期"], { type: "text/csv" }) as never,
+    );
+    const createObjectURL = vi.fn(() => "blob:mock-2");
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createObjectURL });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revokeObjectURL });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+
+    const wrapper2 = mountView();
+    await flushPromises();
+
+    const bar = wrapper2.get('[data-test="plan-progress-bar"]');
+    expect(bar.classes()).not.toContain("transition-all");
+    expect(bar.classes()).toContain("transition-transform");
+    expect(bar.attributes("style")).toContain("scaleX(0.5)");
+    expect(bar.attributes("style")).toContain("50%");
+
+    const upgradeBtn = wrapper2.get('[data-test="plan-upgrade-action"]');
+    expect(upgradeBtn.classes()).toContain("focus:outline-solid");
+    expect(upgradeBtn.classes()).toContain("focus-visible:outline-solid");
+
+    await wrapper2.get('[data-test="export-usage-csv"]').trigger("click");
+    await flushPromises();
+    expect(toastSuccess).toHaveBeenCalledWith("已导出用量账单 CSV");
+    click.mockRestore();
   });
 });

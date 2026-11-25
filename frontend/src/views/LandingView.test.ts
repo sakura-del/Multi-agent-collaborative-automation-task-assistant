@@ -130,4 +130,31 @@ describe("LandingView（Elicit 风格落地页）", () => {
     expect(textEl.text()).toContain("arXiv");
     expect(textEl.text()).toContain("GB/T 7714-2025");
   });
+
+  it("支持三态主题模式选择（light / dark / system）且 Tab 3 导出提示支持关闭", async () => {
+    document.documentElement.classList.remove("dark");
+    localStorage.clear();
+    const { wrapper } = await mountLanding();
+
+    const modeTrigger = wrapper.get('[data-test="landing-theme-mode-select"]');
+    await modeTrigger.trigger("click");
+    await flushPromises();
+    await wrapper.get('[data-test="landing-theme-mode-dark"]').trigger("click");
+    expect(localStorage.getItem("vp:theme")).toBe("dark");
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
+
+    await modeTrigger.trigger("click");
+    await flushPromises();
+    await wrapper.get('[data-test="landing-theme-mode-light"]').trigger("click");
+    expect(localStorage.getItem("vp:theme")).toBe("light");
+    expect(document.documentElement.classList.contains("dark")).toBe(false);
+
+    // 切到 Tab 3 并触发导出提示，可手动关闭
+    await wrapper.get('[data-test="showcase-tab-review"]').trigger("click");
+    await wrapper.get('[data-test="demo-export-docx"]').trigger("click");
+    expect(wrapper.find('[data-test="demo-export-notice"]').exists()).toBe(true);
+    await wrapper.get('[data-test="demo-export-notice-close"]').trigger("click");
+    expect(wrapper.find('[data-test="demo-export-notice"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
 });
