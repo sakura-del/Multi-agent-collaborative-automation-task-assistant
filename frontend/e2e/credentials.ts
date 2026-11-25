@@ -26,8 +26,14 @@ function required(name: string, hint: string): string {
 /** 演示账号（生产上是 admin，口令见部署环境 /opt/veripaper/.demo-password）。 */
 export const E2E_DEMO_ACCOUNT = process.env.E2E_DEMO_ACCOUNT ?? "demo";
 
-/** 第二个账号：用于跨用户隔离、邀请等"需要两个真实用户"的场景。 */
+/** 第二个账号：用于跨用户隔离、免费额度用尽（1/1）等场景。 */
 export const E2E_SECONDARY_ACCOUNT = process.env.E2E_SECONDARY_ACCOUNT ?? "e2efull";
+
+/** 文献综述主流程账号（Pro 套餐，避免与免费版用尽态账号冲突）。 */
+export const E2E_REVIEW_ACCOUNT = process.env.E2E_REVIEW_ACCOUNT ?? "e2ereview";
+
+/** 断线重连专用账号（Pro 套餐，独立任务列表隔离）。 */
+export const E2E_RECONNECT_ACCOUNT = process.env.E2E_RECONNECT_ACCOUNT ?? "e2ereconn";
 
 export function demoPassword(): string {
   return required("E2E_DEMO_PASSWORD", "演示账号口令保存在部署环境的 600 文件里。");

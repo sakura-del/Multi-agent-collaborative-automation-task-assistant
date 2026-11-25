@@ -1,26 +1,13 @@
-import { expect, test, type Page } from "@playwright/test";
-import { demoPassword } from "./credentials";
-import { gotoPasswordLogin } from "./support/auth";
+import { expect, test } from "@playwright/test";
+import { demoCreds } from "./support/env";
+import { seedAuthByApi } from "./support/auth";
 
 // 用量看板「结构取证」（替代肉眼读图）。
-//
-// ⚠️ 诚实说明：本轮使用的模型不支持图片输入，`read_image` 不可用。
-// 因此视觉验收改为**把渲染结果的可见结构完整导出**（每个区块的几何、
-// 文本、字号、颜色、可见性），用数据代替眼睛。这比「看一眼觉得还行」更严格：
-// 字号/对比度/溢出都是量出来的，不是猜的。
 const SHOTS = "e2e/screenshots";
 
-async function login(page: Page) {
-  await gotoPasswordLogin(page);
-  await page.locator("#account").fill("demo");
-  await page.locator("#password").fill(demoPassword());
-  await page.locator('form button[type="submit"]').click();
-  await page.getByRole("link", { name: /任务/ }).waitFor({ timeout: 30_000 });
-}
-
-test("用量看板：完整渲染结构导出", async ({ page }) => {
-  await login(page);
-  await page.goto("/observability");
+test("用量看板：完整渲染结构导出", async ({ page, request }) => {
+  const { account, password } = demoCreds();
+  await seedAuthByApi(page, request, account, password, "/observability");
   await expect(page.locator('[data-test="observability-total"]')).toBeVisible({
     timeout: 30_000,
   });

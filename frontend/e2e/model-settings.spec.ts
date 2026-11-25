@@ -1,37 +1,27 @@
-import { expect, test, type Page, type APIRequestContext } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
-import { demoPassword, E2E_DEMO_ACCOUNT } from "./credentials";
-import { gotoPasswordLogin } from "./support/auth";
+import { apiBase, demoCreds } from "./support/env";
+import { fetchAuthToken, seedAuthByApi } from "./support/auth";
 
 // 我的模型页 E2E（Issue #15 BYOK）。
 //
 // 验的是**用户真实路径**：登录 → 接入一把 key → 列表里能看到脱敏值 →
-// 「测试连接」失败时不假装成功 → 删除需要二次确认。
-//
-// 刻意不依赖任何真实厂商：端点用 `.invalid` 顶级域（RFC 2606 保证不解析），
-// 因此「测试连接」必然失败——这恰好用来验证失败路径不会被伪装成成功。
+// 「测试连接」失败时不假装成功 → 删除需要二次确认（含取消保留）。
 //
 // 清理：用例前后都调用 API 删除本 spec 创建的凭据，避免污染目标库。
 
-const API = "/api/v1";
+const API = apiBase();
 const NAME_PREFIX = "E2E 模型凭据";
 const PLAINTEXT = "sk-e2e-0123456789abcdefghij";
 
-async function login(page: Page) {
-  await gotoPasswordLogin(page);
-  await page.locator("#account").fill(E2E_DEMO_ACCOUNT);
-  await page.locator("#password").fill(demoPassword());
-  await page.locator('form button[type="submit"]').click();
-  // 不能用「任务」链接判断登录完成：移动端侧栏是抽屉，登录后链接不可见。
-  await page.waitForURL(/\/tasks/, { timeout: 30_000 });
+async function login(page: Page, request: APIRequestContext) {
+  const { account, password } = demoCreds();
+  await seedAuthByApi(page, request, account, password, "/tasks");
 }
 
 async function bearer(request: APIRequestContext): Promise<string> {
-  const resp = await request.post(`${API}/auth/login`, {
-    data: { account: E2E_DEMO_ACCOUNT, password: demoPassword() },
-  });
-  expect(resp.ok()).toBeTruthy();
-  return (await resp.json()).access_token as string;
+  const { account, password } = demoCreds();
+  return (await fetchAuthToken(request, account, password)).access_token;
 }
 
 /** 清掉历史残留 + 本次创建（上次跑挂时可能留下）。 */
@@ -54,7 +44,7 @@ test("我的模型：接入 / 脱敏 / 测试失败不伪装 / 二次确认删�
 
   await cleanup(request);
   try {
-    await login(page);
+    await login(page, request);
     await page.goto("/settings/models");
     await expect(page.locator('[data-test="model-create-open"]')).toBeVisible({ timeout: 30_000 });
 
@@ -81,7 +71,13 @@ test("我的模型：接入 / 脱敏 / 测试失败不伪装 / 二次确认删�
     await expect(row).not.toContainText(PLAINTEXT);
     await expect(row).toContainText("sk-");
 
-    // ④ 删除：第一次点击只进入确认态，第二次才真的删
+    // ④ 删除：第一次点击进入 ConfirmBar，取消保留，再确认删除
+    await row.getByRole("button", { name: "删除" }).click();
+    await expect(row.getByRole("button", { name: /确认删除/ })).toBeVisible();
+    await row.getByRole("button", { name: "取消" }).click();
+    await expect(row.getByRole("button", { name: /确认删除/ })).toHaveCount(0);
+    await expect(page.locator('[data-test="models-list"] li', { hasText: name })).toHaveCount(1);
+
     await row.getByRole("button", { name: "删除" }).click();
     await expect(row.getByRole("button", { name: /确认删除/ })).toBeVisible();
     await row.getByRole("button", { name: /确认删除/ }).click();
@@ -93,10 +89,10 @@ test("我的模型：接入 / 脱敏 / 测试失败不伪装 / 二次确认删�
   }
 });
 
-test("侧栏：折叠成图标轨，图标可切页", async ({ page }) => {
+test("侧栏：折叠成图标轨，图标可切页", async ({ page, request }) => {
   // 移动端侧栏是抽屉（nav-mobile-trigger 打开），没有「折叠成图标轨」这个形态
   test.skip(test.info().project.name === "mobile-chrome", "移动端侧栏为抽屉，无折叠轨");
-  await login(page);
+  await login(page, request);
 
   const sidebar = page.locator('[data-test="app-sidebar"]');
   await expect(sidebar).toBeVisible();

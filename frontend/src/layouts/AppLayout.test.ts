@@ -341,7 +341,11 @@ describe("AppLayout M2 UX 与动效改造验证", () => {
     });
     await flushPromises();
 
-    await wrapper.get('[data-test="chat-fab"]').trigger("click");
+    // chat-fab 必须 Teleport 到 body，避免被 App.vue 路由过渡 Motion 的 transform 困住定位
+    expect(wrapper.find('[data-test="chat-fab"]').exists()).toBe(false);
+    const fabBtn = document.body.querySelector('[data-test="chat-fab"]') as HTMLButtonElement | null;
+    expect(fabBtn).not.toBeNull();
+    fabBtn!.click();
     await flushPromises();
 
     const loadingShell = wrapper.find('[data-test="chat-shell-loading"]');

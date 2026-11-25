@@ -85,14 +85,14 @@ function toggleStep(step: AgentPlanStep) {
   expandedId.value = expandedId.value === step.id ? null : step.id;
 }
 
-/** 工具徽章色与中文标签：kind → tailwind 类 */
+/** 工具徽章色与中文标签：kind → tailwind 类（浅色用 800 色阶确保对比度 >= 4.5） */
 const KIND_STYLE: Record<string, { pill: string; icon: typeof Search; label: string }> = {
-  planner: { pill: "bg-sky-500/10 text-sky-600 dark:text-sky-400", icon: Brain, label: "规划" },
-  search: { pill: "bg-amber-500/10 text-amber-600 dark:text-amber-400", icon: Search, label: "检索" },
-  extract: { pill: "bg-orange-500/10 text-orange-600 dark:text-orange-400", icon: Wrench, label: "抽取" },
-  write: { pill: "bg-orange-500/10 text-orange-600 dark:text-orange-400", icon: Wrench, label: "写作" },
-  validate: { pill: "bg-lime-500/10 text-lime-600 dark:text-lime-400", icon: FlaskConical, label: "校验" },
-  review: { pill: "bg-teal-500/10 text-teal-600 dark:text-teal-400", icon: FlaskConical, label: "复盘" },
+  planner: { pill: "bg-sky-500/10 text-sky-800 dark:text-sky-400", icon: Brain, label: "规划" },
+  search: { pill: "bg-amber-500/10 text-amber-800 dark:text-amber-400", icon: Search, label: "检索" },
+  extract: { pill: "bg-orange-500/10 text-orange-800 dark:text-orange-400", icon: Wrench, label: "抽取" },
+  write: { pill: "bg-orange-500/10 text-orange-800 dark:text-orange-400", icon: Wrench, label: "写作" },
+  validate: { pill: "bg-lime-500/10 text-lime-800 dark:text-lime-400", icon: FlaskConical, label: "校验" },
+  review: { pill: "bg-teal-500/10 text-teal-800 dark:text-teal-400", icon: FlaskConical, label: "复盘" },
 };
 
 function kindStyle(kind: string) {
@@ -235,6 +235,7 @@ function stepDotClass(status: AgentStepStatus): string {
                   {{ step.title }}
                 </span>
                 <span
+                  data-test="agent-plan-kind-pill"
                   class="inline-flex h-5 items-center gap-1 rounded-full px-2 text-[10px] font-medium"
                   :class="kindStyle(step.kind).pill"
                 >

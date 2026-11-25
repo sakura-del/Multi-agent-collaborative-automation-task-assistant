@@ -792,11 +792,11 @@ onBeforeUnmount(() => {
 
                   <span
                     v-else-if="getCell(src, col.key)!.status === 'not_reported'"
-                    class="inline-flex flex-col text-muted-foreground/80"
+                    class="inline-flex flex-col text-muted-foreground"
                     data-test="cell-not-reported"
                   >
                     <span>未报告</span>
-                    <span class="text-[10px] opacity-75">
+                    <span class="text-[10px]">
                       基于{{ getCell(src, col.key)!.evidence_scope === "full_text" ? "全文" : "摘要" }}
                     </span>
                   </span>

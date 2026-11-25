@@ -1,18 +1,15 @@
 import { expect, test } from "@playwright/test";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { demoPassword } from "./credentials";
-import { gotoPasswordLogin } from "./support/auth";
+import { demoCreds } from "./support/env";
+import { seedAuthByApi } from "./support/auth";
 
 // 结果页需要「已完成」任务才有 review_report，单独取一条已完成的
 const SHOTS = resolve(dirname(fileURLToPath(import.meta.url)), "screenshots");
 
-test("任务结果页（引用核验 + 质量评分）", async ({ page }) => {
-  await gotoPasswordLogin(page);
-  await page.locator("#account").fill("demo");
-  await page.locator("#password").fill(demoPassword());
-  await page.locator('form button[type="submit"]').click();
-  await page.getByRole("link", { name: /任务/ }).waitFor({ timeout: 30_000 });
+test("任务结果页（引用核验 + 质量评分）", async ({ page, request }) => {
+  const { account, password } = demoCreds();
+  await seedAuthByApi(page, request, account, password, "/tasks");
 
   // 找第一条「已完成」任务打开
   const rows = page.locator('[data-test^="task-row-"]');

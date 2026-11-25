@@ -64,7 +64,7 @@
   /* 语义状态 */
   --success: oklch(0.48 0.13 155);
   --success-foreground: oklch(0.99 0 0);
-  --warning: oklch(0.52 0.13 70);
+  --warning: oklch(0.47 0.13 70);
   --warning-foreground: oklch(0.99 0 0);
 
   /* 图表序列色（OKLCH 浅色画布对比度校准 >= 4.5:1） */
@@ -480,25 +480,38 @@
   .funnel-particle {
     position: absolute;
     top: 0;
-    left: 50%;
+    left: -1.75px;
+    width: 3.5px;
+    height: 100%;
+    opacity: 0;
+    will-change: transform, opacity;
+    transform: translate3d(0, -2%, 0);
+    animation: funnel-drop 5.2s linear infinite;
+  }
+
+  .funnel-particle::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
     width: 3.5px;
     height: 3.5px;
     border-radius: 999px;
     background: var(--foreground);
-    opacity: 0;
-    will-change: transform, opacity;
-    transform: translate3d(-50%, 0, 0);
-    animation: funnel-drop 5.2s linear infinite;
   }
 
   /* 第 0 层出口粒子末段变绿：通过 ::after 绿光层 opacity 淡入替代 background 动画 */
   .funnel-particle.exit-0::after {
     content: "";
     position: absolute;
-    inset: 0;
-    border-radius: inherit;
+    top: 0;
+    left: 0;
+    width: 3.5px;
+    height: 3.5px;
+    border-radius: 999px;
     background: var(--success);
     opacity: 0;
+    will-change: opacity;
     animation: funnel-particle-success-fade 5.2s linear infinite;
     animation-delay: inherit;
   }
@@ -522,30 +535,30 @@
 
 @keyframes funnel-drop {
   0% {
-    transform: translate3d(calc(var(--x) * 18cqw - 50%), -2cqh, 0);
+    transform: translate3d(0, -2%, 0);
     opacity: 0;
   }
   6% {
     opacity: 0.55;
   }
   22% {
-    transform: translate3d(calc(var(--x) * 13.5cqw - 50%), 20cqh, 0);
+    transform: translate3d(0, 20%, 0);
     opacity: 0.55;
   }
   44% {
-    transform: translate3d(calc(var(--x) * 8.5cqw - 50%), 42cqh, 0);
+    transform: translate3d(0, 42%, 0);
     opacity: 0.45;
   }
   66% {
-    transform: translate3d(calc(var(--x) * 5cqw - 50%), 64cqh, 0);
+    transform: translate3d(0, 64%, 0);
     opacity: 0.45;
   }
   84% {
-    transform: translate3d(calc(var(--x) * 2.6cqw - 50%), 82cqh, 0);
+    transform: translate3d(0, 82%, 0);
     opacity: 0.9;
   }
   100% {
-    transform: translate3d(calc(var(--x) * 1.6cqw - 50%), 99cqh, 0);
+    transform: translate3d(0, 99%, 0);
     opacity: 0;
   }
 }
@@ -563,57 +576,57 @@
 
 @keyframes funnel-drop-exit-1 {
   0% {
-    transform: translate3d(calc(var(--x) * 18cqw - 50%), -2cqh, 0);
+    transform: translate3d(0, -2%, 0);
     opacity: 0;
   }
   6% {
     opacity: 0.55;
   }
   22% {
-    transform: translate3d(calc(var(--x) * 13.5cqw - 50%), 20cqh, 0);
+    transform: translate3d(0, 20%, 0);
     opacity: 0.5;
   }
   34%,
   100% {
-    transform: translate3d(calc(var(--x) * 40cqw - 50%), 25cqh, 0);
+    transform: translate3d(0, 26%, 0);
     opacity: 0;
   }
 }
 
 @keyframes funnel-drop-exit-2 {
   0% {
-    transform: translate3d(calc(var(--x) * 18cqw - 50%), -2cqh, 0);
+    transform: translate3d(0, -2%, 0);
     opacity: 0;
   }
   6% {
     opacity: 0.55;
   }
   44% {
-    transform: translate3d(calc(var(--x) * 8.5cqw - 50%), 42cqh, 0);
+    transform: translate3d(0, 42%, 0);
     opacity: 0.45;
   }
   56%,
   100% {
-    transform: translate3d(calc(var(--x) * 30cqw - 50%), 47cqh, 0);
+    transform: translate3d(0, 48%, 0);
     opacity: 0;
   }
 }
 
 @keyframes funnel-drop-exit-3 {
   0% {
-    transform: translate3d(calc(var(--x) * 18cqw - 50%), -2cqh, 0);
+    transform: translate3d(0, -2%, 0);
     opacity: 0;
   }
   6% {
     opacity: 0.5;
   }
   66% {
-    transform: translate3d(calc(var(--x) * 5cqw - 50%), 64cqh, 0);
+    transform: translate3d(0, 64%, 0);
     opacity: 0.45;
   }
   78%,
   100% {
-    transform: translate3d(calc(var(--x) * 22cqw - 50%), 69cqh, 0);
+    transform: translate3d(0, 70%, 0);
     opacity: 0;
   }
 }

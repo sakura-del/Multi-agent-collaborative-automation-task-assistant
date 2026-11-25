@@ -1,21 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { demoPassword } from "./credentials";
-import { gotoPasswordLogin } from "./support/auth";
+import { apiBase, demoCreds } from "./support/env";
+import { fetchAuthToken, seedAuthByApi } from "./support/auth";
 
 // 团队工作区 + 席位 + 导师批注走查（Phase 2）
-//
-// ## 两条必须遵守的写法
-//
-// 1. **所有测试数据带时间戳**：双视口（chromium + mobile-chrome）串行跑，
-//    且失败重跑会留下残留。同名数据会让 `filter({ hasText })` 命中多个元素
-//    （strict mode violation）。首版就踩了：mobile 因上一轮残留的
-//    「E2E 验收团队」而匹配到 2 个。
-// 2. **先清理再断言**：批注用唯一内容，删除后按 `data-test` 精确断言
-//    `toHaveCount(0)`，不用 `not.toContainText`（后者在行被复用时不可靠）。
 const SHOTS = resolve(dirname(fileURLToPath(import.meta.url)), "screenshots");
-const API = "http://10.0.10.2:48080/api/v1";
+const API = apiBase();
 
 async function shot(page: Page, name: string) {
   await page.screenshot({
@@ -24,22 +15,14 @@ async function shot(page: Page, name: string) {
   });
 }
 
-async function login(page: Page, account: string, password: string) {
-  await gotoPasswordLogin(page);
-  await page.locator("#account").fill(account);
-  await page.locator("#password").fill(password);
-  await page.locator('form button[type="submit"]').click();
-  await page.getByRole("link", { name: /任务/ }).waitFor({ timeout: 30_000 });
-}
-
-test("团队页：创建团队 + 席位用量展示", async ({ page }) => {
+test("团队页：创建团队 + 席位用量展示", async ({ page, request }) => {
   // 唯一名字（双视口 + 重跑都不冲突）
   const stamp = `${Date.now()}-${test.info().project.name}`;
   const teamName = `E2E 团队 ${stamp}`;
   const slug = `e2e-team-${stamp}`.toLowerCase().replace(/[^a-z0-9-]/g, "-");
 
-  await login(page, "demo", demoPassword());
-  await page.goto("/workspaces");
+  const { account, password } = demoCreds();
+  await seedAuthByApi(page, request, account, password, "/workspaces");
 
   await expect(page.getByRole("heading", { name: "团队" })).toBeVisible({ timeout: 30_000 });
   await shot(page, "list");
@@ -86,10 +69,8 @@ test("任务详情页展示导师批注面板", async ({ page, request }) => {
   const stamp = `${Date.now()}-${test.info().project.name}`;
   const content = `E2E 批注 ${stamp}`;
 
-  const loginResp = await request.post(`${API}/auth/login`, {
-    data: { account: "demo", password: demoPassword() },
-  });
-  const token = (await loginResp.json()).access_token as string;
+  const { account, password } = demoCreds();
+  const token = (await fetchAuthToken(request, account, password)).access_token;
   const headers = { Authorization: `Bearer ${token}` };
 
   const tasks = await request.get(`${API}/tasks?limit=50`, { headers });
@@ -98,8 +79,7 @@ test("任务详情页展示导师批注面板", async ({ page, request }) => {
   expect(completed, "demo 账号应有已完成任务").toBeTruthy();
   const taskId = completed!.task_id;
 
-  await login(page, "demo", demoPassword());
-  await page.goto(`/tasks/${taskId}`);
+  await seedAuthByApi(page, request, account, password, `/tasks/${taskId}`);
 
   // 2026-10-23 重设计：批注从「每个 tab 底部常驻」改为**侧边抽屉，默认收起**
   // （旧版挂在四个 tab 下面，含大块空态，把结果/日志挤得很长）。
@@ -129,8 +109,18 @@ test("任务详情页展示导师批注面板", async ({ page, request }) => {
   await expect(row).toContainText("已解决", { timeout: 30_000 });
   await shot(page, "annotation-resolved");
 
-  // 删除 → 该行消失（按唯一内容断言，不用 not.toContainText）
+  // 删除 → ConfirmBar 二次确认（先取消保留，再确认删除）
   await row.getByRole("button", { name: "删除" }).click();
+  const confirmBtn = row.locator('[data-test^="annotation-delete-confirm-"]');
+  const cancelBtn = row.locator('[data-test^="annotation-delete-cancel-"]');
+  await expect(confirmBtn).toBeVisible();
+  await cancelBtn.click();
+  await expect(confirmBtn).toHaveCount(0);
+  await expect(listLocator.locator("li").filter({ hasText: content })).toHaveCount(1);
+
+  await row.getByRole("button", { name: "删除" }).click();
+  await expect(confirmBtn).toBeVisible();
+  await confirmBtn.click();
   await expect(listLocator.locator("li").filter({ hasText: content })).toHaveCount(0, {
     timeout: 30_000,
   });

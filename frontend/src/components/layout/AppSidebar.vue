@@ -279,7 +279,7 @@ const width = computed(() => (props.collapsed ? "3.75rem" : "14.5rem"));
         </span>
         <kbd
           v-if="!props.collapsed"
-          class="shrink-0 font-mono text-[10px] text-muted-foreground/80"
+          class="shrink-0 font-mono text-[10px] text-muted-foreground"
         >
           ⌘K
         </kbd>
@@ -507,7 +507,7 @@ const width = computed(() => (props.collapsed ? "3.75rem" : "14.5rem"));
                 <Search :size="13" aria-hidden="true" />
                 <span>快速搜索…</span>
               </span>
-              <kbd class="font-mono text-[10px] text-muted-foreground/80">⌘K</kbd>
+              <kbd class="font-mono text-[10px] text-muted-foreground">⌘K</kbd>
             </button>
             <GlobalPromptEntry :collapsed="false" @navigate="closeMobileIfOpen" />
           </div>

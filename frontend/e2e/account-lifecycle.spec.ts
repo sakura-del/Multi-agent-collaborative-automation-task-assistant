@@ -1,58 +1,13 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { E2E_DEMO_ACCOUNT, demoPassword } from "./credentials";
-import { gotoPasswordLogin } from "./support/auth";
+import { demoCreds } from "./support/env";
+import { gotoPasswordLogin, seedAuthByApi } from "./support/auth";
 
 // 账号生命周期页面验收（Phase 1 P1-C 前端）
-// 覆盖：登录页「忘记密码」入口 → 申请重置（恒定响应）→ 邮箱验证页重发
-//
-// 运行（对着服务器）：
-//   E2E_BASE_URL=http://10.0.10.2:48080 pnpm exec playwright test e2e/account-lifecycle.spec.ts
+// 覆盖：登录页「忘记密码」入口 → 申请重置（恒定响应）→ 邮箱验证页重发 / 已验证态
 
 const SHOTS = resolve(dirname(fileURLToPath(import.meta.url)), "screenshots");
-const CREDENTIALS = { account: E2E_DEMO_ACCOUNT, password: demoPassword() };
-
-async function login(page: Page) {
-  await gotoPasswordLogin(page);
-  await page.locator("#account").fill(CREDENTIALS.account);
-  await page.locator("#password").fill(CREDENTIALS.password);
-  await page.locator('form button[type="submit"]').click();
-
-  // ⚠️ 登录端点受限流（`rate_limit.rules.auth_login`，默认 10 次/分钟）。
-  // 多文件 × 双视口连续跑会命中 429 → 页面停留登录页 → 后续断言全失败。
-  // 显式识别并等待窗口恢复后重试，避免把「测试环境限流」误报成产品缺陷。
-  //
-  // ⚠️ 判定「登录成功」不能用侧栏链接：窄屏下导航收进抽屉，`nav-tasks` 不可见
-  // （mobile-chrome 会一直等到 120s 超时）。改成「侧栏链接可见」或「地址栏到 /tasks」
-  // 任一成立即可。
-  const loggedIn = page.getByRole("link", { name: /任务/ });
-  const onTasks = () =>
-    page
-      .waitForURL(/\/tasks$/, { timeout: 10_000 })
-      .then(() => "ok" as const)
-      .catch(() => null);
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    const settled = await Promise.race([
-      loggedIn
-        .waitFor({ state: "visible", timeout: 10_000 })
-        .then(() => "ok" as const)
-        .catch(() => null),
-      onTasks(),
-      page
-        .locator("text=请求过于频繁")
-        .waitFor({ state: "visible", timeout: 10_000 })
-        .then(() => "limited" as const)
-        .catch(() => null),
-    ]);
-    if (settled === "ok") {
-      return;
-    }
-    await page.waitForTimeout(8_000);
-    await page.locator('form button[type="submit"]').click().catch(() => undefined);
-  }
-  await expect(page).toHaveURL(/\/tasks$/, { timeout: 30_000 });
-}
 
 test.describe("账号生命周期", () => {
   test("登录页有「忘记密码」入口，点击进入重置页", async ({ page }) => {
@@ -130,30 +85,32 @@ test.describe("账号生命周期", () => {
     await expect(page.locator('[data-test="reset-error"]')).toContainText("有效的邮箱");
   });
 
-  test("邮箱验证页：登录后可重发验证邮件", async ({ page }) => {
-    await login(page);
+  test("邮箱验证页：兼容已验证态与重发验证邮件", async ({ page, request }) => {
+    const { account, password } = demoCreds();
+    await seedAuthByApi(page, request, account, password);
     await page.goto("/account/verify");
     await expect(page.getByRole("heading", { name: "邮箱验证" })).toBeVisible();
 
-    const button = page.locator('[data-test="verify-request"]');
-    await expect(button).toBeVisible();
-    await button.click();
-    // 三条成功/已知路径：
-    //   - verify-message / verify-success：后端返回「已发送」或「已验证」
-    //   - verify-error：该端点与密码重置共用限流配额（5 次/小时），
-    //     多测试/多视口连跑会拿到 429；此时必须展示可读原因，而不是静默失败。
-    const settled = page.locator(
-      '[data-test="verify-message"], [data-test="verify-success"], [data-test="verify-error"]'
-    );
-    await expect(settled.first()).toBeVisible({ timeout: 30_000 });
+    const alreadyVerified = page.locator('[data-test="verify-already-verified"]');
+    if (await alreadyVerified.isVisible().catch(() => false)) {
+      await expect(alreadyVerified).toContainText("当前邮箱已通过验证");
+      await expect(page.locator('[data-test="verify-back-tasks"]')).toBeVisible();
+    } else {
+      const button = page.locator('[data-test="verify-request"]');
+      await expect(button).toBeVisible();
+      await button.click();
+      const settled = page.locator(
+        '[data-test="verify-message"], [data-test="verify-success"], [data-test="verify-error"]',
+      );
+      await expect(settled.first()).toBeVisible({ timeout: 30_000 });
 
-    const text = (await settled.first().textContent()) ?? "";
-    const isRateLimited = text.includes("请求过于频繁");
-    if (isRateLimited) {
-      test.info().annotations.push({
-        type: "rate-limited",
-        description: "重发验证邮件被限流（429），展示可读原因即为通过",
-      });
+      const text = (await settled.first().textContent()) ?? "";
+      if (text.includes("请求过于频繁")) {
+        test.info().annotations.push({
+          type: "rate-limited",
+          description: "重发验证邮件被限流（429），展示可读原因即为通过",
+        });
+      }
     }
 
     await page.screenshot({

@@ -309,17 +309,18 @@ function handleLogout() {
     <!-- 全局会话小窗（Issue #8 P0）：默认收起时仅渲染轻量 FAB，避免首屏加载 292KB ChatShell 并抢占并发带宽 -->
     <template v-if="$route.name !== 'chat'">
       <ChatShell v-if="chatOpenStored" />
-      <button
-        v-else
-        type="button"
-        data-test="chat-fab"
-        class="fixed bottom-5 right-5 z-[200] flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-transform hover:scale-105 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none motion-reduce:hover:scale-100 motion-reduce:active:scale-100"
-        aria-label="打开会话"
-        title="打开会话"
-        @click="openChatShell"
-      >
-        <MessageSquare class="size-5" />
-      </button>
+      <Teleport v-else to="body">
+        <button
+          type="button"
+          data-test="chat-fab"
+          class="fixed bottom-5 right-5 z-[200] flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-transform hover:scale-105 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none motion-reduce:hover:scale-100 motion-reduce:active:scale-100"
+          aria-label="打开会话"
+          title="打开会话"
+          @click="openChatShell"
+        >
+          <MessageSquare class="size-5" />
+        </button>
+      </Teleport>
     </template>
   </div>
 </template>

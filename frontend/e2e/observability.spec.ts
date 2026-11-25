@@ -1,16 +1,13 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { E2E_DEMO_ACCOUNT, demoPassword } from "./credentials";
-import { gotoPasswordLogin } from "./support/auth";
+import { apiBase, demoCreds } from "./support/env";
+import { fetchAuthToken, seedAuthByApi } from "./support/auth";
 
 // 用量看板走查（Phase 2 可观测性 + 2026-10-26 重设计）：
 // 真实后端 → 概览卡片 + 全状态分布 + 最近任务，并核对「看板的数字自洽」。
-//
-// ⚠️ 这一页的核心风险不是版式，是**数字与真实数据不符**。用户很难自己发现，
-// 所以断言必须打在「数字能不能用」上（AGENTS §5 #2），不能只断言元素存在。
 const SHOTS = resolve(dirname(fileURLToPath(import.meta.url)), "screenshots");
-const API = "http://10.0.10.2:48080/api/v1";
+const API = apiBase();
 
 async function shot(page: Page, name: string) {
   await page.screenshot({
@@ -19,21 +16,14 @@ async function shot(page: Page, name: string) {
   });
 }
 
-async function login(page: Page) {
-  await gotoPasswordLogin(page);
-  await page.locator("#account").fill("demo");
-  await page.locator("#password").fill(demoPassword());
-  await page.locator('form button[type="submit"]').click();
-  await page.getByRole("link", { name: /任务/ }).waitFor({ timeout: 30_000 });
+async function login(page: Page, request: APIRequestContext) {
+  const { account, password } = demoCreds();
+  await seedAuthByApi(page, request, account, password, "/observability");
 }
 
 test("用量看板：概览卡片 + 状态分布 + 最近任务", async ({ page, request }) => {
-  // 确认后端有数据（demo 账号有历史任务）
-  const loginResp = await request.post(`${API}/auth/login`, {
-    data: { account: E2E_DEMO_ACCOUNT, password: demoPassword() },
-  });
-  expect(loginResp.ok()).toBeTruthy();
-  const token = (await loginResp.json()).access_token as string;
+  const { account, password } = demoCreds();
+  const token = (await fetchAuthToken(request, account, password)).access_token;
   const overview = await request.get(`${API}/observability/overview`, {
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -41,8 +31,7 @@ test("用量看板：概览卡片 + 状态分布 + 最近任务", async ({ page,
   const body = await overview.json();
   expect(body.tasks.total).toBeGreaterThan(0);
 
-  await login(page);
-  await page.goto("/observability");
+  await login(page, request);
 
   // 概览卡片
   const total = page.locator('[data-test="observability-total"]');
@@ -68,21 +57,15 @@ test("用量看板：概览卡片 + 状态分布 + 最近任务", async ({ page,
 });
 
 test("用量看板：数字必须与真实接口一致且自洽", async ({ page, request }) => {
-  // 这一条是「看板不说谎」的核心验收：页面上的每个数字都要能在后端找到出处，
-  // 并且**分布合计 == 任务总数**（旧版会漏 waiting_approval，差值不可见）。
-  const loginResp = await request.post(`${API}/auth/login`, {
-    data: { account: E2E_DEMO_ACCOUNT, password: demoPassword() },
-  });
-  expect(loginResp.ok()).toBeTruthy();
-  const token = (await loginResp.json()).access_token as string;
+  const { account, password } = demoCreds();
+  const token = (await fetchAuthToken(request, account, password)).access_token;
   const body = await (
     await request.get(`${API}/observability/overview`, {
       headers: { Authorization: `Bearer ${token}` },
     })
   ).json();
 
-  await login(page);
-  await page.goto("/observability");
+  await login(page, request);
   await expect(page.locator('[data-test="observability-total"]')).toBeVisible({
     timeout: 30_000,
   });
@@ -117,10 +100,9 @@ test("用量看板：数字必须与真实接口一致且自洽", async ({ page,
   await shot(page, "dashboard-consistency");
 });
 
-test("用量看板：点击最近任务行进入任务详情", async ({ page }) => {
+test("用量看板：点击最近任务行进入任务详情", async ({ page, request }) => {
   // 看板的价值在于「看到异常能立刻跳过去看」；行不可点就只是个报表。
-  await login(page);
-  await page.goto("/observability");
+  await login(page, request);
 
   const firstRow = page.locator('[data-test^="observability-row-"]').first();
   await expect(firstRow).toBeVisible({ timeout: 30_000 });

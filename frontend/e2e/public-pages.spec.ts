@@ -57,6 +57,10 @@ test.describe("公开页（Issue #26）", () => {
   test("中文文案没有逗号后空格", async ({ page }) => {
     await page.goto("/login");
 
+    // 路由懒加载且 App.vue 包裹路由过渡，先用 Web-first 自动重试断言等待目标视图挂载就位
+    await expect(page.locator('[data-test="auth-title"]')).toBeVisible();
+    await expect(page.locator("body")).toContainText("你负责判断，系统负责");
+
     // 用 textContent 而不是 innerText：`<br>` 在 innerText 里是换行，
     // 会被 /，\s/ 误判成「逗号后空格」（这正是巡检报告里标题那条的来源）。
     const text = (await page.locator("body").textContent()) ?? "";
@@ -68,7 +72,7 @@ test.describe("公开页（Issue #26）", () => {
     await page.goto("/password-reset");
 
     await expect(page.getByRole("heading", { name: "重置密码" })).toBeVisible();
-    await expect(page.locator('a[aria-label="VeriPaper 首页"]')).toBeVisible();
+    await expect(page.locator('a[aria-label="VeriPaper 首页"]:visible').first()).toBeVisible();
 
     const back = page.locator('[data-test="reset-back-to-login"]');
     await expect(back).toBeVisible();

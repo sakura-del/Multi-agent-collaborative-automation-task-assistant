@@ -174,7 +174,7 @@ const summary = computed(() =>
             />
           </svg>
 
-          <!-- 粒子层：覆盖漏斗区域，沿收窄的路径下落 -->
+          <!-- 粒子层：覆盖漏斗区域，静态轨道旋转收窄 + 纯百分比 GPU 位移，零主线程样式重算 -->
           <div
             v-if="!reducedMotion"
             aria-hidden="true"
@@ -183,13 +183,17 @@ const summary = computed(() =>
             <span
               v-for="(particle, index) in PARTICLES"
               :key="index"
-              :class="`funnel-particle exit-${particle.exit}`"
+              class="funnel-lane pointer-events-none absolute inset-y-0 left-1/2 w-0"
               :style="{
-                '--x': particle.x,
-                '--exit': particle.exit,
-                animationDelay: particle.delay,
+                transform: `rotate(${(particle.x * 8.5).toFixed(2)}deg)`,
+                transformOrigin: 'center 112%',
               }"
-            />
+            >
+              <span
+                :class="`funnel-particle exit-${particle.exit}`"
+                :style="{ animationDelay: particle.delay }"
+              />
+            </span>
           </div>
         </div>
 

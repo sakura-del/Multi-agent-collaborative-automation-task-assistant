@@ -1,52 +1,14 @@
 import { expect, test, type Page } from "@playwright/test";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { E2E_DEMO_ACCOUNT, demoPassword } from "./credentials";
-import { gotoPasswordLogin } from "./support/auth";
+import { demoCreds } from "./support/env";
+import { seedAuthByApi } from "./support/auth";
 
 // Phase 1 前端页面验收：Word 模板管理 + 参考文献导入
 // 覆盖：登录 → 导航到新页面 → 上传模板（真实后端）→ 看到占位符 → 渲染下载
 //       → 粘贴 BibTeX 解析预览 → 中文原样
-//
-// 运行（对着服务器）：
-//   E2E_BASE_URL=http://10.0.10.2:48080 pnpm exec playwright test e2e/phase1-pages.spec.ts
 
 const SHOTS = resolve(dirname(fileURLToPath(import.meta.url)), "screenshots");
-const CREDENTIALS = { account: E2E_DEMO_ACCOUNT, password: demoPassword() };
-
-async function login(page: Page) {
-  await gotoPasswordLogin(page);
-  // 登录页的账号输入框有「用户名 / 邮箱」标签（id=account）
-  await page.locator("#account").fill(CREDENTIALS.account);
-  await page.locator("#password").fill(CREDENTIALS.password);
-  // 密码态只有一个「登录」提交按钮，但用 form 的 submit 定位更抗文案变化
-  await page.locator('form button[type="submit"]').click();
-
-  // ⚠️ 登录端点受限流保护（`rate_limit.rules.auth_login`，默认 10 次/分钟）。
-  // 多文件 × 双视口连续跑会命中 429，此时页面停留在登录页、后续导航断言全部失败。
-  // 这里显式识别并等待窗口恢复后重试，避免把「测试环境限流」误报成产品缺陷。
-  const loggedIn = page.getByRole("link", { name: /任务/ });
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    const settled = await Promise.race([
-      loggedIn
-        .waitFor({ state: "visible", timeout: 10_000 })
-        .then(() => "ok" as const)
-        .catch(() => null),
-      page
-        .locator("text=请求过于频繁")
-        .waitFor({ state: "visible", timeout: 10_000 })
-        .then(() => "limited" as const)
-        .catch(() => null),
-    ]);
-    if (settled === "ok") {
-      return;
-    }
-    // 被限流：等待窗口（默认 60s）后重试
-    await page.waitForTimeout(8_000);
-    await page.locator('form button[type="submit"]').click().catch(() => undefined);
-  }
-  await expect(loggedIn).toBeVisible({ timeout: 30_000 });
-}
 
 /**
  * 切页后把横向滚动归位。
@@ -200,12 +162,13 @@ function crc32(data: Buffer): number {
 }
 
 test.describe("Phase 1 页面", () => {
-  test.beforeEach(async ({ page }) => {
-    await login(page);
+  test.beforeEach(async ({ page, request }) => {
+    const { account, password } = demoCreds();
+    await seedAuthByApi(page, request, account, password, "/tasks");
   });
 
   test("Word 模板页：上传 .docx 后展示占位符并可渲染下载", async ({ page }) => {
-    await page.getByRole("link", { name: "Word 模板" }).click();
+    await page.goto("/templates");
     await expect(page.getByRole("heading", { name: "Word 模板" })).toBeVisible();
     await resetScroll(page);
 
@@ -268,7 +231,7 @@ test.describe("Phase 1 页面", () => {
   });
 
   test("导入页：粘贴 BibTeX 解析预览（含中文原样）", async ({ page }) => {
-    await page.getByRole("link", { name: "导入文献" }).click();
+    await page.goto("/references/import");
     await expect(page.getByRole("heading", { name: "导入参考文献" })).toBeVisible();
     await resetScroll(page);
 
@@ -332,7 +295,7 @@ test.describe("Phase 1 页面", () => {
   });
 
   test("导入页：非法内容给出可读错误", async ({ page }) => {
-    await page.getByRole("link", { name: "导入文献" }).click();
+    await page.goto("/references/import");
     await resetScroll(page);
     await page.locator('[data-test="import-content"]').fill("这既不是 BibTeX 也不是 RIS");
     await page.locator('[data-test="import-submit"]').click();
@@ -351,11 +314,11 @@ test.describe("Phase 1 页面", () => {
   });
 
   test("两个新页面均无横向溢出", async ({ page }) => {
-    for (const [name, link] of [
-      ["templates", "Word 模板"],
-      ["import", "导入文献"],
+    for (const [name, route] of [
+      ["templates", "/templates"],
+      ["import", "/references/import"],
     ] as const) {
-      await page.getByRole("link", { name: link }).click();
+      await page.goto(route);
       await expect(page.getByRole("heading").first()).toBeVisible();
       // 等待列表/横幅等异步内容落定，避免测量到中间态
       await page.waitForLoadState("networkidle").catch(() => undefined);

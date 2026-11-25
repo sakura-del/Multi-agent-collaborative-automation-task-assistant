@@ -1,38 +1,18 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { inflateRawSync } from "node:zlib";
-import { demoPassword } from "./credentials";
-import { gotoPasswordLogin } from "./support/auth";
+import { apiBase, demoCreds } from "./support/env";
+import { fetchAuthToken, seedAuthByApi } from "./support/auth";
+import { measureContrastTargets } from "./support/contrast";
 
 // Word 模板页 E2E（2026-10-26 重设计）。
-//
-// ## 为什么整个文件只有一条 test
-//
-// `auth_login` 限流是 **5 次 / 3600s**（AGENTS §2）。此前拆成 4 条 test，
-// 每条各做一次 API 登录 + 一次页面登录 = 8 次 → 必然 429，
-// 表现为「登录页超时」，**看起来像页面缺陷但完全无关**（已实测踩到）。
-//
-// 合并成一条：1 次 API 登录 + 1 次页面登录，一次页面访问跑完所有断言。
-// 这也与 `style.spec.ts` / `plan-measure.spec.ts` 的取证模式一致。
-const API = "http://10.0.10.2:48080/api/v1";
+const API = apiBase();
 const SHOTS = "e2e/screenshots";
 
 /**
  * 仓库里的真实测试模板（后端测试夹具）。
- *
- * 路径相对 `frontend/`（Playwright 的 cwd），所以要先 `../backend/`。
- * 用真实模板而不是现造一个：占位符与样式映射都是真的，
- * 这样「校验」走的路径与用户上传的完全一致。
  */
 const TEMPLATE_FIXTURE = "../backend/tests/fixtures/templates/school_template.docx";
-
-async function loginAs(page: Page, account: string, password: string) {
-  await gotoPasswordLogin(page);
-  await page.locator("#account").fill(account);
-  await page.locator("#password").fill(password);
-  await page.locator('form button[type="submit"]').click();
-  await page.getByRole("link", { name: /任务/ }).waitFor({ timeout: 30_000 });
-}
 
 /**
  * 从 zip（docx）里取出指定条目的内容。
@@ -67,12 +47,9 @@ test("模板页：校验语义如实、占位符可读、删除需确认、移�
   page,
   request,
 }) => {
-  // ===== 准备：一次 API 登录，确保有模板 =====
-  const loginResp = await request.post(`${API}/auth/login`, {
-    data: { account: "demo", password: demoPassword() },
-  });
-  expect(loginResp.ok(), "auth_login 限流 5 次/3600s，超了要等窗口").toBeTruthy();
-  const accessToken = (await loginResp.json()).access_token as string;
+  // ===== 准备：复用 API 登录，确保有模板 =====
+  const demo = demoCreds();
+  const accessToken = (await fetchAuthToken(request, demo.account, demo.password)).access_token;
   const auth = { Authorization: `Bearer ${accessToken}` };
 
   const listTemplates = async () =>
@@ -97,9 +74,8 @@ test("模板页：校验语义如实、占位符可读、删除需确认、移�
   const templateId = existing.items[0].template_id as string;
   console.log("TEMPLATE_ID=" + templateId);
 
-  // ===== 一次页面登录，跑完所有页面断言 =====
-  await loginAs(page, "demo", demoPassword());
-  await page.goto("/templates");
+  // ===== 进入模板页 =====
+  await seedAuthByApi(page, request, demo.account, demo.password, "/templates");
   await expect(page.locator(`[data-test="template-row-${templateId}"]`)).toBeVisible({
     timeout: 30_000,
   });
@@ -141,40 +117,12 @@ test("模板页：校验语义如实、占位符可读、删除需确认、移�
   console.log("NOTE_GEOMETRY=" + JSON.stringify(noteGeometry));
   expect(noteGeometry.h).toBeGreaterThan(20);
 
-  const contrast = await page.evaluate(() => {
-    const canvas = document.createElement("canvas");
-    canvas.width = 1;
-    canvas.height = 1;
-    const ctx = canvas.getContext("2d")!;
-    const toRgb = (c: string): [number, number, number] => {
-      ctx.clearRect(0, 0, 1, 1);
-      ctx.fillStyle = "#000";
-      ctx.fillStyle = c;
-      ctx.fillRect(0, 0, 1, 1);
-      const d = ctx.getImageData(0, 0, 1, 1).data;
-      return [d[0], d[1], d[2]];
-    };
-    const lum = (rgb: [number, number, number]) => {
-      const f = (x: number) => {
-        const s = x / 255;
-        return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
-      };
-      return 0.2126 * f(rgb[0]) + 0.7152 * f(rgb[1]) + 0.0722 * f(rgb[2]);
-    };
-    const el = document.querySelector('[data-test="template-sample-note"]') as HTMLElement;
-    const s = getComputedStyle(el);
-    const l1 = lum(toRgb(s.color));
-    const l2 = lum(toRgb(s.backgroundColor));
-    const [hi, lo] = l1 > l2 ? [l1, l2] : [l2, l1];
-    return {
-      color: s.color,
-      bg: s.backgroundColor,
-      fontSize: s.fontSize,
-      ratio: Math.round(((hi + 0.05) / (lo + 0.05)) * 100) / 100,
-    };
-  });
+  const contrastResults = await measureContrastTargets(page, [
+    { label: "template-sample-note", selector: '[data-test="template-sample-note"]' },
+  ]);
+  const contrast = contrastResults[0]!;
   console.log("NOTE_CONTRAST=" + JSON.stringify(contrast));
-  expect(contrast.ratio).toBeGreaterThanOrEqual(4.5);
+  expect(contrast.ratio).toBeGreaterThanOrEqual(contrast.threshold);
 
   const deleteAria = await page
     .locator(`[data-test="template-delete-${templateId}"]`)

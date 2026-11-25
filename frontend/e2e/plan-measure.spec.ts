@@ -1,17 +1,18 @@
-import { expect, test, type Page } from "@playwright/test";
-import { demoPassword, secondaryPassword } from "./credentials";
-import { gotoPasswordLogin } from "./support/auth";
+import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { demoCreds, secondaryCreds } from "./support/env";
+import { seedAuthByApi } from "./support/auth";
+import { measureContrastTargets } from "./support/contrast";
 
 // 套餐页「修复后量数值」验收（AGENTS §6.5.7 第 2/3 条）。
 // 与修复前的取证逐项对比，用数据证明缺陷真的没了。
-const API = "http://10.0.10.2:48080/api/v1";
 
-async function loginAs(page: Page, account: string, password: string) {
-  await gotoPasswordLogin(page);
-  await page.locator("#account").fill(account);
-  await page.locator("#password").fill(password);
-  await page.locator('form button[type="submit"]').click();
-  await page.getByRole("link", { name: /任务/ }).waitFor({ timeout: 30_000 });
+async function loginAs(
+  page: Page,
+  request: APIRequestContext,
+  account: string,
+  password: string,
+) {
+  await seedAuthByApi(page, request, account, password, "/settings/plan");
 }
 
 async function measure(page: Page, tag: string) {
@@ -76,9 +77,9 @@ async function measure(page: Page, tag: string) {
   return data;
 }
 
-test("套餐页修复后：demo（机构版）", async ({ page }) => {
-  await loginAs(page, "demo", demoPassword());
-  await page.goto("/settings/plan");
+test("套餐页修复后：demo（机构版）", async ({ page, request }) => {
+  const demo = demoCreds();
+  await loginAs(page, request, demo.account, demo.password);
   await expect(page.locator('[data-test="plan-current"]')).toBeVisible({ timeout: 30_000 });
 
   const d = await measure(page, "AFTER_DEMO");
@@ -91,46 +92,21 @@ test("套餐页修复后：demo（机构版）", async ({ page }) => {
   // 机构版不限篇数 → 无进度条
   expect(d.barBox).toBeNull();
 
-  // 对比度
-  const contrast = await page.evaluate(() => {
-    const canvas = document.createElement("canvas");
-    canvas.width = 1; canvas.height = 1;
-    const ctx = canvas.getContext("2d")!;
-    const toRgb = (c: string): [number, number, number] => {
-      ctx.clearRect(0, 0, 1, 1); ctx.fillStyle = "#000"; ctx.fillStyle = c;
-      ctx.fillRect(0, 0, 1, 1);
-      const d = ctx.getImageData(0, 0, 1, 1).data;
-      return [d[0], d[1], d[2]];
-    };
-    const lum = (rgb: [number, number, number]) => {
-      const f = (x: number) => { const s = x / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; };
-      return 0.2126 * f(rgb[0]) + 0.7152 * f(rgb[1]) + 0.0722 * f(rgb[2]);
-    };
-    const ratio = (fg: string, bg: string) => {
-      const l1 = lum(toRgb(fg)), l2 = lum(toRgb(bg));
-      const [hi, lo] = l1 > l2 ? [l1, l2] : [l2, l1];
-      return Math.round(((hi + 0.05) / (lo + 0.05)) * 100) / 100;
-    };
-    const card = document.querySelector('[data-test="plan-current"]') as HTMLElement;
-    const cardBg = getComputedStyle(card).backgroundColor;
-    const muted = document.querySelector('[data-test="plan-period-end"]') as HTMLElement;
-    const entLabel = document.querySelector(
-      '[data-test="plan-entitlement-team"] p'
-    ) as HTMLElement;
-    return {
-      mutedRatio: ratio(getComputedStyle(muted).color, cardBg),
-      entLabelRatio: ratio(getComputedStyle(entLabel).color, cardBg),
-    };
-  });
-  console.log("AFTER_DEMO_CONTRAST=" + JSON.stringify(contrast));
-  expect(contrast.mutedRatio).toBeGreaterThanOrEqual(4.5);
+  // 对比度（统一使用 support/contrast.ts）
+  const contrastResults = await measureContrastTargets(page, [
+    { label: "plan-period-end", selector: '[data-test="plan-period-end"]' },
+    { label: "plan-entitlement-label", selector: '[data-test="plan-entitlement-team"] p' },
+  ]);
+  console.log("AFTER_DEMO_CONTRAST=" + JSON.stringify(contrastResults));
+  const muted = contrastResults.find((c) => c.label === "plan-period-end")!;
+  expect(muted.ratio).toBeGreaterThanOrEqual(muted.threshold);
 
   await page.screenshot({ path: "e2e/screenshots/plan-after-demo.png", fullPage: true });
 });
 
-test("套餐页修复后：免费版（额度用尽）", async ({ page }) => {
-  await loginAs(page, "e2efull", secondaryPassword());
-  await page.goto("/settings/plan");
+test("套餐页修复后：免费版（额度用尽）", async ({ page, request }) => {
+  const sec = secondaryCreds();
+  await loginAs(page, request, sec.account, sec.password);
   await expect(page.locator('[data-test="plan-current"]')).toBeVisible({ timeout: 30_000 });
 
   const d = await measure(page, "AFTER_FREE");

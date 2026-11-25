@@ -1,28 +1,23 @@
-import { expect, test, type Page } from "@playwright/test";
-import { demoPassword } from "./credentials";
-import { gotoPasswordLogin } from "./support/auth";
+import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { apiBase, demoCreds } from "./support/env";
+import { fetchAuthToken, seedAuthByApi } from "./support/auth";
 
 // 引用样式页 E2E（2026-10-26 重设计）：
 // 预览必须真实、样式之间必须可区分、兜底必须告警、删除必须确认。
-const API = "http://10.0.10.2:48080/api/v1";
+const API = apiBase();
 const SHOTS = "e2e/screenshots";
 
-async function loginAs(page: Page, account: string, password: string) {
-  await gotoPasswordLogin(page);
-  await page.locator("#account").fill(account);
-  await page.locator("#password").fill(password);
-  await page.locator('form button[type="submit"]').click();
-  await page.getByRole("link", { name: /任务/ }).waitFor({ timeout: 30_000 });
+async function loginAs(page: Page, request: APIRequestContext, account: string, password: string) {
+  await seedAuthByApi(page, request, account, password, "/tasks");
 }
 
-async function token(request: Page["request"], account: string, password: string) {
-  const resp = await request.post(`${API}/auth/login`, { data: { account, password } });
-  expect(resp.ok()).toBeTruthy();
-  return (await resp.json()).access_token as string;
+async function token(request: APIRequestContext, account: string, password: string) {
+  return (await fetchAuthToken(request, account, password)).access_token;
 }
 
 test("样式页：每个样式都有真实渲染预览", async ({ page, request }) => {
-  const accessToken = await token(request, "demo", demoPassword());
+  const demo = demoCreds();
+  const accessToken = await token(request, demo.account, demo.password);
   const styles = await (
     await request.get(`${API}/citation-styles`, { headers: { Authorization: `Bearer ${accessToken}` } })
   ).json();
@@ -32,7 +27,7 @@ test("样式页：每个样式都有真实渲染预览", async ({ page, request 
     })
   ).json();
 
-  await loginAs(page, "demo", demoPassword());
+  await loginAs(page, request, demo.account, demo.password);
   await page.goto("/styles");
   await expect(page.locator('[data-test^="style-row-"]').first()).toBeVisible({
     timeout: 30_000,
@@ -76,10 +71,11 @@ test("样式页：每个样式都有真实渲染预览", async ({ page, request 
   await page.screenshot({ path: `${SHOTS}/style-after.png`, fullPage: true });
 });
 
-test("样式页：预览能看出两个国标样式的差异", async ({ page }) => {
+test("样式页：预览能看出两个国标样式的差异", async ({ page, request }) => {
   // 这两个样式元信息完全相同（citation-number · citation-order · zh-CN），
   // 用户只能靠预览区分 —— 若预览也一样，选择就没有依据。
-  await loginAs(page, "demo", demoPassword());
+  const demo = demoCreds();
+  await loginAs(page, request, demo.account, demo.password);
   await page.goto("/styles");
   await expect(page.locator('[data-test="style-row-gbt7714-2025-numeric"]')).toBeVisible({
     timeout: 30_000,
@@ -98,10 +94,9 @@ test("样式页：预览能看出两个国标样式的差异", async ({ page }) 
   expect(gb2015).not.toContain("[J]");
 });
 
-test("样式页：删除需要二次确认", async ({ page }) => {
-  // 后端删除会 unlink 磁盘文件。用 e2efull 账号（无自定义样式）无法测删除，
-  // 所以这里只验证「预置样式没有删除按钮」这一半契约。
-  await loginAs(page, "demo", demoPassword());
+test("样式页：删除需要二次确认", async ({ page, request }) => {
+  const demo = demoCreds();
+  await loginAs(page, request, demo.account, demo.password);
   await page.goto("/styles");
   await expect(page.locator('[data-test="style-row-apa"]')).toBeVisible({ timeout: 30_000 });
 
@@ -109,10 +104,11 @@ test("样式页：删除需要二次确认", async ({ page }) => {
   expect(deleteButtons, "预置样式不可删除").toBe(0);
 });
 
-test("样式页：预览加载失败仍可用（局部失败不连坐）", async ({ page }) => {
-  await loginAs(page, "demo", demoPassword());
+test("样式页：预览加载失败仍可用（局部失败不连坐）", async ({ page, request }) => {
+  const demo = demoCreds();
+  await loginAs(page, request, demo.account, demo.password);
 
-  await page.route(`${API}/citation-styles/previews`, (route) =>
+  await page.route("**/api/v1/citation-styles/previews", (route) =>
     route.fulfill({ status: 500, contentType: "application/json", body: '{"detail":"boom"}' })
   );
 
@@ -129,8 +125,9 @@ test("样式页：预览加载失败仍可用（局部失败不连坐）", async
   await page.screenshot({ path: `${SHOTS}/style-partial-failure.png`, fullPage: true });
 });
 
-test("样式页：移动端无横向溢出", async ({ page }) => {
-  await loginAs(page, "demo", demoPassword());
+test("样式页：移动端无横向溢出", async ({ page, request }) => {
+  const demo = demoCreds();
+  await loginAs(page, request, demo.account, demo.password);
   await page.goto("/styles");
   await expect(page.locator('[data-test^="style-row-"]').first()).toBeVisible({
     timeout: 30_000,

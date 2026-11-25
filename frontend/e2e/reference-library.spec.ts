@@ -1,36 +1,13 @@
 import { expect, test } from "@playwright/test";
-import type { Page } from "@playwright/test";
-import { demoPassword } from "./credentials";
-import { gotoPasswordLogin } from "./support/auth";
+import { demoCreds } from "./support/env";
+import { seedAuthByApi } from "./support/auth";
 
 /**
  * 引用库页 + 导入页保存入口的真实浏览器验证（2026-10-26 引用库计划 §3.6）。
- *
- * ⚠️ **一个文件只做一次登录**（AGENTS §5 #29）：`auth_login` 限流 5 次/3600s。
- * 所以这里只有一条 test，把三段断言（导入页有保存入口 / 引用库页结构 /
- * 空态引导）合并到一次页面访问里跑完。
- *
- * 断言的是**结构化数值**，不是截图：
- * - 元素存在性与可见性用 `count()` / `isVisible()`；
- * - 溢出用 `scrollWidth > clientWidth` 量；
- * - 文案断言它「说了什么」，而不是「有个元素」。
  */
-
-const CREDENTIALS = { account: "demo", password: demoPassword() };
-
-async function login(page: Page) {
-  await gotoPasswordLogin(page);
-  await page.locator("#account").fill(CREDENTIALS.account);
-  await page.locator("#password").fill(CREDENTIALS.password);
-  await page.locator('button[type="submit"]').click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 30_000 });
-}
-
-test("引用库页与导入页保存入口在真实浏览器里可用", async ({ page }) => {
-  await login(page);
-
-  // ===== ① 导入页：必须有「保存到引用库」出口 =====
-  await page.goto("/references/import");
+test("引用库页与导入页保存入口在真实浏览器里可用", async ({ page, request }) => {
+  const { account, password } = demoCreds();
+  await seedAuthByApi(page, request, account, password, "/references/import");
   await page.waitForLoadState("networkidle");
 
   // 页面说明必须提到能保存 + 能建任务（之前页面完全不说下一步）

@@ -1,24 +1,17 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { demoPassword } from "./credentials";
-import { gotoPasswordLogin } from "./support/auth";
+import { demoCreds } from "./support/env";
+import { seedAuthByApi } from "./support/auth";
+import { measureContrastTargets } from "./support/contrast";
 
 // 用量看板「量数值」验收（AGENTS §6.5.7 第 2/3 条）：
 // 不靠推理判断「看起来没问题」，而是把关键几何与文本全量取出来打印。
 const SHOTS = resolve(dirname(fileURLToPath(import.meta.url)), "screenshots");
 
-async function login(page: Page) {
-  await gotoPasswordLogin(page);
-  await page.locator("#account").fill("demo");
-  await page.locator("#password").fill(demoPassword());
-  await page.locator('form button[type="submit"]').click();
-  await page.getByRole("link", { name: /任务/ }).waitFor({ timeout: 30_000 });
-}
-
-test("用量看板：量数值（几何 / 文本 / 溢出 / 对比度）", async ({ page }) => {
-  await login(page);
-  await page.goto("/observability");
+test("用量看板：量数值（几何 / 文本 / 溢出 / 对比度）", async ({ page, request }) => {
+  const { account, password } = demoCreds();
+  await seedAuthByApi(page, request, account, password, "/observability");
   await expect(page.locator('[data-test="observability-total"]')).toBeVisible({
     timeout: 30_000,
   });
@@ -87,65 +80,20 @@ test("用量看板：量数值（几何 / 文本 / 溢出 / 对比度）", async
   );
   console.log("DESKTOP_OVERFLOW_PX=" + overflow);
 
-  // ⑧ 文字对比度：正文与次要文字相对卡片底色（WCAG AA 要求 ≥4.5:1）
-  //
-  // ⚠️ 本项目 tokens 用 oklch 定义（main.css），getComputedStyle 返回的就是
-  // `oklch(0.15 0 0)` 字符串，不是 rgb。首版解析器只认 rgb → 拿到 NaN → 比值算成 1
-  // 并误报失败。这里改成**用 canvas 把任意 CSS 颜色转成 sRGB**再算亮度。
-  const contrast = await page.evaluate(() => {
-    const canvas = document.createElement("canvas");
-    canvas.width = 1;
-    canvas.height = 1;
-    const ctx = canvas.getContext("2d")!;
-
-    function toRgb(color: string): [number, number, number] {
-      ctx.clearRect(0, 0, 1, 1);
-      ctx.fillStyle = "#000";
-      ctx.fillStyle = color;
-      ctx.fillRect(0, 0, 1, 1);
-      const data = ctx.getImageData(0, 0, 1, 1).data;
-      return [data[0], data[1], data[2]];
-    }
-    function luminance(rgb: [number, number, number]): number {
-      const toLin = (c: number) => {
-        const s = c / 255;
-        return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
-      };
-      return 0.2126 * toLin(rgb[0]) + 0.7152 * toLin(rgb[1]) + 0.0722 * toLin(rgb[2]);
-    }
-    function ratio(fg: string, bg: string): number {
-      const l1 = luminance(toRgb(fg));
-      const l2 = luminance(toRgb(bg));
-      const [hi, lo] = l1 > l2 ? [l1, l2] : [l2, l1];
-      return Math.round(((hi + 0.05) / (lo + 0.05)) * 100) / 100;
-    }
-    const bodyBg = getComputedStyle(document.body).backgroundColor;
-    const total = document.querySelector('[data-test="observability-total"]') as HTMLElement;
-    const muted = document.querySelector(
-      '[data-test="observability-success-denominator"]'
-    ) as HTMLElement;
-    const card = total.parentElement as HTMLElement;
-    const cardBg = getComputedStyle(card).backgroundColor;
-    return {
-      bodyBg,
-      cardBg,
-      bodyRgb: toRgb(bodyBg),
-      cardRgb: toRgb(cardBg),
-      totalColor: getComputedStyle(total).color,
-      totalRgb: toRgb(getComputedStyle(total).color),
-      totalRatio: ratio(getComputedStyle(total).color, cardBg),
-      mutedColor: getComputedStyle(muted).color,
-      mutedRatio: ratio(getComputedStyle(muted).color, cardBg),
-      mutedRatioOnBody: ratio(getComputedStyle(muted).color, bodyBg),
-    };
-  });
-  console.log("CONTRAST=" + JSON.stringify(contrast));
+  // ⑧ 文字对比度：统一使用 support/contrast.ts（Canvas OKLCH + 祖先 Alpha 合成）
+  const contrastResults = await measureContrastTargets(page, [
+    { label: "observability-total", selector: '[data-test="observability-total"]' },
+    { label: "success-denominator", selector: '[data-test="observability-success-denominator"]' },
+  ]);
+  console.log("CONTRAST=" + JSON.stringify(contrastResults));
+  const totalContrast = contrastResults.find((c) => c.label === "observability-total")!;
+  const mutedContrast = contrastResults.find((c) => c.label === "success-denominator")!;
 
   // ⑨ 移动端：无横向溢出，且卡片纵向堆叠
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForTimeout(300);
   const mobileOverflow = await page.evaluate(
-    () => document.documentElement.scrollWidth - window.innerWidth
+    () => document.documentElement.scrollWidth - window.innerWidth,
   );
   console.log("MOBILE_OVERFLOW_PX=" + mobileOverflow);
   await page.screenshot({
@@ -165,6 +113,7 @@ test("用量看板：量数值（几何 / 文本 / 溢出 / 对比度）", async
   expect(mobileOverflow).toBeLessThanOrEqual(1);
   // 硬断言：每行都有标题（不是 UUID）
   expect(rows.every((r) => r.hasTitle)).toBe(true);
-  // 硬断言：正文对比度 ≥ AA
-  expect(contrast.totalRatio).toBeGreaterThanOrEqual(4.5);
+  // 硬断言：正文与次要文案对比度 ≥ AA
+  expect(totalContrast.ratio).toBeGreaterThanOrEqual(totalContrast.threshold);
+  expect(mutedContrast.ratio).toBeGreaterThanOrEqual(mutedContrast.threshold);
 });

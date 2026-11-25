@@ -5,11 +5,18 @@ import DOMPurify from "dompurify";
 import { useTheme } from "@/composables/useTheme";
 import ScreeningView from "@/views/ScreeningView.vue";
 
-const { mermaidInitializeMock, mermaidRenderMock } = vi.hoisted(() => ({
+const { mermaidInitializeMock, mermaidRenderMock, toastSuccessMock, toastErrorMock } = vi.hoisted(() => ({
   mermaidInitializeMock: vi.fn(),
   mermaidRenderMock: vi.fn(async (_id: string, _code: string) => ({
     svg: '<svg data-mock="default"><g></g></svg>',
   })),
+  toastSuccessMock: vi.fn(),
+  toastErrorMock: vi.fn(),
+}));
+
+vi.mock("@/lib/toast", () => ({
+  toastSuccess: toastSuccessMock,
+  toastError: toastErrorMock,
 }));
 
 vi.mock("mermaid", () => ({
@@ -710,6 +717,51 @@ describe("ScreeningView", () => {
     expect(cls).toContain("fixed");
     expect(cls).toContain("bottom-5");
     expect(cls).toContain("right-20");
+  });
+
+  it("连续筛选决策仅更新底部 screening-success，不重复弹顶部 toastSuccess 避免移动端遮挡", async () => {
+    vi.mocked(listScreeningRecords).mockResolvedValue([
+      recordRow({ record_id: "r1", title: "第一篇" }),
+      recordRow({ record_id: "r2", title: "第二篇" }),
+    ]);
+    vi.mocked(createDecision).mockResolvedValue({
+      record_id: "r1",
+      current_stage: "title_abstract",
+    });
+
+    const wrapper = mount(ScreeningView, { props: { taskId: "task-1" } });
+    await flushPromises();
+
+    await wrapper.get('[data-test="screening-maybe-r1"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.get('[data-test="screening-success"]').text()).toContain("待定「第一篇」");
+
+    await wrapper.get('[data-test="screening-include-r2"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.get('[data-test="screening-success"]').text()).toContain("已纳入「第二篇」");
+
+    await wrapper.get('[data-test="screening-exclude-r1"]').trigger("click");
+    await wrapper.get('[data-test="screening-exclude-reason-r1"]').setValue("主题无关");
+    await wrapper.get('[data-test="screening-exclude-submit-r1"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.get('[data-test="screening-success"]').text()).toContain("已排除「第一篇」");
+
+    expect(toastSuccessMock).not.toHaveBeenCalled();
+
+    // 失败场景仍触发 toastError；复制 Mermaid 源码仍正常使用 toastSuccess
+    vi.mocked(createDecision).mockRejectedValueOnce(new Error("网络异常"));
+    await wrapper.get('[data-test="screening-maybe-r2"]').trigger("click");
+    await flushPromises();
+    expect(toastErrorMock).toHaveBeenCalledWith("网络异常");
+
+    const writeTextMock = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: writeTextMock },
+      configurable: true,
+    });
+    await wrapper.get('[data-test="screening-mermaid-copy"]').trigger("click");
+    await flushPromises();
+    expect(toastSuccessMock).toHaveBeenCalledWith("已复制 Mermaid 源码");
   });
 
   it("Mermaid 异步渲染响应深浅主题并丢弃过期请求结果", async () => {

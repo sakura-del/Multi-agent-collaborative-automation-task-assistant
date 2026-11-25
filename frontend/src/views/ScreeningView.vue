@@ -21,7 +21,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useDelayedLoading } from "@/composables/useDelayedLoading";
 import { useTheme } from "@/composables/useTheme";
-import { TRANSITION_ENTER, TRANSITION_MICRO } from "@/lib/ease";
+import { TRANSITION_MICRO } from "@/lib/ease";
 import { toastError, toastSuccess } from "@/lib/toast";
 import type { ExtractionTableOut } from "@/api/extractions";
 import {
@@ -524,8 +524,8 @@ async function submitDecision(
   try {
     const updated = await createDecision(record.record_id, payload);
     record.current_stage = updated.current_stage;
+    // 筛选决策已有底部非阻塞 screening-success 提示条，不再额外弹顶部 Toaster（避免移动端窄屏多层堆叠遮挡首卡与导航）
     setSuccessBanner(okMessage);
-    toastSuccess(okMessage);
     if (priorityEnabled.value && priority.value?.status === "ready") {
       priorityStale.value = true;
     }
@@ -664,8 +664,7 @@ async function submitDecision(
             v-for="record in displayRecords"
             :key="record.record_id"
             :class="[
-              'px-3.5 py-3 transition-colors duration-150',
-              excludeFormId === record.record_id ? '' : '[content-visibility:auto] [contain-intrinsic-size:auto_168px]',
+              'px-3.5 py-3 transition-colors duration-150 [contain:layout_style]',
               rollbackFlashId === record.record_id
                 ? 'bg-destructive/5 ring-1 ring-inset ring-destructive/60'
                 : 'hover:bg-muted/25',
@@ -676,21 +675,9 @@ async function submitDecision(
               <div class="min-w-0 flex-1">
                 <div class="flex flex-wrap items-center gap-1.5">
                   <span class="text-sm font-medium text-foreground">{{ cleanAbstractLatex(record.title) }}</span>
-                  <AnimatePresence mode="popLayout" :initial="false">
-                    <Motion
-                      :key="`${record.record_id}-stage-${record.current_stage}`"
-                      as="span"
-                      class="inline-flex"
-                      :initial="{ opacity: 0 }"
-                      :animate="{ opacity: 1 }"
-                      :exit="{ opacity: 0 }"
-                      :transition="reducedMotion ? TRANSITION_MICRO : TRANSITION_ENTER"
-                    >
-                      <Badge :variant="STAGE_TONE[record.current_stage] ?? 'muted'">
-                        {{ STAGE_LABELS[record.current_stage] ?? record.current_stage }}
-                      </Badge>
-                    </Motion>
-                  </AnimatePresence>
+                  <Badge :variant="STAGE_TONE[record.current_stage] ?? 'muted'">
+                    {{ STAGE_LABELS[record.current_stage] ?? record.current_stage }}
+                  </Badge>
                   <Badge
                     v-if="priorityRanks.get(record.record_id)"
                     variant="success"
@@ -698,42 +685,20 @@ async function submitDecision(
                   >
                     推荐优先 #{{ priorityRanks.get(record.record_id) }}
                   </Badge>
-                  <AnimatePresence mode="popLayout" :initial="false">
-                    <Motion
-                      v-if="record.current_verdict === 'exclude'"
-                      :key="`${record.record_id}-verdict-exclude`"
-                      as="span"
-                      class="inline-flex"
-                      :initial="{ opacity: 0 }"
-                      :animate="{ opacity: 1 }"
-                      :exit="{ opacity: 0 }"
-                      :transition="reducedMotion ? TRANSITION_MICRO : TRANSITION_ENTER"
-                    >
-                      <Badge
-                        variant="destructive"
-                        :data-test="`screening-excluded-badge-${record.record_id}`"
-                      >
-                        已排除{{ record.current_exclusion_reason ? `：${record.current_exclusion_reason}` : "" }}
-                      </Badge>
-                    </Motion>
-                    <Motion
-                      v-else-if="record.current_verdict === 'maybe'"
-                      :key="`${record.record_id}-verdict-maybe`"
-                      as="span"
-                      class="inline-flex"
-                      :initial="{ opacity: 0 }"
-                      :animate="{ opacity: 1 }"
-                      :exit="{ opacity: 0 }"
-                      :transition="reducedMotion ? TRANSITION_MICRO : TRANSITION_ENTER"
-                    >
-                      <Badge
-                        variant="warning"
-                        :data-test="`screening-maybe-badge-${record.record_id}`"
-                      >
-                        待定
-                      </Badge>
-                    </Motion>
-                  </AnimatePresence>
+                  <Badge
+                    v-if="record.current_verdict === 'exclude'"
+                    variant="destructive"
+                    :data-test="`screening-excluded-badge-${record.record_id}`"
+                  >
+                    已排除{{ record.current_exclusion_reason ? `：${record.current_exclusion_reason}` : "" }}
+                  </Badge>
+                  <Badge
+                    v-else-if="record.current_verdict === 'maybe'"
+                    variant="warning"
+                    :data-test="`screening-maybe-badge-${record.record_id}`"
+                  >
+                    待定
+                  </Badge>
                 </div>
                 <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                   <span>{{ record.authors.join("；") || "（无作者）" }}</span>

@@ -2,8 +2,8 @@ import { expect, test, type APIRequestContext, type Page } from "@playwright/tes
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { demoPassword, E2E_DEMO_ACCOUNT } from "./credentials";
-import { gotoPasswordLogin } from "./support/auth";
+import { apiBase, demoCreds } from "./support/env";
+import { fetchAuthToken, seedAuthByApi } from "./support/auth";
 
 /**
  * 会话内核 E2E（Issue #8 P0 收尾，2026-11-19）。
@@ -26,66 +26,28 @@ import { gotoPasswordLogin } from "./support/auth";
  * - 登录单独做了限流重试（auth_login 默认 10 次/分钟）。
  */
 
-const API = "/api/v1";
+const API = apiBase();
 /** 会话标题取首条消息前 40 字（后端行为），用它做清理标记 */
 const MARKER = "[E2E-chat]";
 // 允许 query（工具开启时是 /stream?tools=1）
 const STREAM_RE = /\/api\/v1\/conversations\/[^/]+\/messages\/[^/]+\/stream(?:\?|$)/;
 const FIXTURE = resolve(dirname(fileURLToPath(import.meta.url)), "fixtures/sample.txt");
 
-/** 登录（含限流重试：命中 429 时等待窗口恢复再提交）。 */
-async function login(page: Page): Promise<void> {
-  await gotoPasswordLogin(page);
-  await page.locator("#account").fill(E2E_DEMO_ACCOUNT);
-  await page.locator("#password").fill(demoPassword());
-  await page.locator('form button[type="submit"]').click();
-
-  const tasksLink = page.getByRole("link", { name: /任务/ });
-  const expandNav = page.locator('[data-test="nav-expand"]');
-  const mobileNav = page.locator('[data-test="nav-mobile-trigger"]');
-  let expanded = false;
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    if (await tasksLink.isVisible().catch(() => false)) {
-      return;
-    }
-    // 移动视口（Pixel 5）侧栏默认折叠：任务链接不在 DOM 可见区，
-    // 必须先点「展开导航」。桌面端该按钮可能不存在，点击失败即忽略。
-    if (!expanded) {
-      const trigger = (await expandNav.isVisible().catch(() => false))
-        ? expandNav
-        : (await mobileNav.isVisible().catch(() => false))
-          ? mobileNav
-          : null;
-      if (trigger) {
-        await trigger.click().catch(() => undefined);
-        expanded = true;
-      }
-    }
-    const limited = await page
-      .locator("text=请求过于频繁")
-      .isVisible()
-      .catch(() => false);
-    await page.waitForTimeout(limited ? 8_000 : 1_000);
-    if (limited) {
-      await page
-        .locator('form button[type="submit"]')
-        .click()
-        .catch(() => undefined);
-    }
-  }
-  await expect(tasksLink).toBeVisible({ timeout: 30_000 });
+/** 复用 API JWT 登录（避免反复走密码表单与触发移动抽屉）。 */
+async function login(page: Page, request: APIRequestContext): Promise<void> {
+  const { account, password } = demoCreds();
+  await seedAuthByApi(page, request, account, password, "/tasks");
 }
 
 /** 清理本 spec 残留会话（用例失败也不会污染目标库）。 */
 async function cleanup(request: APIRequestContext): Promise<void> {
-  const loginResp = await request.post(`${API}/auth/login`, {
-    data: { account: E2E_DEMO_ACCOUNT, password: demoPassword() },
-  });
-  if (!loginResp.ok()) {
-    // 清理失败不阻塞用例（登录限流时宁可留残留，也不能让清理把测试拖红）
+  const { account, password } = demoCreds();
+  let token = "";
+  try {
+    token = (await fetchAuthToken(request, account, password)).access_token;
+  } catch {
     return;
   }
-  const token = (await loginResp.json()).access_token as string;
   const headers = { Authorization: `Bearer ${token}` };
   const listResp = await request.get(`${API}/conversations`, { headers });
   if (!listResp.ok()) {
@@ -151,7 +113,7 @@ test.describe("会话内核：真实链路", () => {
     await cleanup(request);
   });
 
-  test("FAB → 输入 → SSE → 完成 → 刷新后历史恢复", async ({ page }) => {
+  test("FAB → 输入 → SSE → 完成 → 刷新后历史恢复", async ({ page, request }) => {
     // 真实链路要调平台模型（有 429/延迟）。没有可用模型的测试环境
     // （如本地隔离栈）默认跳过；需要时显式 E2E_REAL_LLM=1。
     test.skip(!process.env.E2E_REAL_LLM, "需平台模型可用：设 E2E_REAL_LLM=1 开启");
@@ -159,7 +121,7 @@ test.describe("会话内核：真实链路", () => {
     const pageErrors: string[] = [];
     page.on("pageerror", (error) => pageErrors.push(error.message));
 
-    await login(page);
+    await login(page, request);
     await page.goto("/tasks");
     await openChat(page);
     await newConversation(page);
@@ -249,7 +211,7 @@ test.describe("会话内核：流式状态机（SSE 桩）", () => {
     });
   }
 
-  test("持久化 full 形态不影响普通页布局（回归）", async ({ page }) => {
+  test("持久化 full 形态不影响普通页布局（回归）", async ({ page, request }) => {
     // 复现线上事故：访问过 /chat 后 localStorage 留下 full，回 /tasks 时
     // 聊天壳变成 w-full 的 flex 子项，把任务页挤成竖排。
     await page.addInitScript(() => {
@@ -257,8 +219,7 @@ test.describe("会话内核：流式状态机（SSE 桩）", () => {
       localStorage.setItem("vp:chat:open", "1");
     });
 
-    await login(page);
-    await page.goto("/tasks");
+    await login(page, request);
 
     const shell = page.locator('[data-test="chat-shell"]');
     await expect(shell).toBeVisible({ timeout: 30_000 });
@@ -266,8 +227,9 @@ test.describe("会话内核：流式状态机（SSE 桩）", () => {
     await expect
       .poll(async () => shell.evaluate((element) => getComputedStyle(element).position))
       .toBe("fixed");
+    const vw = page.viewportSize()?.width ?? 1280;
     const box = await shell.boundingBox();
-    expect(box?.width ?? 0).toBeLessThan(500);
+    expect(box?.width ?? 0).toBeLessThanOrEqual(Math.min(380, vw - 24));
 
     // 主内容区仍有正常宽度（没有被挤成一条竖线）
     const mainBox = await page.locator("main").boundingBox();
@@ -279,12 +241,17 @@ test.describe("会话内核：流式状态机（SSE 桩）", () => {
       .poll(async () => shell.evaluate((element) => getComputedStyle(element).position))
       .toBe("fixed");
     const dockBox = await shell.boundingBox();
-    expect(dockBox?.width ?? 0).toBeLessThan(500);
+    if (vw < 768) {
+      expect(dockBox?.width ?? 0).toBeGreaterThanOrEqual(vw - 2);
+    } else {
+      expect(dockBox?.width ?? 0).toBeGreaterThanOrEqual(438);
+      expect(dockBox?.width ?? 0).toBeLessThanOrEqual(442);
+    }
     const mainAfterDock = await page.locator("main").boundingBox();
     expect(mainAfterDock?.width ?? 0).toBeGreaterThan(300);
   });
 
-  test("多 delta 流式 → 完成态；Markdown/KaTeX/Mermaid 均渲染", async ({ page }) => {
+  test("多 delta 流式 → 完成态；Markdown/KaTeX/Mermaid 均渲染", async ({ page, request }) => {
     await stubStream(page, {
       delayMs: 1_500,
       bodies: [
@@ -296,8 +263,7 @@ test.describe("会话内核：流式状态机（SSE 桩）", () => {
       ],
     });
 
-    await login(page);
-    await page.goto("/tasks");
+    await login(page, request);
     await openChat(page);
     await newConversation(page);
     await send(page, `${MARKER} 渲染检查`);
@@ -318,15 +284,14 @@ test.describe("会话内核：流式状态机（SSE 桩）", () => {
     await expect(page.locator('[data-test="chat-message-user"]')).toHaveCount(1);
   });
 
-  test("停止生成 → interrupted 徽章 + 停止按钮消失", async ({ page }) => {
+  test("停止生成 → interrupted 徽章 + 停止按钮消失", async ({ page, request }) => {
     await stubStream(page, {
       // 延迟足够长，确保「停止」在流式期间被点击
       delayMs: 15_000,
       bodies: [sseBody(["这段内容不应该完整出现"])],
     });
 
-    await login(page);
-    await page.goto("/tasks");
+    await login(page, request);
     await openChat(page);
     await newConversation(page);
     await send(page, `${MARKER} 长回答，用来测试停止`);
@@ -343,11 +308,10 @@ test.describe("会话内核：流式状态机（SSE 桩）", () => {
     await expect(page.locator('[data-test="chat-message-error"]')).toHaveCount(0);
   });
 
-  test("文档附件：上传知识库 → 随消息发送并落库", async ({ page }) => {
-    await stubStream(page, { bodies: [sseBody(["收到附件，已准备好用它建综述。"]) ] });
+  test("文档附件：上传知识库 → 随消息发送并落库", async ({ page, request }) => {
+    await stubStream(page, { bodies: [sseBody(["收到附件，已准备好用它建综述。"])] });
 
-    await login(page);
-    await page.goto("/tasks");
+    await login(page, request);
     await openChat(page);
     await newConversation(page);
 
@@ -359,13 +323,12 @@ test.describe("会话内核：流式状态机（SSE 桩）", () => {
 
     // 发送请求必须带上 document_id（后端据此校验归属并落 attachments JSON）
     const requestPromise = page.waitForRequest(
-      (request) =>
-        request.method() === "POST" && request.url().includes("/messages"),
-      { timeout: 30_000 }
+      (req) => req.method() === "POST" && req.url().includes("/messages"),
+      { timeout: 30_000 },
     );
     await send(page, `${MARKER} 用这篇文档建综述`);
-    const request = await requestPromise;
-    const body = request.postDataJSON() as {
+    const postReq = await requestPromise;
+    const body = postReq.postDataJSON() as {
       attachments?: { document_id?: string; title?: string }[];
     };
     expect(body.attachments?.length).toBe(1);
@@ -377,13 +340,15 @@ test.describe("会话内核：流式状态机（SSE 桩）", () => {
     await expect(page.locator('[data-test="chat-body-assistant"]')).toContainText("收到附件");
   });
 
-  test("编辑重发产生分支 → 切换回上一分支看到原回答", async ({ page }) => {
+  test("编辑重发产生分支 → 切换回上一分支看到原回答，且支持 ConfirmBar 删除会话", async ({
+    page,
+    request,
+  }) => {
     await stubStream(page, {
-      bodies: [sseBody(["第一版回答：保留旧分支。"]), sseBody(["第二版回答：新分支。"]),],
+      bodies: [sseBody(["第一版回答：保留旧分支。"]), sseBody(["第二版回答：新分支。"])],
     });
 
-    await login(page);
-    await page.goto("/tasks");
+    await login(page, request);
     await openChat(page);
     await newConversation(page);
 
@@ -392,7 +357,7 @@ test.describe("会话内核：流式状态机（SSE 桩）", () => {
     await waitStreamingSettled(page);
     await expect(page.locator('[data-test="chat-body-assistant"]')).toContainText("第一版回答");
 
-    // 编辑重发：悬停显示工具条 → 编辑 → 改内容 → 重发
+    // 编辑重发：触屏常显 / 桌面悬停显示工具条 → 编辑 → 改内容 → 重发
     const userMessage = page.locator('[data-test="chat-message-user"]');
     await userMessage.hover();
     await page.locator('[data-test="chat-edit"]').first().click();
@@ -411,6 +376,28 @@ test.describe("会话内核：流式状态机（SSE 桩）", () => {
     await expect(page.locator('[data-test="chat-body-user"]')).toContainText("原始问题");
     await expect(page.locator('[data-test="chat-body-assistant"]')).toContainText("第一版回答");
     await expect(branchCount).toHaveText("1/2");
+
+    // 删除会话需 ConfirmBar 二次确认：点删除 → 取消保留 → 再点删除 → 确认删除
+    await page.locator('[data-test="chat-toggle-list"]').click();
+    const listBox = page.locator('[data-test="chat-conversation-list"]');
+    await expect(listBox).toBeVisible();
+    const targetItem = listBox.locator("li").filter({ hasText: MARKER }).first();
+    await expect(targetItem).toBeVisible();
+    const countBefore = await listBox.locator("li").filter({ hasText: MARKER }).count();
+
+    await targetItem.getByRole("button", { name: "删除会话" }).click();
+    await expect(page.locator('[data-test="chat-delete-confirm"]')).toBeVisible();
+    await page.locator('[data-test="chat-delete-cancel"]').click();
+    await expect(page.locator('[data-test="chat-delete-confirm"]')).toHaveCount(0);
+    expect(await listBox.locator("li").filter({ hasText: MARKER }).count()).toBe(countBefore);
+
+    await targetItem.getByRole("button", { name: "删除会话" }).click();
+    await page.locator('[data-test="chat-delete-confirm"]').click();
+    await expect
+      .poll(async () => listBox.locator("li").filter({ hasText: MARKER }).count(), {
+        timeout: 15_000,
+      })
+      .toBe(countBefore - 1);
   });
 });
 
@@ -426,11 +413,10 @@ test.describe("会话内核：工具调用（真实模型）", () => {
     await cleanup(request);
   });
 
-  test("只读工具自动执行 → 继续生成回答", async ({ page }) => {
+  test("只读工具自动执行 → 继续生成回答", async ({ page, request }) => {
     test.skip(!process.env.E2E_REAL_LLM, "需平台模型可用：设 E2E_REAL_LLM=1 开启");
 
-    await login(page);
-    await page.goto("/tasks");
+    await login(page, request);
     await openChat(page);
     await newConversation(page);
 
@@ -458,11 +444,10 @@ test.describe("会话内核：工具调用（真实模型）", () => {
     await expect(page.locator('[data-test="chat-error"]')).toHaveCount(0);
   });
 
-  test("写工具先出确认卡 → 确认后创建任务", async ({ page }) => {
+  test("写工具先出确认卡 → 确认后创建任务", async ({ page, request }) => {
     test.skip(!process.env.E2E_REAL_LLM, "需平台模型可用：设 E2E_REAL_LLM=1 开启");
 
-    await login(page);
-    await page.goto("/tasks");
+    await login(page, request);
     await openChat(page);
     await newConversation(page);
 

@@ -13,11 +13,11 @@
  * 失败 = rose + repeating-linear-gradient；数据 tabular-nums；
  * startMs 相对首个节点开始时刻；时长 <1s 显示 ms。
  */
-import { computed, onBeforeUnmount, ref } from "vue";
-import { motion, useReducedMotion } from "motion-v";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { useReducedMotion } from "motion-v";
 import { Brain, CircleAlert, Pause, Play, Search, Wrench, Clock3 } from "lucide-vue-next";
 
-import { DURATION, EASE_OUT } from "@/lib/ease";
+import { useTheme } from "@/composables/useTheme";
 
 export interface TraceSpan {
   id: string;
@@ -88,6 +88,7 @@ const totalTokensHint = computed(
 
 // ===== 播放头（rAF 循环、拖拽 range 实时跟手、越过前 span 变暗）=====
 const reducedMotion = useReducedMotion();
+const { isDark } = useTheme();
 const playing = ref(false);
 const isScrubbing = ref(false);
 /** 播放头位置（相对 run 起点的 ms）；0 = 未播放 */
@@ -97,23 +98,32 @@ const PLAYBACK_MS = 2000;
 
 function stopPlayback() {
   playing.value = false;
+  isScrubbing.value = false;
   if (rafId !== null) {
     window.cancelAnimationFrame(rafId);
     rafId = null;
   }
+  syncRangeValue();
 }
 
 function replay() {
   stopPlayback();
+  isScrubbing.value = false;
   playheadMs.value = 0;
   if (reducedMotion.value) {
     playheadMs.value = totalDurationMs.value;
+    syncRangeValue();
     return;
   }
   playing.value = true;
   const startedAt = performance.now();
   const step = (now: number) => {
     if (!playing.value) return;
+    if (reducedMotion.value) {
+      playheadMs.value = totalDurationMs.value;
+      stopPlayback();
+      return;
+    }
     const elapsed = now - startedAt;
     playheadMs.value = Math.min(
       totalDurationMs.value,
@@ -129,14 +139,141 @@ function replay() {
 }
 
 function onScrub(event: Event) {
-  isScrubbing.value = true;
+  const nextMs = Number((event.target as HTMLInputElement).value);
   stopPlayback();
-  playheadMs.value = Number((event.target as HTMLInputElement).value);
+  isScrubbing.value = true;
+  playheadMs.value = nextMs;
+  syncRangeValue();
 }
 
 const playheadVisible = computed(() => playing.value || playheadMs.value > 0);
+const liveTimeActive = computed(
+  () => !reducedMotion.value && (playing.value || isScrubbing.value),
+);
+const rangeInputRef = ref<HTMLInputElement | null>(null);
+const timeCanvasRef = ref<HTMLCanvasElement | null>(null);
+const frozenTimeLabel = ref<string | null>(null);
+let cachedCanvasStyle: { color: string; font: string } | null = null;
 
-onBeforeUnmount(stopPlayback);
+const CANVAS_CSS_WIDTH = 104;
+const CANVAS_CSS_HEIGHT = 16;
+
+function getCanvasDpr(): number {
+  const raw = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 2;
+  return Math.min(Math.max(raw, 2), 3);
+}
+
+const canvasDpr = ref(getCanvasDpr());
+const canvasPixelWidth = computed(() => Math.round(CANVAS_CSS_WIDTH * canvasDpr.value));
+const canvasPixelHeight = computed(() => Math.round(CANVAS_CSS_HEIGHT * canvasDpr.value));
+
+const currentTimeLabel = computed(
+  () =>
+    `${formatDuration(Math.min(playheadMs.value, totalDurationMs.value))} / ${formatDuration(totalDurationMs.value)}`,
+);
+
+const settledTimeLabel = computed(
+  () => frozenTimeLabel.value ?? currentTimeLabel.value,
+);
+
+function syncRangeValue() {
+  const input = rangeInputRef.value;
+  if (!input) return;
+  const target = String(Math.round(Math.min(playheadMs.value, totalDurationMs.value)));
+  if (input.value !== target) {
+    input.value = target;
+  }
+}
+
+function drawLiveTime() {
+  const canvas = timeCanvasRef.value;
+  if (!canvas) return;
+  const ctx = canvas.getContext?.("2d");
+  if (!ctx) return;
+  const dpr = getCanvasDpr();
+  canvasDpr.value = dpr;
+  const targetW = Math.round(CANVAS_CSS_WIDTH * dpr);
+  const targetH = Math.round(CANVAS_CSS_HEIGHT * dpr);
+  if (canvas.width !== targetW) canvas.width = targetW;
+  if (canvas.height !== targetH) canvas.height = targetH;
+  if (!cachedCanvasStyle) {
+    const cs = window.getComputedStyle(canvas);
+    cachedCanvasStyle = {
+      color: cs.color || "#71717a",
+      font: `10px ${cs.fontFamily || "ui-monospace, monospace"}`,
+    };
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, CANVAS_CSS_WIDTH, CANVAS_CSS_HEIGHT);
+  ctx.fillStyle = cachedCanvasStyle.color;
+  ctx.font = cachedCanvasStyle.font;
+  ctx.textBaseline = "middle";
+  ctx.fillText(currentTimeLabel.value, 0, CANVAS_CSS_HEIGHT / 2);
+}
+
+function invalidateCanvasStyleAndRedraw() {
+  cachedCanvasStyle = null;
+  if (liveTimeActive.value) {
+    drawLiveTime();
+  }
+}
+
+watch(isDark, invalidateCanvasStyleAndRedraw);
+
+watch(reducedMotion, (rm) => {
+  if (rm && playing.value) {
+    playheadMs.value = totalDurationMs.value;
+    stopPlayback();
+  }
+});
+
+watch(liveTimeActive, (active) => {
+  if (active) {
+    cachedCanvasStyle = null;
+    if (frozenTimeLabel.value === null) {
+      frozenTimeLabel.value = currentTimeLabel.value;
+    }
+  } else {
+    frozenTimeLabel.value = null;
+  }
+});
+
+watch(totalDurationMs, () => {
+  if (!playing.value) {
+    syncRangeValue();
+  }
+});
+
+watch(
+  [playheadMs, totalDurationMs, liveTimeActive],
+  ([, , active]) => {
+    if (active) {
+      drawLiveTime();
+    }
+  },
+  { flush: "post" },
+);
+
+let themeObserver: MutationObserver | null = null;
+
+onMounted(() => {
+  syncRangeValue();
+  if (typeof document !== "undefined" && typeof MutationObserver !== "undefined") {
+    themeObserver = new MutationObserver(() => {
+      invalidateCanvasStyleAndRedraw();
+    });
+    themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class"],
+    });
+  }
+});
+
+onBeforeUnmount(() => {
+  stopPlayback();
+  themeObserver?.disconnect();
+  themeObserver = null;
+});
 
 /** span 是否已被播放头越过（越过前的 span 变暗） */
 function aheadOfPlayhead(span: TraceSpan): boolean {
@@ -228,28 +365,58 @@ function spanIcon(kind: string) {
 
     <!-- 播放工具栏：X / 总时长 + Replay / Pause + 拖拽 scrub -->
     <div class="flex items-center gap-2 border-b border-border px-4 py-2">
-      <span class="font-mono text-[10px] tabular-nums text-muted-foreground">
-        {{ formatDuration(Math.min(playheadMs, totalDurationMs)) }} / {{ formatDuration(totalDurationMs) }}
-      </span>
-      <input
-        type="range"
-        class="h-1.5 flex-1 cursor-col-resize accent-primary"
-        :max="totalDurationMs"
-        :value="Math.min(playheadMs, totalDurationMs)"
-        step="50"
-        aria-label="拖拽播放头"
-        @input="onScrub"
-        @change="isScrubbing = false"
-      />
+      <div class="relative h-4 w-[6.5rem] shrink-0">
+        <span
+          :class="liveTimeActive ? 'opacity-0' : 'opacity-100'"
+          :aria-hidden="liveTimeActive ? 'true' : undefined"
+          class="inline-block h-4 w-[6.5rem] whitespace-nowrap font-mono text-[10px] leading-4 tabular-nums text-muted-foreground"
+        >
+          {{ settledTimeLabel }}
+        </span>
+        <canvas
+          ref="timeCanvasRef"
+          :width="canvasPixelWidth"
+          :height="canvasPixelHeight"
+          :class="liveTimeActive ? 'opacity-100' : 'opacity-0'"
+          class="pointer-events-none absolute inset-0 h-4 w-[6.5rem] font-mono text-[10px] text-muted-foreground"
+          aria-hidden="true"
+        />
+      </div>
+      <div class="relative flex h-5 flex-1 items-center">
+        <div
+          aria-hidden="true"
+          class="pointer-events-none relative h-1.5 w-full overflow-hidden rounded-full bg-muted"
+        >
+          <div
+            class="h-full w-full origin-left rounded-full bg-primary will-change-transform"
+            :style="{ transform: `scaleX(${playheadRatio})` }"
+          />
+        </div>
+        <input
+          ref="rangeInputRef"
+          type="range"
+          class="peer absolute inset-0 h-full w-full cursor-col-resize appearance-none opacity-0 [&::-webkit-slider-thumb]:hidden"
+          :max="totalDurationMs"
+          step="50"
+          aria-label="拖拽播放头"
+          :aria-valuetext="currentTimeLabel"
+          @input="onScrub"
+          @change="isScrubbing = false"
+        />
+        <span
+          aria-hidden="true"
+          class="pointer-events-none absolute inset-x-0 h-1.5 rounded-full ring-ring peer-focus-visible:ring-2"
+        />
+      </div>
       <button
         type="button"
         data-test="trace-replay"
-        class="inline-flex size-7 items-center justify-center rounded-lg border border-border text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        class="relative inline-flex size-7 items-center justify-center rounded-lg border border-border text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         :aria-label="playing ? '暂停回放' : '回放'"
         @click="playing ? stopPlayback() : replay()"
       >
-        <Pause v-if="playing" class="size-3.5" />
-        <Play v-else class="size-3.5" />
+        <Pause :class="playing ? 'opacity-100' : 'opacity-0'" class="size-3.5" />
+        <Play :class="playing ? 'opacity-0' : 'opacity-100'" class="absolute size-3.5" />
       </button>
     </div>
 
@@ -287,15 +454,17 @@ function spanIcon(kind: string) {
           <div class="relative h-6">
             <!-- 轨道 -->
             <div class="absolute inset-x-0 top-1/2 h-3 -translate-y-1/2 rounded-full bg-muted/40" />
-            <!-- span 条：播放/拖拽时 scaleX 按 playhead 生长 -->
-            <motion.div
-              class="absolute top-1/2 h-3 -translate-y-1/2 rounded-full"
+            <!-- span 条：播放/拖拽时仅修改 GPU transform scaleX，避免触发 Layout Thrashing -->
+            <div
+              class="absolute top-1/2 h-3 rounded-full will-change-transform"
               :class="[spanClass(span), isDimmed(span) || aheadOfPlayhead(span) ? 'opacity-30' : '']"
-              :style="spanStyle(span)"
-              :initial="{ scaleX: 0 }"
-              :animate="{ scaleX: spanScale(span) }"
-              :transition="{ duration: reducedMotion || isScrubbing ? 0 : DURATION.fast, ease: EASE_OUT }"
-              style="transform-origin: left center"
+              :style="[
+                spanStyle(span),
+                {
+                  transformOrigin: 'left center',
+                  transform: `translateY(-50%) scaleX(${spanScale(span)})`,
+                },
+              ]"
             />
             <span
               class="pointer-events-none absolute top-1/2 -translate-y-1/2 pl-1.5 font-mono text-[10px] tabular-nums text-muted-foreground"
@@ -306,21 +475,22 @@ function spanIcon(kind: string) {
           </div>
         </div>
         <p v-if="!spans.length" class="py-4 text-sm text-muted-foreground">暂无执行数据。</p>
-        <!-- 播放头竖线（播放或拖拽中均保持可见；轨道定位层按 --trace-col-offset 对齐右侧时间轴起点） -->
         <div
           v-if="playheadVisible"
           data-test="trace-playhead-track"
-          class="pointer-events-none hidden sm:block absolute inset-y-0 right-0 left-[var(--trace-col-offset,12.75rem)]"
+          class="pointer-events-none hidden sm:block absolute inset-y-0 right-0 left-[var(--trace-col-offset,12.75rem)] overflow-hidden"
           aria-hidden="true"
         >
           <div
             data-test="trace-playhead-line"
-            class="absolute top-0 bottom-0 w-px bg-foreground/50"
+            class="absolute inset-y-0 left-0 w-full will-change-transform"
             :style="{
               '--playhead-ratio': String(playheadRatio),
-              left: `${playheadRatio * 100}%`,
+              transform: `translate3d(${playheadRatio * 100}%, 0, 0)`,
             }"
-          />
+          >
+            <div class="h-full w-px bg-foreground/50" />
+          </div>
         </div>
       </div>
     </div>

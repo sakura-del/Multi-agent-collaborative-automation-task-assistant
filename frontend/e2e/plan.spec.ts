@@ -1,34 +1,34 @@
-import { expect, test, type Page } from "@playwright/test";
-import { demoPassword, secondaryPassword } from "./credentials";
-import { gotoPasswordLogin } from "./support/auth";
+import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { apiBase, demoCreds, secondaryCreds } from "./support/env";
+import { fetchAuthToken, seedAuthByApi } from "./support/auth";
 
 // 套餐页 E2E（2026-10-26 重设计）：
 // 数字必须与真实接口一致；权益/到期日/警示色/升级入口/加载态/局部失败都要验。
-const API = "http://10.0.10.2:48080/api/v1";
+const API = apiBase();
 const SHOTS = "e2e/screenshots";
 
-async function loginAs(page: Page, account: string, password: string) {
-  await gotoPasswordLogin(page);
-  await page.locator("#account").fill(account);
-  await page.locator("#password").fill(password);
-  await page.locator('form button[type="submit"]').click();
-  await page.getByRole("link", { name: /任务/ }).waitFor({ timeout: 30_000 });
+async function loginAs(
+  page: Page,
+  request: APIRequestContext,
+  account: string,
+  password: string,
+) {
+  await seedAuthByApi(page, request, account, password, "/tasks");
 }
 
-async function token(request: Page["request"], account: string, password: string) {
-  const resp = await request.post(`${API}/auth/login`, { data: { account, password } });
-  expect(resp.ok()).toBeTruthy();
-  return (await resp.json()).access_token as string;
+async function token(request: APIRequestContext, account: string, password: string) {
+  return (await fetchAuthToken(request, account, password)).access_token;
 }
 
 test("套餐页：当前套餐数字与真实接口一致", async ({ page, request }) => {
-  const accessToken = await token(request, "demo", demoPassword());
+  const demo = demoCreds();
+  const accessToken = await token(request, demo.account, demo.password);
   const usage = await (
     await request.get(`${API}/billing/usage`, { headers: { Authorization: `Bearer ${accessToken}` } })
   ).json();
   const plans = await (await request.get(`${API}/billing/plans`)).json();
 
-  await loginAs(page, "demo", demoPassword());
+  await loginAs(page, request, demo.account, demo.password);
   await page.goto("/settings/plan");
   await expect(page.locator('[data-test="plan-current"]')).toBeVisible({ timeout: 30_000 });
 
@@ -62,14 +62,13 @@ test("套餐页：当前套餐数字与真实接口一致", async ({ page, reque
 });
 
 test("套餐页：免费版额度用尽的警示与升级入口", async ({ page, request }) => {
-  const account = "e2efull";
-  const password = secondaryPassword();
+  const { account, password } = secondaryCreds();
   const accessToken = await token(request, account, password);
   const usage = await (
     await request.get(`${API}/billing/usage`, { headers: { Authorization: `Bearer ${accessToken}` } })
   ).json();
 
-  await loginAs(page, account, password);
+  await loginAs(page, request, account, password);
   await page.goto("/settings/plan");
   await expect(page.locator('[data-test="plan-current"]')).toBeVisible({ timeout: 30_000 });
 
@@ -108,10 +107,11 @@ test("套餐页：免费版额度用尽的警示与升级入口", async ({ page,
   await page.screenshot({ path: `${SHOTS}/plan-free.png`, fullPage: true });
 });
 
-test("套餐页：加载中有明确加载态（不是空白）", async ({ page }) => {
-  await loginAs(page, "e2efull", secondaryPassword());
+test("套餐页：加载中有明确加载态（不是空白）", async ({ page, request }) => {
+  const { account, password } = secondaryCreds();
+  await loginAs(page, request, account, password);
 
-  await page.route(`${API}/billing/usage`, async (route) => {
+  await page.route("**/api/v1/billing/usage", async (route) => {
     await new Promise((r) => setTimeout(r, 3000));
     await route.continue();
   });
@@ -129,10 +129,11 @@ test("套餐页：加载中有明确加载态（不是空白）", async ({ page 
   await expect(page.locator('[data-test="plan-loading"]')).toBeHidden();
 });
 
-test("套餐页：usage 失败不连累套餐列表", async ({ page }) => {
-  await loginAs(page, "e2efull", secondaryPassword());
+test("套餐页：usage 失败不连累套餐列表", async ({ page, request }) => {
+  const { account, password } = secondaryCreds();
+  await loginAs(page, request, account, password);
 
-  await page.route(`${API}/billing/usage`, (route) =>
+  await page.route("**/api/v1/billing/usage", (route) =>
     route.fulfill({ status: 500, contentType: "application/json", body: '{"detail":"boom"}' })
   );
 
@@ -150,8 +151,9 @@ test("套餐页：usage 失败不连累套餐列表", async ({ page }) => {
   await page.screenshot({ path: `${SHOTS}/plan-partial-failure.png`, fullPage: true });
 });
 
-test("套餐页：移动端无横向溢出", async ({ page }) => {
-  await loginAs(page, "demo", demoPassword());
+test("套餐页：移动端无横向溢出", async ({ page, request }) => {
+  const demo = demoCreds();
+  await loginAs(page, request, demo.account, demo.password);
   await page.goto("/settings/plan");
   await expect(page.locator('[data-test="plan-current"]')).toBeVisible({ timeout: 30_000 });
 

@@ -2,8 +2,8 @@ import { expect, test, type Page } from "@playwright/test";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { existsSync, statSync } from "node:fs";
-import { secondaryPassword } from "./credentials";
-import { gotoPasswordLogin } from "./support/auth";
+import { reconnectCreds, reviewCreds, type E2ECredentials } from "./support/env";
+import { loginViaUi } from "./support/auth";
 
 // 文献综述全流程验收（Plan 4 Task 8 / M4）：
 // 登录（账号预建）→ 上传知识库文档 → 建离线任务 → 确认规划 → 观察 DAG 状态变化 → 完成 → 校验引用 → 下载两种产物
@@ -51,60 +51,17 @@ async function expectNoHorizontalOverflow(page: Page) {
 }
 
 /**
- * E2E 专用账号（**固定**，且需在测试环境预建）。
- *
- * 为什么不在用例里注册：`auth_register` 是 5 次/3600s 的限流端点，而本 spec
- * 有 2 个用例 × 2 个视口 = 4 次注册/轮次，连跑两轮就必然撞墙（2026-10-21 实测）。
- * 更根本的是 2026-11-23 起前端注册入口已并入邮箱验证码流（新邮箱首次验证
- * 自动建号），没有可用用户名/密码自助注册的表单。
- *
- * 两个用例用不同账号，避免互相干扰任务列表与知识库内容。
+ * E2E 专用账号（通过环境配置注入，避免与免费版用尽态账号 e2efull 冲突）：
+ * - full: 使用 `reviewCreds()`（默认 e2ereview，Pro 套餐）
+ * - reconnect: 使用 `reconnectCreds()`（默认 e2ereconn，Pro 套餐）
  */
-const E2E_PASSWORD = secondaryPassword();
 const E2E_USERS = {
-  full: { username: "e2efull", password: E2E_PASSWORD },
-  reconnect: { username: "e2ereconn", password: E2E_PASSWORD },
+  full: reviewCreds(),
+  reconnect: reconnectCreds(),
 } as const;
 
-type E2EUser = { username: string; password: string };
-
-/**
- * 登录 E2E 专用账号（账号必须已在测试环境预建）。
- *
- * 登录失败时给出**可读原因**，而不是含糊的 `toHaveURL` 超时：限流与账号缺失
- * 都曾把测试红灯误判成产品缺陷。
- */
-async function ensureSignedIn(page: Page, user: E2EUser): Promise<void> {
-  await gotoPasswordLogin(page);
-  await page.locator("#account").fill(user.username);
-  await page.locator("#password").fill(user.password);
-  await page.getByRole("button", { name: "登录", exact: true }).click();
-
-  const outcome = await Promise.race([
-    page
-      .waitForURL(/\/tasks/, { timeout: 30_000 })
-      .then(() => "ok" as const)
-      .catch(() => null),
-    page
-      .locator('[data-test="form-error"], [role="alert"]')
-      .first()
-      .waitFor({ state: "visible", timeout: 30_000 })
-      .then(() => "failed" as const)
-      .catch(() => null),
-  ]);
-  if (outcome === "ok") return;
-
-  const alertText = await page
-    .locator('[data-test="form-error"], [role="alert"]')
-    .first()
-    .textContent()
-    .catch(() => null);
-  throw new Error(
-    `E2E 账号 ${user.username} 登录失败` +
-      `${alertText ? `（页面提示：${alertText.trim()}）` : ""}。` +
-      "该账号需在测试环境预建（邮箱验证码流首次验证会自动建号）；" +
-      "若提示「请求过于频繁」，说明 auth_login 限流已用尽，等窗口恢复再跑。"
-  );
+async function ensureSignedIn(page: Page, user: E2ECredentials): Promise<void> {
+  await loginViaUi(page, user.account, user.password);
 }
 
 async function uploadFixture(page: Page, title: string) {

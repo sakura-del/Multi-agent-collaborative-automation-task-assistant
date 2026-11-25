@@ -1,8 +1,8 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { demoPassword } from "./credentials";
-import { gotoPasswordLogin } from "./support/auth";
+import { demoCreds } from "./support/env";
+import { seedAuthByApi } from "./support/auth";
 
 // M2 全部页面迁移后的视觉验收截图
 const SHOTS = resolve(dirname(fileURLToPath(import.meta.url)), "screenshots");
@@ -14,48 +14,28 @@ async function shot(page: Page, name: string, fullPage = true) {
   });
 }
 
-async function login(page: Page) {
-  await gotoPasswordLogin(page);
-  await page.locator("#account").fill("demo");
-  await page.locator("#password").fill(demoPassword());
-  await page.locator('form button[type="submit"]').click();
-  const loggedIn = page.getByRole("link", { name: /任务/ });
-  for (let i = 0; i < 6; i += 1) {
-    const settled = await Promise.race([
-      loggedIn
-        .waitFor({ state: "visible", timeout: 8_000 })
-        .then(() => "ok" as const)
-        .catch(() => null),
-      page
-        .locator("text=请求过于频繁")
-        .waitFor({ state: "visible", timeout: 8_000 })
-        .then(() => "limited" as const)
-        .catch(() => null),
-    ]);
-    if (settled === "ok") return;
-    await page.waitForTimeout(8_000);
-    await page.locator('form button[type="submit"]').click().catch(() => undefined);
-  }
-  await expect(loggedIn).toBeVisible({ timeout: 30_000 });
+async function login(page: Page, request: APIRequestContext) {
+  const { account, password } = demoCreds();
+  await seedAuthByApi(page, request, account, password, "/tasks");
 }
 
 test("登录页", async ({ page }) => {
   // 截「登录页」要的是默认入口（邮箱验证码一体流），不是密码兜底态
   await page.goto("/login");
-  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  await expect(page.locator('[data-test="auth-title"]')).toBeVisible();
   await shot(page, "login");
 });
 
-test("任务列表", async ({ page }) => {
-  await login(page);
+test("任务列表", async ({ page, request }) => {
+  await login(page, request);
   await expect(page.locator('[data-test^="task-row-"]').first()).toBeVisible({
     timeout: 30_000,
   });
   await shot(page, "tasks");
 });
 
-test("任务详情 · 规划 + 执行 + 日志 + 结果", async ({ page }) => {
-  await login(page);
+test("任务详情 · 规划 + 执行 + 日志 + 结果", async ({ page, request }) => {
+  await login(page, request);
   const firstRow = page.locator('[data-test^="task-row-"]').first();
   await firstRow.getByRole("button", { name: "打开" }).click();
 
@@ -85,31 +65,31 @@ test("任务详情 · 规划 + 执行 + 日志 + 结果", async ({ page }) => {
   }
 });
 
-test("知识库", async ({ page }) => {
-  await login(page);
-  await page.getByRole("link", { name: /知识库/ }).click();
-  await page.waitForTimeout(1200);
+test("知识库", async ({ page, request }) => {
+  await login(page, request);
+  await page.goto("/knowledge");
+  await expect(page.getByRole("heading", { name: "知识库" })).toBeVisible({ timeout: 30_000 });
   await shot(page, "knowledge");
 });
 
-test("引用样式", async ({ page }) => {
-  await login(page);
-  await page.getByRole("link", { name: /引用样式/ }).click();
-  await page.waitForTimeout(1000);
+test("引用样式", async ({ page, request }) => {
+  await login(page, request);
+  await page.goto("/styles");
+  await expect(page.getByRole("heading", { name: "引用样式" })).toBeVisible({ timeout: 30_000 });
   await shot(page, "styles");
 });
 
-test("Word 模板", async ({ page }) => {
-  await login(page);
-  await page.getByRole("link", { name: /Word 模板/ }).click();
-  await page.waitForTimeout(1000);
+test("Word 模板", async ({ page, request }) => {
+  await login(page, request);
+  await page.goto("/templates");
+  await expect(page.getByRole("heading", { name: "Word 模板" })).toBeVisible({ timeout: 30_000 });
   await shot(page, "templates");
 });
 
-test("导入文献", async ({ page }) => {
-  await login(page);
-  await page.getByRole("link", { name: /导入文献/ }).click();
-  await page.waitForTimeout(600);
+test("导入文献", async ({ page, request }) => {
+  await login(page, request);
+  await page.goto("/references/import");
+  await expect(page.getByRole("heading", { name: "导入参考文献" })).toBeVisible({ timeout: 30_000 });
   await shot(page, "import");
 });
 

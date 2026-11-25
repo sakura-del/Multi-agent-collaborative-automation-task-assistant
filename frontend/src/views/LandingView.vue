@@ -352,7 +352,7 @@ function jumpToShowcase(tab: ShowcaseTab) {
         <p class="shrink-0 text-xs font-medium text-[#6B7280] dark:text-muted-foreground">
           聚合全球主流学术数据源与引文标准
         </p>
-        <ul class="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-xs font-semibold tracking-wide text-[#4B5563]/80 dark:text-muted-foreground">
+        <ul class="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-xs font-semibold tracking-wide text-[#4B5563] dark:text-muted-foreground">
           <li v-for="source in TRUST_SOURCES" :key="source" class="select-none">
             {{ source }}
           </li>

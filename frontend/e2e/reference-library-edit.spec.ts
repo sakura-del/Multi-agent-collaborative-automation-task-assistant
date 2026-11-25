@@ -1,41 +1,8 @@
-import { expect, test } from "@playwright/test";
-import type { Page } from "@playwright/test";
-import { demoPassword } from "./credentials";
-import { gotoPasswordLogin } from "./support/auth";
+import { expect, test, type Page } from "@playwright/test";
+import { apiBase, demoCreds } from "./support/env";
+import { seedAuthByApi } from "./support/auth";
 
-/**
- * 引用库条目编辑的真实浏览器验证（2026-10-27）。
- *
- * 背景：编辑功能上一轮只有单元测试，浏览器层完全未验证（交接 §3.8 验证限制）。
- * 单测能证明「调用了 updateLibraryItem」，但证明不了：
- * - 点铅笔按钮真的能打开表单、且**预填当前值**；
- * - 改完点保存，**列表上的字真的变了**（不是只有内存 ref 变了）；
- * - 刷新后仍在（说明真的落库了，不是前端乐观更新）；
- * - 后端准入检查真的把非法值拦住了，并且**原因展示给用户**。
- *
- * ⚠️ **一个文件只做一次登录**（AGENTS §5 #29）：`auth_login` 限流 5 次/3600s。
- * 所以这里只有一条 test，把五个场景合并到一次页面访问里跑完。
- *
- * ## 写这条 E2E 时踩到的三个坑（都实测踩过）
- *
- * 1. **`page.request` 不会自动带鉴权**：本项目 token 存 `localStorage.access_token`
- *    （见 `src/api/client.ts`），**不是 cookie** → 直接打接口 401。
- *    必须 `page.evaluate` 读出 token 再注入 `Authorization`。
- * 2. **造数据前必须先清空**：后端按归一化 DOI 去重合并，
- *    上次运行留下的同 DOI 条目会让新条目变成 `merged`（created=0），
- *    于是按题名找不到 → 测试自己把自己搞挂。
- * 3. **不能写 `not.toContain(旧题名)`**：新题名是 `${旧题名}-已改`，
- *    **旧题名是新题名的前缀**，这条断言永远失败。要验「整体替换」应断言
- *    「行里的题名恰好等于新题名」。
- *
- * ## 诚实性验证（做过）
- *
- * 把 `saveEdit` 里的 `await refresh()` 去掉并**真部署**后，本测试变红：
- * `Expected substring: "...-已改" / Received string: "...（旧题名）... 2024"`。
- * 说明它抓的是「页面真的更新了」，不是「接口被调用了」。
- */
-
-const CREDENTIALS = { account: "demo", password: demoPassword() };
+const API = apiBase();
 
 /** 造一条引用库条目；返回 item_id。 */
 async function seedItem(page: Page, title: string): Promise<string> {
@@ -43,11 +10,11 @@ async function seedItem(page: Page, title: string): Promise<string> {
   expect(token, "登录后 localStorage 里应有 access_token").toBeTruthy();
   const headers = { Authorization: `Bearer ${token}` };
 
-  // 坑 2：先清空，避免同 DOI 被合并成 created=0
-  const cleared = await page.request.delete("/api/v1/reference-library", { headers });
+  // 先清空，避免同 DOI 被合并成 created=0
+  const cleared = await page.request.delete(`${API}/reference-library`, { headers });
   expect(cleared.ok(), `清空失败：${cleared.status()}`).toBe(true);
 
-  const response = await page.request.post("/api/v1/reference-library", {
+  const response = await page.request.post(`${API}/reference-library`, {
     headers,
     data: {
       items: [
@@ -67,7 +34,7 @@ async function seedItem(page: Page, title: string): Promise<string> {
   const body = await response.json();
   expect(body.created, `清空后应新建 1 条，实际 created=${body.created}`).toBe(1);
 
-  const list = await page.request.get("/api/v1/reference-library?limit=100", { headers });
+  const list = await page.request.get(`${API}/reference-library?limit=100`, { headers });
   expect(list.ok(), `列表失败：${list.status()}`).toBe(true);
   const payload = await list.json();
   const items = payload.items ?? payload;
@@ -76,16 +43,12 @@ async function seedItem(page: Page, title: string): Promise<string> {
   return found.item_id as string;
 }
 
-async function login(page: Page) {
-  await gotoPasswordLogin(page);
-  await page.locator("#account").fill(CREDENTIALS.account);
-  await page.locator("#password").fill(CREDENTIALS.password);
-  await page.locator('button[type="submit"]').click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 30_000 });
-}
-
-test("引用库条目编辑在真实浏览器里可用，且后端准入检查拦住非法值", async ({ page }) => {
-  await login(page);
+test("引用库条目编辑在真实浏览器里可用，且后端准入检查拦住非法值", async ({
+  page,
+  request,
+}) => {
+  const { account, password } = demoCreds();
+  await seedAuthByApi(page, request, account, password, "/references/library");
 
   const stamp = Date.now();
   const originalTitle = `编辑验证条目-${stamp}`;

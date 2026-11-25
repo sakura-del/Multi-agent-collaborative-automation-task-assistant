@@ -52,5 +52,5 @@ const text = computed(() => props.label ?? LABELS[props.status] ?? props.status)
 </script>
 
 <template>
-  <Badge :variant="tone">{{ text }}</Badge>
+  <Badge data-test="status-badge" :variant="tone">{{ text }}</Badge>
 </template>

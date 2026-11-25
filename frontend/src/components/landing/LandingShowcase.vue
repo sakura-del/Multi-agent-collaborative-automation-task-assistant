@@ -377,8 +377,8 @@ onBeforeUnmount(() => {
               class="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors"
               :class="
                 verdicts[paper.id] === 'exclude'
-                  ? 'border-[#E11D48]/30 bg-[#FFF1F2] text-[#BE123C] dark:border-destructive/40 dark:bg-destructive/15 dark:text-destructive'
-                  : 'border-[#E5E7EB] bg-white text-[#4B5563] hover:border-[#E11D48]/30 hover:text-[#BE123C] dark:border-border dark:bg-background dark:text-muted-foreground dark:hover:border-destructive/40 dark:hover:text-destructive'
+                  ? 'border-[#E11D48]/30 bg-[#FFF1F2] text-[#BE123C] dark:border-destructive/40 dark:bg-destructive/15 dark:text-rose-300'
+                  : 'border-[#E5E7EB] bg-white text-[#4B5563] hover:border-[#E11D48]/30 hover:text-[#BE123C] dark:border-border dark:bg-background dark:text-muted-foreground dark:hover:border-destructive/40 dark:hover:text-rose-300'
               "
               @click="setVerdict(paper.id, 'exclude')"
             >

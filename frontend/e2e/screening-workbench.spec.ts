@@ -1,12 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { demoPassword } from "./credentials";
-import { gotoPasswordLogin } from "./support/auth";
+import { apiBase, demoCreds } from "./support/env";
+import { fetchAuthToken, seedAuthByApi } from "./support/auth";
 
 // PRISMA 筛选工作台视觉验收：真实后端造数据 → 走完决策流 → 截图
 const SHOTS = resolve(dirname(fileURLToPath(import.meta.url)), "screenshots");
-const API = "http://10.0.10.2:48080/api/v1";
+const API = apiBase();
 
 async function shot(page: Page, name: string) {
   await page.screenshot({
@@ -15,21 +15,12 @@ async function shot(page: Page, name: string) {
   });
 }
 
-async function login(page: Page) {
-  await gotoPasswordLogin(page);
-  await page.locator("#account").fill("demo");
-  await page.locator("#password").fill(demoPassword());
-  await page.locator('form button[type="submit"]').click();
-  await page.getByRole("link", { name: /任务/ }).waitFor({ timeout: 30_000 });
-}
-
-test("PRISMA 筛选工作台：造数据 → 纳入/排除 → 计数变化", async ({ page, request }) => {
-  // ---- 后端直接造数据（前端没有「提交检索」的入口，检索由任务执行产生）----
-  const loginResp = await request.post(`${API}/auth/login`, {
-    data: { account: "demo", password: demoPassword() },
-  });
-  expect(loginResp.ok()).toBeTruthy();
-  const token = (await loginResp.json()).access_token as string;
+test("PRISMA 筛选工作台：造数据 → 纳入/排除 → 计数变化与 Pin-in-Place", async ({
+  page,
+  request,
+}) => {
+  const { account, password } = demoCreds();
+  const token = (await fetchAuthToken(request, account, password)).access_token;
   const auth = { Authorization: `Bearer ${token}` };
 
   const taskResp = await request.post(`${API}/tasks`, {
@@ -81,30 +72,36 @@ test("PRISMA 筛选工作台：造数据 → 纳入/排除 → 计数变化", as
   expect((await logResp.json()).hits_deduped).toBe(3);
 
   // ---- 前端走查 ----
-  await login(page);
-  await page.goto(`/tasks/${taskId}/screening`);
+  await seedAuthByApi(page, request, account, password, `/tasks/${taskId}/screening`);
   await expect(
     page.locator('[data-test^="screening-row-"]').first()
   ).toBeVisible({ timeout: 30_000 });
   await shot(page, "initial");
 
-  // 校验 PRISMA 计数条
+  // 校验 PRISMA 漏斗计数
   const prisma = page.locator('[data-test="screening-prisma"]');
   await expect(prisma).toContainText("165");
   await expect(prisma).toContainText("识别");
 
-  // 纳入第一条 → 阶段推进到「全文」
-  // 注意：这里**按 id 取行**而不是按位置（`rows.first()`）。刷新后列表会重新渲染，
-  // 位置可能变（后端排序曾因 created_at 并列而不稳定，Task 7 已修）；按 id 定位
-  // 才不会「点的是 A、断言的是 B」。
+  // 纳入第一条 → 阶段推进到「全文」，且 Pin-in-Place 保持列表顺序与 scrollY 稳定
   const rows = page.locator('[data-test^="screening-row-"]');
-  const firstId = (await rows.first().getAttribute("data-test"))!.replace("screening-row-", "");
+  const initialOrder = await rows.evaluateAll((els) =>
+    els.map((el) => el.getAttribute("data-test")),
+  );
+  const scrollBefore = await page.evaluate(() => window.scrollY);
+  const firstId = initialOrder[0]!.replace("screening-row-", "");
   const firstRow = page.locator(`[data-test="screening-row-${firstId}"]`);
   await page.locator(`[data-test="screening-include-${firstId}"]`).click();
   await expect(page.locator('[data-test="screening-success"]')).toContainText("已纳入", {
     timeout: 20_000,
   });
   await expect(firstRow).toContainText("全文");
+  const afterOrder = await rows.evaluateAll((els) =>
+    els.map((el) => el.getAttribute("data-test")),
+  );
+  expect(afterOrder).toEqual(initialOrder);
+  const scrollAfter = await page.evaluate(() => window.scrollY);
+  expect(Math.abs(scrollAfter - scrollBefore)).toBeLessThanOrEqual(1);
   await shot(page, "after-include");
 
   // 排除第三条（同样按 id 定位）：
@@ -123,15 +120,22 @@ test("PRISMA 筛选工作台：造数据 → 纳入/排除 → 计数变化", as
   });
 
   // 排除是终态：按钮必须消失，改显示「已排除：理由」徽标
-  // （否则用户会点一个注定 400 的按钮，且 PRISMA 计数可能被覆盖掉）
   await expect(page.locator(`[data-test="screening-include-${thirdId}"]`)).toHaveCount(0);
   await expect(page.locator(`[data-test="screening-exclude-${thirdId}"]`)).toHaveCount(0);
   const excludedBadge = page.locator(`[data-test="screening-excluded-badge-${thirdId}"]`);
   await expect(excludedBadge).toBeVisible();
   await expect(excludedBadge).toContainText("marine biology, not relevant");
 
-  // PRISMA 计数必须跟着变：标题/摘要排除 = 1
-  await expect(prisma).toContainText("标题/摘要排除");
+  // M4 FunnelChart 校验 + 后端 /prisma 接口精确核对（title_abstract.excluded === 1）
+  await expect(prisma).toContainText("总体转化");
+  const prismaResp = await request.get(`${API}/screening/prisma?task_id=${taskId}`, {
+    headers: auth,
+  });
+  expect(prismaResp.ok()).toBeTruthy();
+  const prismaJson = (await prismaResp.json()) as {
+    title_abstract?: { excluded?: number };
+  };
+  expect(prismaJson.title_abstract?.excluded).toBe(1);
   await shot(page, "after-exclude");
 
   // Mermaid 源码存在
