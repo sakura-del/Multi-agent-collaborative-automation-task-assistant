@@ -93,7 +93,7 @@ const charCount = computed(() => props.modelValue.length);
 <template>
   <div
     data-test="prompt-input"
-    class="rounded-2xl border bg-background transition-shadow"
+    class="min-w-0 w-full max-w-full overflow-hidden rounded-2xl border bg-background transition-shadow"
     :class="focused ? 'border-ring ring-2 ring-ring/40' : 'border-border'"
   >
     <textarea
@@ -111,12 +111,16 @@ const charCount = computed(() => props.modelValue.length);
       @keydown="onKeydown"
     />
     <div
-      class="flex items-center justify-between gap-2 border-t border-border px-3 py-2"
+      class="flex items-center justify-between gap-x-2 gap-y-1 border-t border-border px-3 py-2"
+      :class="compact ? 'flex-nowrap' : 'flex-wrap'"
       data-test="prompt-input-footer"
     >
-      <span class="inline-flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground">
+      <span
+        class="inline-flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground"
+        :class="compact ? 'truncate' : 'flex-1'"
+      >
         <Sparkles class="size-3 shrink-0" />
-        <span class="truncate">{{ hint }}</span>
+        <span :class="compact ? 'truncate' : 'break-words'">{{ hint }}</span>
       </span>
       <div class="flex shrink-0 items-center gap-2 whitespace-nowrap">
         <span class="font-mono text-[10px] tabular-nums text-muted-foreground">

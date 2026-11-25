@@ -5,9 +5,16 @@ import { ChevronRight, Command, Moon, PanelLeftOpen, Sun } from "lucide-vue-next
 
 import { useTheme } from "@/composables/useTheme";
 
-defineProps<{
-  showMobileTrigger?: boolean;
-}>();
+// 注意：Vue 3 对未指定默认值的 boolean prop 会自动强转为 false，
+// 必须用 withDefaults 显式设默认 true，否则移动端菜单触发按钮不会渲染（Issue #64）。
+const props = withDefaults(
+  defineProps<{
+    showMobileTrigger?: boolean;
+  }>(),
+  {
+    showMobileTrigger: true,
+  },
+);
 
 const emit = defineEmits<{
   (event: "openMobile"): void;
@@ -56,7 +63,7 @@ const crumbs = computed<Crumb[]>(() => {
   >
     <div class="flex min-w-0 items-center gap-2">
       <button
-        v-if="showMobileTrigger !== false"
+        v-if="props.showMobileTrigger"
         type="button"
         data-test="nav-mobile-trigger"
         aria-label="打开导航"

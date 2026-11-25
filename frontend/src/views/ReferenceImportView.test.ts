@@ -304,4 +304,16 @@ describe("ReferenceImportView 保存到引用库", () => {
     expect(text).toContain("引用库");
     expect(text).toMatch(/创建任务/);
   });
+
+  it("导入表单与输入框具备窄屏防横向溢出约束（min-w-0 与底部提示栏折行，Issue #64）", async () => {
+    const wrapper = mount(ReferenceImportView);
+    await flushPromises();
+
+    const promptInput = wrapper.find('[data-test="prompt-input"]');
+    expect(promptInput.classes()).toContain("min-w-0");
+    expect(promptInput.classes()).toContain("max-w-full");
+
+    const footer = wrapper.find('[data-test="prompt-input-footer"]');
+    expect(footer.classes()).toContain("flex-wrap");
+  });
 });

@@ -108,6 +108,28 @@ describe("AppLayout 侧栏", () => {
     const logout = wrapper.find('button[aria-label="退出登录"]');
     expect(logout.exists()).toBe(true);
   });
+
+  it("顶栏默认渲染移动端导航触发按钮，点击可展开并关闭移动端抽屉（Issue #64）", async () => {
+    const wrapper = await mountLayout();
+    const trigger = wrapper.find('[data-test="nav-mobile-trigger"]');
+    expect(trigger.exists()).toBe(true);
+    expect(document.body.querySelector('[aria-label="移动端导航"]')).toBeNull();
+
+    await trigger.trigger("click");
+    await flushPromises();
+    const mobileNav = document.body.querySelector('[aria-label="移动端导航"]');
+    expect(mobileNav).not.toBeNull();
+    expect(mobileNav?.textContent).toContain("任务");
+
+    const closeBtn = document.body.querySelector<HTMLButtonElement>(
+      '[role="dialog"][aria-label="导航"] button[aria-label="关闭导航"]',
+    );
+    expect(closeBtn).not.toBeNull();
+    closeBtn?.click();
+    await flushPromises();
+    expect(document.body.querySelector('[aria-label="移动端导航"]')).toBeNull();
+    wrapper.unmount();
+  });
 });
 
 describe("登录页产品身份", () => {

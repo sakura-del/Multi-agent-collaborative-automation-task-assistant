@@ -168,23 +168,24 @@ function metaText(item: ImportedReferenceItem): string {
 </script>
 
 <template>
-  <section>
+  <section class="min-w-0">
     <PageHeader
       eyebrow="Reference import"
       title="导入参考文献"
       description="粘贴 BibTeX 或 RIS 文本即可解析预览；支持从 Zotero / EndNote 直接导出。解析后可以保存到引用库，创建任务时选择「我的引用库」就会用这些文献。"
     />
 
-    <Card as="form" class="mb-3 gap-3 p-4" data-test="import-form" @submit.prevent="handleImport">
-      <div class="grid gap-1.5">
+    <Card as="form" class="mb-3 min-w-0 gap-3 p-4" data-test="import-form" @submit.prevent="handleImport">
+      <div class="grid min-w-0 gap-1.5">
         <Label for="import-content">引用文本</Label>
         <BePromptInput
           id="import-content"
           v-model="content"
           data-test="import-content"
           placeholder="粘贴 BibTeX（@article{...}）或 RIS（TY  - JOUR ... ER  - ）"
-          hint="支持 @article / @inproceedings 等；RIS 以 TY  - 开头；Ctrl/⌘+Enter 解析"
+          hint="支持 @article / @inproceedings 等；RIS 以 TY  - 开头"
           min-height="10rem"
+          @submit="handleImport"
         />
       </div>
       <div class="flex flex-wrap items-end gap-3">
@@ -280,7 +281,7 @@ function metaText(item: ImportedReferenceItem): string {
           <span v-if="metaText(item)">{{ metaText(item) }}</span>
         </div>
         <div v-if="item.doi" class="mt-1">
-          <code class="rounded bg-muted px-1 py-0.5 text-xs text-muted-foreground">
+          <code class="break-all rounded bg-muted px-1 py-0.5 text-xs text-muted-foreground">
             {{ item.doi }}
           </code>
         </div>
