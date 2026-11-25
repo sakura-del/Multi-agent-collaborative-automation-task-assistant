@@ -59,7 +59,7 @@ describe("TaskCreateForm", () => {
         const keywordInput = wrapper.find('[data-test="keyword-input"]');
         await keywordInput.setValue("RAG");
         await keywordInput.trigger("keydown.enter");
-        await wrapper.find("form").trigger("submit");
+        await wrapper.find('[data-test="submit"]').trigger("click");
 
         expect(wrapper.emitted("submit")).toBeUndefined();
         expect(wrapper.find('[data-test="validation-error"]').text()).toContain(
@@ -72,7 +72,7 @@ describe("TaskCreateForm", () => {
         await wrapper
             .find('[data-test="topic"]')
             .setValue("检索增强生成系统综述");
-        await wrapper.find("form").trigger("submit");
+        await wrapper.find('[data-test="submit"]').trigger("click");
         expect(wrapper.emitted("submit")).toBeUndefined();
         expect(wrapper.find('[data-test="validation-error"]').text()).toContain(
             "关键词",
@@ -84,7 +84,7 @@ describe("TaskCreateForm", () => {
             await input.setValue(`关键词${index}`);
             await input.trigger("keydown.enter");
         }
-        await wrapper.find("form").trigger("submit");
+        await wrapper.find('[data-test="submit"]').trigger("click");
 
         expect(wrapper.emitted("submit")).toBeUndefined();
         expect(wrapper.find('[data-test="validation-error"]').text()).toContain(
@@ -96,11 +96,11 @@ describe("TaskCreateForm", () => {
         const wrapper = mountForm();
         await fillValidForm(wrapper);
         await wrapper.find('[data-test="max-documents"]').setValue("0");
-        await wrapper.find("form").trigger("submit");
+        await wrapper.find('[data-test="submit"]').trigger("click");
         expect(wrapper.emitted("submit")).toBeUndefined();
 
         await wrapper.find('[data-test="max-documents"]').setValue("51");
-        await wrapper.find("form").trigger("submit");
+        await wrapper.find('[data-test="submit"]').trigger("click");
         expect(wrapper.emitted("submit")).toBeUndefined();
         expect(wrapper.find('[data-test="validation-error"]').text()).toContain(
             "文献数",
@@ -112,7 +112,7 @@ describe("TaskCreateForm", () => {
         await fillValidForm(wrapper);
         await wrapper.find('[data-test="date-from"]').setValue("2026-05-01");
         await wrapper.find('[data-test="date-to"]').setValue("2026-01-01");
-        await wrapper.find("form").trigger("submit");
+        await wrapper.find('[data-test="submit"]').trigger("click");
 
         expect(wrapper.emitted("submit")).toBeUndefined();
         expect(wrapper.find('[data-test="validation-error"]').text()).toContain(
@@ -135,7 +135,7 @@ describe("TaskCreateForm", () => {
         await wrapper.find('[data-test="style-apa"]').trigger("click");
         await wrapper.find('[data-test="offline"]').setValue(true);
         await wrapper.find('[data-test="doc-doc-1"]').setValue(true);
-        await wrapper.find("form").trigger("submit");
+        await wrapper.find('[data-test="submit"]').trigger("click");
 
         const emitted = wrapper.emitted("submit");
         expect(emitted).toHaveLength(1);
@@ -206,7 +206,7 @@ describe("TaskCreateForm", () => {
         expect(select.text()).toContain("我的国标样式");
 
         await fillValidForm(wrapper);
-        await wrapper.find("form").trigger("submit");
+        await wrapper.find('[data-test="submit"]').trigger("click");
 
         expect(wrapper.emitted("submit")?.[0][0]).toMatchObject({
             citation_style: "gbt7714-2025-numeric",
@@ -233,7 +233,7 @@ describe("TaskCreateForm", () => {
 
         await wrapper.find('[data-test="style-select"]').setValue("my-style");
         await fillValidForm(wrapper);
-        await wrapper.find("form").trigger("submit");
+        await wrapper.find('[data-test="submit"]').trigger("click");
 
         expect(wrapper.emitted("submit")?.[0][0]).toMatchObject({
             citation_style: "my-style",
@@ -251,7 +251,7 @@ describe("TaskCreateForm", () => {
         expect(wrapper.find('[data-test="style-apa"]').exists()).toBe(true);
 
         await fillValidForm(wrapper);
-        await wrapper.find("form").trigger("submit");
+        await wrapper.find('[data-test="submit"]').trigger("click");
 
         expect(wrapper.emitted("submit")?.[0][0]).toMatchObject({
             citation_style: "gbt7714",
@@ -270,7 +270,7 @@ describe("TaskCreateForm · 引用核验开关", () => {
         expect((checkbox.element as HTMLInputElement).checked).toBe(false);
 
         await fillValidForm(wrapper);
-        await wrapper.find("form").trigger("submit");
+        await wrapper.find('[data-test="submit"]').trigger("click");
 
         expect(wrapper.emitted("submit")?.[0][0]).toMatchObject({
             verify_references: false,
@@ -281,7 +281,7 @@ describe("TaskCreateForm · 引用核验开关", () => {
         const wrapper = mountForm();
         await wrapper.find('[data-test="verify-references"]').setValue(true);
         await fillValidForm(wrapper);
-        await wrapper.find("form").trigger("submit");
+        await wrapper.find('[data-test="submit"]').trigger("click");
 
         expect(wrapper.emitted("submit")?.[0][0]).toMatchObject({
             verify_references: true,
@@ -443,7 +443,7 @@ describe("TaskCreateForm 引用库文献源", () => {
             .find('[data-test="keyword-input"]')
             .trigger("keydown.enter");
         await wrapper.find('[data-test="reference-library"]').setValue(true);
-        await wrapper.find("form").trigger("submit");
+        await wrapper.find('[data-test="submit"]').trigger("click");
 
         const payload = wrapper.emitted("submit")?.[0]?.[0] as Record<
             string,
@@ -463,7 +463,7 @@ describe("TaskCreateForm 引用库文献源", () => {
         await wrapper
             .find('[data-test="keyword-input"]')
             .trigger("keydown.enter");
-        await wrapper.find("form").trigger("submit");
+        await wrapper.find('[data-test="submit"]').trigger("click");
 
         const payload = wrapper.emitted("submit")?.[0]?.[0] as Record<
             string,
@@ -529,7 +529,7 @@ describe("TaskCreateForm 引用库文献源", () => {
         // 显式二选一：先切到「自带模型」再选凭据
         await wrapper.find('[data-test="model-source-byok"]').trigger("click");
         await wrapper.find('[data-test="model-select"]').setValue("cred-1");
-        await wrapper.find("form").trigger("submit");
+        await wrapper.find('[data-test="submit"]').trigger("click");
 
         const payload = wrapper.emitted("submit")?.[0]?.[0] as Record<
             string,
@@ -542,7 +542,7 @@ describe("TaskCreateForm 引用库文献源", () => {
         const wrapper = mountForm();
         await flushPromises();
         await fillValidForm(wrapper);
-        await wrapper.find("form").trigger("submit");
+        await wrapper.find('[data-test="submit"]').trigger("click");
 
         const payload = wrapper.emitted("submit")?.[0]?.[0] as Record<
             string,
@@ -663,7 +663,7 @@ describe("TaskCreateForm 默认模型", () => {
         await wrapper
             .find('[data-test="model-source-platform"]')
             .trigger("click");
-        await wrapper.find("form").trigger("submit");
+        await wrapper.find('[data-test="submit"]').trigger("click");
 
         const payload = wrapper.emitted("submit")?.[0]?.[0] as Record<
             string,
@@ -681,7 +681,7 @@ describe("TaskCreateForm 默认模型", () => {
         await flushPromises();
         await fillValidForm(wrapper);
         await wrapper.find('[data-test="model-source-byok"]').trigger("click");
-        await wrapper.find("form").trigger("submit");
+        await wrapper.find('[data-test="submit"]').trigger("click");
 
         const banner = wrapper.find('[data-test="validation-error"]');
         expect(banner.exists()).toBe(true);
@@ -725,7 +725,7 @@ describe("TaskCreateForm 默认模型", () => {
         );
 
         await fillValidForm(wrapper);
-        await wrapper.find("form").trigger("submit");
+        await wrapper.find('[data-test="submit"]').trigger("click");
 
         expect(wrapper.emitted("submit")?.[0][0]).toMatchObject({
             workflow_preset: "research_gaps",
@@ -746,7 +746,7 @@ describe("TaskCreateForm 默认模型", () => {
         expect(wrapper.find('[data-test="keyword-input"]').exists()).toBe(false);
 
         // 草稿与知识库均为空 → 拦截
-        await wrapper.find("form").trigger("submit");
+        await wrapper.find('[data-test="submit"]').trigger("click");
         expect(wrapper.emitted("submit")).toBeUndefined();
         expect(wrapper.find('[data-test="validation-error"]').text()).toContain(
             "待核验草稿",
@@ -757,7 +757,7 @@ describe("TaskCreateForm 默认模型", () => {
             .find('[data-test="draft-text"]')
             .setValue("检索增强生成显著降低了事实错误 [E1]。\n\n## 参考文献\n- [1] RAG 2020");
         await wrapper.find('[data-test="doc-doc-1"]').setValue(true);
-        await wrapper.find("form").trigger("submit");
+        await wrapper.find('[data-test="submit"]').trigger("click");
 
         expect(wrapper.emitted("submit")?.[0][0]).toMatchObject({
             workflow_preset: "verify_citations",
@@ -786,7 +786,7 @@ describe("TaskCreateForm 默认模型", () => {
         await wrapper
             .find('[data-test="snowball-dir-forward"]')
             .trigger("click");
-        await wrapper.find("form").trigger("submit");
+        await wrapper.find('[data-test="submit"]').trigger("click");
 
         expect(wrapper.emitted("submit")?.[0][0]).toMatchObject({
             workflow_preset: "citation_snowballing",
@@ -820,6 +820,9 @@ describe("TaskCreateForm 默认模型", () => {
         expect((keywordInput.element as HTMLInputElement).value).toBe("");
         // 提交按钮必须为 type="button"（彻底关闭多字段表单的浏览器隐式回车提交）
         expect(wrapper.find('[data-test="submit"]').attributes("type")).toBe("button");
+        // 即使外层 form 收到原生 submit 事件也不得误触提交（只有显式点击提交按钮才提交）
+        await wrapper.find("form").trigger("submit");
+        expect(wrapper.emitted("submit")).toBeUndefined();
 
         // 显式点击「创建任务」按钮仍可正常提交
         await wrapper.find('[data-test="submit"]').trigger("click");

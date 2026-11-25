@@ -405,7 +405,7 @@ function handleSubmit() {
     <Card
         as="form"
         class="max-w-3xl gap-4 p-4"
-        @submit.prevent="handleSubmit"
+        @submit.prevent
         @keydown="onFormKeydown"
     >
         <div class="grid gap-1.5">
