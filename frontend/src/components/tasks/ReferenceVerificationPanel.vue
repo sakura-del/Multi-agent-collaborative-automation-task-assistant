@@ -67,6 +67,16 @@ function retractionLabel(value: boolean | null | undefined): string {
   return "撤稿状态未知";
 }
 
+function retractionTitle(value: boolean | null | undefined): string {
+  if (value === true) {
+    return "该文献在检索库中已被标记为撤稿";
+  }
+  if (value === false) {
+    return "仅表示当前检索库暂无撤稿记录，不代表绝对安全";
+  }
+  return "尚未获取到撤稿元数据";
+}
+
 const counts = computed(() =>
   VERDICT_ORDER.map((verdict) => ({
     verdict,
@@ -177,12 +187,16 @@ const qualityCounts = computed(() => {
           <Badge
             v-if="entry.verification_status"
             :variant="entry.is_retracted === true ? 'destructive' : 'muted'"
+            :title="retractionTitle(entry.is_retracted)"
             :data-test="`bibliography-retraction-${entry.index}`"
           >
             {{ retractionLabel(entry.is_retracted) }}
           </Badge>
         </li>
       </ol>
+      <p class="text-[11px] leading-relaxed text-muted-foreground">
+        注：「未标记撤稿」仅表示当前检索库暂无撤稿记录，不代表绝对安全；「撤稿状态未知」表示尚未获取到撤稿元数据。
+      </p>
     </template>
 
     <!-- 空态：绝不能显示「已验证 0 条」这类误导数字（离线演示任务默认不做核验） -->

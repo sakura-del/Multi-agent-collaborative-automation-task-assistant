@@ -18,8 +18,11 @@ export interface TaskEventSessionDeps {
   maxFailures?: number;
 }
 
+export type TaskEventConnectionState = "connected" | "reconnecting" | "polling";
+
 export interface TaskEventHandlers {
   onSnapshot?: (snapshot: unknown) => void;
+  onConnectionChange?: (state: TaskEventConnectionState, attempt?: number) => void;
 }
 
 export interface TaskEventSession {
@@ -91,6 +94,7 @@ export function createTaskEventSession(deps: TaskEventSessionDeps): TaskEventSes
     if (pollTimer !== null || stopped) {
       return;
     }
+    handlers.onConnectionChange?.("polling");
     pollTimer = setInterval(() => {
       void replayMissed().catch(() => undefined);
     }, pollIntervalMs);
@@ -105,6 +109,7 @@ export function createTaskEventSession(deps: TaskEventSessionDeps): TaskEventSes
       startPolling();
       return;
     }
+    handlers.onConnectionChange?.("reconnecting", failures);
     const delay = baseDelayMs * 3 ** (failures - 1);
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
@@ -127,6 +132,7 @@ export function createTaskEventSession(deps: TaskEventSessionDeps): TaskEventSes
     socket = current;
     current.onopen = () => {
       failures = 0;
+      handlers.onConnectionChange?.("connected");
     };
     current.onmessage = (message: { data: string }) => {
       try {
@@ -179,6 +185,8 @@ export function createTaskEventSession(deps: TaskEventSessionDeps): TaskEventSes
       socket = null;
     }
     taskId = null;
+    handlers = {};
+    failures = 0;
   }
 
   return { start, stop };

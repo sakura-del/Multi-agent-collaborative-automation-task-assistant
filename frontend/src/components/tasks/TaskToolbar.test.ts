@@ -44,12 +44,20 @@ describe("TaskToolbar", () => {
     expect(wrapper.emitted("command")).toEqual([[{ command: "retry_node", node_id: "n2" }]]);
   });
 
-  it("confirms before cancelling", async () => {
+  it("confirms before cancelling and supports aborting cancel", async () => {
     const wrapper = mount(TaskToolbar, { props: { status: "running" } });
 
     await wrapper.find('[data-test="control-cancel"]').trigger("click");
     expect(wrapper.emitted("command")).toBeUndefined();
+    expect(wrapper.find('[data-test="control-cancel-abort"]').exists()).toBe(true);
 
+    // 点取消收起确认条，不触发终止
+    await wrapper.find('[data-test="control-cancel-abort"]').trigger("click");
+    expect(wrapper.emitted("command")).toBeUndefined();
+    expect(wrapper.find('[data-test="control-cancel-abort"]').exists()).toBe(false);
+
+    // 再次触发终止并确认
+    await wrapper.find('[data-test="control-cancel"]').trigger("click");
     await wrapper.find('[data-test="control-cancel"]').trigger("click");
     expect(wrapper.emitted("command")).toEqual([[{ command: "cancel" }]]);
   });
@@ -57,6 +65,7 @@ describe("TaskToolbar", () => {
   it("validates the required text before supplying input", async () => {
     const wrapper = mount(TaskToolbar, {
       props: { status: "waiting_human", selectedNodeId: "n3", selectedNodeStatus: "waiting_human" },
+      global: { stubs: { Teleport: true } },
     });
 
     await wrapper.find('[data-test="control-supply-input"]').trigger("click");
@@ -84,10 +93,12 @@ describe("TaskLog", () => {
     });
 
     const row = wrapper.find('[data-test="log-row-1"]');
-    expect(row.text()).toContain("subtask_state_transition");
-    expect(row.text()).toContain("running");
+    expect(row.text()).toContain("子任务状态流转");
+    expect(row.text()).toContain("执行中");
     expect(row.text()).toContain("<b>hi</b>"); // 文本插值，不解析为 HTML
     expect(row.find("b").exists()).toBe(false);
+    expect(row.classes()).toContain("[content-visibility:auto]");
+    expect(wrapper.find('[data-test="log-filter-level"]').text()).toContain("信息");
   });
 
   it("filters by agent, node and level", async () => {
@@ -114,5 +125,19 @@ describe("TaskLog", () => {
     await wrapper.find('[aria-label="下一页"]').trigger("click");
     expect(wrapper.find('[data-test="log-page"]').text()).toContain("2 / 2");
     expect(wrapper.findAll('[data-test^="log-row-"]')).toHaveLength(30);
+  });
+
+  it("筛选无结果时展示「清除筛选」按钮并可一键重置", async () => {
+    const events = [event(1, { payload: { agent_type: "executor", node_id: "n1", level: "info" } })];
+    const wrapper = mount(TaskLog, { props: { events } });
+
+    await wrapper.find('[data-test="log-filter-level"]').setValue("error");
+    expect(wrapper.findAll('[data-test^="log-row-"]')).toHaveLength(0);
+    const resetBtn = wrapper.find('[data-test="log-reset-filters"]');
+    expect(resetBtn.exists()).toBe(true);
+
+    await resetBtn.trigger("click");
+    expect(wrapper.findAll('[data-test^="log-row-"]')).toHaveLength(1);
+    expect(wrapper.find('[data-test="log-reset-filters"]').exists()).toBe(false);
   });
 });

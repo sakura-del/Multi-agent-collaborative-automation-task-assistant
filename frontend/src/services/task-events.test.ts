@@ -245,4 +245,37 @@ describe("task event session", () => {
     expect(FakeWebSocket.instances[0].url.startsWith("wss://")).toBe(true);
     session.stop();
   });
+
+  it("emits onConnectionChange transitions across connected, reconnecting and polling", async () => {
+    const { deps } = buildDeps();
+    const session = createTaskEventSession(deps);
+    const onConnectionChange = vi.fn();
+
+    await session.start("task-1", 0, vi.fn(), { onConnectionChange });
+    FakeWebSocket.instances[0].onopen?.();
+    expect(onConnectionChange).toHaveBeenLastCalledWith("connected");
+
+    // 第 1 次断线重连
+    FakeWebSocket.instances[0].serverClose();
+    expect(onConnectionChange).toHaveBeenLastCalledWith("reconnecting", 1);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    FakeWebSocket.instances[1].serverClose();
+    expect(onConnectionChange).toHaveBeenLastCalledWith("reconnecting", 2);
+
+    await vi.advanceTimersByTimeAsync(3000);
+    FakeWebSocket.instances[2].serverClose();
+    expect(onConnectionChange).toHaveBeenLastCalledWith("reconnecting", 3);
+
+    await vi.advanceTimersByTimeAsync(9000);
+    // 第 4 次失败超过 maxFailures=3，降级为 polling
+    FakeWebSocket.instances[3].serverClose();
+    expect(onConnectionChange).toHaveBeenLastCalledWith("polling");
+
+    // stop() 后清零 handlers，后续残留关闭不得再触发回调
+    const callsBeforeStop = onConnectionChange.mock.calls.length;
+    session.stop();
+    FakeWebSocket.instances[3].onclose?.();
+    expect(onConnectionChange.mock.calls.length).toBe(callsBeforeStop);
+  });
 });

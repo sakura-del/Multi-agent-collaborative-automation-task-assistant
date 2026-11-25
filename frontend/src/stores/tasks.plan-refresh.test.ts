@@ -39,7 +39,10 @@ const startSpy = vi.fn(
     _taskId: string,
     _after: number,
     _onEvent: (event: TaskEvent) => void,
-    _handlers?: { onSnapshot?: (snapshot: unknown) => void }
+    _handlers?: {
+      onSnapshot?: (snapshot: unknown) => void;
+      onConnectionChange?: (state: "connected" | "reconnecting" | "polling", attempt?: number) => void;
+    }
   ) => undefined
 );
 const stopSpy = vi.fn();

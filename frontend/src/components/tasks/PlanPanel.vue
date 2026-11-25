@@ -48,7 +48,13 @@ const props = withDefaults(
   }
 );
 
-const emit = defineEmits<{ approve: [version: number]; regenerate: []; retry: [stepId: string] }>();
+const emit = defineEmits<{
+  approve: [version: number];
+  regenerate: [];
+  retry: [stepId: string];
+  dismissError: [];
+  dismissConflict: [];
+}>();
 
 /** 不可确认规划时按真实执行阶段给出准确说明，避免已完成任务误报「已暂停在执行阶段」（Issue #55）。 */
 const approveHint = computed(() => {
@@ -69,8 +75,16 @@ const approveHint = computed(() => {
 
 <template>
   <section class="flex flex-col gap-4" data-test="plan-panel">
-    <ErrorBanner :message="props.conflict" testid="plan-conflict" />
-    <ErrorBanner :message="props.error" testid="plan-error" />
+    <ErrorBanner
+      :message="props.conflict"
+      testid="plan-conflict"
+      @dismiss="emit('dismissConflict')"
+    />
+    <ErrorBanner
+      :message="props.error"
+      testid="plan-error"
+      @dismiss="emit('dismissError')"
+    />
 
     <template v-if="props.plan">
       <header class="flex flex-wrap items-start justify-between gap-3">
@@ -138,7 +152,7 @@ const approveHint = computed(() => {
       </div>
 
       <section class="flex flex-col gap-2">
-        <h3 class="text-sm font-medium">执行计划（beUI Agent Plan）</h3>
+        <h3 class="text-sm font-medium">执行计划</h3>
         <BeAgentPlan
           :title="props.plan.topic"
           :steps="props.steps ?? []"
@@ -148,7 +162,7 @@ const approveHint = computed(() => {
           :show-actions="false"
           @retry="emit('retry', $event)"
         />
-        <details class="mt-1">
+        <details class="mt-1 rounded-lg border border-border/70 bg-card/50 px-3 py-2">
           <summary class="cursor-pointer text-xs text-muted-foreground">查看经典 DAG 视图</summary>
           <div class="mt-2">
             <TaskDag :nodes="props.plan.nodes" />

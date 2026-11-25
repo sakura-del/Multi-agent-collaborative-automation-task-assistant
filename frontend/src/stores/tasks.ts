@@ -2,7 +2,11 @@ import { ref } from "vue";
 import { defineStore } from "pinia";
 
 import { taskApi } from "@/api/tasks";
-import { createTaskEventSession, type TaskEventSession } from "@/services/task-events";
+import {
+  createTaskEventSession,
+  type TaskEventConnectionState,
+  type TaskEventSession,
+} from "@/services/task-events";
 import type { TaskCounts, TaskStatusGroup } from "@/api/tasks";
 import type {
   TaskControl,
@@ -21,6 +25,7 @@ export const useTaskStore = defineStore("tasks", () => {
   const events = ref<TaskEvent[]>([]);
   const lastEventId = ref(0);
   const watching = ref(false);
+  const connectionState = ref<TaskEventConnectionState>("connected");
   const listLoading = ref(false);
   /** 服务端分页：每页条数与后端默认 limit 保持一致。 */
   const PAGE_SIZE = 20;
@@ -286,6 +291,9 @@ export const useTaskStore = defineStore("tasks", () => {
             snapshot.value = { ...(snapshot.value ?? next), ...next };
           }
         },
+        onConnectionChange: (state) => {
+          connectionState.value = state;
+        },
       })
       .catch(() => undefined);
   }
@@ -295,6 +303,7 @@ export const useTaskStore = defineStore("tasks", () => {
     session = null;
     watching.value = false;
     watchedTaskId = null;
+    connectionState.value = "connected";
   }
 
   return {
@@ -303,6 +312,7 @@ export const useTaskStore = defineStore("tasks", () => {
     events,
     lastEventId,
     watching,
+    connectionState,
     listLoading,
     detailLoading,
     PAGE_SIZE,

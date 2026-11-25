@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import {
-  CircleAlert,
   MessageSquarePlus,
   Pause,
   Play,
@@ -9,9 +8,10 @@ import {
   Square,
 } from "lucide-vue-next";
 
-import { Alert } from "@/components/ui/alert";
-import { Card } from "@/components/ui/card";
+import ConfirmBar from "@/components/common/ConfirmBar.vue";
+import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import { Button } from "@/components/ui/button";
+import { MotionDialog } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import type { SubtaskStatus, TaskControl, TaskStatus } from "@/api/types";
 
@@ -52,11 +52,7 @@ function send(payload: TaskControl) {
   emit("command", payload);
 }
 
-function requestCancel() {
-  if (!confirmingCancel.value) {
-    confirmingCancel.value = true;
-    return;
-  }
+function confirmCancel() {
   confirmingCancel.value = false;
   send({ command: "cancel" });
 }
@@ -129,28 +125,38 @@ function submitSupplyInput() {
     </Button>
 
     <Button
-      v-if="canCancel"
+      v-if="canCancel && !confirmingCancel"
       variant="destructive"
       size="sm"
       data-test="control-cancel"
       type="button"
       :disabled="busy"
-      @click="requestCancel"
+      @click="confirmingCancel = true"
     >
-      <Square :size="15" aria-hidden="true" /> {{ confirmingCancel ? "确认取消？" : "取消" }}
-    </Button>
-    <Button
-      v-if="confirmingCancel"
-      variant="ghost"
-      size="sm"
-      data-test="control-cancel-abort"
-      type="button"
-      @click="confirmingCancel = false"
-    >
-      放弃
+      <Square :size="15" aria-hidden="true" /> 终止任务
     </Button>
 
-    <Card v-if="supplyingInput" class="basis-full p-3" data-test="supply-input-modal">
+    <ConfirmBar
+      v-if="canCancel && confirmingCancel"
+      class="basis-full"
+      title="确认终止当前任务？"
+      consequence="终止后任务无法恢复，已消耗的检索与生成配额不会退还。"
+      confirm-label="终止任务"
+      cancel-label="取消"
+      confirm-testid="control-cancel"
+      cancel-testid="control-cancel-abort"
+      :loading="busy"
+      @confirm="confirmCancel"
+      @cancel="confirmingCancel = false"
+    />
+
+    <MotionDialog
+      v-model:open="supplyingInput"
+      title="补充任务输入"
+      aria-label="补充任务输入"
+      initial-focus="#supply-input"
+      :panel-attrs="{ 'data-test': 'supply-input-modal', class: 'p-4' }"
+    >
       <div class="grid gap-1.5">
         <Label for="supply-input">补充内容（必填）</Label>
         <textarea
@@ -158,14 +164,14 @@ function submitSupplyInput() {
           v-model="supplyText"
           data-test="supply-input-text"
           rows="3"
+          placeholder="输入需要补充的背景、约束或文献线索（Ctrl/Cmd + Enter 提交）"
           class="w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+          @keydown.ctrl.enter.prevent="submitSupplyInput"
+          @keydown.meta.enter.prevent="submitSupplyInput"
         />
       </div>
-      <Alert v-if="supplyError" variant="destructive" class="mt-2">
-        <CircleAlert />
-        <span>{{ supplyError }}</span>
-      </Alert>
-      <div class="mt-2 flex justify-end gap-1.5">
+      <ErrorBanner :message="supplyError" class="mt-2" @dismiss="supplyError = null" />
+      <div class="mt-3 flex justify-end gap-1.5">
         <Button variant="ghost" size="sm" type="button" @click="supplyingInput = false">
           取消
         </Button>
@@ -178,6 +184,6 @@ function submitSupplyInput() {
           提交
         </Button>
       </div>
-    </Card>
+    </MotionDialog>
   </div>
 </template>

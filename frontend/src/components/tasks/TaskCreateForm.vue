@@ -1,12 +1,16 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
-import { X } from "lucide-vue-next";
+import { computed, inject, nextTick, onMounted, ref, watch } from "vue";
+import { routerKey } from "vue-router";
+import { ChevronDown, Plus, X } from "lucide-vue-next";
+import { useReducedMotion } from "motion-v";
 
+import AnimatedCollapse from "@/components/common/AnimatedCollapse.vue";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
+import { toastInfo, toastWarning } from "@/lib/toast";
 import { listCitationStyles } from "@/api/citation-styles";
 import { listLLMCredentials } from "@/api/llm-credentials";
 import { getLibrarySummary } from "@/api/reference-library";
@@ -33,7 +37,7 @@ const props = withDefaults(
     { pending: false, error: null, documents: () => [] },
 );
 
-const emit = defineEmits<{ submit: [payload: TaskCreate] }>();
+const emit = defineEmits<{ submit: [payload: TaskCreate]; dismissError: [] }>();
 
 const TOPIC_MIN = 5;
 const TOPIC_MAX = 200;
@@ -93,6 +97,24 @@ function selectPreset(presetId: WorkflowPreset) {
 }
 const selectedDocuments = ref<string[]>([]);
 const validationMessages = ref<string[]>([]);
+const validationErrorFields = ref<Set<string>>(new Set());
+const advancedOpen = ref(false);
+const reduced = useReducedMotion();
+const optionalRouter = inject(routerKey, null);
+
+const ERROR_RING_CLASS =
+    "border-destructive ring-2 ring-destructive/20 transition-[border-color,box-shadow] duration-150";
+
+/** 安全导航：无 Vue Router 实例的单测环境下退回浏览器原生跳转 */
+function goTo(path: string) {
+    if (optionalRouter) {
+        void optionalRouter.push(path);
+    } else {
+        window.location.assign(path);
+    }
+}
+
+const MAX_DOC_PRESETS = [5, 10, 20] as const;
 
 // BYOK（Issue #15）：显式二选一——「平台模型」还是「自带模型」。
 // 2026-11-17 用户要求：选择必须摆在明面上，不能藏在下拉第一项里。
@@ -182,11 +204,46 @@ onMounted(async () => {
     }
 });
 
-// 勾选「使用我的引用库」时，若当前文献数大于引用库可用条数，自动同步到可用条数（Issue #58）
+// 勾选「使用我的引用库」时，互斥清空离线演示语料，并同步可用条数（Issue #58 / UX-P1-03）
 watch([useReferenceLibrary, libraryCount], ([enabled, count]) => {
+    if (enabled) {
+        offlineDataset.value = false;
+    }
     if (enabled && count !== null && count > 0 && Number(maxDocuments.value) > count) {
         maxDocuments.value = count;
     }
+});
+
+/** 失焦时对文献数做安全夹紧，避免打断正在输入或拦截测试边界断言 */
+function clampMaxDocuments() {
+    const raw = Number(maxDocuments.value);
+    if (!Number.isFinite(raw)) {
+        maxDocuments.value = activePreset.value.defaults.maxDocuments;
+        toastInfo("文献数已恢复为预设值");
+        return;
+    }
+    const clamped = Math.min(DOC_MAX, Math.max(DOC_MIN, Math.round(raw)));
+    if (clamped !== raw) {
+        maxDocuments.value = clamped;
+        toastInfo(`文献数已调整至 ${DOC_MIN}–${DOC_MAX} 之间`);
+    }
+}
+
+/** 高级设置摘要标签：展示当前非显性默认值 */
+const advancedSummary = computed(() => {
+    const langLabel = language.value === "zh" ? "中文" : "英文";
+    const styleTitle =
+        styleOptions.value?.find((item) => item.style_id === citationStyle.value)
+            ?.title ??
+        BUILT_IN_STYLES.find((item) => item.style_id === citationStyle.value)
+            ?.title ??
+        citationStyle.value;
+    const verifyLabel = verifyReferences.value ? "已开启引用核验" : "未开启引用核验";
+    const dateLabel =
+        dateFrom.value || dateTo.value
+            ? ` · ${dateFrom.value || "不限"} ~ ${dateTo.value || "至今"}`
+            : "";
+    return `${langLabel} · ${styleTitle} · ${verifyLabel}${dateLabel}`;
 });
 
 function isEnterKey(event: KeyboardEvent): boolean {
@@ -220,15 +277,45 @@ function onFormKeydown(event: KeyboardEvent) {
     }
 }
 
+/** 将批量输入按常见逗号/分号拆分、去空白并保序去重 */
+function splitBatchInput(raw: string): string[] {
+    const seen = new Set<string>();
+    const items: string[] = [];
+    for (const part of raw.split(/[,，;；]+/)) {
+        const trimmed = part.trim();
+        if (trimmed && !seen.has(trimmed)) {
+            seen.add(trimmed);
+            items.push(trimmed);
+        }
+    }
+    return items;
+}
+
+/** 合并已有条目列表与未失焦草稿拆分结果（保序去重） */
+function mergeBatchItems(existing: string[], draft: string): string[] {
+    const seen = new Set(existing);
+    const next = [...existing];
+    for (const part of splitBatchInput(draft)) {
+        if (!seen.has(part)) {
+            seen.add(part);
+            next.push(part);
+        }
+    }
+    return next;
+}
+
 function addKeyword() {
-    const value = keywordDraft.value.trim().replace(/,$/, "");
-    if (!value) {
+    const parts = splitBatchInput(keywordDraft.value);
+    if (!parts.length) {
+        keywordDraft.value = "";
         return;
     }
-    if (!keywords.value.includes(value)) {
-        keywords.value = [...keywords.value, value];
-    }
+    const next = mergeBatchItems(keywords.value, keywordDraft.value);
+    keywords.value = next;
     keywordDraft.value = "";
+    if (next.length > KEYWORD_MAX) {
+        toastWarning(`关键词最多 ${KEYWORD_MAX} 个，请删减超出部分`);
+    }
 }
 
 function removeKeyword(keyword: string) {
@@ -236,14 +323,26 @@ function removeKeyword(keyword: string) {
 }
 
 function addSeedDoi() {
-    const value = seedDraft.value.trim().replace(/,$/, "");
-    if (!value) {
+    const parts = splitBatchInput(seedDraft.value);
+    if (!parts.length) {
+        seedDraft.value = "";
         return;
     }
-    if (seedDois.value.length < SEED_MAX && !seedDois.value.includes(value)) {
-        seedDois.value = [...seedDois.value, value];
+    const next = [...seedDois.value];
+    let truncated = false;
+    for (const part of parts) {
+        if (next.includes(part)) continue;
+        if (next.length >= SEED_MAX) {
+            truncated = true;
+            break;
+        }
+        next.push(part);
     }
+    seedDois.value = next;
     seedDraft.value = "";
+    if (truncated) {
+        toastWarning(`种子论文最多 ${SEED_MAX} 篇，已截断超出部分`);
+    }
 }
 
 function removeSeedDoi(seed: string) {
@@ -256,53 +355,65 @@ function toggleDocument(id: string, checked: boolean) {
         : selectedDocuments.value.filter((item) => item !== id);
 }
 
-function validate(): string[] {
+const FIELD_SELECTORS: Record<string, string> = {
+    topic: '[data-test="topic"]',
+    draft: '[data-test="draft-text"]',
+    keyword: '[data-test="keyword-input"]',
+    seed: '[data-test="seed-doi-input"]',
+    maxDocuments: '[data-test="max-documents"]',
+    dateRange: '[data-test="date-to"]',
+    model: '[data-test="model-select"]',
+};
+
+function validate(): { messages: string[]; fields: Set<string>; firstField: string | null } {
     const messages: string[] = [];
+    const fields = new Set<string>();
+    let firstField: string | null = null;
+    const mark = (field: string, message: string) => {
+        messages.push(message);
+        fields.add(field);
+        if (!firstField) firstField = field;
+    };
+
     if (isVerifyCitations.value) {
         const trimmedDraft = draftText.value.trim();
         if (!trimmedDraft && selectedDocuments.value.length === 0) {
-            messages.push("验证引用模式请粘贴待核验草稿，或至少勾选一篇知识库文档");
+            mark("draft", "验证引用模式请粘贴待核验草稿，或至少勾选一篇知识库文档");
         }
         const trimmedTopic = topic.value.trim();
         if (
             trimmedTopic &&
             (trimmedTopic.length < TOPIC_MIN || trimmedTopic.length > TOPIC_MAX)
         ) {
-            messages.push(`主题需为 ${TOPIC_MIN}–${TOPIC_MAX} 个字符`);
+            mark("topic", `主题需为 ${TOPIC_MIN}–${TOPIC_MAX} 个字符`);
         }
         if (selectedDocuments.value.length > DOC_MAX) {
             messages.push(`最多选择 ${DOC_MAX} 篇知识库文档`);
         }
         if (modelSource.value === "byok" && !selectedCredentialInfo.value) {
-            messages.push("已选择自带模型，请从列表中选出一把可用凭据");
+            mark("model", "已选择自带模型，请从列表中选出一把可用凭据");
         }
-        return messages;
+        return { messages, fields, firstField };
     }
 
     const trimmedTopic = topic.value.trim();
     if (trimmedTopic.length < TOPIC_MIN || trimmedTopic.length > TOPIC_MAX) {
-        messages.push(`主题需为 ${TOPIC_MIN}–${TOPIC_MAX} 个字符`);
+        mark("topic", `主题需为 ${TOPIC_MIN}–${TOPIC_MAX} 个字符`);
     }
-    const pendingKeyword = keywordDraft.value.trim();
-    const effectiveKeywords = pendingKeyword
-        ? [...new Set([...keywords.value, pendingKeyword])]
-        : keywords.value;
-    const pendingSeed = seedDraft.value.trim();
-    const effectiveSeeds = pendingSeed
-        ? [...new Set([...seedDois.value, pendingSeed])]
-        : seedDois.value;
+    const effectiveKeywords = mergeBatchItems(keywords.value, keywordDraft.value);
+    const effectiveSeeds = mergeBatchItems(seedDois.value, seedDraft.value);
     if (isCitationSnowballing.value) {
         if (effectiveSeeds.length > SEED_MAX) {
-            messages.push(`种子论文最多 ${SEED_MAX} 篇`);
+            mark("seed", `种子论文最多 ${SEED_MAX} 篇`);
         }
         if (effectiveKeywords.length < 1 && effectiveSeeds.length < 1) {
-            messages.push("关键词或种子论文至少填写 1 项");
+            mark("keyword", "关键词或种子论文至少填写 1 项");
         }
     } else if (effectiveKeywords.length < 1) {
-        messages.push("关键词至少 1 个");
+        mark("keyword", "关键词至少 1 个");
     }
     if (effectiveKeywords.length > KEYWORD_MAX) {
-        messages.push(`关键词最多 ${KEYWORD_MAX} 个`);
+        mark("keyword", `关键词最多 ${KEYWORD_MAX} 个`);
     }
     const documents = Number(maxDocuments.value);
     if (
@@ -310,19 +421,19 @@ function validate(): string[] {
         documents < DOC_MIN ||
         documents > DOC_MAX
     ) {
-        messages.push(`文献数需在 ${DOC_MIN}–${DOC_MAX} 之间`);
+        mark("maxDocuments", `文献数需在 ${DOC_MIN}–${DOC_MAX} 之间`);
     }
     if (dateFrom.value && dateTo.value && dateFrom.value > dateTo.value) {
-        messages.push("起始日期不能晚于结束日期");
+        mark("dateRange", "起始日期不能晚于结束日期");
     }
     if (selectedDocuments.value.length > DOC_MAX) {
         messages.push(`最多选择 ${DOC_MAX} 篇知识库文档`);
     }
     // 显式选了「自带模型」就必须选到具体一把：不让它静默回退平台（违背 BYOK 原则）
     if (modelSource.value === "byok" && !selectedCredentialInfo.value) {
-        messages.push("已选择自带模型，请从列表中选出一把可用凭据");
+        mark("model", "已选择自带模型，请从列表中选出一把可用凭据");
     }
-    return messages;
+    return { messages, fields, firstField };
 }
 
 function resolveVerifyTopic(): string {
@@ -341,10 +452,26 @@ function resolveVerifyTopic(): string {
     return "草稿引用核验任务";
 }
 
-function handleSubmit() {
-    const messages = validate();
-    validationMessages.value = messages;
-    if (messages.length > 0) {
+async function handleSubmit() {
+    const result = validate();
+    validationMessages.value = result.messages;
+    validationErrorFields.value = result.fields;
+    if (result.messages.length > 0) {
+        if (result.firstField === "dateRange" && !advancedOpen.value) {
+            advancedOpen.value = true;
+        }
+        await nextTick();
+        if (result.firstField) {
+            const selector = FIELD_SELECTORS[result.firstField];
+            const el = selector ? (document.querySelector(selector) as HTMLElement | null) : null;
+            if (el) {
+                el.scrollIntoView?.({
+                    block: "center",
+                    behavior: reduced.value ? "auto" : "smooth",
+                });
+                el.focus?.({ preventScroll: true });
+            }
+        }
         return;
     }
     if (isVerifyCitations.value) {
@@ -363,14 +490,8 @@ function handleSubmit() {
         return;
     }
 
-    const pendingKeyword = keywordDraft.value.trim();
-    const effectiveKeywords = pendingKeyword
-        ? [...new Set([...keywords.value, pendingKeyword])]
-        : [...keywords.value];
-    const pendingSeed = seedDraft.value.trim();
-    const effectiveSeeds = pendingSeed
-        ? [...new Set([...seedDois.value, pendingSeed])].slice(0, SEED_MAX)
-        : [...seedDois.value];
+    const effectiveKeywords = mergeBatchItems(keywords.value, keywordDraft.value);
+    const effectiveSeeds = mergeBatchItems(seedDois.value, seedDraft.value).slice(0, SEED_MAX);
     const payload: TaskCreate = {
         topic: topic.value.trim(),
         keywords:
@@ -452,6 +573,7 @@ function handleSubmit() {
                 :minlength="TOPIC_MIN"
                 :maxlength="TOPIC_MAX"
                 :placeholder="activePreset.topicPlaceholder"
+                :class="validationErrorFields.has('topic') ? ERROR_RING_CLASS : ''"
             />
         </div>
 
@@ -466,7 +588,10 @@ function handleSubmit() {
                 rows="8"
                 maxlength="30000"
                 placeholder="粘贴待核验段落及文末 ## 参考文献 列表，系统将直接核验每条引用的真实性、撤稿状态与论断支撑度…"
-                class="flex min-h-[11rem] w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                :class="[
+                    'flex min-h-[11rem] w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background',
+                    validationErrorFields.has('draft') ? ERROR_RING_CLASS : '',
+                ]"
             />
             <p class="text-xs text-muted-foreground">
                 若同时勾选下方知识库文档，系统将基于原文分块做全文级论断核验；未勾选时按题录/摘要级核验。
@@ -480,16 +605,30 @@ function handleSubmit() {
         >
             <div class="grid gap-1.5" @keydown.capture="onSeedDoiKeydown">
                 <Label for="task-seed-doi">
-                    种子论文 DOI / 标题（选填，回车添加，最多 {{ SEED_MAX }} 篇）
+                    种子论文 DOI / 标题（选填，支持逗号或分号批量拆分，最多 {{ SEED_MAX }} 篇）
                 </Label>
-                <Input
-                    id="task-seed-doi"
-                    v-model="seedDraft"
-                    data-test="seed-doi-input"
-                    type="text"
-                    placeholder="例如：10.1145/3442381.3450000 或经典论文题名（留空将自动检索 Top 3 种子）"
-                    @blur="addSeedDoi"
-                />
+                <div class="flex items-center gap-2">
+                    <Input
+                        id="task-seed-doi"
+                        v-model="seedDraft"
+                        data-test="seed-doi-input"
+                        type="text"
+                        placeholder="例如：10.1145/3442381.3450000（支持逗号批量粘贴）"
+                        :class="['flex-1', validationErrorFields.has('seed') ? ERROR_RING_CLASS : '']"
+                        @blur="addSeedDoi"
+                    />
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        data-test="seed-doi-add-btn"
+                        class="shrink-0"
+                        @click="addSeedDoi"
+                    >
+                        <Plus :size="14" aria-hidden="true" />
+                        <span>添加</span>
+                    </Button>
+                </div>
                 <ul v-if="seedDois.length" class="flex flex-wrap gap-1.5 pt-1">
                     <li
                         v-for="seed in seedDois"
@@ -541,15 +680,29 @@ function handleSubmit() {
         </div>
 
         <div class="grid gap-1.5" @keydown.capture="onKeywordKeydown">
-            <Label for="task-keyword">关键词（回车添加，1–10 个）</Label>
-            <Input
-                id="task-keyword"
-                v-model="keywordDraft"
-                data-test="keyword-input"
-                type="text"
-                placeholder="输入关键词后按回车"
-                @blur="addKeyword"
-            />
+            <Label for="task-keyword">关键词（回车或点击添加，支持逗号/分号批量拆分，1–10 个）</Label>
+            <div class="flex items-center gap-2">
+                <Input
+                    id="task-keyword"
+                    v-model="keywordDraft"
+                    data-test="keyword-input"
+                    type="text"
+                    placeholder="输入关键词后按回车或点添加"
+                    :class="['flex-1', validationErrorFields.has('keyword') ? ERROR_RING_CLASS : '']"
+                    @blur="addKeyword"
+                />
+                <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    data-test="keyword-add-btn"
+                    class="shrink-0"
+                    @click="addKeyword"
+                >
+                    <Plus :size="14" aria-hidden="true" />
+                    <span>添加</span>
+                </Button>
+            </div>
             <ul v-if="keywords.length" class="flex flex-wrap gap-1.5 pt-1">
                 <li
                     v-for="keyword in keywords"
@@ -569,113 +722,81 @@ function handleSubmit() {
             </ul>
         </div>
 
-        <div class="grid gap-3 sm:grid-cols-3">
-            <div class="grid gap-1.5">
-                <Label for="task-documents">文献数（1–50）</Label>
-                <Input
-                    id="task-documents"
-                    v-model="maxDocuments"
-                    data-test="max-documents"
-                    type="number"
-                    min="1"
-                    max="50"
-                />
-            </div>
-            <div class="grid gap-1.5">
-                <Label for="task-date-from">起始日期</Label>
-                <Input
-                    id="task-date-from"
-                    v-model="dateFrom"
-                    data-test="date-from"
-                    type="date"
-                />
-            </div>
-            <div class="grid gap-1.5">
-                <Label for="task-date-to">结束日期</Label>
-                <Input
-                    id="task-date-to"
-                    v-model="dateTo"
-                    data-test="date-to"
-                    type="date"
-                />
-            </div>
-        </div>
-
-        <div class="grid gap-3 sm:grid-cols-2">
-            <div class="grid gap-1.5">
-                <span class="text-sm font-medium leading-none">输出语言</span>
-                <div
-                    class="inline-flex w-fit gap-1 rounded-lg bg-muted p-1"
-                    role="group"
-                >
-                    <button
-                        v-for="option in [
-                            { value: 'zh', label: '中文' },
-                            { value: 'en', label: '英文' },
-                        ] as const"
-                        :key="option.value"
+        <!-- 一级可见区：文献数量 + 来源 -->
+        <div class="grid gap-3 rounded-lg border border-border/70 bg-muted/15 p-3">
+            <div class="flex flex-wrap items-end gap-3">
+                <div class="grid gap-1.5">
+                    <Label for="task-documents">文献数（1–50）</Label>
+                    <Input
+                        id="task-documents"
+                        v-model="maxDocuments"
+                        data-test="max-documents"
+                        type="number"
+                        min="1"
+                        max="50"
+                        :class="['w-28', validationErrorFields.has('maxDocuments') ? ERROR_RING_CLASS : '']"
+                        @blur="clampMaxDocuments"
+                    />
+                </div>
+                <div class="flex flex-wrap items-center gap-1.5" role="group" aria-label="常用文献数量预设">
+                    <Button
+                        v-for="presetCount in MAX_DOC_PRESETS"
+                        :key="presetCount"
                         type="button"
-                        :data-test="`lang-${option.value}`"
-                        :aria-pressed="language === option.value"
-                        :class="[
-                            'rounded-md px-3 py-1 text-sm font-medium transition-colors',
-                            language === option.value
-                                ? 'bg-background text-foreground shadow-xs'
-                                : 'text-muted-foreground hover:text-foreground',
-                        ]"
-                        @click="language = option.value"
+                        size="sm"
+                        :variant="Number(maxDocuments) === presetCount ? 'secondary' : 'outline'"
+                        :data-test="`max-docs-chip-${presetCount}`"
+                        @click="maxDocuments = presetCount"
                     >
-                        {{ option.label }}
-                    </button>
+                        {{ presetCount }} 篇
+                    </Button>
                 </div>
             </div>
 
-            <div class="grid gap-1.5">
-                <Label v-if="styleOptions" for="task-citation-style"
-                    >引用格式</Label
+            <div class="grid gap-2">
+                <label
+                    class="flex items-start gap-2 text-sm"
+                    data-test="reference-library-label"
                 >
-                <span v-else class="text-sm font-medium leading-none"
-                    >引用格式</span
-                >
-                <!-- 列表可用：动态下拉（预置 + 自定义）；不可用：内置两项降级 -->
-                <select
-                    v-if="styleOptions"
-                    id="task-citation-style"
-                    v-model="citationStyle"
-                    data-test="style-select"
-                    class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-                >
-                    <option
-                        v-for="style in styleOptions"
-                        :key="style.style_id"
-                        :value="style.style_id"
-                    >
-                        {{ style.title
-                        }}{{ style.source === "custom" ? "（自定义）" : "" }}
-                    </option>
-                </select>
-                <div
-                    v-else
-                    class="inline-flex w-fit gap-1 rounded-lg bg-muted p-1"
-                    role="group"
-                >
-                    <button
-                        v-for="style in BUILT_IN_STYLES"
-                        :key="style.style_id"
-                        type="button"
-                        :data-test="`style-${style.style_id}`"
-                        :aria-pressed="citationStyle === style.style_id"
-                        :class="[
-                            'rounded-md px-3 py-1 text-sm font-medium transition-colors',
-                            citationStyle === style.style_id
-                                ? 'bg-background text-foreground shadow-xs'
-                                : 'text-muted-foreground hover:text-foreground',
-                        ]"
-                        @click="citationStyle = style.style_id"
-                    >
-                        {{ style.title }}
-                    </button>
-                </div>
+                    <input
+                        v-model="useReferenceLibrary"
+                        data-test="reference-library"
+                        type="checkbox"
+                        :disabled="libraryCount === 0"
+                        class="mt-0.5 size-4 rounded border-input accent-primary disabled:cursor-not-allowed disabled:opacity-50"
+                    />
+                    <span>
+                        使用我的引用库（{{
+                            libraryCount === null
+                                ? "加载中…"
+                                : `${libraryCount} 篇`
+                        }}，不访问外部检索源）
+                        <span
+                            v-if="libraryCount === 0"
+                            class="text-muted-foreground"
+                        >
+                            —— 引用库为空，
+                            <a
+                                href="/references/import"
+                                class="text-primary underline underline-offset-2 hover:opacity-85"
+                                @click.prevent="goTo('/references/import')"
+                            >
+                                前往导入文献 →
+                            </a>
+                        </span>
+                    </span>
+                </label>
+
+                <label class="flex items-center gap-2 text-sm">
+                    <input
+                        v-model="offlineDataset"
+                        data-test="offline"
+                        type="checkbox"
+                        :disabled="useReferenceLibrary"
+                        class="size-4 rounded border-input accent-primary"
+                    />
+                    <span>使用离线演示语料（冻结 10 篇，不访问 arXiv）</span>
+                </label>
             </div>
         </div>
         </template>
@@ -733,7 +854,10 @@ function handleSubmit() {
                     id="task-model"
                     v-model="selectedCredential"
                     data-test="model-select"
-                    class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                    :class="[
+                        'flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background',
+                        validationErrorFields.has('model') ? ERROR_RING_CLASS : '',
+                    ]"
                 >
                     <option value="" disabled>请选择一把自带模型…</option>
                     <option
@@ -751,62 +875,17 @@ function handleSubmit() {
                 </p>
             </div>
             <p v-else class="text-xs text-muted-foreground">
-                任务将使用平台配置的模型。要用自己的 API Key，切到「自带模型」。
-            </p>
-        </div>
-
-        <div v-if="!isVerifyCitations" class="grid gap-2">
-            <label
-                class="flex items-start gap-2 text-sm"
-                data-test="reference-library-label"
-            >
-                <input
-                    v-model="useReferenceLibrary"
-                    data-test="reference-library"
-                    type="checkbox"
-                    class="mt-0.5 size-4 rounded border-input accent-primary"
-                />
-                <span>
-                    使用我的引用库（{{
-                        libraryCount === null
-                            ? "加载中…"
-                            : `${libraryCount} 篇`
-                    }}，不访问外部检索源）
-                    <span
-                        v-if="libraryCount === 0"
-                        class="text-muted-foreground"
-                    >
-                        —— 引用库为空，先去「导入文献」保存几条再启用
-                    </span>
-                </span>
-            </label>
-
-            <label class="flex items-center gap-2 text-sm">
-                <input
-                    v-model="offlineDataset"
-                    data-test="offline"
-                    type="checkbox"
-                    :disabled="useReferenceLibrary"
-                    class="size-4 rounded border-input accent-primary"
-                />
-                <span>使用离线演示语料（冻结 10 篇，不访问 arXiv）</span>
-            </label>
-
-            <label
-                class="flex items-start gap-2 text-sm"
-                data-test="verify-references-label"
-            >
-                <input
-                    v-model="verifyReferences"
-                    data-test="verify-references"
-                    type="checkbox"
-                    class="mt-0.5 size-4 rounded border-input accent-primary"
-                />
-                <span
-                    >引用核验：与 CrossRef/OpenAlex
-                    比对文献元数据，可能增加任务耗时</span
+                任务将使用平台配置的模型。要用自己的 API Key，请先
+                <a
+                    v-if="usableCredentials.length === 0"
+                    href="/settings/models"
+                    class="text-primary underline underline-offset-2 hover:opacity-85"
+                    @click.prevent="goTo('/settings/models')"
                 >
-            </label>
+                    前往我的模型添加 →
+                </a>
+                <span v-else>切到「自带模型」。</span>
+            </p>
         </div>
 
         <fieldset
@@ -837,12 +916,171 @@ function handleSubmit() {
             </label>
         </fieldset>
 
+        <!-- 二级折叠区：默认收起但 keep-mounted 常驻 DOM，保证单测与无障碍查询不丢失 -->
+        <div
+            v-if="!isVerifyCitations"
+            class="rounded-lg border border-border bg-card/60"
+        >
+            <button
+                type="button"
+                data-test="toggle-advanced-options"
+                :aria-expanded="advancedOpen"
+                class="flex w-full flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-left text-sm transition-colors hover:bg-muted/40"
+                @click="advancedOpen = !advancedOpen"
+            >
+                <span class="font-medium text-foreground">
+                    高级设置：日期、语言、格式与核验（可选）
+                </span>
+                <span class="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
+                    <span
+                        :class="
+                            verifyReferences || dateFrom || dateTo
+                                ? 'font-medium text-primary'
+                                : ''
+                        "
+                    >
+                        {{ advancedSummary }}
+                    </span>
+                    <ChevronDown
+                        class="size-4 shrink-0 transition-transform duration-150 motion-reduce:transition-none"
+                        :class="advancedOpen ? 'rotate-180' : 'rotate-0'"
+                        aria-hidden="true"
+                    />
+                </span>
+            </button>
+
+            <AnimatedCollapse :open="advancedOpen" keep-mounted>
+                <div class="grid gap-3 border-t border-border px-3 py-3">
+                    <div class="grid gap-3 sm:grid-cols-2">
+                        <div class="grid gap-1.5">
+                            <Label for="task-date-from">起始日期</Label>
+                            <Input
+                                id="task-date-from"
+                                v-model="dateFrom"
+                                data-test="date-from"
+                                type="date"
+                            />
+                        </div>
+                        <div class="grid gap-1.5">
+                            <Label for="task-date-to">结束日期</Label>
+                            <Input
+                                id="task-date-to"
+                                v-model="dateTo"
+                                data-test="date-to"
+                                type="date"
+                                :class="validationErrorFields.has('dateRange') ? ERROR_RING_CLASS : ''"
+                            />
+                        </div>
+                    </div>
+
+                    <div class="grid gap-3 sm:grid-cols-2">
+                        <div class="grid gap-1.5">
+                            <span class="text-sm font-medium leading-none">输出语言</span>
+                            <div
+                                class="inline-flex w-fit gap-1 rounded-lg bg-muted p-1"
+                                role="group"
+                            >
+                                <button
+                                    v-for="option in [
+                                        { value: 'zh', label: '中文' },
+                                        { value: 'en', label: '英文' },
+                                    ] as const"
+                                    :key="option.value"
+                                    type="button"
+                                    :data-test="`lang-${option.value}`"
+                                    :aria-pressed="language === option.value"
+                                    :class="[
+                                        'rounded-md px-3 py-1 text-sm font-medium transition-colors',
+                                        language === option.value
+                                            ? 'bg-background text-foreground shadow-xs'
+                                            : 'text-muted-foreground hover:text-foreground',
+                                    ]"
+                                    @click="language = option.value"
+                                >
+                                    {{ option.label }}
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="grid gap-1.5">
+                            <Label v-if="styleOptions" for="task-citation-style"
+                                >引用格式</Label
+                            >
+                            <span v-else class="text-sm font-medium leading-none"
+                                >引用格式</span
+                            >
+                            <!-- 列表可用：动态下拉（预置 + 自定义）；不可用：内置两项降级 -->
+                            <select
+                                v-if="styleOptions"
+                                id="task-citation-style"
+                                v-model="citationStyle"
+                                data-test="style-select"
+                                class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                            >
+                                <option
+                                    v-for="style in styleOptions"
+                                    :key="style.style_id"
+                                    :value="style.style_id"
+                                >
+                                    {{ style.title
+                                    }}{{ style.source === "custom" ? "（自定义）" : "" }}
+                                </option>
+                            </select>
+                            <div
+                                v-else
+                                class="inline-flex w-fit gap-1 rounded-lg bg-muted p-1"
+                                role="group"
+                            >
+                                <button
+                                    v-for="style in BUILT_IN_STYLES"
+                                    :key="style.style_id"
+                                    type="button"
+                                    :data-test="`style-${style.style_id}`"
+                                    :aria-pressed="citationStyle === style.style_id"
+                                    :class="[
+                                        'rounded-md px-3 py-1 text-sm font-medium transition-colors',
+                                        citationStyle === style.style_id
+                                            ? 'bg-background text-foreground shadow-xs'
+                                            : 'text-muted-foreground hover:text-foreground',
+                                    ]"
+                                    @click="citationStyle = style.style_id"
+                                >
+                                    {{ style.title }}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <label
+                        class="flex items-start gap-2 text-sm"
+                        data-test="verify-references-label"
+                    >
+                        <input
+                            v-model="verifyReferences"
+                            data-test="verify-references"
+                            type="checkbox"
+                            class="mt-0.5 size-4 rounded border-input accent-primary"
+                        />
+                        <span
+                            >引用核验：与 CrossRef/OpenAlex
+                            比对文献元数据，可能增加任务耗时</span
+                        >
+                    </label>
+                </div>
+            </AnimatedCollapse>
+        </div>
+
         <ErrorBanner
             v-if="validationMessages.length"
             :message="validationMessages.join('；')"
             testid="validation-error"
+            @dismiss="validationMessages = []"
         />
-        <ErrorBanner :message="props.error" testid="form-error" />
+        <ErrorBanner
+            :message="props.error"
+            testid="form-error"
+            @dismiss="emit('dismissError')"
+        />
 
         <div class="flex gap-2">
             <!-- 使用 type="button" + @click 显式提交，彻底禁用多字段表单的浏览器原生回车隐式提交（Issue #58） -->

@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed } from "vue";
 import { X } from "lucide-vue-next";
 
+import { Button } from "@/components/ui/button";
+import { MotionDrawer } from "@/components/ui/drawer";
 import type { BibliographyEntry, ClaimCheckResult } from "@/api/types";
 import { highlightQuote } from "@/utils/claim-highlight";
 import {
@@ -27,8 +29,6 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{ close: [] }>();
-
-const closeButton = ref<HTMLButtonElement | null>(null);
 
 const sortedClaims = computed(() =>
   [...props.claims].sort((a, b) => claimSeverity(a.verdict) - claimSeverity(b.verdict)),
@@ -59,64 +59,39 @@ const renderedClaims = computed(() =>
     };
   }),
 );
-
-function onKeydown(event: KeyboardEvent) {
-  if (event.key === "Escape" && props.open) {
-    event.preventDefault();
-    emit("close");
-  }
-}
-
-watch(
-  () => props.open,
-  async (open) => {
-    if (!open) {
-      return;
-    }
-    await nextTick();
-    closeButton.value?.focus();
-  },
-);
-
-onMounted(() => window.addEventListener("keydown", onKeydown));
-onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 </script>
 
 <template>
-  <Teleport to="body">
-    <div
-      v-if="open"
-      class="fixed inset-0 z-50 flex justify-end bg-black/30"
-      data-test="claim-drawer"
-      @click.self="emit('close')"
-    >
-      <aside
-        role="dialog"
-        aria-modal="true"
-        aria-label="来源核验"
-        class="flex h-full w-[26rem] max-w-full flex-col overflow-y-auto border-l border-border bg-card shadow-xl"
-        @click.stop
+  <MotionDrawer
+    :open="props.open"
+    side="right"
+    width-class="w-[26rem] max-w-full"
+    aria-label="来源核验"
+    initial-focus="[data-test='claim-drawer-close']"
+    :backdrop-attrs="{ 'data-test': 'claim-drawer' }"
+    :panel-attrs="{ class: 'bg-card overflow-y-auto' }"
+    @close="emit('close')"
+  >
+    <header class="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
+      <div class="min-w-0">
+        <p class="text-[9px] font-semibold tracking-[0.16em] text-primary">
+          引用核验
+        </p>
+        <h2 class="mt-1 truncate text-sm font-semibold">
+          {{ title || `来源核验 · [E${index ?? "?"}]` }}
+        </h2>
+      </div>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        data-test="claim-drawer-close"
+        aria-label="关闭来源核验"
+        @click="emit('close')"
       >
-        <header class="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
-          <div class="min-w-0">
-            <p class="text-[9px] font-semibold tracking-[0.16em] text-primary uppercase">
-              Source check
-            </p>
-            <h2 class="mt-1 truncate text-sm font-semibold">
-              {{ title || `来源核验 · [E${index ?? "?"}]` }}
-            </h2>
-          </div>
-          <button
-            ref="closeButton"
-            type="button"
-            class="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            data-test="claim-drawer-close"
-            aria-label="关闭来源核验"
-            @click="emit('close')"
-          >
-            <X class="size-4" />
-          </button>
-        </header>
+        <X class="size-4" />
+      </Button>
+    </header>
 
         <div class="flex flex-col gap-4 px-4 py-4">
           <!-- 文献信息 + 来源质量 -->
@@ -237,8 +212,6 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
               </div>
             </article>
           </section>
-        </div>
-      </aside>
     </div>
-  </Teleport>
+  </MotionDrawer>
 </template>

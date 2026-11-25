@@ -1,13 +1,17 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, nextTick, ref, useId, watch } from "vue";
 import { Download } from "lucide-vue-next";
+import { Motion, useReducedMotion } from "motion-v";
 
 import { taskApi } from "@/api/tasks";
+import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import ClaimEvidenceDrawer from "@/components/tasks/ClaimEvidenceDrawer.vue";
 import EvidenceMatrixView from "@/components/tasks/EvidenceMatrixView.vue";
 import ReferenceVerificationPanel from "@/components/tasks/ReferenceVerificationPanel.vue";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { SPRING_LAYOUT } from "@/lib/ease";
+import { toastError, toastSuccess } from "@/lib/toast";
 import type {
   Artifact,
   BibliographyEntry,
@@ -49,12 +53,25 @@ const emit = defineEmits<{ refresh: [] }>();
 
 const downloading = ref<"markdown" | "docx" | null>(null);
 const errorMessage = ref<string | null>(null);
+const tabGroupId = useId();
+const reduced = useReducedMotion();
+const markdownContainerRef = ref<HTMLElement | null>(null);
 /** 源码视图开关（默认渲染视图）。 */
 const showSource = ref(false);
 /** 综述正文 / 证据矩阵 Tab（仅存在 evidence_matrix 时展示切换栏）。 */
 const resultView = ref<"paper" | "matrix">("paper");
 const hasMatrix = computed(
   () => Boolean(props.report.evidence_matrix?.questions?.length),
+);
+
+// 切回渲染视图后等待一帧确保容器可见，预留增量高亮/排版校验挂钩
+watch(
+  () => [props.report.final_markdown, resultView.value, showSource.value] as const,
+  async ([, view, source]) => {
+    if (view !== "paper" || source) return;
+    await nextTick();
+  },
+  { flush: "post" },
 );
 const fillingQuestionIndex = ref<number | null>(null);
 const gapNotice = ref<string | null>(null);
@@ -355,8 +372,10 @@ async function download(kind: "markdown" | "docx") {
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
+    toastSuccess(kind === "markdown" ? "已导出 Markdown" : "已导出 DOCX");
   } catch (error) {
     errorMessage.value = (error as Error).message || "下载失败";
+    toastError(errorMessage.value);
   } finally {
     if (objectUrl) {
       URL.revokeObjectURL(objectUrl); // 触发后立即释放，避免内存泄漏
@@ -373,7 +392,7 @@ async function download(kind: "markdown" | "docx") {
       <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div class="flex items-center gap-3">
           <div>
-            <p class="text-[9px] font-semibold tracking-[0.16em] text-primary uppercase">Final review</p>
+            <p class="text-[9px] font-semibold tracking-[0.16em] text-primary">终稿复盘</p>
             <h2 class="mt-1 text-base font-semibold tracking-tight">最终综述</h2>
           </div>
           <div
@@ -388,7 +407,7 @@ async function download(kind: "markdown" | "docx") {
               data-test="result-tab-paper"
               :aria-selected="resultView === 'paper'"
               :class="[
-                'rounded-md px-2.5 py-1 font-medium transition-colors',
+                'relative rounded-md px-2.5 py-1 font-medium transition-colors',
                 resultView === 'paper'
                   ? 'bg-background text-foreground shadow-xs'
                   : 'text-muted-foreground hover:text-foreground',
@@ -396,6 +415,12 @@ async function download(kind: "markdown" | "docx") {
               @click="resultView = 'paper'"
             >
               综述正文
+              <Motion
+                v-if="resultView === 'paper'"
+                :layout-id="reduced ? undefined : `result-tab-pill-${tabGroupId}`"
+                :transition="SPRING_LAYOUT"
+                class="pointer-events-none absolute inset-x-1 bottom-0.5 h-0.5 rounded-full bg-primary"
+              />
             </button>
             <button
               type="button"
@@ -403,7 +428,7 @@ async function download(kind: "markdown" | "docx") {
               data-test="result-tab-matrix"
               :aria-selected="resultView === 'matrix'"
               :class="[
-                'rounded-md px-2.5 py-1 font-medium transition-colors',
+                'relative rounded-md px-2.5 py-1 font-medium transition-colors',
                 resultView === 'matrix'
                   ? 'bg-background text-foreground shadow-xs'
                   : 'text-muted-foreground hover:text-foreground',
@@ -411,6 +436,12 @@ async function download(kind: "markdown" | "docx") {
               @click="resultView = 'matrix'"
             >
               证据矩阵
+              <Motion
+                v-if="resultView === 'matrix'"
+                :layout-id="reduced ? undefined : `result-tab-pill-${tabGroupId}`"
+                :transition="SPRING_LAYOUT"
+                class="pointer-events-none absolute inset-x-1 bottom-0.5 h-0.5 rounded-full bg-primary"
+              />
             </button>
           </div>
         </div>
@@ -446,16 +477,18 @@ async function download(kind: "markdown" | "docx") {
       />
 
       <EvidenceMatrixView
-        v-if="resultView === 'matrix' && props.report.evidence_matrix"
+        v-if="props.report.evidence_matrix"
+        v-show="resultView === 'matrix'"
         :matrix="props.report.evidence_matrix"
         :filling-index="fillingQuestionIndex"
         @select-cell="openMatrixCell"
         @fill-gap="handleFillGap"
       />
 
-      <!-- renderMarkdown 继续负责 marked + DOMPurify 两段式安全链，不在本层另做 HTML 拼接。 -->
+      <!-- renderMarkdown 继续负责 marked + DOMPurify 两段式安全链；v-show 保活避免切换 Tab 丢失滚动与 DOM 状态。 -->
       <div
-        v-else-if="!showSource"
+        ref="markdownContainerRef"
+        v-show="resultView === 'paper' && !showSource"
         data-test="result-markdown"
         class="md-body max-h-none overflow-visible rounded-lg border border-border bg-card px-5 py-6 font-display sm:px-8 sm:py-8 lg:px-10"
         v-html="renderedMarkdown"
@@ -463,7 +496,7 @@ async function download(kind: "markdown" | "docx") {
       />
 
       <pre
-        v-else
+        v-show="resultView === 'paper' && showSource"
         data-test="result-markdown-source"
         class="max-h-[70vh] overflow-auto rounded-lg border border-border bg-card p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap"
         >{{ props.report.final_markdown }}</pre
@@ -479,7 +512,7 @@ async function download(kind: "markdown" | "docx") {
       <section class="border-b border-border pb-5">
         <div class="mb-3 flex items-center justify-between gap-2">
           <h3 class="text-sm font-medium">质量检查</h3>
-          <span class="text-[9px] tracking-wider text-muted-foreground">SCORE / 100</span>
+          <span class="text-[9px] tracking-wider text-muted-foreground">百分制评分</span>
         </div>
         <ul v-if="scores.length" class="flex flex-col gap-2.5" data-test="result-scores">
           <li
@@ -498,8 +531,8 @@ async function download(kind: "markdown" | "docx") {
                 aria-valuemax="100"
               >
                 <span
-                  class="block h-full rounded-full bg-primary"
-                  :style="{ width: `${score.percent}%` }"
+                  class="block h-full w-full origin-left rounded-full bg-primary transition-transform duration-250 motion-reduce:transition-none"
+                  :style="{ transform: `scaleX(${(score.percent ?? 0) / 100})` }"
                 />
               </span>
               <span class="text-right font-medium tabular-nums">{{ score.percent }}</span>
@@ -522,7 +555,7 @@ async function download(kind: "markdown" | "docx") {
         <div class="mb-3 flex items-center justify-between gap-2">
           <h3 class="text-sm font-medium">参考文献</h3>
           <span v-if="bibliography.length" class="text-[9px] tracking-wider text-muted-foreground">
-            {{ bibliography.length }} ENTRIES
+            共 {{ bibliography.length }} 条
           </span>
         </div>
         <ol v-if="bibliography.length" class="flex flex-col gap-3" data-test="result-bibliography">
@@ -607,9 +640,7 @@ async function download(kind: "markdown" | "docx") {
             <Download :size="15" aria-hidden="true" /> DOCX
           </Button>
         </div>
-        <Alert v-if="errorMessage" variant="destructive" class="mt-2">
-          <span>{{ errorMessage }}</span>
-        </Alert>
+        <ErrorBanner :message="errorMessage" class="mt-2" @dismiss="errorMessage = null" />
       </section>
     </aside>
 

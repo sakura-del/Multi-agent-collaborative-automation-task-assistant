@@ -40,6 +40,12 @@ export interface ExtractionTableSummaryOut {
   error?: string | null;
   column_count: number;
   source_count: number;
+  /** 已完成抽取的单元格数 */
+  completed_cells?: number;
+  /** 抽取失败的单元格数 */
+  failed_cells?: number;
+  /** 单元格总数 */
+  total_cells?: number;
   created_at: string;
   updated_at: string;
 }

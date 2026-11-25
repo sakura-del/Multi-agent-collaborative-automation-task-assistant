@@ -19,9 +19,21 @@ vi.mock("@/api/tasks", () => ({
   },
 }));
 
+const sessionStartSpy = vi.fn(
+  async (
+    _taskId: string,
+    _after: number,
+    _onEvent: (event: unknown) => void,
+    _handlers?: {
+      onSnapshot?: (snapshot: unknown) => void;
+      onConnectionChange?: (state: "connected" | "reconnecting" | "polling", attempt?: number) => void;
+    }
+  ) => undefined
+);
+
 vi.mock("@/services/task-events", () => ({
   createTaskEventSession: () => ({
-    start: vi.fn(async () => undefined),
+    start: sessionStartSpy,
     stop: vi.fn(),
   }),
 }));
@@ -121,19 +133,100 @@ describe("TaskDetailView 规划 Tab 状态一致性（Issue #55）", () => {
     expect(wrapper.find('[data-test="plan-approve"]').exists()).toBe(false);
     expect(wrapper.find('[data-test="plan-regenerate"]').exists()).toBe(false);
 
-    // BeAgentPlan 必须展示 Completed 与 2 个步骤，不再出现 Awaiting approval / No steps yet
+    // BeAgentPlan 必须展示「已完成」与 2 个步骤，不再出现 Awaiting approval / No steps yet / 等待确认
     const agentPlan = wrapper.find('[data-test="agent-plan"]');
     expect(agentPlan.exists()).toBe(true);
-    expect(agentPlan.find('[data-test="agent-plan-status"]').text()).toBe("Completed");
+    expect(agentPlan.find('[data-test="agent-plan-status"]').text()).toBe("已完成");
     expect(agentPlan.text()).toContain("检索学术文献");
     expect(agentPlan.text()).toContain("撰写综述正文");
     expect(agentPlan.text()).not.toContain("Awaiting approval");
+    expect(agentPlan.text()).not.toContain("等待确认");
     expect(agentPlan.text()).not.toContain("No steps yet");
+    expect(agentPlan.text()).not.toContain("暂无执行步骤");
     expect(agentPlan.text()).not.toContain("0/0 complete");
+    expect(agentPlan.text()).not.toContain("已完成 0/0 步");
 
     // Issue #57：Tab 栏避免 -mb-px 触发纵向滚动箭头
     const tablist = wrapper.get('nav[role="tablist"]');
     expect(tablist.attributes("class")).toContain("overflow-y-hidden");
     expect(wrapper.get('[data-test="tab-plan"]').attributes("class")).not.toContain("-mb-px");
+  });
+
+  it("显示 WS 连接微指示器并在恢复后短暂提示", async () => {
+    vi.useFakeTimers();
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: "/tasks/:taskId", name: "task-detail", component: TaskDetailView, props: true },
+        { path: "/tasks/:taskId/screening", name: "task-screening", component: { template: "<div />" } },
+      ],
+    });
+    await router.push({ name: "task-detail", params: { taskId: "task-done-1" }, query: { tab: "plan" } });
+    await router.isReady();
+
+    const wrapper = mount(TaskDetailView, {
+      props: { taskId: "task-done-1" },
+      global: {
+        plugins: [router],
+        stubs: { TaskRefreshPanel: true, AnnotationPanel: true, BeTimeline: true },
+      },
+    });
+    await flushPromises();
+
+    // 正常 connected 时静默不渲染
+    expect(wrapper.find('[data-test="ws-connection-indicator"]').exists()).toBe(false);
+
+    const { useTaskStore } = await import("@/stores/tasks");
+    const store = useTaskStore();
+    store.connectionState = "reconnecting";
+    await flushPromises();
+    expect(wrapper.find('[data-test="ws-connection-indicator"]').text()).toContain("重连中");
+
+    store.connectionState = "polling";
+    await flushPromises();
+    expect(wrapper.find('[data-test="ws-connection-indicator"]').text()).toContain("定时同步");
+
+    store.connectionState = "connected";
+    await flushPromises();
+    expect(wrapper.find('[data-test="ws-connection-indicator"]').text()).toContain("已恢复");
+
+    await vi.advanceTimersByTimeAsync(1600);
+    await flushPromises();
+    expect(wrapper.find('[data-test="ws-connection-indicator"]').exists()).toBe(false);
+    vi.useRealTimers();
+  });
+
+  it("执行 Tab 展示轨迹瀑布图，禁用结果 Tab 时给出提示", async () => {
+    vi.mocked(taskApi.get).mockResolvedValue({
+      ...COMPLETED_SNAPSHOT,
+      status: "running",
+      review_report: null,
+      error: null,
+    });
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: "/tasks/:taskId", name: "task-detail", component: TaskDetailView, props: true },
+        { path: "/tasks/:taskId/screening", name: "task-screening", component: { template: "<div />" } },
+      ],
+    });
+    await router.push({
+      name: "task-detail",
+      params: { taskId: "task-done-1" },
+      query: { tab: "execution" },
+    });
+    await router.isReady();
+
+    const wrapper = mount(TaskDetailView, {
+      props: { taskId: "task-done-1" },
+      global: {
+        plugins: [router],
+        stubs: { TaskRefreshPanel: true, AnnotationPanel: true, BeTimeline: true },
+      },
+    });
+    await flushPromises();
+
+    expect(wrapper.find('[data-test="trace-waterfall"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="tab-result"]').attributes("title")).toContain("复盘后可用");
   });
 });

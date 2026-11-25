@@ -392,3 +392,77 @@ describe("新建表单：指定知识库文档（Issue #35 验收发现的 P2）
     expect(wrapper.text()).not.toContain("指定知识库文档（可选）");
   });
 });
+
+describe("M3 任务列表 UX 与动效收口", () => {
+  it("使用「待我处理」筛选且移除顶部重复统计条", async () => {
+    const wrapper = await mountWith([
+      task({ task_id: "a", status: "waiting_approval" }),
+      task({ task_id: "b", status: "completed" }),
+    ]);
+
+    expect(wrapper.find('[data-test="filter-needs-me"]').text()).toContain("待我处理");
+    expect(wrapper.findAll('[data-test="stat-needs-me"]')).toHaveLength(1);
+    expect(wrapper.findAll('[data-test="stat-total"]')).toHaveLength(1);
+  });
+
+  it("待办为 0 时 attention-needs-me 仍保留「等待你的判断」语义锚点", async () => {
+    const wrapper = await mountWith([task({ status: "completed" })]);
+    const action = wrapper.find('[data-test="attention-needs-me"]');
+    expect(action.exists()).toBe(true);
+    expect(action.text()).toContain("等待你的判断");
+  });
+
+  it("筛选无结果时工具栏仍保持渲染（不消失）", async () => {
+    const wrapper = await mountWith([task({ status: "completed" })]);
+    await wrapper.find('[data-test="filter-needs-me"]').trigger("click");
+
+    expect(wrapper.find('[data-test="filtered-empty"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="filter-all"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="task-search"]').exists()).toBe(true);
+  });
+
+  it("切换到时间线视图且在第 1 页有任务时不重复渲染下方表格", async () => {
+    const wrapper = await mountWith([
+      task({ task_id: "t-1", status: "running" }),
+      task({ task_id: "t-2", status: "completed" }),
+    ]);
+
+    await wrapper.find('[data-test="view-mode-timeline"]').trigger("click");
+    await nextTick();
+
+    expect(wrapper.find('[data-test="be-timeline"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="task-row-t-1"]').exists()).toBe(false);
+    // 时间线进度条采用 scaleX 变换
+    const progressEl = wrapper.find('[data-test="be-timeline"] [style*="scaleX"]');
+    expect(progressEl.exists()).toBe(true);
+  });
+
+  it("加载超过 180ms 显示骨架屏且不闪现空态", async () => {
+    vi.useFakeTimers();
+    setActivePinia(createPinia());
+    const router = makeRouter();
+    await router.push("/tasks");
+    await router.isReady();
+
+    const { useTaskStore } = await import("@/stores/tasks");
+    const store = useTaskStore();
+    store.items = [];
+    store.listLoading = true;
+    store.loadList = async () => {};
+    store.loadCounts = async () => {};
+
+    const wrapper = mount(TaskListView, {
+      global: { plugins: [router], stubs: { TaskCreateForm: true } },
+    });
+
+    // 0ms 时：不显示空态也不闪烁骨架屏
+    expect(wrapper.find('[data-test="empty-state"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="task-list-skeleton"]').exists()).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(200);
+    await nextTick();
+    expect(wrapper.find('[data-test="task-list-skeleton"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="empty-state"]').exists()).toBe(false);
+    vi.useRealTimers();
+  });
+});

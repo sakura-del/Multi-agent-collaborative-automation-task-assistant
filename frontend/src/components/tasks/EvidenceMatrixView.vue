@@ -185,7 +185,7 @@ function canFillGap(cell: EvidenceMatrixCell): boolean {
               >
                 <Loader2
                   v-if="props.fillingIndex === qIdx"
-                  class="size-3 animate-spin"
+                  class="size-3 animate-spin motion-reduce:animate-none"
                   aria-hidden="true"
                 />
                 <Search v-else class="size-3" aria-hidden="true" />

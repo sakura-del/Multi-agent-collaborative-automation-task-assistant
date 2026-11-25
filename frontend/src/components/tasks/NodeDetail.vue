@@ -3,6 +3,7 @@ import { computed } from "vue";
 import { Brain, CircleAlert, Clock3, Repeat2, X } from "lucide-vue-next";
 
 import StatusBadge from "@/components/common/StatusBadge.vue";
+import { Button } from "@/components/ui/button";
 import type { PlanNode, SubtaskSnapshot } from "@/api/types";
 import { formatDateTime } from "@/utils/task-status";
 
@@ -23,18 +24,18 @@ const props = defineProps<{
 defineEmits<{ close: [] }>();
 
 const KIND_LABEL: Record<string, string> = {
-  planner: "Agent",
-  search: "Retrieval",
-  extract: "LLM",
-  write: "LLM",
-  validate: "Guardrail",
-  review: "Agent",
+  planner: "智能体",
+  search: "文献检索",
+  extract: "模型生成",
+  write: "模型生成",
+  validate: "质量校验",
+  review: "智能体",
 };
 
 const attributes = computed(() => {
   const list: { label: string; value: string }[] = [
-    { label: "span id", value: props.node?.id ?? "" },
-    { label: "kind", value: KIND_LABEL[props.node?.type ?? ""] ?? props.node?.type ?? "" },
+    { label: "节点标识", value: props.node?.id ?? "" },
+    { label: "节点类型", value: KIND_LABEL[props.node?.type ?? ""] ?? props.node?.type ?? "" },
     {
       label: "依赖",
       value: props.node?.dependencies.length ? props.node.dependencies.join("、") : "无",
@@ -43,7 +44,7 @@ const attributes = computed(() => {
   ];
   const output = props.subtask?.output;
   if (output && typeof output === "object") {
-    list.push({ label: "output keys", value: Object.keys(output).join(", ") });
+    list.push({ label: "输出字段", value: Object.keys(output).join(", ") });
   }
   return list.filter((item) => item.value !== "");
 });
@@ -82,9 +83,9 @@ function formatDuration(ms: number): string {
   <aside
     v-if="props.node"
     data-test="node-detail"
-    class="min-w-72 overflow-clip rounded-2xl border border-border bg-background text-foreground"
+    class="w-full min-w-0 sm:min-w-72 overflow-clip rounded-2xl border border-border bg-background text-foreground"
   >
-    <!-- Header：span 名称 + kind + 关闭 -->
+    <!-- Header：节点名称 + 类型 + 关闭 -->
     <header class="flex items-start justify-between gap-2 border-b border-border px-4 py-3">
       <div class="min-w-0">
         <p class="font-mono text-[10px] text-muted-foreground">{{ props.node.id }}</p>
@@ -99,25 +100,26 @@ function formatDuration(ms: number): string {
           </span>
         </div>
       </div>
-      <button
+      <Button
         type="button"
+        variant="ghost"
+        size="icon-sm"
         title="关闭"
         aria-label="关闭"
-        class="inline-flex size-7 shrink-0 items-center justify-center rounded-lg border border-border text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         @click="$emit('close')"
       >
         <X class="size-3.5" />
-      </button>
+      </Button>
     </header>
 
     <div class="flex flex-col gap-3 px-4 py-3">
-      <!-- Timing 区（beUI 详情面板：Timing 条 + tabular-nums） -->
+      <!-- Timing 区：Timing 条 + tabular-nums -->
       <section>
         <h3
-          class="mb-1.5 flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
+          class="mb-1.5 flex items-center gap-1 text-[10px] font-medium tracking-wide text-muted-foreground"
         >
           <Clock3 class="size-3" />
-          Timing
+          执行耗时
         </h3>
         <div class="relative h-2 rounded-full bg-muted/40">
           <span
@@ -127,11 +129,11 @@ function formatDuration(ms: number): string {
           />
         </div>
         <dl class="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
-          <dt class="text-muted-foreground">started</dt>
+          <dt class="text-muted-foreground">开始时间</dt>
           <dd class="font-mono tabular-nums">{{ formatDateTime(props.subtask?.started_at) }}</dd>
-          <dt class="text-muted-foreground">completed</dt>
+          <dt class="text-muted-foreground">结束时间</dt>
           <dd class="font-mono tabular-nums">{{ formatDateTime(props.subtask?.completed_at) }}</dd>
-          <dt class="text-muted-foreground">duration</dt>
+          <dt class="text-muted-foreground">持续时长</dt>
           <dd class="font-mono tabular-nums">
             {{ timing ? formatDuration(timing.durationMs) : "—" }}
           </dd>
@@ -149,10 +151,10 @@ function formatDuration(ms: number): string {
         </p>
       </div>
 
-      <!-- Attributes 列表 -->
+      <!-- 属性列表 -->
       <section>
-        <h3 class="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-          Attributes
+        <h3 class="mb-1.5 text-[10px] font-medium tracking-wide text-muted-foreground">
+          节点属性
         </h3>
         <dl class="flex flex-col gap-1">
           <div

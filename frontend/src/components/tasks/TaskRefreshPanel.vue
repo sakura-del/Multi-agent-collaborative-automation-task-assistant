@@ -6,6 +6,7 @@ import { taskApi } from "@/api/tasks";
 import type { TaskRefreshRun, TaskRoutine } from "@/api/types";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import { Button } from "@/components/ui/button";
+import { toastInfo, toastSuccess } from "@/lib/toast";
 import { formatDateTime } from "@/utils/task-status";
 import { renderMarkdown } from "@/utils/markdown";
 
@@ -108,6 +109,7 @@ async function startRefresh() {
     runs.value = [created, ...runs.value];
     polls = 0;
     schedulePoll();
+    toastInfo("已启动增量检索");
   } catch (error) {
     errorMessage.value = (error as Error).message;
   } finally {
@@ -125,6 +127,7 @@ async function saveRoutine(patch: Partial<Pick<TaskRoutine, "enabled" | "cadence
       cadence: patch.cadence ?? current?.cadence ?? "weekly",
       notify: patch.notify ?? current?.notify ?? "email",
     });
+    toastSuccess("已保存定时排期");
   } catch (error) {
     errorMessage.value = (error as Error).message;
   } finally {
@@ -180,8 +183,8 @@ onBeforeUnmount(stopPolling);
   >
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div class="min-w-0">
-        <p class="text-[9px] font-semibold tracking-[0.16em] text-primary uppercase">
-          Keep it fresh
+        <p class="text-[9px] font-semibold tracking-[0.16em] text-primary">
+          持续追踪
         </p>
         <h2 class="mt-1 font-display text-base font-medium">持续更新</h2>
         <p class="mt-1 text-xs text-muted-foreground">
@@ -194,13 +197,13 @@ onBeforeUnmount(stopPolling);
         :disabled="starting || refreshing || loading"
         @click="startRefresh"
       >
-        <Loader2 v-if="starting || refreshing" class="animate-spin" aria-hidden="true" />
+        <Loader2 v-if="starting || refreshing" class="animate-spin motion-reduce:animate-none" aria-hidden="true" />
         <RefreshCw v-else :size="14" aria-hidden="true" />
         <span>{{ refreshing ? "检索中…" : "再次检索新文献" }}</span>
       </Button>
     </div>
 
-    <ErrorBanner :message="errorMessage" class="mt-3" />
+    <ErrorBanner :message="errorMessage" class="mt-3" @dismiss="errorMessage = null" />
 
     <!-- 排期：开关 + 频率 + 是否邮件汇报 -->
     <div

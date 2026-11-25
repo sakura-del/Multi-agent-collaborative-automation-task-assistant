@@ -168,18 +168,50 @@ describe("AnnotationPanel", () => {
     expect(wrapper.find('[data-test="annotation-delete-others"]').exists()).toBe(false);
   });
 
-  it("删除后从列表移除", async () => {
+  it("删除需经二次确认（取消不发请求，确认后移除）", async () => {
     vi.mocked(listAnnotations).mockResolvedValue([annotation()] as never);
     vi.mocked(deleteAnnotation).mockResolvedValue(undefined as never);
 
     const wrapper = mountPanel();
     await flushPromises();
 
+    // 第一步点击删除：弹出确认条，尚未发请求
     await wrapper.get('[data-test="annotation-delete-a1"]').trigger("click");
+    expect(deleteAnnotation).not.toHaveBeenCalled();
+    expect(wrapper.find('[data-test="annotation-delete-confirm-a1"]').exists()).toBe(true);
+
+    // 点击取消：收起确认条且未发请求
+    await wrapper.get('[data-test="annotation-delete-cancel-a1"]').trigger("click");
+    expect(deleteAnnotation).not.toHaveBeenCalled();
+    expect(wrapper.find('[data-test="annotation-delete-confirm-a1"]').exists()).toBe(false);
+
+    // 再次点击删除并确认
+    await wrapper.get('[data-test="annotation-delete-a1"]').trigger("click");
+    await wrapper.get('[data-test="annotation-delete-confirm-a1"]').trigger("click");
     await flushPromises();
 
     expect(deleteAnnotation).toHaveBeenCalledWith("t1", "a1");
     expect(wrapper.find('[data-test="annotation-row-a1"]').exists()).toBe(false);
+  });
+
+  it("支持 Ctrl+Enter 快捷提交批注", async () => {
+    vi.mocked(listAnnotations).mockResolvedValue([] as never);
+    vi.mocked(createAnnotation).mockResolvedValue(
+      annotation({ annotation_id: "new2", content: "快捷键批注" }) as never
+    );
+
+    const wrapper = mountPanel();
+    await flushPromises();
+
+    const textarea = wrapper.get('[data-test="annotation-input"]');
+    await textarea.setValue("快捷键批注");
+    await textarea.trigger("keydown.ctrl.enter");
+    await flushPromises();
+
+    expect(createAnnotation).toHaveBeenCalledWith("t1", {
+      anchor_type: "task",
+      content: "快捷键批注",
+    });
   });
 
   it("段落批注显示「段落」徽标", async () => {

@@ -592,4 +592,41 @@ describe("TaskResult · 引用核验集成", () => {
     expect(wrapper.emitted("refresh")).toHaveLength(1);
     wrapper.unmount();
   });
+
+  it("切换证据矩阵后通过 v-show 保活正文容器并使用中文文案与 scaleX 评分条", async () => {
+    const wrapper = mountResult({
+      report: report({
+        evidence_matrix: {
+          questions: ["Q1"],
+          cells: [
+            {
+              question_index: 0,
+              bucket: "strong",
+              claim_ids: [],
+              ref_indices: [1],
+              evidence_kind: "excerpt",
+              summary: "ok",
+              suggested_query: null,
+            },
+          ],
+        },
+      }),
+    });
+
+    expect(wrapper.text()).toContain("终稿复盘");
+    expect(wrapper.text()).toContain("百分制评分");
+    expect(wrapper.text()).toContain("共 3 条");
+    expect(wrapper.text()).not.toContain("Final review");
+    expect(wrapper.text()).not.toContain("SCORE / 100");
+
+    // 评分条使用 scaleX
+    expect(wrapper.find('[data-test="result-scores"] [style*="scaleX"]').exists()).toBe(true);
+
+    // 切到矩阵 Tab 后正文容器仍留在 DOM（v-show 保活），只是 display: none
+    await wrapper.find('[data-test="result-tab-matrix"]').trigger("click");
+    await nextTick();
+    const md = wrapper.find('[data-test="result-markdown"]');
+    expect(md.exists()).toBe(true);
+    expect((md.element as HTMLElement).style.display).toBe("none");
+  });
 });

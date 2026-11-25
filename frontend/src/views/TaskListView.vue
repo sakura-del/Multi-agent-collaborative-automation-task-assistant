@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { ChevronRight, Clock, List, Plus, Search } from "lucide-vue-next";
 
+import AnimatedCollapse from "@/components/common/AnimatedCollapse.vue";
 import BeTimeline from "@/components/motion/BeTimeline.vue";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
@@ -10,7 +11,9 @@ import StatusBadge from "@/components/common/StatusBadge.vue";
 import TaskCreateForm from "@/components/tasks/TaskCreateForm.vue";
 import TaskStatusIcon from "@/components/tasks/TaskStatusIcon.vue";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Pagination } from "@/components/ui/pagination";
+import { useDelayedLoading } from "@/composables/useDelayedLoading";
 import { useKnowledgeStore } from "@/stores/knowledge";
 import { useTaskStore } from "@/stores/tasks";
 import type { TaskStatusGroup } from "@/api/tasks";
@@ -49,6 +52,7 @@ const errorMessage = ref<string | null>(null);
 const keyword = ref("");
 /** 筛选：`all` / `needs-me` / `active` / `done`。 */
 const filter = ref<"all" | "needs-me" | "active" | "done">("all");
+const showSkeleton = useDelayedLoading(() => store.listLoading && !store.items.length);
 
 /**
  * 打开/收起新建表单，并在首次展开时加载知识库文档。
@@ -233,10 +237,10 @@ const timelineTasks = computed(() =>
 const counts = computed(() => store.counts);
 
 const FILTERS = [
-  { value: "all", label: "全部", key: "all" },
-  { value: "needs-me", label: "待我确认", key: "needs_me" },
-  { value: "active", label: "进行中", key: "active" },
-  { value: "done", label: "已完成", key: "done" },
+  { value: "all", label: "全部", key: "all", statTestid: "stat-total" },
+  { value: "needs-me", label: "待我处理", key: "needs_me", statTestid: "stat-needs-me" },
+  { value: "active", label: "进行中", key: "active", statTestid: "stat-active" },
+  { value: "done", label: "已完成", key: "done", statTestid: "stat-done" },
 ] as const;
 
 // ===== 筛选 + 搜索 =====
@@ -322,81 +326,18 @@ const rows = computed(() =>
       </div>
     </header>
 
-    <ErrorBanner :message="errorMessage" />
+    <ErrorBanner :message="errorMessage" @dismiss="errorMessage = null" />
 
-    <TaskCreateForm
-      v-if="showForm"
-      class="mb-5"
-      :pending="submitting"
-      :error="errorMessage"
-      :documents="knowledge.documents"
-      @submit="handleCreate"
-    />
-
-    <!-- 紧凑统计与待办条（Linear 风格：不占大块高度，直奔列表） -->
-    <div
-      v-if="store.items.length"
-      class="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2"
-    >
-      <div class="flex flex-wrap items-center gap-3 text-xs">
-        <button
-          type="button"
-          data-test="stat-needs-me"
-          class="inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 transition-colors hover:bg-muted"
-          @click="filter = filter === 'needs-me' ? 'all' : 'needs-me'"
-        >
-          <span
-            class="font-semibold tabular-nums"
-            :class="counts.needs_me > 0 ? 'text-warning' : 'text-muted-foreground'"
-            >{{ counts.needs_me }}</span
-          >
-          <span class="text-muted-foreground">待我确认</span>
-        </button>
-        <span class="h-3 w-px bg-border" aria-hidden="true" />
-        <button
-          type="button"
-          data-test="stat-active"
-          class="inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 transition-colors hover:bg-muted"
-          @click="filter = filter === 'active' ? 'all' : 'active'"
-        >
-          <span class="font-semibold text-foreground tabular-nums">{{ counts.active }}</span>
-          <span class="text-muted-foreground">进行中</span>
-        </button>
-        <span class="h-3 w-px bg-border" aria-hidden="true" />
-        <button
-          type="button"
-          data-test="stat-done"
-          class="inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 transition-colors hover:bg-muted"
-          @click="filter = filter === 'done' ? 'all' : 'done'"
-        >
-          <span class="font-semibold text-foreground tabular-nums">{{ counts.done }}</span>
-          <span class="text-muted-foreground">已完成</span>
-        </button>
-        <span class="h-3 w-px bg-border" aria-hidden="true" />
-        <div data-test="stat-total" class="inline-flex items-center gap-1.5 px-1.5 py-0.5">
-          <span class="font-semibold text-foreground tabular-nums">{{ counts.all }}</span>
-          <span class="text-muted-foreground">全部</span>
-        </div>
-      </div>
-
-      <button
-        type="button"
-        data-test="attention-needs-me"
-        class="inline-flex items-center gap-2 rounded-md border px-2.5 py-1 text-xs transition-colors"
-        :class="
-          counts.needs_me > 0
-            ? 'border-warning/35 bg-warning/10 text-warning hover:bg-warning/15'
-            : 'border-border bg-background text-muted-foreground hover:text-foreground'
-        "
-        :aria-pressed="filter === 'needs-me'"
-        @click="filter = filter === 'needs-me' ? 'all' : 'needs-me'"
-      >
-        <span class="font-medium">
-          {{ counts.needs_me > 0 ? `${counts.needs_me} 项等待你的判断` : "暂无待处理任务" }}
-        </span>
-        <span class="opacity-80">{{ filter === "needs-me" ? "查看全部" : "筛选待办" }} →</span>
-      </button>
-    </div>
+    <AnimatedCollapse :open="showForm">
+      <TaskCreateForm
+        class="mb-5"
+        :pending="submitting"
+        :error="errorMessage"
+        :documents="knowledge.documents"
+        @submit="handleCreate"
+        @dismiss-error="errorMessage = null"
+      />
+    </AnimatedCollapse>
 
     <!-- 可选时间线视图（默认收起，切换到时间线模式时展示） -->
     <div
@@ -433,11 +374,13 @@ const rows = computed(() =>
             </div>
             <div>
               <p class="text-[11px] font-medium tracking-wide uppercase opacity-80">研究任务</p>
-              <div class="mt-1.5 h-1.5 rounded-full bg-foreground/10">
+              <div class="mt-1.5 h-1.5 overflow-hidden rounded-full bg-foreground/10">
                 <div
-                  class="h-full rounded-full"
+                  class="h-full w-full origin-left rounded-full"
                   :class="timelineBarClass(timelineTask(event.id)!.status)"
-                  :style="{ width: `${taskProgress(timelineTask(event.id)!.status)}%` }"
+                  :style="{
+                    transform: `scaleX(${taskProgress(timelineTask(event.id)!.status) / 100})`,
+                  }"
                 />
               </div>
             </div>
@@ -449,8 +392,11 @@ const rows = computed(() =>
       </BeTimeline>
     </div>
 
-    <!-- 筛选 + 搜索 -->
-    <div v-if="store.items.length" class="mb-4 flex flex-wrap items-center gap-2">
+    <!-- 唯一单排工具栏：状态筛选（含计数）+ 待我处理快捷提示 + 搜索 -->
+    <div
+      v-if="store.items.length || isFiltered || store.counts.all > 0"
+      class="mb-4 flex flex-wrap items-center gap-2"
+    >
       <div class="flex flex-wrap gap-1" role="group" aria-label="按状态筛选">
         <button
           v-for="option in FILTERS"
@@ -459,7 +405,7 @@ const rows = computed(() =>
           :data-test="`filter-${option.value}`"
           :aria-pressed="filter === option.value"
           :class="[
-            'relative px-1 py-1.5 text-xs font-medium transition-colors after:absolute after:right-0 after:-bottom-1 after:left-0 after:h-0.5 after:rounded-full',
+            'relative px-1.5 py-1.5 text-xs font-medium transition-colors after:absolute after:right-0 after:-bottom-1 after:left-0 after:h-0.5 after:rounded-full',
             filter === option.value
               ? 'text-foreground after:bg-primary'
               : 'text-muted-foreground after:bg-transparent hover:text-foreground',
@@ -467,34 +413,72 @@ const rows = computed(() =>
           @click="filter = option.value"
         >
           {{ option.label }}
-          <span class="ml-1 tabular-nums opacity-70">{{ counts[option.key] }}</span>
+          <span :data-test="option.statTestid" class="ml-1 tabular-nums opacity-70">{{
+            counts[option.key]
+          }}</span>
         </button>
       </div>
 
-      <div class="relative ml-auto w-full sm:w-64">
-        <Search
-          :size="14"
-          class="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground"
-          aria-hidden="true"
-        />
-        <input
-          v-model="keyword"
-          data-test="task-search"
-          type="search"
-          placeholder="搜索标题…"
-          aria-label="搜索任务标题"
-          class="w-full rounded-md border border-input bg-card py-1.5 pr-2.5 pl-8 text-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring"
-        />
+      <div class="ml-auto flex flex-wrap items-center gap-2 max-sm:w-full">
+        <button
+          type="button"
+          data-test="attention-needs-me"
+          class="inline-flex items-center gap-2 rounded-md border px-2.5 py-1 text-xs transition-colors"
+          :class="
+            counts.needs_me > 0
+              ? 'border-warning/35 bg-warning/10 text-warning hover:bg-warning/15'
+              : 'border-border bg-background text-muted-foreground hover:text-foreground'
+          "
+          :aria-pressed="filter === 'needs-me'"
+          @click="filter = filter === 'needs-me' ? 'all' : 'needs-me'"
+        >
+          <span class="font-medium">
+            {{ counts.needs_me > 0 ? `${counts.needs_me} 项等待你的判断` : "暂无等待你的判断" }}
+          </span>
+          <span v-if="counts.needs_me > 0" class="opacity-80">
+            {{ filter === "needs-me" ? "查看全部" : "查看" }} →
+          </span>
+        </button>
+
+        <div class="relative w-full sm:w-56">
+          <Search
+            :size="14"
+            class="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground"
+            aria-hidden="true"
+          />
+          <Input
+            v-model="keyword"
+            data-test="task-search"
+            type="search"
+            placeholder="搜索标题…"
+            aria-label="搜索任务标题"
+            class="h-8 pl-8 text-xs"
+          />
+        </div>
       </div>
     </div>
 
-    <p v-if="store.listLoading && !store.items.length" class="text-sm text-muted-foreground">
-      加载中…
-    </p>
+    <!-- 延迟骨架屏：避免闪现空态 -->
+    <div
+      v-if="showSkeleton"
+      data-test="task-list-skeleton"
+      class="space-y-2 rounded-lg border border-border bg-card p-3"
+      aria-busy="true"
+    >
+      <div
+        v-for="row in 4"
+        :key="row"
+        class="flex items-center justify-between gap-3 border-b border-border/60 py-2 last:border-b-0"
+      >
+        <div class="h-4 w-2/5 animate-pulse rounded bg-muted/60 motion-reduce:animate-none" />
+        <div class="h-4 w-20 animate-pulse rounded bg-muted/60 motion-reduce:animate-none" />
+        <div class="h-4 w-28 animate-pulse rounded bg-muted/60 max-lg:hidden motion-reduce:animate-none" />
+      </div>
+    </div>
 
-    <!-- 真·空态（区别于筛选无结果） -->
+    <!-- 真·空态（区别于筛选无结果；RECHECK-B3 加 !loading && !showSkeleton 守卫） -->
     <EmptyState
-      v-else-if="!store.items.length"
+      v-else-if="!store.listLoading && !showSkeleton && !store.items.length && !isFiltered"
       testid="empty-state"
       title="还没有任务"
       description="新建一个文献综述任务，系统会先规划再执行，可随时确认与干预。"
@@ -514,7 +498,7 @@ const rows = computed(() =>
       <p class="mt-1 text-xs text-muted-foreground">
         {{
           filter === "needs-me"
-            ? "当前没有需要你确认的任务，可以切回「全部」看看。"
+            ? "当前没有需要你处理的任务，可以切回「全部」看看。"
             : "试试换个关键词，或切回「全部」。"
         }}
       </p>
@@ -532,7 +516,10 @@ const rows = computed(() =>
       </Button>
     </div>
 
-    <div v-else class="overflow-hidden rounded-lg border border-border bg-card">
+    <div
+      v-else-if="!(viewMode === 'timeline' && timelineTasks.length && store.listPage === 1)"
+      class="overflow-hidden rounded-lg border border-border bg-card"
+    >
       <!-- 桌面：Linear 高密度表格。窄屏：卡片式 -->
       <table class="w-full border-collapse text-[13px] max-md:block">
         <thead class="max-md:hidden">
@@ -633,8 +620,8 @@ const rows = computed(() =>
                   :title="`${taskProgress(row.task.status)}%`"
                 >
                   <div
-                    class="h-full rounded-full bg-primary transition-[width] duration-300 motion-reduce:transition-none"
-                    :style="{ width: `${taskProgress(row.task.status)}%` }"
+                    class="h-full w-full origin-left rounded-full bg-primary transition-transform duration-300 motion-reduce:transition-none"
+                    :style="{ transform: `scaleX(${taskProgress(row.task.status) / 100})` }"
                   />
                 </div>
                 <!-- 真正的按钮语义放这里：

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Pagination } from "@/components/ui/pagination";
 import { Label } from "@/components/ui/label";
 import type { TaskEvent } from "@/api/types";
-import { formatDateTime } from "@/utils/task-status";
+import { formatDateTime, taskStatusLabel } from "@/utils/task-status";
 
 /** 日志级别 → Badge 语义变体（不直接写颜色，保持全站语义色一致）。 */
 const LEVEL_TONE: Record<string, NonNullable<BadgeVariants["variant"]>> = {
@@ -15,6 +15,30 @@ const LEVEL_TONE: Record<string, NonNullable<BadgeVariants["variant"]>> = {
   warning: "warning",
   error: "destructive",
   debug: "muted",
+};
+
+const LEVEL_LABELS: Record<string, string> = {
+  info: "信息",
+  warning: "警告",
+  error: "错误",
+  debug: "调试",
+};
+
+const EVENT_TYPE_LABELS: Record<string, string> = {
+  task_created: "任务创建",
+  plan_ready: "规划就绪",
+  task_status: "任务状态变更",
+  task_waiting_human: "等待人工介入",
+  task_completed: "任务完成",
+  task_failed: "任务失败",
+  task_cancelled: "任务已终止",
+  subtask_state_transition: "子任务状态流转",
+  subtask_status: "子任务状态",
+  subtask_started: "子任务开始",
+  subtask_completed: "子任务完成",
+  subtask_failed: "子任务失败",
+  node_completed: "节点完成",
+  node_failed: "节点失败",
 };
 
 // 结构化日志查看器：按 Agent / 节点 / 级别过滤，默认分页 100 行；一律文本插值（不用 v-html）
@@ -120,13 +144,23 @@ watch(pageCount, (count) => {
     page.value = count;
   }
 });
+
+const hasActiveFilter = computed(() =>
+  Boolean(agentFilter.value || nodeFilter.value || levelFilter.value),
+);
+
+function resetFilters() {
+  agentFilter.value = "";
+  nodeFilter.value = "";
+  levelFilter.value = "";
+}
 </script>
 
 <template>
   <section class="flex flex-col gap-2.5" data-test="task-log">
     <div class="flex flex-wrap items-end gap-3">
       <div class="grid gap-1">
-        <Label for="log-filter-agent">Agent</Label>
+        <Label for="log-filter-agent">执行角色</Label>
         <select
           id="log-filter-agent"
           v-model="agentFilter"
@@ -158,9 +192,9 @@ watch(pageCount, (count) => {
           class="flex h-8 rounded-md border border-input bg-background px-2 text-xs shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
         >
           <option value="">全部</option>
-          <option value="info">info</option>
-          <option value="warning">warning</option>
-          <option value="error">error</option>
+          <option value="info">信息</option>
+          <option value="warning">警告</option>
+          <option value="error">错误</option>
         </select>
       </div>
       <span class="ml-auto text-xs text-muted-foreground" data-test="log-count">
@@ -168,24 +202,55 @@ watch(pageCount, (count) => {
       </span>
     </div>
 
-    <ol class="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
+    <ol
+      v-if="visible.length"
+      class="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card"
+    >
       <li
         v-for="row in visible"
         :key="row.eventId"
-        class="grid grid-cols-[auto_auto_auto_auto_auto_auto_1fr] items-center gap-2 px-2.5 py-1.5 text-xs"
+        class="flex flex-col gap-1 px-2.5 py-2 text-xs [content-visibility:auto] [contain-intrinsic-size:auto_48px] sm:grid sm:grid-cols-[auto_auto_auto_auto_auto_auto_1fr] sm:items-center sm:gap-2 sm:py-1.5"
         :data-test="`log-row-${row.eventId}`"
       >
-        <span class="tabular-nums text-muted-foreground">{{ row.occurredAt }}</span>
-        <Badge :variant="LEVEL_TONE[row.level] ?? 'muted'">{{ row.level }}</Badge>
-        <span class="text-muted-foreground">{{ row.eventType }}</span>
-        <span class="text-muted-foreground">{{ row.status }}</span>
-        <span>{{ row.agent }}</span>
-        <span class="text-muted-foreground">{{ row.node }}</span>
+        <div class="flex flex-wrap items-center gap-2 sm:contents">
+          <span class="tabular-nums text-muted-foreground">{{ row.occurredAt }}</span>
+          <Badge :variant="LEVEL_TONE[row.level] ?? 'muted'">
+            {{ LEVEL_LABELS[row.level] ?? row.level }}
+          </Badge>
+          <span class="text-muted-foreground">
+            {{ EVENT_TYPE_LABELS[row.eventType] ?? row.eventType }}
+          </span>
+          <span class="text-muted-foreground">{{ taskStatusLabel(row.status) }}</span>
+          <span>{{ row.agent }}</span>
+          <span class="text-muted-foreground">{{ row.node }}</span>
+        </div>
         <span class="truncate" :title="row.message">{{ row.message }}</span>
       </li>
     </ol>
 
-    <p v-if="!visible.length" class="text-sm text-muted-foreground">没有匹配的事件。</p>
+    <div
+      v-else
+      class="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-card px-4 py-6 text-center"
+    >
+      <p class="text-sm font-medium text-foreground">没有匹配的事件</p>
+      <p class="text-xs text-muted-foreground">
+        {{
+          hasActiveFilter
+            ? "当前筛选条件下暂无日志，可以清除筛选条件查看全部执行事件。"
+            : "任务推进后，实时执行事件会展示在这里。"
+        }}
+      </p>
+      <Button
+        v-if="hasActiveFilter"
+        type="button"
+        variant="outline"
+        size="sm"
+        data-test="log-reset-filters"
+        @click="resetFilters"
+      >
+        清除筛选
+      </Button>
+    </div>
 
     <!-- 日志可能上百页：只给「上一页/下一页」翻不到中间，换成可跳页的分页 -->
     <div

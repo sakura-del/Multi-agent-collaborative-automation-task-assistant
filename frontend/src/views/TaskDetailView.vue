@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import BeTraceWaterfall, { type TraceSpan } from "@/components/motion/BeTraceWaterfall.vue";
 import BeAgentPlan, { type AgentPlanStep } from "@/components/motion/BeAgentPlan.vue";
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ListFilter, MessageSquare, X } from "lucide-vue-next";
+import { Motion, useReducedMotion } from "motion-v";
 
 import BeTimeline from "@/components/motion/BeTimeline.vue";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
@@ -17,6 +18,10 @@ import TaskRefreshPanel from "@/components/tasks/TaskRefreshPanel.vue";
 import TaskLog from "@/components/tasks/TaskLog.vue";
 import TaskResult from "@/components/tasks/TaskResult.vue";
 import TaskToolbar from "@/components/tasks/TaskToolbar.vue";
+import { Button } from "@/components/ui/button";
+import { MotionDrawer } from "@/components/ui/drawer";
+import { useDelayedLoading } from "@/composables/useDelayedLoading";
+import { SPRING_LAYOUT } from "@/lib/ease";
 import { useAuthStore } from "@/stores/auth";
 import { useTaskStore } from "@/stores/tasks";
 import type { PlanNode, SubtaskStatus, TaskControl, TaskEvent } from "@/api/types";
@@ -56,6 +61,58 @@ const conflictMessage = ref<string | null>(null);
 const selectedNodeId = ref<string | null>(null);
 /** 批注抽屉开关（默认收起）。 */
 const annotationOpen = ref(false);
+const tabGroupId = useId();
+const reduced = useReducedMotion();
+const showSkeleton = useDelayedLoading(() => store.detailLoading && !store.snapshot);
+
+// ===== WS 连接微指示器状态机 =====
+const showRecovered = ref(false);
+let recoverTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearRecoverTimer() {
+  if (recoverTimer !== null) {
+    clearTimeout(recoverTimer);
+    recoverTimer = null;
+  }
+}
+
+watch(
+  () => store.connectionState,
+  (next, prev) => {
+    clearRecoverTimer();
+    if ((prev === "reconnecting" || prev === "polling") && next === "connected") {
+      showRecovered.value = true;
+      recoverTimer = setTimeout(() => {
+        showRecovered.value = false;
+        recoverTimer = null;
+      }, 1500);
+    } else {
+      showRecovered.value = false;
+    }
+  },
+);
+
+// ===== 执行节点选中脉冲与窄屏定位 =====
+const pulsingDetail = ref(false);
+let pulseTimer: ReturnType<typeof setTimeout> | null = null;
+
+async function selectExecutionNode(nodeId: string) {
+  selectedNodeId.value = nodeId;
+  pulsingDetail.value = true;
+  if (pulseTimer !== null) clearTimeout(pulseTimer);
+  pulseTimer = setTimeout(() => {
+    pulsingDetail.value = false;
+    pulseTimer = null;
+  }, 800);
+  if (typeof window !== "undefined" && window.innerWidth < 1280) {
+    await nextTick();
+    const detailEl = document.querySelector('[data-test="node-detail"]') as HTMLElement | null;
+    detailEl?.scrollIntoView?.({
+      block: "nearest",
+      behavior: reduced.value ? "auto" : "smooth",
+    });
+  }
+}
 
 const activeTab = computed<TabKey>(() => {
   const value = String(route.query.tab ?? "plan");
@@ -282,10 +339,18 @@ watch(
  * 后端把失败原因放在 `task_waiting_human` 事件的 payload.reason 里，
  * 页面上此前只显示「任务已暂停，等你介入」——用户不知道要做什么。
  */
-const waitingReason = computed(() =>
-  latestWaitingReason(store.events, store.snapshot?.status ?? ""),
-);
+const waitingReason = computed(() => {
+  const status = store.snapshot?.status ?? "";
+  const fromEvents = latestWaitingReason(store.events, status);
+  if (fromEvents) return fromEvents;
+  if (status === "waiting_human") return store.snapshot?.waiting_reason ?? "";
+  if (status === "failed") return store.snapshot?.error ?? "";
+  return "";
+});
 const waitingAdvice = computed(() => adviceForWaitingReason(waitingReason.value));
+const failedError = computed(() =>
+  store.snapshot?.status === "failed" ? (store.snapshot.error ?? waitingReason.value) : "",
+);
 
 // ===== 执行事件时间线（beUI 风格）=====
 
@@ -342,6 +407,8 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  clearRecoverTimer();
+  if (pulseTimer !== null) clearTimeout(pulseTimer);
   store.stopWatching();
 });
 </script>
@@ -353,7 +420,8 @@ onBeforeUnmount(() => {
       <header class="mb-4 min-h-[1.75rem]">
         <div
           v-if="!store.snapshot && !errorMessage"
-          class="h-7 w-72 animate-pulse rounded-md bg-muted/60"
+          class="h-7 w-72 rounded-md"
+          :class="showSkeleton ? 'animate-pulse bg-muted/60 motion-reduce:animate-none' : ''"
         />
         <h1 v-else class="text-xl leading-snug font-semibold tracking-tight text-foreground">
           {{ store.snapshot?.title ?? "任务详情" }}
@@ -399,9 +467,30 @@ onBeforeUnmount(() => {
         </p>
       </div>
 
-      <ErrorBanner :message="errorMessage" />
+      <div
+        v-else-if="failedError"
+        data-test="failed-reason"
+        class="mb-4 flex flex-col gap-1 rounded-md border border-destructive/30 bg-destructive/8 px-3 py-2 text-sm"
+      >
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="font-medium text-destructive">任务执行失败</span>
+          <button
+            v-if="activeTab !== 'plan' && canReplan"
+            type="button"
+            class="text-xs text-destructive underline underline-offset-2"
+            @click="selectTab('plan')"
+          >
+            去重新规划 →
+          </button>
+        </div>
+        <p class="font-mono text-xs leading-5 break-words text-destructive/90">
+          {{ failedError }}
+        </p>
+      </div>
 
-      <!-- 选项卡：Linear 极简下划线式；用伪元素下划线并显式 overflow-y-hidden，避免 -mb-px 触发窄屏纵向滚动箭头（Issue #57） -->
+      <ErrorBanner :message="errorMessage" @dismiss="errorMessage = null" />
+
+      <!-- 选项卡：共享 layoutId 滑块（useId() 实例隔离），显式 overflow-y-hidden 防止窄屏纵向滚动箭头（Issue #57） -->
       <nav
         class="mb-4 flex gap-1 overflow-x-auto overflow-y-hidden border-b border-border"
         role="tablist"
@@ -409,36 +498,66 @@ onBeforeUnmount(() => {
         <button
           v-for="tab in TABS"
           :key="tab"
-          class="relative shrink-0 whitespace-nowrap px-3 py-2 text-xs font-medium transition-colors after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:rounded-full"
+          class="relative shrink-0 whitespace-nowrap px-3 py-2 text-xs font-medium transition-colors"
           :class="
             activeTab === tab
-              ? 'text-foreground after:bg-primary'
-              : 'text-muted-foreground after:bg-transparent hover:text-foreground'
+              ? 'text-foreground'
+              : 'text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50'
           "
           :data-test="`tab-${tab}`"
           role="tab"
           type="button"
           :aria-selected="activeTab === tab"
           :disabled="tab === 'result' && !resultAvailable"
+          :title="tab === 'result' && !resultAvailable ? '任务完成复盘后可用' : undefined"
           @click="selectTab(tab)"
         >
           {{ { plan: "规划", execution: "执行", logs: "日志", result: "结果" }[tab] }}
+          <Motion
+            v-if="activeTab === tab"
+            :layout-id="reduced ? undefined : `tab-pill-${tabGroupId}`"
+            :transition="SPRING_LAYOUT"
+            class="pointer-events-none absolute inset-x-0 bottom-0 h-0.5 rounded-full bg-primary"
+          />
         </button>
       </nav>
 
-      <TaskToolbar
-        class="mb-3"
-        :status="store.snapshot?.status ?? 'created'"
-        :pending="pending"
-        :selected-node-id="selectedNodeId"
-        :selected-node-status="selectedSubtask?.status ?? null"
-        @command="handleControl"
-      />
+      <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <TaskToolbar
+          :status="store.snapshot?.status ?? 'created'"
+          :pending="pending"
+          :selected-node-id="selectedNodeId"
+          :selected-node-status="selectedSubtask?.status ?? null"
+          @command="handleControl"
+        />
+        <span
+          v-if="store.connectionState !== 'connected' || showRecovered"
+          data-test="ws-connection-indicator"
+          class="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-0.5 text-[11px] text-muted-foreground"
+        >
+          <span
+            class="size-1.5 rounded-full"
+            :class="
+              store.connectionState === 'reconnecting'
+                ? 'animate-pulse bg-warning motion-reduce:animate-none'
+                : store.connectionState === 'polling'
+                  ? 'bg-muted-foreground'
+                  : 'bg-success'
+            "
+            aria-hidden="true"
+          />
+          <span v-if="store.connectionState === 'reconnecting'">实时连接重连中…</span>
+          <span v-else-if="store.connectionState === 'polling'">已切换为定时同步</span>
+          <span v-else>实时连接已恢复</span>
+        </span>
+      </div>
 
       <div v-if="!store.snapshot && !errorMessage" class="min-h-[24rem] space-y-3" aria-busy="true">
-        <div class="h-24 animate-pulse rounded-lg border border-border bg-muted/40" />
-        <div class="h-36 animate-pulse rounded-lg border border-border bg-muted/40" />
-        <div class="h-24 animate-pulse rounded-lg border border-border bg-muted/40" />
+        <template v-if="showSkeleton">
+          <div class="h-24 animate-pulse rounded-lg border border-border bg-muted/40 motion-reduce:animate-none" />
+          <div class="h-36 animate-pulse rounded-lg border border-border bg-muted/40 motion-reduce:animate-none" />
+          <div class="h-24 animate-pulse rounded-lg border border-border bg-muted/40 motion-reduce:animate-none" />
+        </template>
       </div>
 
       <div v-else-if="activeTab === 'plan'">
@@ -455,6 +574,8 @@ onBeforeUnmount(() => {
           @approve="handleApprove"
           @regenerate="handleRegenerate"
           @retry="handleRetryStep"
+          @dismiss-error="errorMessage = null"
+          @dismiss-conflict="conflictMessage = null"
         />
       </div>
 
@@ -462,15 +583,40 @@ onBeforeUnmount(() => {
         v-else-if="activeTab === 'execution'"
         class="grid gap-3 xl:grid-cols-[minmax(0,1fr)_18rem]"
       >
-        <TaskDag
-          v-if="store.snapshot?.plan"
-          :nodes="store.snapshot.plan.nodes"
-          :statuses="statuses"
-          :selected="selectedNodeId"
-          @select="selectedNodeId = $event"
+        <div class="min-w-0">
+          <TaskDag
+            v-if="store.snapshot?.plan"
+            :nodes="store.snapshot.plan.nodes"
+            :statuses="statuses"
+            :selected="selectedNodeId"
+            @select="selectExecutionNode"
+          />
+          <p v-else class="text-sm text-muted-foreground">暂无规划，无法展示 DAG。</p>
+          <BeTraceWaterfall
+            v-if="traceSpans.length"
+            :run-name="traceRunName"
+            :spans="traceSpans"
+            class="mt-3"
+          />
+        </div>
+        <NodeDetail
+          v-if="selectedNode"
+          :node="selectedNode"
+          :subtask="selectedSubtask"
+          :siblings="store.snapshot?.subtasks ?? []"
+          :class="
+            pulsingDetail
+              ? 'border-primary ring-2 ring-primary/40 transition-colors duration-150'
+              : ''
+          "
+          @close="selectedNodeId = null"
         />
-        <p v-else class="text-sm text-muted-foreground">暂无规划，无法展示 DAG。</p>
-        <NodeDetail :node="selectedNode" :subtask="selectedSubtask" @close="selectedNodeId = null" />
+        <div
+          v-else
+          class="flex h-fit items-center justify-center rounded-2xl border border-dashed border-border bg-card/40 px-4 py-6 text-center text-xs text-muted-foreground"
+        >
+          点击左侧节点查看执行耗时与输出详情
+        </div>
       </div>
 
       <div v-else-if="activeTab === 'logs'" class="space-y-4">
@@ -559,7 +705,7 @@ onBeforeUnmount(() => {
         <div class="flex flex-col gap-1 border-t border-border pt-2.5">
           <dt class="text-muted-foreground">使用模型</dt>
           <dd class="font-medium break-words" data-test="task-model">
-            <span v-if="!store.snapshot" class="inline-block h-4 w-24 animate-pulse rounded bg-muted/60" />
+            <span v-if="!store.snapshot" class="inline-block h-4 w-24 animate-pulse rounded bg-muted/60 motion-reduce:animate-none" />
             <template v-else>
               {{
                 store.snapshot.model
@@ -606,36 +752,29 @@ onBeforeUnmount(() => {
     <!-- 导师批注（Phase 2）：**侧边抽屉**，默认收起。
          旧版把它常驻在四个 tab 底部（含大块空态），把结果/日志挤得很长；
          批注属于协作场景，不该在所有 tab 抢占纵向空间。 -->
-    <Teleport to="body">
-      <div
-        v-if="annotationOpen"
-        class="fixed inset-0 z-40 bg-foreground/20"
-        data-test="annotation-backdrop"
-        @click="annotationOpen = false"
-      />
-      <aside
-        v-if="annotationOpen"
-        data-test="annotation-drawer"
-        role="dialog"
-        aria-label="导师批注"
-        class="fixed top-0 right-0 z-50 flex h-full w-full max-w-md flex-col border-l border-border bg-card shadow-raised"
-      >
-        <div class="flex items-center justify-between border-b border-border px-4 py-3">
-          <h2 class="text-sm font-semibold">导师批注</h2>
-          <button
-            type="button"
-            data-test="close-annotation"
-            aria-label="关闭批注"
-            class="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-            @click="annotationOpen = false"
-          >
-            <X :size="16" aria-hidden="true" />
-          </button>
-        </div>
-        <div class="min-h-0 flex-1 overflow-y-auto p-4">
-          <AnnotationPanel :task-id="props.taskId" :current-user-id="currentUserId" bare />
-        </div>
-      </aside>
-    </Teleport>
+    <MotionDrawer
+      v-model:open="annotationOpen"
+      side="right"
+      width-class="w-full max-w-md"
+      aria-label="导师批注"
+      :backdrop-attrs="{ 'data-test': 'annotation-backdrop' }"
+      :panel-attrs="{ 'data-test': 'annotation-drawer' }"
+    >
+      <div class="flex items-center justify-between border-b border-border px-4 py-3">
+        <h2 class="text-sm font-semibold">导师批注</h2>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          data-test="close-annotation"
+          aria-label="关闭批注"
+          @click="annotationOpen = false"
+        >
+          <X :size="16" aria-hidden="true" />
+        </Button>
+      </div>
+      <div class="min-h-0 flex-1 overflow-y-auto p-4">
+        <AnnotationPanel :task-id="props.taskId" :current-user-id="currentUserId" bare />
+      </div>
+    </MotionDrawer>
   </section>
 </template>

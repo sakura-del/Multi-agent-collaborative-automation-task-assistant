@@ -107,10 +107,13 @@ describe("PlanPanel", () => {
     expect(hint).not.toContain("已暂停在执行阶段");
 
     const agentPlan = wrapper.find('[data-test="agent-plan"]');
-    expect(agentPlan.find('[data-test="agent-plan-status"]').text()).toBe("Completed");
+    expect(agentPlan.find('[data-test="agent-plan-status"]').text()).toBe("已完成");
     expect(agentPlan.text()).not.toContain("Awaiting approval");
+    expect(agentPlan.text()).not.toContain("等待确认");
     expect(agentPlan.text()).not.toContain("No steps yet");
-    expect(agentPlan.text()).toContain("2 steps");
+    expect(agentPlan.text()).not.toContain("暂无执行步骤");
+    expect(agentPlan.text()).toContain("共 2 步");
+    expect(wrapper.text()).not.toContain("beUI");
   });
 
   it("renders running and failed hints accurately when approval is disabled", () => {

@@ -878,4 +878,183 @@ describe("TaskCreateForm 默认模型", () => {
         expect(titleSpan.classes()).toContain("min-w-0");
         expect(titleSpan.classes()).toContain("break-all");
     });
+
+    it("关键词与种子 DOI 支持分隔符批量拆分及显式「添加」按钮", async () => {
+        const wrapper = mountForm();
+        await flushPromises();
+
+        // 关键词批量拆分 + 显式添加按钮
+        const kwInput = wrapper.find('[data-test="keyword-input"]');
+        await kwInput.setValue("RAG, Agent；检索，RAG");
+        await wrapper.find('[data-test="keyword-add-btn"]').trigger("click");
+        expect(wrapper.text()).toContain("RAG");
+        expect(wrapper.text()).toContain("Agent");
+        expect(wrapper.text()).toContain("检索");
+        expect((kwInput.element as HTMLInputElement).value).toBe("");
+
+        // 滚雪球模式下种子 DOI 批量拆分 + 显式添加按钮
+        await wrapper.find('[data-test="preset-citation_snowballing"]').trigger("click");
+        const seedInput = wrapper.find('[data-test="seed-doi-input"]');
+        await seedInput.setValue("10.1000/a; 10.1000/b，10.1000/a");
+        await wrapper.find('[data-test="seed-doi-add-btn"]').trigger("click");
+        expect(wrapper.text()).toContain("10.1000/a");
+        expect(wrapper.text()).toContain("10.1000/b");
+    });
+
+    it("提供文献数预设芯片、引用库互斥清零与安全原生跳转链接", async () => {
+        vi.mocked(api.get).mockImplementation((url: string) => {
+            if (url === "/citation-styles") {
+                return Promise.resolve({
+                    data: { styles: [apiStyleRow()], default_style_id: "gbt7714-2025-numeric" },
+                });
+            }
+            if (url === "/reference-library/summary") {
+                return Promise.resolve({ data: { total: 0, usable_as_source: 0 } });
+            }
+            if (url === "/llm-credentials") {
+                return Promise.resolve({ data: [] });
+            }
+            return Promise.reject(new Error(`unexpected url ${url}`));
+        });
+
+        const wrapper = mountForm();
+        await flushPromises();
+
+        // 预设芯片 5 / 10 / 20
+        await wrapper.find('[data-test="max-docs-chip-20"]').trigger("click");
+        expect((wrapper.find('[data-test="max-documents"]').element as HTMLInputElement).value).toBe("20");
+
+        // 引用库为空时复选框禁用且提供原生 <a> 跳转
+        const libCheckbox = wrapper.find('[data-test="reference-library"]').element as HTMLInputElement;
+        expect(libCheckbox.disabled).toBe(true);
+        const importLink = wrapper.find('a[href="/references/import"]');
+        expect(importLink.exists()).toBe(true);
+
+        // 无可用 BYOK 凭据时提供前往我的模型原生 <a> 入口
+        const modelLink = wrapper.find('a[href="/settings/models"]');
+        expect(modelLink.exists()).toBe(true);
+    });
+
+    it("启用引用库时自动重置 offlineDataset 为 false", async () => {
+        vi.mocked(api.get).mockImplementation((url: string) => {
+            if (url === "/citation-styles") {
+                return Promise.resolve({
+                    data: { styles: [apiStyleRow()], default_style_id: "gbt7714-2025-numeric" },
+                });
+            }
+            if (url === "/reference-library/summary") {
+                return Promise.resolve({ data: { total: 5, usable_as_source: 5 } });
+            }
+            if (url === "/llm-credentials") {
+                return Promise.resolve({ data: [] });
+            }
+            return Promise.reject(new Error(`unexpected url ${url}`));
+        });
+
+        const wrapper = mountForm();
+        await flushPromises();
+
+        await wrapper.find('[data-test="offline"]').setValue(true);
+        expect((wrapper.find('[data-test="offline"]').element as HTMLInputElement).checked).toBe(true);
+
+        await wrapper.find('[data-test="reference-library"]').setValue(true);
+        await flushPromises();
+
+        expect((wrapper.find('[data-test="offline"]').element as HTMLInputElement).checked).toBe(false);
+    });
+
+    it("日期校验失败时自动展开高级折叠区并高亮出错字段", async () => {
+        const wrapper = mountForm();
+        await flushPromises();
+        await fillValidForm(wrapper);
+
+        const toggleBtn = wrapper.find('[data-test="toggle-advanced-options"]');
+        expect(toggleBtn.attributes("aria-expanded")).toBe("false");
+
+        await wrapper.find('[data-test="date-from"]').setValue("2025-05-01");
+        await wrapper.find('[data-test="date-to"]').setValue("2024-01-01");
+        await wrapper.find('[data-test="submit"]').trigger("click");
+        await flushPromises();
+
+        expect(toggleBtn.attributes("aria-expanded")).toBe("true");
+        expect(wrapper.find('[data-test="date-to"]').classes()).toContain("border-destructive");
+    });
+
+    it("粘贴超限批量关键词且未失焦直接提交时应拆分拦截并标红（Challenger 1.3b）", async () => {
+        const wrapper = mountForm();
+        await flushPromises();
+        await wrapper.find('[data-test="topic"]').setValue("检索增强生成批量关键词校验测试");
+
+        const kwInput = wrapper.find('[data-test="keyword-input"]');
+        await kwInput.setValue("a,b，c;d；e,f,g,h,i,j,k,l");
+        await wrapper.find('[data-test="submit"]').trigger("click");
+        await flushPromises();
+
+        expect(wrapper.emitted("submit")).toBeUndefined();
+        expect(wrapper.find('[data-test="validation-error"]').text()).toContain("最多 10");
+        expect(kwInput.classes()).toContain("border-destructive");
+    });
+
+    it("已有 9 词时未失焦输入 2 个逗号分隔关键词直接提交应拦截并标红（Challenger 1.3c）", async () => {
+        const wrapper = mountForm();
+        await flushPromises();
+        await wrapper.find('[data-test="topic"]').setValue("检索增强生成边界叠加校验测试");
+
+        const kwInput = wrapper.find('[data-test="keyword-input"]');
+        for (let index = 1; index <= 9; index += 1) {
+            await kwInput.setValue(`k${index}`);
+            await kwInput.trigger("keydown.enter");
+        }
+        await kwInput.setValue("k10,k11");
+        await wrapper.find('[data-test="submit"]').trigger("click");
+        await flushPromises();
+
+        expect(wrapper.emitted("submit")).toBeUndefined();
+        expect(wrapper.find('[data-test="validation-error"]').text()).toContain("最多 10");
+        expect(kwInput.classes()).toContain("border-destructive");
+    });
+
+    it("滚雪球模式输入 6 个逗号分隔种子 DOI 未失焦直接提交应拦截并标红（Challenger 1.3d）", async () => {
+        const wrapper = mountForm();
+        await flushPromises();
+        await wrapper.find('[data-test="preset-citation_snowballing"]').trigger("click");
+        await wrapper.find('[data-test="topic"]').setValue("引文滚雪球种子数量上限校验测试");
+
+        const seedInput = wrapper.find('[data-test="seed-doi-input"]');
+        await seedInput.setValue("10.1/a,10.1/b,10.1/c,10.1/d,10.1/e,10.1/f");
+        await wrapper.find('[data-test="submit"]').trigger("click");
+        await flushPromises();
+
+        expect(wrapper.emitted("submit")).toBeUndefined();
+        expect(wrapper.find('[data-test="validation-error"]').text()).toContain("最多 5");
+        expect(seedInput.classes()).toContain("border-destructive");
+    });
+
+    it("未失焦输入合法批量关键词直接提交时自动拆分为独立条目并去重", async () => {
+        const wrapper = mountForm();
+        await flushPromises();
+        await wrapper.find('[data-test="topic"]').setValue("未失焦合法批量拆分提交测试");
+
+        const kwInput = wrapper.find('[data-test="keyword-input"]');
+        await kwInput.setValue("a, b");
+        await kwInput.trigger("keydown.enter");
+        await kwInput.setValue("c, d；b");
+        await wrapper.find('[data-test="submit"]').trigger("click");
+        await flushPromises();
+
+        const emitted = wrapper.emitted("submit");
+        expect(emitted).toHaveLength(1);
+        expect(emitted?.[0][0]).toMatchObject({
+            keywords: ["a", "b", "c", "d"],
+        });
+    });
+
+    it("关闭后端错误提示条时透传 dismissError 事件", async () => {
+        const wrapper = mountForm({ error: "服务器暂时不可用" });
+        const closeBtn = wrapper.find('[data-test="form-error"] button');
+        expect(closeBtn.exists()).toBe(true);
+        await closeBtn.trigger("click");
+
+        expect(wrapper.emitted("dismissError")).toEqual([[]]);
+    });
 });

@@ -290,6 +290,14 @@ export interface TaskSnapshot {
   /** 回退平台后实际使用的厂商；null = 未发生过回退（Issue #28） */
   actual_provider?: string | null;
   actual_model?: string | null;
+  /** 综述正文（Markdown），与后端 TaskSnapshot.final_output 对齐 */
+  final_output?: string | null;
+  /** 任务级失败原因（仅 status === 'failed' 时填充） */
+  error?: string | null;
+  /** 任务等待人工介入原因（仅 status === 'waiting_human' 时填充） */
+  waiting_reason?: string | null;
+  /** 工作流预设标识 */
+  workflow_preset?: WorkflowPreset | string | null;
   created_at: string | null;
   updated_at: string | null;
 }
@@ -1214,3 +1222,5 @@ export interface ByokOverview {
   dormant_count: number;
   dormant_users: ByokDormantUser[];
 }
+
+export type { ExtractionTableSummaryOut as ExtractionTableSummary } from "./extractions";

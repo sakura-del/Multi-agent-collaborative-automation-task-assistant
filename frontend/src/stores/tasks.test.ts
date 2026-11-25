@@ -23,7 +23,10 @@ const startSpy = vi.fn(
     _taskId: string,
     _after: number,
     _onEvent: (event: TaskEvent) => void,
-    _handlers?: { onSnapshot?: (snapshot: unknown) => void }
+    _handlers?: {
+      onSnapshot?: (snapshot: unknown) => void;
+      onConnectionChange?: (state: "connected" | "reconnecting" | "polling", attempt?: number) => void;
+    }
   ) => undefined
 );
 const stopSpy = vi.fn();
@@ -209,9 +212,21 @@ describe("task store", () => {
     expect(store.lastEventId).toBe(11);
     expect(store.events).toHaveLength(1);
 
+    // onConnectionChange 透传至 store.connectionState，并在 stopWatching 重置
+    const handlers = startSpy.mock.calls[0][3];
+    expect(store.connectionState).toBe("connected");
+    handlers?.onConnectionChange?.("reconnecting", 1);
+    expect(store.connectionState).toBe("reconnecting");
+    handlers?.onConnectionChange?.("polling");
+    expect(store.connectionState).toBe("polling");
+    handlers?.onConnectionChange?.("connected");
+    expect(store.connectionState).toBe("connected");
+
+    handlers?.onConnectionChange?.("polling");
     store.stopWatching();
     expect(stopSpy).toHaveBeenCalledTimes(1);
     expect(store.watching).toBe(false);
+    expect(store.connectionState).toBe("connected");
   });
 
   it("sends control commands and stores the returned snapshot", async () => {

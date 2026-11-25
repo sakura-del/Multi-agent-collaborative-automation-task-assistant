@@ -200,4 +200,13 @@ describe("ReferenceVerificationPanel", () => {
     expect(omitted.find('[data-test="verification-panel"]').exists()).toBe(true);
     expect(omitted.find('[data-test="verification-summary"]').exists()).toBe(true);
   });
+
+  it("仅在有核验汇总时渲染撤稿语义说明，空态不污染", () => {
+    const withSummary = mountPanel();
+    expect(withSummary.text()).toContain("未标记撤稿");
+    expect(withSummary.text()).toContain("不代表绝对安全");
+
+    const empty = mountPanel({ summary: null, entries: [] });
+    expect(empty.text()).not.toContain("不代表绝对安全");
+  });
 });

@@ -2,10 +2,13 @@
 import { computed, onMounted, ref } from "vue";
 import { Check, MessageSquare, RotateCcw, Trash2 } from "lucide-vue-next";
 
+import ConfirmBar from "@/components/common/ConfirmBar.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useDelayedLoading } from "@/composables/useDelayedLoading";
+import { toastSuccess } from "@/lib/toast";
 import {
   createAnnotation,
   deleteAnnotation,
@@ -56,8 +59,10 @@ const props = defineProps<{
 
 const annotations = ref<Annotation[]>([]);
 const loading = ref(false);
+const showSkeleton = useDelayedLoading(loading);
 const error = ref<string | null>(null);
 const busyId = ref<string | null>(null);
+const confirmDeleteId = ref<string | null>(null);
 
 const draft = ref("");
 const submitting = ref(false);
@@ -96,6 +101,7 @@ async function submit() {
     });
     annotations.value = [...annotations.value, created];
     draft.value = "";
+    toastSuccess("已添加批注");
   } catch (err) {
     error.value = (err as Error).message || "批注提交失败";
   } finally {
@@ -128,6 +134,8 @@ async function remove(annotation: Annotation) {
     annotations.value = annotations.value.filter(
       (item) => item.annotation_id !== annotation.annotation_id
     );
+    confirmDeleteId.value = null;
+    toastSuccess("已删除批注");
   } catch (err) {
     error.value = (err as Error).message || "删除失败";
   } finally {
@@ -167,15 +175,17 @@ function formatTime(value: string): string {
     </div>
 
     <div :class="props.bare ? '' : 'px-3 py-2'">
-      <ErrorBanner :message="error" testid="annotation-error" />
+      <ErrorBanner :message="error" testid="annotation-error" @dismiss="error = null" />
 
       <form class="mb-2" data-test="annotation-form" @submit.prevent="submit">
         <textarea
           v-model="draft"
           rows="2"
-          placeholder="写一条批注（例如：请补充局限性讨论）"
+          placeholder="写一条批注（例如：请补充局限性讨论；Ctrl/Cmd + Enter 提交）"
           class="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
           data-test="annotation-input"
+          @keydown.ctrl.enter.prevent="submit"
+          @keydown.meta.enter.prevent="submit"
         />
         <div class="mt-1 flex justify-end">
           <Button
@@ -189,16 +199,19 @@ function formatTime(value: string): string {
         </div>
       </form>
 
-      <p v-if="loading" class="text-sm text-muted-foreground">加载中…</p>
+      <div v-if="showSkeleton" class="space-y-2 py-2" aria-busy="true">
+        <div class="h-14 animate-pulse rounded-md bg-muted/60 motion-reduce:animate-none" />
+        <div class="h-14 animate-pulse rounded-md bg-muted/60 motion-reduce:animate-none" />
+      </div>
 
       <EmptyState
-        v-else-if="!annotations.length && !error"
+        v-else-if="!loading && !showSkeleton && !annotations.length && !error"
         data-test="annotation-empty"
         title="还没有批注"
         description="导师可在任务详情页写批注；学生处理完可标记为已解决。"
       />
 
-      <ul v-else class="divide-y divide-border" data-test="annotation-list">
+      <ul v-else-if="annotations.length" class="divide-y divide-border" data-test="annotation-list">
         <li
           v-for="annotation in annotations"
           :key="annotation.annotation_id"
@@ -244,13 +257,26 @@ function formatTime(value: string): string {
                 size="sm"
                 :disabled="busyId === annotation.annotation_id"
                 :data-test="`annotation-delete-${annotation.annotation_id}`"
-                @click="remove(annotation)"
+                @click="confirmDeleteId = annotation.annotation_id"
               >
                 <Trash2 />
                 删除
               </Button>
             </div>
           </div>
+          <ConfirmBar
+            v-if="confirmDeleteId === annotation.annotation_id"
+            class="mt-2"
+            title="确认删除这条批注？"
+            consequence="删除后无法恢复，历史讨论记录将移除。"
+            confirm-label="确认删除"
+            cancel-label="取消"
+            :confirm-testid="`annotation-delete-confirm-${annotation.annotation_id}`"
+            :cancel-testid="`annotation-delete-cancel-${annotation.annotation_id}`"
+            :loading="busyId === annotation.annotation_id"
+            @confirm="remove(annotation)"
+            @cancel="confirmDeleteId = null"
+          />
         </li>
       </ul>
     </div>
