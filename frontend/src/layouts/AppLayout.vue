@@ -1,7 +1,4 @@
 <script setup lang="ts">
-// 异步加载：聊天模块（marked 扩展/katex/mermaid）任何加载期异常
-// 都不得拖垮全站（2026-11-19 白屏事故的直接加固）
-const ChatShell = defineAsyncComponent(() => import("@/components/chat/ChatShell.vue"));
 import {
   Activity,
   BookMarked,
@@ -12,40 +9,114 @@ import {
   Folder,
   Gauge,
   KeyRound,
-  Library,
   LayoutDashboard,
+  Library,
   ListChecks,
-  LogOut,
+  Loader2,
   MessageSquare,
   Palette,
   Settings2,
   Users,
+  X,
 } from "lucide-vue-next";
-import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { AnimatePresence, Motion, useReducedMotion } from "motion-v";
+import {
+  computed,
+  defineAsyncComponent,
+  defineComponent,
+  h,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import AppSidebar from "@/components/layout/AppSidebar.vue";
 import CommandPalette from "@/components/layout/CommandPalette.vue";
 import TopBar from "@/components/layout/TopBar.vue";
+import { DURATION, EASE_IN, EASE_OUT, OFFSET } from "@/lib/ease";
+import { hasActiveOverlays } from "@/lib/overlay";
 import { useAuthStore } from "@/stores/auth";
 
-// 工作台布局：安静侧栏 + 分组导航（beUI 视觉语言，见 main.css 头注释）。
-// 样式走 Tailwind 原子类，不写 scoped CSS（AGENTS.md §6.5）。
-//
-// ## 为什么分组
-//
-// 旧版 9 项平铺，同权重 —— 但「任务」是每天用的，「API Key」配一次就不动。
-// 平铺让日常路径淹没在设置项里。按使用频率分三组：
-//   工作台  = 每天用
-//   素材    = 每周用（配知识库与样式）
-//   协作    = 按需（团队场景）
-//   设置    = 一次性（配完不碰，沉到底部）
-//
-// ⚠️ 契约：窄屏导航容器必须保留 `app-nav__links` 类名——
-// `e2e/phase1-pages.spec.ts` 的 resetScroll 依赖它把导航的横向滚动归位。
 const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
+const reduced = useReducedMotion();
+
+const chatOpenStored = ref(localStorage.getItem("vp:chat:open") === "1");
+
+/**
+ * 异步加载 ChatShell 期间的轻量化过渡骨架壳层：
+ * 严禁占用 data-test="chat-shell"，避免 E2E 抢先命中占位壳。
+ */
+const ChatShellLoading = defineComponent({
+  name: "ChatShellLoading",
+  setup() {
+    const isDock =
+      typeof localStorage !== "undefined" &&
+      localStorage.getItem("vp:chat:variant") === "dock";
+    const panelCls = isDock
+      ? "fixed right-0 top-0 z-[200] flex h-svh w-full md:w-[440px] flex-col border-l border-border bg-background shadow-xl"
+      : "fixed bottom-4 right-4 z-[200] flex h-[min(580px,calc(100svh-2rem))] max-h-[min(580px,calc(100svh-2rem))] w-[min(380px,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl";
+    return () =>
+      h(
+        "section",
+        {
+          "data-test": "chat-shell-loading",
+          "aria-label": "AI 助手加载中",
+          class: panelCls,
+        },
+        [
+          h(
+            "header",
+            { class: "flex items-center justify-between gap-2 border-b border-border px-3 py-2.5" },
+            [
+              h("div", { class: "flex items-center gap-2 text-sm font-medium text-foreground" }, [
+                h(Loader2, {
+                  class: "size-3.5 animate-spin text-muted-foreground motion-reduce:animate-none",
+                  "aria-hidden": "true",
+                }),
+                h("span", "AI 助手加载中…"),
+              ]),
+              h(
+                "button",
+                {
+                  type: "button",
+                  "aria-label": "收起加载占位",
+                  class:
+                    "inline-flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+                  onClick: () => {
+                    localStorage.setItem("vp:chat:open", "0");
+                    chatOpenStored.value = false;
+                  },
+                },
+                [h(X, { class: "size-3.5", "aria-hidden": "true" })],
+              ),
+            ],
+          ),
+          h("div", { class: "flex flex-1 flex-col gap-3 p-4" }, [
+            h("div", {
+              class: "h-4 w-2/3 animate-pulse rounded bg-muted/60 motion-reduce:animate-none",
+            }),
+            h("div", {
+              class: "h-16 w-full animate-pulse rounded-xl bg-muted/60 motion-reduce:animate-none",
+            }),
+            h("div", {
+              class: "ml-auto h-12 w-3/4 animate-pulse rounded-xl bg-muted/60 motion-reduce:animate-none",
+            }),
+          ]),
+        ],
+      );
+  },
+});
+
+// 异步加载：聊天模块（marked 扩展/katex/mermaid）任何加载期异常不得拖垮全站
+const ChatShell = defineAsyncComponent({
+  loader: () => import("@/components/chat/ChatShell.vue"),
+  loadingComponent: ChatShellLoading,
+  delay: 0,
+});
 
 // ===== 侧栏折叠 =====
 
@@ -57,6 +128,14 @@ const commandOpen = ref(false);
 watch(navCollapsed, (value) => {
   localStorage.setItem(COLLAPSE_KEY, value ? "1" : "0");
 });
+
+// 任意途径跳转路由（含 GlobalPromptEntry 与程序化导航）后自动收起移动端抽屉并释放滚动锁
+watch(
+  () => route.fullPath,
+  () => {
+    mobileOpen.value = false;
+  },
+);
 
 const GROUP_ICONS: Record<string, typeof ListChecks> = {
   素材: Palette,
@@ -76,18 +155,20 @@ const sidebarGroups = computed(() =>
 );
 const currentNav = computed(() => String(route.name ?? "tasks"));
 
-function toggleCollapse() {
-  navCollapsed.value = !navCollapsed.value;
-}
-
 function onGlobalKeydown(event: KeyboardEvent) {
+  if (event.isComposing || event.keyCode === 229) return;
   if (event.key === "Escape") {
+    if (event.defaultPrevented || hasActiveOverlays()) return;
     mobileOpen.value = false;
     commandOpen.value = false;
+    return;
   }
-  // Ctrl/Cmd+K：打开命令面板
+  // Ctrl/Cmd+K：打开命令面板（若移动抽屉开启，先收起避免叠层冲突）
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
     event.preventDefault();
+    if (!commandOpen.value && mobileOpen.value) {
+      mobileOpen.value = false;
+    }
     commandOpen.value = !commandOpen.value;
     return;
   }
@@ -155,8 +236,6 @@ function visibleItems(items: NavItem[]): NavItem[] {
   return items.filter((item) => !item.adminOnly || auth.user?.role === "admin");
 }
 
-const chatOpenStored = ref(localStorage.getItem("vp:chat:open") === "1");
-
 function openChatShell() {
   localStorage.setItem("vp:chat:open", "1");
   chatOpenStored.value = true;
@@ -189,9 +268,35 @@ function handleLogout() {
         @open-mobile="mobileOpen = true"
         @open-command="commandOpen = true"
       />
-      <main class="min-w-0 flex-1 px-4 pt-5 pb-20 md:px-8 md:pt-6 md:pb-20">
+      <main
+        class="min-w-0 flex-1"
+        :class="
+          route.name === 'chat'
+            ? 'px-4 py-0 md:px-8'
+            : 'px-4 pt-5 pb-20 md:px-8 md:pt-6 md:pb-20'
+        "
+      >
         <div class="mx-auto w-full max-w-[1440px]">
-          <RouterView />
+          <RouterView v-slot="{ Component, route: childRoute }">
+            <AnimatePresence mode="wait" :initial="false">
+              <Motion
+                v-if="Component"
+                :key="childRoute.path"
+                :initial="{ opacity: 0, y: reduced ? 0 : OFFSET.microY }"
+                :animate="{
+                  opacity: 1,
+                  y: 0,
+                  transition: { duration: reduced ? DURATION.micro : 0.18, ease: EASE_OUT },
+                }"
+                :exit="{
+                  opacity: 0,
+                  transition: { duration: reduced ? DURATION.micro : 0.1, ease: EASE_IN },
+                }"
+              >
+                <component :is="Component" />
+              </Motion>
+            </AnimatePresence>
+          </RouterView>
         </div>
       </main>
     </div>
@@ -208,7 +313,7 @@ function handleLogout() {
         v-else
         type="button"
         data-test="chat-fab"
-        class="fixed bottom-5 right-5 z-[200] flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        class="fixed bottom-5 right-5 z-[200] flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-transform hover:scale-105 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none motion-reduce:hover:scale-100 motion-reduce:active:scale-100"
         aria-label="打开会话"
         title="打开会话"
         @click="openChatShell"

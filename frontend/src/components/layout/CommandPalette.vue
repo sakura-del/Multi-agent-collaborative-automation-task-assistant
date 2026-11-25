@@ -21,6 +21,7 @@ import {
   Users,
 } from "lucide-vue-next";
 
+import { MotionDialog } from "@/components/ui/dialog";
 import { useTheme } from "@/composables/useTheme";
 import { useAuthStore } from "@/stores/auth";
 
@@ -42,6 +43,11 @@ interface CommandItem {
   run: () => void;
 }
 
+interface CommandGroup {
+  group: string;
+  items: Array<{ item: CommandItem; flatIndex: number }>;
+}
+
 const router = useRouter();
 const auth = useAuthStore();
 const { isDark, toggleTheme } = useTheme();
@@ -49,6 +55,15 @@ const { isDark, toggleTheme } = useTheme();
 const query = ref("");
 const activeIndex = ref(0);
 const inputEl = ref<HTMLInputElement | null>(null);
+const optionRefs = new Map<number, HTMLElement>();
+
+function setOptionRef(index: number, el: unknown) {
+  if (el instanceof HTMLElement) {
+    optionRefs.set(index, el);
+  } else {
+    optionRefs.delete(index);
+  }
+}
 
 const commands = computed<CommandItem[]>(() => {
   const navItems: CommandItem[] = [
@@ -212,6 +227,21 @@ const filtered = computed(() => {
   );
 });
 
+const groupedCommands = computed<CommandGroup[]>(() => {
+  const groups: CommandGroup[] = [];
+  const byName = new Map<string, CommandGroup>();
+  filtered.value.forEach((item, flatIndex) => {
+    let bucket = byName.get(item.group);
+    if (!bucket) {
+      bucket = { group: item.group, items: [] };
+      byName.set(item.group, bucket);
+      groups.push(bucket);
+    }
+    bucket.items.push({ item, flatIndex });
+  });
+  return groups;
+});
+
 watch(
   () => props.open,
   async (val) => {
@@ -220,12 +250,15 @@ watch(
       activeIndex.value = 0;
       await nextTick();
       inputEl.value?.focus();
+    } else {
+      optionRefs.clear();
     }
   },
 );
 
 watch(filtered, () => {
   activeIndex.value = 0;
+  optionRefs.clear();
 });
 
 function close() {
@@ -237,24 +270,24 @@ function execute(item: CommandItem) {
   item.run();
 }
 
+async function moveActive(delta: number) {
+  const total = filtered.value.length;
+  if (total === 0) return;
+  activeIndex.value = (activeIndex.value + delta + total) % total;
+  await nextTick();
+  optionRefs.get(activeIndex.value)?.scrollIntoView?.({ block: "nearest" });
+}
+
 function onKeydown(event: KeyboardEvent) {
-  if (event.key === "Escape") {
-    event.preventDefault();
-    close();
-    return;
-  }
+  if (event.isComposing || event.keyCode === 229) return;
   if (event.key === "ArrowDown") {
     event.preventDefault();
-    if (filtered.value.length > 0) {
-      activeIndex.value = (activeIndex.value + 1) % filtered.value.length;
-    }
+    void moveActive(1);
     return;
   }
   if (event.key === "ArrowUp") {
     event.preventDefault();
-    if (filtered.value.length > 0) {
-      activeIndex.value = (activeIndex.value - 1 + filtered.value.length) % filtered.value.length;
-    }
+    void moveActive(-1);
     return;
   }
   if (event.key === "Enter") {
@@ -268,59 +301,74 @@ function onKeydown(event: KeyboardEvent) {
 </script>
 
 <template>
-  <Teleport to="body">
-    <div
-      v-if="props.open"
-      data-test="command-palette"
-      class="fixed inset-0 z-50 flex items-start justify-center bg-foreground/25 px-4 pt-[15vh] backdrop-blur-[1px]"
-      role="dialog"
-      aria-modal="true"
-      aria-label="命令面板"
-      @click.self="close"
-      @keydown="onKeydown"
-    >
-      <div
-        class="w-full max-w-lg overflow-hidden rounded-lg border border-border-strong bg-popover text-popover-foreground shadow-raised"
-      >
-        <div class="flex items-center gap-2.5 border-b border-border px-3.5 py-2.5">
-          <Search :size="15" aria-hidden="true" class="shrink-0 text-muted-foreground" />
-          <input
-            ref="inputEl"
-            v-model="query"
-            type="text"
-            placeholder="输入页面名称或操作（如：任务、知识库、主题）…"
-            class="w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
-          />
-          <kbd class="shrink-0 rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-            ESC
-          </kbd>
-        </div>
+  <MotionDialog
+    :open="props.open"
+    data-test="command-palette"
+    aria-label="命令面板"
+    initial-focus="input"
+    backdrop-class="items-start bg-foreground/25 px-4 pt-[15vh]"
+    class="max-w-lg overflow-hidden border-border-strong bg-popover p-0 text-popover-foreground"
+    @update:open="emit('update:open', $event)"
+  >
+    <div @keydown="onKeydown">
+      <div class="flex items-center gap-2.5 border-b border-border px-3.5 py-2.5">
+        <Search :size="15" aria-hidden="true" class="shrink-0 text-muted-foreground" />
+        <input
+          ref="inputEl"
+          v-model="query"
+          type="text"
+          placeholder="输入页面名称或操作（如：任务、知识库、主题）…"
+          class="w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+        />
+        <kbd class="shrink-0 rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+          ESC
+        </kbd>
+      </div>
 
-        <ul class="max-h-72 overflow-y-auto p-1.5" role="listbox">
-          <li v-if="filtered.length === 0" class="px-3 py-6 text-center text-xs text-muted-foreground">
-            没有匹配的页面或命令
+      <ul class="max-h-72 overflow-y-auto p-1.5" role="listbox">
+        <li v-if="filtered.length === 0" class="px-3 py-6 text-center text-xs text-muted-foreground">
+          没有匹配的页面或命令
+        </li>
+        <template v-for="group in groupedCommands" :key="group.group">
+          <li
+            role="presentation"
+            class="px-2.5 pt-2 pb-1 text-[11px] font-medium text-muted-foreground first:pt-1"
+          >
+            {{ group.group }}
           </li>
-          <li v-for="(item, index) in filtered" :key="item.id" role="option" :aria-selected="index === activeIndex">
+          <li
+            v-for="entry in group.items"
+            :key="entry.item.id"
+            :ref="(el) => setOptionRef(entry.flatIndex, el)"
+            role="option"
+            :aria-selected="entry.flatIndex === activeIndex"
+          >
             <button
               type="button"
               class="flex w-full items-center justify-between gap-3 rounded-md px-2.5 py-2 text-left text-sm transition-colors"
               :class="
-                index === activeIndex
+                entry.flatIndex === activeIndex
                   ? 'bg-accent text-accent-foreground'
                   : 'text-foreground hover:bg-muted/70'
               "
-              @mouseenter="activeIndex = index"
-              @click="execute(item)"
+              @mouseenter="activeIndex = entry.flatIndex"
+              @focus="activeIndex = entry.flatIndex"
+              @click="execute(entry.item)"
             >
               <span class="flex min-w-0 items-center gap-2.5">
-                <component :is="item.icon" :size="14" aria-hidden="true" class="shrink-0 text-muted-foreground" />
-                <span class="truncate">{{ item.label }}</span>
+                <component
+                  :is="entry.item.icon"
+                  :size="14"
+                  aria-hidden="true"
+                  class="shrink-0 text-muted-foreground"
+                />
+                <span class="truncate">{{ entry.item.label }}</span>
               </span>
-              <span class="shrink-0 text-[11px] text-muted-foreground">{{ item.group }}</span>
+              <span class="shrink-0 text-[11px] text-muted-foreground">{{ entry.item.group }}</span>
             </button>
           </li>
-        </ul>
-      </div>
+        </template>
+      </ul>
     </div>
-  </Teleport>
+  </MotionDialog>
 </template>

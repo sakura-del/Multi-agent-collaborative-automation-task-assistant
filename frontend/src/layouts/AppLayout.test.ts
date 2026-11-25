@@ -1,9 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
-import { flushPromises, mount } from "@vue/test-utils";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { createRouter, createMemoryHistory } from "vue-router";
 
 import AppLayout from "@/layouts/AppLayout.vue";
+import { hasActiveOverlays } from "@/lib/overlay";
+
+enableAutoUnmount(afterEach);
 
 /**
  * 工作台侧栏（beUI 视觉语言重设计，2026-10-23）。
@@ -21,6 +24,8 @@ function buildRouter() {
     routes: [
       { path: "/", component: stub },
       { path: "/tasks", name: "tasks", component: stub },
+      { path: "/tasks/:id", name: "task-detail", component: stub },
+      { path: "/chat", name: "chat", component: stub },
       { path: "/knowledge", name: "knowledge", component: stub },
       { path: "/extractions/:tableId?", name: "extractions", component: stub },
       { path: "/styles", name: "styles", component: stub },
@@ -277,6 +282,275 @@ describe("Linear / Notion 顶栏与命令面板", () => {
     await flushPromises();
 
     expect(router.currentRoute.value.name).toBe("extractions");
+    wrapper.unmount();
+  });
+});
+
+describe("AppLayout M2 UX 与动效改造验证", () => {
+  afterEach(() => {
+    vi.doUnmock("@/components/chat/ChatShell.vue");
+    vi.resetModules();
+    vi.restoreAllMocks();
+    localStorage.clear();
+    sessionStorage.clear();
+    document.documentElement.classList.remove("dark");
+    document.body.innerHTML = "";
+  });
+
+  it("route.name === 'chat' 时 main 改为 py-0 消除双滚动条，切回 /tasks 恢复", async () => {
+    setActivePinia(createPinia());
+    const router = buildRouter();
+    await router.push("/chat");
+    await router.isReady();
+
+    const wrapper = mount(AppLayout, {
+      global: { plugins: [router], stubs: { RouterView: true } },
+    });
+    await flushPromises();
+
+    const main = wrapper.get("main");
+    expect(main.classes()).toContain("py-0");
+    expect(main.classes()).not.toContain("pt-5");
+    expect(main.classes()).not.toContain("pb-20");
+
+    await router.push("/tasks");
+    await flushPromises();
+    expect(main.classes()).toContain("pt-5");
+    expect(main.classes()).toContain("pb-20");
+    expect(main.classes()).not.toContain("py-0");
+    wrapper.unmount();
+  });
+
+  it("点击 chat-fab 懒加载 ChatShell 期间渲染 data-test='chat-shell-loading'，禁止抢占 chat-shell", async () => {
+    let resolveShell!: (mod: { __esModule: true; default: unknown }) => void;
+    vi.resetModules();
+    vi.doMock("@/components/chat/ChatShell.vue", () => {
+      return new Promise((resolve) => {
+        resolveShell = resolve;
+      });
+    });
+
+    const FreshAppLayout = (await import("@/layouts/AppLayout.vue")).default;
+    setActivePinia(createPinia());
+    const router = buildRouter();
+    await router.push("/tasks");
+    await router.isReady();
+
+    const wrapper = mount(FreshAppLayout, {
+      global: { plugins: [router], stubs: { RouterView: true } },
+    });
+    await flushPromises();
+
+    await wrapper.get('[data-test="chat-fab"]').trigger("click");
+    await flushPromises();
+
+    const loadingShell = wrapper.find('[data-test="chat-shell-loading"]');
+    expect(loadingShell.exists()).toBe(true);
+    expect(wrapper.find('[data-test="chat-shell"]').exists()).toBe(false);
+
+    resolveShell({
+      __esModule: true,
+      default: { name: "ChatShell", template: `<section data-test="chat-shell">loaded</section>` },
+    });
+    await flushPromises();
+
+    expect(wrapper.find('[data-test="chat-shell-loading"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="chat-shell"]').exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("桌面侧栏消除 transition-all 与 max-w-0；移动端抽屉补齐快速搜索、全局 AI 入口与可折叠分组", async () => {
+    const wrapper = await mountLayout();
+    const desktopHtml = wrapper.get('[data-test="app-sidebar"]').html();
+    expect(desktopHtml).not.toContain("transition-all");
+    expect(desktopHtml).not.toContain("max-w-0");
+
+    await wrapper.get('[data-test="nav-mobile-trigger"]').trigger("click");
+    await flushPromises();
+
+    const dialog = document.body.querySelector('[role="dialog"][aria-label="导航"]') as HTMLElement;
+    expect(dialog).not.toBeNull();
+
+    // 移动端抽屉内包含 GlobalPromptEntry 输入框
+    const mobilePrompt = dialog.querySelector('[data-test="global-prompt"]') as HTMLTextAreaElement;
+    expect(mobilePrompt).not.toBeNull();
+
+    // 移动端分组可点击展开/收起（先展开设置组）
+    const mobileNav = dialog.querySelector('[aria-label="移动端导航"]') as HTMLElement;
+    const settingsBtn = Array.from(mobileNav.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("设置"),
+    );
+    expect(settingsBtn).toBeDefined();
+    expect(mobileNav.textContent).not.toContain("我的模型");
+    settingsBtn?.click();
+    await flushPromises();
+    expect(mobileNav.textContent).toContain("我的模型");
+
+    // 点击移动端快速搜索按钮：关闭抽屉并打开命令面板
+    const mobileCmdBtn = Array.from(dialog.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("快速搜索"),
+    );
+    expect(mobileCmdBtn).toBeDefined();
+    mobileCmdBtn?.click();
+    await flushPromises();
+
+    expect(document.body.querySelector('[role="dialog"][aria-label="导航"]')).toBeNull();
+    expect(document.body.querySelector('[data-test="command-palette"]')).not.toBeNull();
+    wrapper.unmount();
+  });
+
+  it("TopBar 提供三态主题模式选择器 [data-test='theme-mode-select']（light / dark / system）", async () => {
+    let systemMatches = true;
+    const listeners = new Set<(e: MediaQueryListEvent) => void>();
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
+      matches: query.includes("prefers-color-scheme: dark") ? systemMatches : false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: (_type: string, cb: (e: MediaQueryListEvent) => void) => listeners.add(cb),
+      removeEventListener: (_type: string, cb: (e: MediaQueryListEvent) => void) => listeners.delete(cb),
+      dispatchEvent: vi.fn(() => true),
+    }) as unknown as MediaQueryList);
+
+    const wrapper = await mountLayout();
+    const trigger = wrapper.get('[data-test="theme-mode-select"]');
+    await trigger.trigger("click");
+    await flushPromises();
+
+    // 切换为跟随系统（当前系统偏好暗色）
+    await wrapper.get('[data-test="theme-mode-system"]').trigger("click");
+    await flushPromises();
+    expect(localStorage.getItem("vp:theme")).toBe("system");
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
+
+    // 模拟系统主题切为浅色
+    systemMatches = false;
+    for (const cb of listeners) cb({ matches: false } as MediaQueryListEvent);
+    await flushPromises();
+    expect(document.documentElement.classList.contains("dark")).toBe(false);
+
+    // 显式切换为深色与浅色
+    await trigger.trigger("click");
+    await flushPromises();
+    await wrapper.get('[data-test="theme-mode-dark"]').trigger("click");
+    expect(localStorage.getItem("vp:theme")).toBe("dark");
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
+
+    await trigger.trigger("click");
+    await flushPromises();
+    await wrapper.get('[data-test="theme-mode-light"]').trigger("click");
+    expect(localStorage.getItem("vp:theme")).toBe("light");
+    expect(document.documentElement.classList.contains("dark")).toBe(false);
+
+    wrapper.unmount();
+  });
+
+  it("打开移动抽屉后直接按 Ctrl+K 叠加/切换 CommandPalette，再按 Esc 全关后 body.style.overflow 必须归位为空字符串（探针 2C）", async () => {
+    document.body.style.overflow = "";
+    const wrapper = await mountLayout();
+
+    await wrapper.get('[data-test="nav-mobile-trigger"]').trigger("click");
+    await flushPromises();
+    expect(document.body.querySelector('[role="dialog"][aria-label="导航"]')).not.toBeNull();
+    expect(document.body.style.overflow).toBe("hidden");
+
+    // 抽屉开启期间直接按 Ctrl+K
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true, cancelable: true }),
+    );
+    await flushPromises();
+    expect(document.body.querySelector('[data-test="command-palette"]')).not.toBeNull();
+
+    // 逐层或一次性按 Esc 直到全部弹层关闭
+    for (let i = 0; i < 2; i += 1) {
+      if (
+        !document.body.querySelector('[data-test="command-palette"]') &&
+        !document.body.querySelector('[role="dialog"][aria-label="导航"]')
+      ) {
+        break;
+      }
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+      );
+      await flushPromises();
+    }
+
+    expect(document.body.querySelector('[data-test="command-palette"]')).toBeNull();
+    expect(document.body.querySelector('[role="dialog"][aria-label="导航"]')).toBeNull();
+    expect(document.body.style.overflow).toBe("");
+    wrapper.unmount();
+  });
+
+  it("移动抽屉内点击 GlobalPromptEntry 任务条跳转路由后自动关闭抽屉并释放滚动锁（D2-c）", async () => {
+    document.body.style.overflow = "";
+    sessionStorage.setItem(
+      "vp:global-prompt:active-tasks",
+      JSON.stringify([{ task_id: "tid-nav-1", title: "抽屉内导航任务", status: "completed" }]),
+    );
+    setActivePinia(createPinia());
+    const router = buildRouter();
+    await router.push("/tasks");
+    await router.isReady();
+
+    const wrapper = mount(AppLayout, {
+      global: { plugins: [router], stubs: { RouterView: true } },
+    });
+    await flushPromises();
+
+    await wrapper.get('[data-test="nav-mobile-trigger"]').trigger("click");
+    await flushPromises();
+
+    const dialog = document.body.querySelector('[role="dialog"][aria-label="导航"]');
+    expect(dialog).not.toBeNull();
+    expect(hasActiveOverlays()).toBe(true);
+    expect(document.body.style.overflow).toBe("hidden");
+
+    const taskRow = dialog?.querySelector('[data-test="global-prompt-task"]') as HTMLElement | null;
+    expect(taskRow).not.toBeNull();
+    taskRow?.click();
+    await flushPromises();
+
+    expect(router.currentRoute.value.path).toBe("/tasks/tid-nav-1");
+    expect(document.body.querySelector('[role="dialog"][aria-label="导航"]')).toBeNull();
+    expect(hasActiveOverlays()).toBe(false);
+    expect(document.body.style.overflow).toBe("");
+    wrapper.unmount();
+  });
+
+  it("已处于目标任务路由 /tasks/tid-same 时，移动抽屉内点击同一 GlobalPromptEntry 任务条仍自动关闭抽屉并释放滚动锁（E4-b）", async () => {
+    document.body.style.overflow = "";
+    sessionStorage.setItem(
+      "vp:global-prompt:active-tasks",
+      JSON.stringify([{ task_id: "tid-same", title: "当前页同路由任务", status: "completed" }]),
+    );
+    setActivePinia(createPinia());
+    const router = buildRouter();
+    await router.push("/tasks/tid-same");
+    await router.isReady();
+
+    const wrapper = mount(AppLayout, {
+      global: { plugins: [router], stubs: { RouterView: true } },
+    });
+    await flushPromises();
+
+    await wrapper.get('[data-test="nav-mobile-trigger"]').trigger("click");
+    await flushPromises();
+
+    const dialog = document.body.querySelector('[role="dialog"][aria-label="导航"]');
+    expect(dialog).not.toBeNull();
+    expect(hasActiveOverlays()).toBe(true);
+    expect(document.body.style.overflow).toBe("hidden");
+
+    const taskRow = dialog?.querySelector('[data-test="global-prompt-task"]') as HTMLElement | null;
+    expect(taskRow).not.toBeNull();
+    taskRow?.click();
+    await flushPromises();
+
+    expect(router.currentRoute.value.path).toBe("/tasks/tid-same");
+    expect(document.body.querySelector('[role="dialog"][aria-label="导航"]')).toBeNull();
+    expect(hasActiveOverlays()).toBe(false);
+    expect(document.body.style.overflow).toBe("");
     wrapper.unmount();
   });
 });

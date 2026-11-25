@@ -125,3 +125,23 @@ export function formatDateTime(value: string | null | undefined): string {
   }
   return parsed.toLocaleString("zh-CN", { hour12: false });
 }
+
+/** 全站统一任务状态中文标签（对齐 ux_spec_final.md §1.2 Glossary） */
+export const TASK_STATUS_LABELS: Record<string, string> = {
+  created: "已创建",
+  planning: "规划中",
+  waiting_approval: "待确认规划",
+  running: "执行中",
+  retrying: "重试中",
+  paused: "已暂停",
+  reviewing: "复盘中",
+  waiting_human: "待人工介入",
+  completed: "已完成",
+  failed: "执行失败",
+  cancelled: "已终止",
+};
+
+/** 获取任务状态的中文标签；未知状态安全回退原值 */
+export function taskStatusLabel(status: string): string {
+  return TASK_STATUS_LABELS[status] ?? status;
+}

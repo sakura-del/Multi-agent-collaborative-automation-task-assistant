@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import type { TaskStatus } from "@/api/types";
 import {
+  TASK_STATUS_LABELS,
   canApprovePlan,
   isActive,
   needsUserAction,
   splitTaskTitle,
+  taskStatusLabel,
 } from "@/utils/task-status";
 
 /**
@@ -109,5 +111,32 @@ describe("canApprovePlan", () => {
     for (const status of others) {
       expect(canApprovePlan(status)).toBe(false);
     }
+  });
+});
+
+describe("TASK_STATUS_LABELS & taskStatusLabel", () => {
+  it("完整映射全部 11 种 TaskStatus 中文标签且对齐 Glossary", () => {
+    const expected: Record<TaskStatus, string> = {
+      created: "已创建",
+      planning: "规划中",
+      waiting_approval: "待确认规划",
+      running: "执行中",
+      retrying: "重试中",
+      paused: "已暂停",
+      reviewing: "复盘中",
+      waiting_human: "待人工介入",
+      completed: "已完成",
+      failed: "执行失败",
+      cancelled: "已终止",
+    };
+
+    for (const [status, label] of Object.entries(expected)) {
+      expect(TASK_STATUS_LABELS[status]).toBe(label);
+      expect(taskStatusLabel(status)).toBe(label);
+    }
+  });
+
+  it("未知状态安全回退原字符串", () => {
+    expect(taskStatusLabel("custom_unknown")).toBe("custom_unknown");
   });
 });

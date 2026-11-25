@@ -1,36 +1,11 @@
-<script lang="ts">
-const activeConfirmBarStack: symbol[] = [];
-
-function pushConfirmBar(token: symbol) {
-  const existingIdx = activeConfirmBarStack.indexOf(token);
-  if (existingIdx !== -1) {
-    activeConfirmBarStack.splice(existingIdx, 1);
-  }
-  activeConfirmBarStack.push(token);
-}
-
-function removeConfirmBar(token: symbol) {
-  const idx = activeConfirmBarStack.indexOf(token);
-  if (idx !== -1) {
-    activeConfirmBarStack.splice(idx, 1);
-  }
-}
-
-function isTopConfirmBar(token: symbol): boolean {
-  return (
-    activeConfirmBarStack.length > 0 &&
-    activeConfirmBarStack[activeConfirmBarStack.length - 1] === token
-  );
-}
-</script>
-
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { HTMLAttributes } from "vue";
 import { AlertTriangle, Loader2 } from "lucide-vue-next";
 
 import AnimatedCollapse from "@/components/common/AnimatedCollapse.vue";
 import { Button } from "@/components/ui/button";
+import { isTopOverlay, pushOverlay, removeOverlay } from "@/lib/overlay";
 import { cn } from "@/lib/utils";
 
 /**
@@ -72,10 +47,12 @@ const emit = defineEmits<{
 }>();
 
 const barToken = Symbol("ConfirmBar");
+const alertRef = ref<HTMLElement | null>(null);
 
 const clickLocked = ref(false);
 let lockTimer: ReturnType<typeof setTimeout> | null = null;
 let keyListenerBound = false;
+let isMounted = false;
 
 const isBusy = computed(() => props.loading || clickLocked.value);
 
@@ -116,7 +93,8 @@ function handleCancel() {
 
 function handleKeydown(event: KeyboardEvent) {
   if (!props.open || event.isComposing || event.keyCode === 229) return;
-  if (!isTopConfirmBar(barToken)) return;
+  // 仅当 ConfirmBar 处于全局 overlayStack 栈顶时消费 Esc，避免穿透顶层模态框或与多栈失步死锁
+  if (!isTopOverlay(barToken)) return;
   if (event.key !== "Escape") return;
   event.preventDefault();
   event.stopImmediatePropagation();
@@ -128,18 +106,34 @@ function handleKeydown(event: KeyboardEvent) {
 function syncKeyListener(active: boolean) {
   if (typeof window === "undefined") return;
   if (active && !keyListenerBound) {
-    pushConfirmBar(barToken);
+    pushOverlay(barToken);
     window.addEventListener("keydown", handleKeydown, { capture: true });
     keyListenerBound = true;
   } else if (!active && keyListenerBound) {
-    removeConfirmBar(barToken);
+    removeOverlay(barToken);
     window.removeEventListener("keydown", handleKeydown, { capture: true });
     keyListenerBound = false;
   }
 }
 
 onMounted(() => {
+  isMounted = true;
   syncKeyListener(props.open);
+  // 若 ConfirmBar 与包裹它的祖先 Dialog/Drawer 同时初始 open=true 挂载，
+  // Vue 会先执行子组件 onMounted 再执行父组件 onMounted，导致祖先随后将自己压到栈顶；
+  // 需在 nextTick 后确认若栈顶仍是该祖先弹层，将 ConfirmBar 恢复至其上方。
+  if (props.open && typeof document !== "undefined") {
+    const ancestorDialog = alertRef.value?.closest('[role="dialog"]');
+    if (ancestorDialog) {
+      void nextTick(() => {
+        if (!isMounted || !props.open || !keyListenerBound) return;
+        const dialogs = Array.from(document.querySelectorAll('[role="dialog"]'));
+        if (dialogs[dialogs.length - 1] === ancestorDialog) {
+          pushOverlay(barToken);
+        }
+      });
+    }
+  }
 });
 
 watch(
@@ -150,6 +144,7 @@ watch(
 );
 
 onBeforeUnmount(() => {
+  isMounted = false;
   clearLockTimer();
   syncKeyListener(false);
 });
@@ -158,6 +153,7 @@ onBeforeUnmount(() => {
 <template>
   <AnimatedCollapse :open="props.open">
     <div
+      ref="alertRef"
       role="alertdialog"
       aria-live="assertive"
       :class="

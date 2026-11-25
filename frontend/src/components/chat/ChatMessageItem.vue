@@ -3,9 +3,10 @@
  * 单条会话消息（Issue #8 P0）：Markdown + KaTeX + Mermaid + 分支切换 + 编辑重发。
  *
  * 渲染走 `chat-markdown.ts` 的两段式安全链（marked → DOMPurify），
- * Mermaid 在挂载后用动态 import 渲染（体积大，只有出现图表才加载）。
+ * 样式统一挂载在 `main.css` `.chat-markdown`（零 scoped CSS）。
  */
-import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { AnimatePresence, Motion, useReducedMotion } from "motion-v";
 import {
   Check,
   ChevronLeft,
@@ -21,6 +22,8 @@ import {
 } from "lucide-vue-next";
 
 import type { ChatMessage, ChatToolCall } from "@/api/conversations";
+import { DURATION, EASE_OUT } from "@/lib/ease";
+import { toastSuccess } from "@/lib/toast";
 import { renderChatMarkdown, renderMermaidBlocks } from "@/utils/chat-markdown";
 
 const props = defineProps<{
@@ -43,6 +46,8 @@ const emit = defineEmits<{
   retry: [messageId: string];
   confirmTool: [messageId: string, approve: boolean];
 }>();
+
+const reduced = useReducedMotion();
 
 const TOOL_LABELS: Record<string, string> = {
   get_quota: "查询配额",
@@ -67,6 +72,21 @@ const toolRecords = computed<ChatToolCall[]>(
   () => props.streamingTools ?? props.message.tool_calls ?? [],
 );
 const confirming = ref(false);
+let confirmTimer: number | null = null;
+let copyTimer: number | null = null;
+let isUnmounted = false;
+
+onBeforeUnmount(() => {
+  isUnmounted = true;
+  if (confirmTimer !== null) {
+    window.clearTimeout(confirmTimer);
+    confirmTimer = null;
+  }
+  if (copyTimer !== null) {
+    window.clearTimeout(copyTimer);
+    copyTimer = null;
+  }
+});
 
 async function decideTool(approve: boolean): Promise<void> {
   if (confirming.value) return;
@@ -75,7 +95,11 @@ async function decideTool(approve: boolean): Promise<void> {
     emit("confirmTool", props.message.id, approve);
   } finally {
     // 结果由 store 刷新消息；此处只防重复点击
-    window.setTimeout(() => (confirming.value = false), 800);
+    if (confirmTimer !== null) window.clearTimeout(confirmTimer);
+    confirmTimer = window.setTimeout(() => {
+      confirming.value = false;
+      confirmTimer = null;
+    }, 800);
   }
 }
 
@@ -87,15 +111,14 @@ const draft = ref("");
 const isUser = computed(() => props.message.role === "user");
 const isStreaming = computed(() => props.streamingText !== null && props.streamingText !== undefined);
 const displayContent = computed(() =>
-  isStreaming.value ? (props.streamingText ?? "") : props.message.content
+  isStreaming.value ? (props.streamingText ?? "") : props.message.content,
 );
 const html = computed(() => renderChatMarkdown(displayContent.value));
 
 async function hydrateMermaid() {
   await nextTick();
-  if (root.value) {
-    await renderMermaidBlocks(root.value);
-  }
+  if (isUnmounted || !root.value) return;
+  await renderMermaidBlocks(root.value);
 }
 
 onMounted(() => {
@@ -109,8 +132,14 @@ watch(displayContent, () => {
 async function copyContent() {
   try {
     await navigator.clipboard.writeText(displayContent.value);
+    if (isUnmounted) return;
     copied.value = true;
-    window.setTimeout(() => (copied.value = false), 1500);
+    toastSuccess("已复制");
+    if (copyTimer !== null) window.clearTimeout(copyTimer);
+    copyTimer = window.setTimeout(() => {
+      copied.value = false;
+      copyTimer = null;
+    }, 1500);
   } catch {
     // 剪贴板不可用（非 https / 无权限）：静默，不做假成功提示
   }
@@ -141,7 +170,7 @@ function submitEdit() {
       <span class="font-medium">{{ isUser ? "我" : (message.model ?? "助手") }}</span>
       <span
         v-if="message.status === 'interrupted'"
-        class="rounded bg-amber-500/10 px-1 text-amber-600"
+        class="rounded bg-warning/10 px-1 text-warning"
         >已中断</span
       >
       <span
@@ -208,7 +237,7 @@ function submitEdit() {
             >
               <Loader2
                 v-if="record.status === 'pending_approval' && message.status === 'waiting_approval'"
-                class="mt-0.5 size-3 shrink-0 animate-spin text-amber-600"
+                class="mt-0.5 size-3 shrink-0 animate-spin text-warning motion-reduce:animate-none"
               />
               <CircleAlert
                 v-else-if="record.status === 'error'"
@@ -216,7 +245,7 @@ function submitEdit() {
               />
               <Check
                 v-else
-                class="mt-0.5 size-3 shrink-0 text-emerald-600"
+                class="mt-0.5 size-3 shrink-0 text-success"
               />
               <span class="min-w-0">
                 <span class="font-medium text-foreground">{{ toolLabel(record.name) }}</span>
@@ -237,9 +266,9 @@ function submitEdit() {
         <div
           v-if="message.pending_tool && message.status === 'waiting_approval'"
           data-test="chat-tool-approval"
-          class="mb-2 rounded-lg border border-amber-500/40 bg-amber-500/5 px-2.5 py-2"
+          class="mb-2 rounded-lg border border-warning/40 bg-warning/8 px-2.5 py-2"
         >
-          <p class="flex items-center gap-1 text-[11px] font-medium text-amber-700">
+          <p class="flex items-center gap-1 text-[11px] font-medium text-warning">
             <ShieldCheck class="size-3.5" /> 需要你确认
           </p>
           <p class="mt-0.5 text-[11px] leading-4 text-muted-foreground">
@@ -295,7 +324,7 @@ function submitEdit() {
         <span
           v-if="isStreaming"
           data-test="chat-streaming-cursor"
-          class="ml-0.5 inline-block h-4 w-1.5 animate-pulse rounded-sm bg-primary align-middle"
+          class="ml-0.5 inline-block h-4 w-1.5 animate-pulse rounded-sm bg-primary align-middle motion-reduce:animate-none"
         />
         <p v-else-if="!displayContent" class="text-xs text-muted-foreground">（空）</p>
       </template>
@@ -310,16 +339,16 @@ function submitEdit() {
       </p>
     </div>
 
-    <!-- 工具条（悬停可见） -->
+    <!-- 工具条（触屏常显柔和态，桌面悬停或聚焦强化） -->
     <div
-      class="flex items-center gap-1.5 px-1 opacity-0 transition-opacity group-hover:opacity-100"
+      class="flex items-center gap-1.5 px-1 opacity-75 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100"
     >
       <!-- 分支切换 -->
       <template v-if="branch && branch.total > 1">
         <button
           type="button"
           data-test="chat-branch-prev"
-          class="rounded p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30"
+          class="rounded p-1 text-muted-foreground hover:text-foreground disabled:opacity-30 sm:p-0.5"
           :disabled="branch.index <= 1"
           :aria-label="`上一个分支（${branch.index}/${branch.total}）`"
           @click="emit('switchBranch', branch.siblings[branch.index - 2] ?? message.id)"
@@ -332,7 +361,7 @@ function submitEdit() {
         <button
           type="button"
           data-test="chat-branch-next"
-          class="rounded p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30"
+          class="rounded p-1 text-muted-foreground hover:text-foreground disabled:opacity-30 sm:p-0.5"
           :disabled="branch.index >= branch.total"
           :aria-label="`下一个分支（${branch.index}/${branch.total}）`"
           @click="emit('switchBranch', branch.siblings[branch.index] ?? message.id)"
@@ -344,19 +373,43 @@ function submitEdit() {
       <button
         type="button"
         data-test="chat-copy"
-        class="rounded p-0.5 text-muted-foreground hover:text-foreground"
+        class="rounded p-1 text-muted-foreground hover:text-foreground sm:p-0.5"
         aria-label="复制"
         @click="copyContent"
       >
-        <Check v-if="copied" class="size-3.5" />
-        <Copy v-else class="size-3.5" />
+        <AnimatePresence mode="wait" :initial="false">
+          <Motion
+            v-if="copied"
+            key="copied"
+            as="span"
+            class="inline-flex items-center justify-center text-success"
+            :initial="{ opacity: 0, scale: reduced ? 1 : 0.85 }"
+            :animate="{ opacity: 1, scale: 1 }"
+            :exit="{ opacity: 0, scale: reduced ? 1 : 0.85 }"
+            :transition="{ duration: DURATION.micro, ease: EASE_OUT }"
+          >
+            <Check class="size-3.5" />
+          </Motion>
+          <Motion
+            v-else
+            key="copy"
+            as="span"
+            class="inline-flex items-center justify-center"
+            :initial="{ opacity: 0, scale: reduced ? 1 : 0.85 }"
+            :animate="{ opacity: 1, scale: 1 }"
+            :exit="{ opacity: 0, scale: reduced ? 1 : 0.85 }"
+            :transition="{ duration: DURATION.micro, ease: EASE_OUT }"
+          >
+            <Copy class="size-3.5" />
+          </Motion>
+        </AnimatePresence>
       </button>
 
       <button
         v-if="isUser && editable"
         type="button"
         data-test="chat-edit"
-        class="rounded p-0.5 text-muted-foreground hover:text-foreground"
+        class="rounded p-1 text-muted-foreground hover:text-foreground sm:p-0.5"
         aria-label="编辑重发"
         @click="startEdit"
       >
@@ -367,7 +420,7 @@ function submitEdit() {
         v-if="!isUser && message.status !== 'streaming'"
         type="button"
         data-test="chat-retry"
-        class="rounded p-0.5 text-muted-foreground hover:text-foreground"
+        class="rounded p-1 text-muted-foreground hover:text-foreground sm:p-0.5"
         aria-label="重新生成"
         @click="emit('retry', message.id)"
       >
@@ -376,50 +429,3 @@ function submitEdit() {
     </div>
   </article>
 </template>
-
-<style scoped>
-/* 会话气泡内的 Markdown：收紧段落间距，避免消息看起来过度留白 */
-.chat-markdown :deep(p) {
-  margin: 0.35em 0;
-}
-.chat-markdown :deep(h1),
-.chat-markdown :deep(h2),
-.chat-markdown :deep(h3) {
-  margin: 0.5em 0 0.25em;
-  font-size: 0.95em;
-  font-weight: 600;
-}
-.chat-markdown :deep(pre) {
-  margin: 0.5em 0;
-  overflow-x: auto;
-  border-radius: 0.5rem;
-  background: hsl(var(--muted));
-  padding: 0.5rem 0.75rem;
-  font-size: 0.75rem;
-}
-.chat-markdown :deep(code) {
-  font-size: 0.8em;
-}
-.chat-markdown :deep(table) {
-  border-collapse: collapse;
-  font-size: 0.75rem;
-}
-.chat-markdown :deep(th),
-.chat-markdown :deep(td) {
-  border: 1px solid hsl(var(--border));
-  padding: 0.25rem 0.5rem;
-}
-.chat-markdown :deep(a) {
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-/* 用户气泡里链接与行内代码反色，避免绿底绿字 */
-.chat-markdown--user :deep(a),
-.chat-markdown--user :deep(code) {
-  color: inherit;
-}
-.chat-markdown :deep(.mermaid-figure svg) {
-  max-width: 100%;
-  height: auto;
-}
-</style>

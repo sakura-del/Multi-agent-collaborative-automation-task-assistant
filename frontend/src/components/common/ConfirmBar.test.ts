@@ -395,4 +395,123 @@ describe("ConfirmBar 破坏性二次确认条原语", () => {
     expect(wrapper.vm.confirmOpen).toBe(false);
     expect(wrapper.vm.dialogOpen).toBe(true);
   });
+
+  it("ConfirmBar 开启期间叠加打开 MotionDialog 时，第 1 次 Esc 先关闭顶层 Dialog 而不穿透取消 ConfirmBar（D5-b）", async () => {
+    const Host = defineComponent({
+      components: { MotionDialog, ConfirmBar },
+      setup() {
+        const barOpen = ref(true);
+        const dialogOpen = ref(false);
+        const dialogCloseCount = ref(0);
+        const barCancelCount = ref(0);
+        return { barOpen, dialogOpen, dialogCloseCount, barCancelCount };
+      },
+      template: `
+        <div>
+          <ConfirmBar
+            :open="barOpen"
+            title="确认删除当前会话？"
+            cancel-testid="bottom-bar-cancel"
+            @cancel="barCancelCount += 1; barOpen = false"
+          />
+          <MotionDialog
+            v-model:open="dialogOpen"
+            aria-label="顶层命令弹窗"
+            data-test="top-overlay-dialog"
+            @close="dialogCloseCount += 1"
+          >
+            <button type="button">命令项</button>
+          </MotionDialog>
+        </div>
+      `,
+    });
+
+    const wrapper = mount(Host);
+    mountedWrappers.push(wrapper);
+    await flushPromises();
+
+    // ConfirmBar 是行内确认条，不应锁定页面滚动
+    expect(document.body.style.overflow).toBe("");
+
+    // 叠加打开顶层 MotionDialog
+    wrapper.vm.dialogOpen = true;
+    await flushPromises();
+    expect(document.body.querySelector('[data-test="top-overlay-dialog"]')).not.toBeNull();
+    expect(document.body.style.overflow).toBe("hidden");
+
+    // 第 1 次 Esc：必须先关顶层 Dialog，不得穿透取消底层 ConfirmBar
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    await flushPromises();
+
+    expect(wrapper.vm.dialogOpen).toBe(false);
+    expect(wrapper.vm.dialogCloseCount).toBe(1);
+    expect(document.body.querySelector('[data-test="top-overlay-dialog"]')).toBeNull();
+    expect(wrapper.vm.barOpen).toBe(true);
+    expect(wrapper.vm.barCancelCount).toBe(0);
+    expect(document.body.style.overflow).toBe("");
+
+    // 第 2 次 Esc：顶层 Dialog 已移出栈，此时取消底层 ConfirmBar
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    await flushPromises();
+
+    expect(wrapper.vm.barOpen).toBe(false);
+    expect(wrapper.vm.barCancelCount).toBe(1);
+  });
+
+  it("MotionDialog 内嵌初始 open=true ConfirmBar 1 且同帧打开外部行内 ConfirmBar 2 时，连按 Esc 依次关闭 ConfirmBar 1 → ConfirmBar 2 → MotionDialog 不死锁（E5-a）", async () => {
+    const Host = defineComponent({
+      components: { MotionDialog, ConfirmBar },
+      setup() {
+        const dialogOpen = ref(true);
+        const bar1Open = ref(true);
+        const bar2Open = ref(true);
+        const events = ref<string[]>([]);
+        return { dialogOpen, bar1Open, bar2Open, events };
+      },
+      template: `
+        <div>
+          <MotionDialog
+            v-model:open="dialogOpen"
+            aria-label="外层弹窗"
+            data-test="e5a-dialog"
+            @close="events.push('Dialog')"
+          >
+            <ConfirmBar
+              :open="bar1Open"
+              title="弹窗内确认条"
+              cancel-testid="e5a-bar1-cancel"
+              @cancel="events.push('ConfirmBar1'); bar1Open = false"
+            />
+          </MotionDialog>
+          <ConfirmBar
+            :open="bar2Open"
+            title="外部行内确认条"
+            cancel-testid="e5a-bar2-cancel"
+            @cancel="events.push('ConfirmBar2'); bar2Open = false"
+          />
+        </div>
+      `,
+    });
+
+    const wrapper = mount(Host);
+    mountedWrappers.push(wrapper);
+    await flushPromises();
+
+    expect(document.body.querySelector('[data-test="e5a-dialog"]')).not.toBeNull();
+    expect(document.body.querySelector('[data-test="e5a-bar1-cancel"]')).not.toBeNull();
+    expect(wrapper.find('[data-test="e5a-bar2-cancel"]').exists()).toBe(true);
+
+    // 连按 3 次 Esc：必须严格依次取消 ConfirmBar 1 → ConfirmBar 2 → 关闭 MotionDialog，不得死锁
+    for (let i = 0; i < 3; i += 1) {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+      await flushPromises();
+    }
+
+    expect(wrapper.vm.events).toEqual(["ConfirmBar1", "ConfirmBar2", "Dialog"]);
+    expect(wrapper.vm.bar1Open).toBe(false);
+    expect(wrapper.vm.bar2Open).toBe(false);
+    expect(wrapper.vm.dialogOpen).toBe(false);
+    expect(document.body.querySelector('[data-test="e5a-dialog"]')).toBeNull();
+    expect(document.body.style.overflow).toBe("");
+  });
 });

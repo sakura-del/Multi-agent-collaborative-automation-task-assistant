@@ -4,17 +4,13 @@ defineOptions({ inheritAttrs: false });
  * beUI Prompt Input 的 Vue 移植
  * （https://asharca.github.io/ui/components/agents/prompt-input/）。
  *
- * 原实现：自动增长 textarea + 键盘提交 + 动画化发送/停止状态。
- * 本项目适配（AGENTS.md §6.5.1.1 ①）：用于 BibTeX/RIS 粘贴导入——
- * 保留自动增长与提交态动画，粘贴区较大（min-h-40），hint 提示支持格式探测。
- *
- * 规格：容器 rounded-2xl border bg-background；textarea 无边框（焦点在容器）；
- * 容器 focus-within ring；发送按钮 rounded-xl；EASE_OUT [0.16,1,0.3,1]；
- * Ctrl/⌘+Enter 提交；reduced-motion 降级。
+ * 支持自动增长 textarea（rAF 合批 + max-h-72 滚动上限）、IME 组合输入防误触、
+ * Enter / Ctrl+Enter 快捷键与显式提交按钮。
  */
-import { computed, ref, watch, useAttrs } from "vue";
-import { motion } from "motion-v";
-import { CornerDownLeft, Sparkles } from "lucide-vue-next";
+import { computed, onBeforeUnmount, ref, useAttrs, watch } from "vue";
+import { CornerDownLeft, Loader2, Sparkles } from "lucide-vue-next";
+
+import { Button } from "@/components/ui/button";
 
 const props = withDefaults(
   defineProps<{
@@ -28,6 +24,8 @@ const props = withDefaults(
     submitOnEnter?: boolean;
     /** 紧凑模式（侧栏窄容器）：底部单行展示提示与字数，避免换行挤压（Issue #57） */
     compact?: boolean;
+    /** 提交按钮自定义文案 */
+    submitLabel?: string;
   }>(),
   {
     modelValue: "",
@@ -38,7 +36,8 @@ const props = withDefaults(
     disabled: false,
     submitOnEnter: false,
     compact: false,
-  }
+    submitLabel: "发送",
+  },
 );
 
 const emit = defineEmits<{
@@ -51,20 +50,46 @@ const attrs = useAttrs();
 
 const focused = ref(false);
 const textarea = ref<HTMLTextAreaElement | null>(null);
+let growRafId: number | null = null;
 
-/** 自动增长：滚动高度撑开容器（minHeight 之下不缩） */
-function autoGrow() {
+/** 自动增长：由 CSS minHeight 兜底并在 rAF 内合批读取 scrollHeight，避免单位解析错误与同步重排 */
+function applyAutoGrow() {
   const el = textarea.value;
   if (!el) return;
+  const rawMin = typeof window !== "undefined" ? getComputedStyle(el).minHeight : "";
+  const minPx = rawMin.endsWith("px") ? Number.parseFloat(rawMin) || 0 : 0;
   el.style.height = "auto";
-  el.style.height = `${Math.max(el.scrollHeight, parseInt(props.minHeight, 10) || 160)}px`;
+  const nextHeight = Math.max(el.scrollHeight, minPx);
+  if (nextHeight > 0) {
+    el.style.height = `${nextHeight}px`;
+  } else {
+    el.style.height = "";
+  }
 }
+
+function scheduleAutoGrow() {
+  if (typeof window === "undefined" || typeof requestAnimationFrame !== "function") {
+    applyAutoGrow();
+    return;
+  }
+  if (growRafId !== null) cancelAnimationFrame(growRafId);
+  growRafId = requestAnimationFrame(() => {
+    growRafId = null;
+    applyAutoGrow();
+  });
+}
+
+onBeforeUnmount(() => {
+  if (growRafId !== null && typeof cancelAnimationFrame === "function") {
+    cancelAnimationFrame(growRafId);
+  }
+});
 
 watch(
   () => props.modelValue,
   () => {
-    void autoGrow();
-  }
+    scheduleAutoGrow();
+  },
 );
 
 function onInput(event: Event) {
@@ -78,6 +103,7 @@ function submit() {
 }
 
 function onKeydown(event: KeyboardEvent) {
+  if (event.isComposing || event.keyCode === 229) return;
   const isCtrlEnter = (event.ctrlKey || event.metaKey) && event.key === "Enter";
   const isBareEnter = props.submitOnEnter && event.key === "Enter" && !event.shiftKey;
   if (isCtrlEnter || isBareEnter) {
@@ -88,6 +114,10 @@ function onKeydown(event: KeyboardEvent) {
 
 const hasContent = computed(() => props.modelValue.trim().length > 0);
 const charCount = computed(() => props.modelValue.length);
+
+defineExpose({
+  focus: () => textarea.value?.focus(),
+});
 </script>
 
 <template>
@@ -102,7 +132,7 @@ const charCount = computed(() => props.modelValue.length);
       :value="modelValue"
       :placeholder="placeholder"
       :disabled="disabled"
-      class="block w-full resize-none rounded-t-2xl bg-transparent px-4 py-3 font-mono text-xs leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none disabled:opacity-50"
+      class="block max-h-72 w-full resize-none overflow-y-auto rounded-t-2xl bg-transparent px-4 py-3 font-mono text-xs leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none disabled:opacity-50"
       :style="{ minHeight }"
       spellcheck="false"
       @input="onInput"
@@ -116,23 +146,38 @@ const charCount = computed(() => props.modelValue.length);
       data-test="prompt-input-footer"
     >
       <span
-        class="inline-flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground"
-        :class="compact ? 'truncate' : 'flex-1'"
+        class="inline-flex min-w-0 flex-1 items-center gap-1 text-[10px] text-muted-foreground"
+        :class="compact ? 'truncate' : ''"
       >
         <Sparkles class="size-3 shrink-0" />
         <span :class="compact ? 'truncate' : 'break-words'">{{ hint }}</span>
       </span>
       <div class="flex shrink-0 items-center gap-2 whitespace-nowrap">
         <span class="font-mono text-[10px] tabular-nums text-muted-foreground">
-          {{ compact ? `${charCount} 字` : `${charCount} chars` }}
+          {{ `${charCount} 字` }}
         </span>
         <span
           v-if="!compact"
-          class="inline-flex items-center gap-1 text-[10px] text-muted-foreground"
+          class="hidden items-center gap-1 text-[10px] text-muted-foreground sm:inline-flex"
         >
           <CornerDownLeft class="size-3 shrink-0" />
           {{ submitOnEnter ? "Enter 提交" : "Ctrl/⌘+Enter 提交" }}
         </span>
+        <Button
+          type="button"
+          size="sm"
+          data-test="prompt-submit"
+          :disabled="disabled || submitting || !hasContent"
+          :class="compact ? 'h-6 px-2 text-[11px]' : 'h-7 px-2.5 text-xs'"
+          @click="submit"
+        >
+          <Loader2
+            v-if="submitting"
+            class="size-3 animate-spin motion-reduce:animate-none"
+            aria-hidden="true"
+          />
+          <span>{{ submitLabel }}</span>
+        </Button>
       </div>
     </div>
   </div>
