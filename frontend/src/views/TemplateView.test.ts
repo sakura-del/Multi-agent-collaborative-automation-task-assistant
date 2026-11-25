@@ -242,9 +242,30 @@ describe("TemplateView 示例标注与删除确认（2026-10-26）", () => {
 
     const success = wrapper.find('[data-test="template-render-success"]');
     expect(success.exists()).toBe(true);
-    // 关键：不能让用户以为这是真实成稿
+    // 关键：不能让用户以为这是真实成稿，且不能透出未解析的原始 Markdown 星号（Issue #60）
     expect(success.text()).toMatch(/示例/);
+    expect(success.text()).not.toContain("**");
     clickSpy.mockRestore();
+  });
+
+  it("打开或取消文件选择器时不提前触发「请先选择模板文件」，仅在提交空表单时提示（Issue #60）", async () => {
+    const wrapper = await mountView();
+    const inputWrapper = wrapper.find('[data-test="template-file"]');
+    Object.defineProperty(inputWrapper.element, "files", {
+      value: [],
+      writable: false,
+      configurable: true,
+    });
+    await inputWrapper.trigger("change");
+    await flushPromises();
+
+    // 取消/清空选择时不能提前弹红错
+    expect(wrapper.find('[data-test="template-upload-error"]').exists()).toBe(false);
+
+    // 显式点击提交空表单时才提示
+    await wrapper.find('[data-test="template-upload-form"]').trigger("submit");
+    await flushPromises();
+    expect(wrapper.find('[data-test="template-upload-error"]').text()).toContain("请先选择模板文件");
   });
 
   it("占位符要显示 label/sample（后端给了就要用，别只显示 key）", async () => {

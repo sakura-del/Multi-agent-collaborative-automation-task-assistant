@@ -95,7 +95,9 @@ function onFileChange(event: Event) {
   const file = input.files?.[0] ?? null;
   selectedFile.value = file;
   uploadMessage.value = null;
-  uploadError.value = fileError(file);
+  // 点选文件/取消选择器时不提前弹「请先选择模板文件」，空文件校验留到提交时触发（Issue #60）；
+  // 仅当用户已选中文件但格式不合法（如 .docm）时即时提示。
+  uploadError.value = file ? fileError(file) : null;
   // 名称留空时用文件名（不含扩展名）作为默认显示名
   if (file && !templateName.value) {
     const index = file.name.lastIndexOf(".");
@@ -166,7 +168,7 @@ async function handleValidate(template: TemplateOut) {
     downloadBlob(blob, `${template.name || template.template_id}-校验.docx`);
     renderMessage.value =
       `模板「${template.name}」校验通过，已下载填充示例文本的 .docx。` +
-      `该文件仅用于确认版式与占位符是否齐全，**不是**真实综述成稿；` +
+      `该文件仅用于确认版式与占位符是否齐全，不是真实综述成稿；` +
       `真实成稿请在任务详情页导出（那里使用任务正文与已渲染的参考文献）。`;
   } catch (error) {
     renderError.value = (error as Error).message || "模板校验失败";
