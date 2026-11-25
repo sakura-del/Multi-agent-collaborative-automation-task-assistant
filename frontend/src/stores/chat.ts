@@ -181,6 +181,49 @@ export const useChatStore = defineStore("chat", () => {
   }
 
   /**
+   * 流式连接意外中断（如 Cloudflare / 代理瞬断 ERR_CONNECTION_CLOSED）时的服务端回拉兜底：
+   * 服务端生成器往往已完成并落库，但浏览器在读流中途丢了连接。
+   * 通过轮询拉取会话详情（最多 3 次）拿回已落库的正文与真实状态，避免页面空白误报 network error。
+   */
+  async function syncMessageAfterStreamDrop(
+    conversationId: string,
+    assistantMessageId: string,
+  ): Promise<ChatMessage | null> {
+    const maxAttempts = 3;
+    let latestMessage: ChatMessage | null = null;
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      try {
+        const snapshot = await conversationApi.get(conversationId);
+        const found = snapshot.messages.find((item) => item.id === assistantMessageId) ?? null;
+        if (found) {
+          latestMessage = found;
+          if (detail.value?.id === conversationId) {
+            upsertMessage(found);
+          }
+          // 已落终态或已有非空正文且不再 streaming，立即结束等待
+          if (found.status !== "pending" && found.status !== "streaming") {
+            return found;
+          }
+        }
+      } catch {
+        // 回拉失败时继续下一次或交由外层保留原错
+      }
+      if (attempt < maxAttempts - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+      }
+    }
+    return latestMessage;
+  }
+
+  function formatStreamError(raw: string): string {
+    const text = raw.trim();
+    if (!text || /network error|failed to fetch|load failed|connection closed/i.test(text)) {
+      return "流式连接中断，请稍后重试或刷新查看";
+    }
+    return text;
+  }
+
+  /**
    * 流式生成一条 assistant 消息（发送与确认后续跑共用）。
    *
    * `resume=true`：写操作确认后的续跑。**不能**清空正文与工具轨迹——
@@ -206,6 +249,10 @@ export const useChatStore = defineStore("chat", () => {
         message.tool_calls = [];
       }
     }
+
+    let streamFailedMessage: string | null = null;
+    let receivedTerminalEvent = false;
+    let receivedServerError = false;
 
     await streamChatMessage(
       conversationId,
@@ -238,6 +285,7 @@ export const useChatStore = defineStore("chat", () => {
           }
         },
         onToolApproval: (data) => {
+          receivedTerminalEvent = true;
           const record = streamingTools.value.find((item) => item.id === data.id);
           if (record) {
             record.arguments = data.arguments;
@@ -254,8 +302,12 @@ export const useChatStore = defineStore("chat", () => {
             };
           }
         },
-        onDone: () => undefined,
+        onDone: () => {
+          receivedTerminalEvent = true;
+        },
         onError: (data) => {
+          receivedTerminalEvent = true;
+          receivedServerError = true;
           error.value = data.message;
         },
       },
@@ -266,20 +318,53 @@ export const useChatStore = defineStore("chat", () => {
       // AbortError 是「用户点了停止」的正常路径，不报错
       const name = (err as Error)?.name;
       if (name !== "AbortError") {
-        error.value = (err as Error).message || "流式生成中断";
+        streamFailedMessage = (err as Error)?.message || "流式生成中断";
       }
     });
 
+    const aborted = controller?.signal.aborted === true;
     const finalText = streamingText.value;
-    const target = detail.value?.messages.find((m) => m.id === assistantMessageId);
-    if (target) {
-      target.content = finalText || target.content;
-      target.tool_calls = streamingTools.value.slice();
-      target.status = controller?.signal.aborted ? "interrupted" : target.status;
-      if (!controller?.signal.aborted && target.status === "streaming") {
-        target.status = "completed";
+    const needsFallbackSync =
+      !aborted &&
+      !receivedServerError &&
+      (streamFailedMessage !== null || (!receivedTerminalEvent && !finalText.trim()));
+
+    if (needsFallbackSync) {
+      const recovered = await syncMessageAfterStreamDrop(conversationId, assistantMessageId);
+      if (
+        recovered &&
+        recovered.status !== "failed" &&
+        (recovered.content.trim().length > 0 || recovered.status === "waiting_approval")
+      ) {
+        // 服务端已正常落库：直接展示服务端正文并清除断连报错
+        error.value = null;
+      } else {
+        const target = detail.value?.messages.find((m) => m.id === assistantMessageId);
+        if (target) {
+          target.content = finalText || recovered?.content || target.content;
+          target.tool_calls =
+            recovered?.tool_calls?.length ? recovered.tool_calls : streamingTools.value.slice();
+          target.status =
+            recovered && recovered.status !== "streaming" && recovered.status !== "pending"
+              ? recovered.status
+              : "interrupted";
+        }
+        error.value =
+          recovered?.error ||
+          formatStreamError(streamFailedMessage ?? "流式连接中断，请稍后重试或刷新查看");
+      }
+    } else {
+      const target = detail.value?.messages.find((m) => m.id === assistantMessageId);
+      if (target) {
+        target.content = finalText || target.content;
+        target.tool_calls = streamingTools.value.slice();
+        target.status = aborted ? "interrupted" : target.status;
+        if (!aborted && target.status === "streaming") {
+          target.status = receivedServerError ? "failed" : "completed";
+        }
       }
     }
+
     streamingMessageId.value = null;
     streamingText.value = "";
     controller = null;

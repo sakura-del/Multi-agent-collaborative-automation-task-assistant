@@ -431,9 +431,21 @@ class TaskExecution:
         trace_id = uuid.uuid4().hex
         config = request.model_dump(mode="json")
         config["trace_id"] = trace_id
-        description = self._describe(request)
 
         async with self._session_factory() as session:
+            reference_library_count: int | None = None
+            if request.reference_library:
+                from app.knowledge.services.reference_library_service import (
+                    ReferenceLibraryService,
+                )
+
+                reference_library_count = await ReferenceLibraryService(session).count(user_id)
+                if reference_library_count <= 0:
+                    raise ValidationException("引用库为空，请先导入文献后再启用「使用我的引用库」")
+                config["reference_library_count"] = reference_library_count
+                config["max_documents"] = min(request.max_documents, reference_library_count)
+
+            description = self._describe(request, reference_library_count=reference_library_count)
             repo = TaskRepository(session)
             task = Task(
                 user_id=user_id,
@@ -1638,6 +1650,20 @@ class TaskExecution:
                 task = await TaskRepository(session).get(task_id)
                 if task is None:
                     return
+                if isinstance(task.config, dict) and task.config.get("reference_library"):
+                    from app.knowledge.services.reference_library_service import (
+                        ReferenceLibraryService,
+                    )
+
+                    lib_count = await ReferenceLibraryService(session).count(task.user_id)
+                    if lib_count > 0:
+                        updated_config = dict(task.config)
+                        updated_config["reference_library_count"] = lib_count
+                        if isinstance(updated_config.get("max_documents"), int):
+                            updated_config["max_documents"] = min(
+                                updated_config["max_documents"], lib_count
+                            )
+                        task.config = updated_config
                 requirement = self._requirement(task)
                 trace_id = self._trace_id(task)
                 task_type = task.task_type
@@ -2862,18 +2888,38 @@ class TaskExecution:
         return cls._PRESET_DIRECTIVES.get(key, cls._PRESET_DIRECTIVES["literature_review"])
 
     @classmethod
-    def _describe(cls, request: LiteratureReviewRequest) -> str:
+    def _describe(
+        cls,
+        request: LiteratureReviewRequest,
+        *,
+        reference_library_count: int | None = None,
+    ) -> str:
         """把结构化请求压成任务描述（供规划 Agent 作为需求输入）。"""
         parts = [f"研究主题：{request.topic}"]
         parts.append(f"关键词：{', '.join(request.keywords)}")
         parts.append(cls._preset_directive(request.workflow_preset))
         if request.date_from or request.date_to:
             parts.append(f"时间范围：{request.date_from or '不限'} ~ {request.date_to or '不限'}")
-        parts.append(f"文献数量：{request.max_documents}")
+        effective_max_docs = (
+            min(request.max_documents, reference_library_count)
+            if request.reference_library
+            and reference_library_count is not None
+            and reference_library_count > 0
+            else request.max_documents
+        )
+        parts.append(f"文献数量：{effective_max_docs}")
         parts.append(f"输出语言：{request.output_language}")
         parts.append(f"引用格式：{request.citation_style}")
         if request.document_ids:
             parts.append(f"指定文献数：{len(request.document_ids)}")
+        if request.reference_library:
+            if reference_library_count is not None and reference_library_count > 0:
+                parts.append(
+                    f"仅使用用户引用库（共 {reference_library_count} 篇，不访问外部检索源），"
+                    f"所有节点目标文献数与 required_evidence 不得超过 {reference_library_count}"
+                )
+            else:
+                parts.append("仅使用用户引用库（不访问外部检索源）")
         if request.offline_dataset:
             parts.append("使用离线语料")
         return "；".join(parts)

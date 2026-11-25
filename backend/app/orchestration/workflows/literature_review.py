@@ -103,6 +103,36 @@ def clamp_max_results(raw: Any) -> int:
     return max(MIN_SEARCH_RESULTS, min(MAX_SEARCH_RESULTS, value))
 
 
+def clamp_plan_for_reference_library(plan: TaskPlan, library_count: int) -> TaskPlan:
+    """引用库模式下，把计划中所有节点的目标文献数与 required_evidence 钳制到引用库真实条数。
+
+    用户勾选「使用我的引用库（N 篇）」时，检索源只从该 N 篇里取数；若规划模型仍生成
+    required_evidence=12 / target_count=12 等高于 N 的阈值，会导致后续节点与校验器误判
+    文献不足（Issue #58）。这里做确定性后置钳制，保证落库计划始终与可用文献上限一致。
+    """
+    if library_count <= 0:
+        return plan
+    clamped_nodes: list[PlanNode] = []
+    for node in plan.nodes:
+        new_required = (
+            min(node.required_evidence, library_count) if node.required_evidence > 0 else 0
+        )
+        new_input = dict(node.input)
+        for key in ("max_results", "target_count", "total_target", "reference_count"):
+            raw = new_input.get(key)
+            if isinstance(raw, int) and not isinstance(raw, bool) and raw > library_count:
+                new_input[key] = library_count
+        clamped_nodes.append(
+            node.model_copy(
+                update={
+                    "required_evidence": new_required,
+                    "input": new_input,
+                }
+            )
+        )
+    return plan.model_copy(update={"nodes": clamped_nodes})
+
+
 #: 文献场景允许的节点类型（与 PlanNode.type 一致）
 REQUIRED_NODE_TYPES = frozenset({"search", "extract", "write", "validate", "review"})
 #: 需要证据上下文的节点类型
@@ -252,6 +282,12 @@ class LiteratureReviewWorkflow:
                 raise HumanActionRequiredError(
                     f"规划修复后仍未满足文献契约: {second_error}"
                 ) from second_error
+
+        config = getattr(task, "config", None) or {}
+        if isinstance(config, dict) and config.get("reference_library"):
+            raw_count = config.get("reference_library_count")
+            if isinstance(raw_count, int) and raw_count > 0:
+                plan = clamp_plan_for_reference_library(plan, raw_count)
 
         self._plan = plan
         logger.info(
@@ -838,7 +874,16 @@ class LiteratureReviewWorkflow:
     def _requirement(task: Any) -> str:
         description = str(getattr(task, "description", "") or "").strip()
         title = str(getattr(task, "title", "") or "").strip()
-        return description or title
+        base = description or title
+        config = getattr(task, "config", None) or {}
+        if isinstance(config, dict) and config.get("reference_library"):
+            raw_count = config.get("reference_library_count")
+            if isinstance(raw_count, int) and raw_count > 0 and "required_evidence" not in base:
+                base = (
+                    f"{base}；仅使用用户引用库（共 {raw_count} 篇，不访问外部检索源），"
+                    f"所有节点目标文献数与 required_evidence 不得超过 {raw_count}"
+                )
+        return base
 
     @staticmethod
     def _trace_id(task: Any) -> str:
@@ -1005,6 +1050,7 @@ __all__ = [
     "LiteratureNodeValidator",
     "LiteraturePlanContractError",
     "LiteratureReviewWorkflow",
+    "clamp_plan_for_reference_library",
     "render_executor_prompt",
     "render_planner_prompt",
 ]

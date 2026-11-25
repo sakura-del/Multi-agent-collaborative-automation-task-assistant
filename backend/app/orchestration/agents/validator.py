@@ -110,13 +110,26 @@ class ValidatorAgent(BaseAgent):
         # 步骤2：确定性引用校验（文献场景）
         citation_report = self._run_citation_checks(input_data)
 
-        # 步骤3：LLM 语义自检（仅当确定性安全/完整性检查通过）
+        # 步骤3：LLM 语义自检（仅当确定性安全/完整性检查通过，且非确定性检索节点）
+        # search 节点的产出是程序化检索得到的文献列表（尤其是引用库/离线清单模式，重试
+        # 必然返回完全相同的条目），不应交由 LLM 做主观相关性否决而触发死循环（Issue #58）。
         integrity_failed = (
             citation_report is not None
             and not citation_report.passed
             and not citation_report.retryable
         )
-        semantic_report = None if integrity_failed else await self._check_semantic(title, result)
+        if integrity_failed:
+            semantic_report = None
+        elif self._is_search_node(input_data):
+            semantic_report = {
+                "score": 100,
+                "issues": [],
+                "suggestions": [],
+                "logic_consistent": True,
+                "factual_accurate": True,
+            }
+        else:
+            semantic_report = await self._check_semantic(title, result)
 
         # 步骤4：论断级核验（Issue #31 Phase 2）——只对通过校验的作者正文执行
         if citation_report is None:
@@ -206,6 +219,14 @@ class ValidatorAgent(BaseAgent):
             except PydanticValidationError:
                 continue
         return evidence
+
+    @staticmethod
+    def _is_search_node(input_data: dict[str, Any]) -> bool:
+        """是否为程序化检索节点（search）。"""
+        payload = input_data.get("execution_result")
+        if not isinstance(payload, dict):
+            return False
+        return str(payload.get("node_type") or "") == "search"
 
     @staticmethod
     def _is_authored(input_data: dict[str, Any], *, content_role: ContentRole) -> bool:

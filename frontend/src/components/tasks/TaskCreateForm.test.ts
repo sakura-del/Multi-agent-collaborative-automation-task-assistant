@@ -796,4 +796,60 @@ describe("TaskCreateForm 默认模型", () => {
             verify_references: true,
         });
     });
+
+    it("关键词输入框按 Enter 只添加标签并阻止默认事件，绝不误触整表提交（Issue #58）", async () => {
+        const wrapper = mountForm();
+        await flushPromises();
+        await wrapper
+            .find('[data-test="topic"]')
+            .setValue("检索增强生成引用库闭环综述");
+
+        const keywordInput = wrapper.find('[data-test="keyword-input"]');
+        await keywordInput.setValue("RAG");
+        const enterEvent = new KeyboardEvent("keydown", {
+            key: "Enter",
+            bubbles: true,
+            cancelable: true,
+        });
+        keywordInput.element.dispatchEvent(enterEvent);
+        await flushPromises();
+
+        expect(enterEvent.defaultPrevented).toBe(true);
+        expect(wrapper.emitted("submit")).toBeUndefined();
+        expect(wrapper.text()).toContain("RAG");
+        expect((keywordInput.element as HTMLInputElement).value).toBe("");
+    });
+
+    it("勾选使用我的引用库时，自动将文献数上限同步为引用库可用条数（Issue #58）", async () => {
+        vi.mocked(api.get).mockImplementation((url: string) => {
+            if (url === "/citation-styles") {
+                return Promise.resolve({
+                    data: {
+                        styles: [apiStyleRow()],
+                        default_style_id: "gbt7714-2025-numeric",
+                    },
+                });
+            }
+            if (url === "/reference-library/summary") {
+                return Promise.resolve({
+                    data: { total: 2, usable_as_source: 2 },
+                });
+            }
+            if (url === "/llm-credentials") {
+                return Promise.resolve({ data: [] });
+            }
+            return Promise.reject(new Error(`unexpected url ${url}`));
+        });
+
+        const wrapper = mountForm();
+        await flushPromises();
+
+        await wrapper.find('[data-test="reference-library"]').setValue(true);
+        await flushPromises();
+
+        expect(
+            (wrapper.find('[data-test="max-documents"]').element as HTMLInputElement)
+                .value,
+        ).toBe("2");
+    });
 });

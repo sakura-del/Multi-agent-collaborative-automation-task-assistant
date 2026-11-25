@@ -577,9 +577,9 @@ async def stream_message(
         streamer.stream(conversation_id, message_id, resume=resume),
         media_type="text/event-stream",
         headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            # nginx 反代必须关缓冲，否则 delta 会攒成一坨（生产踩坑高发点）
+            # 禁止中间代理缓冲或改写流（no-transform 防止 Cloudflare/代理压缩破坏分帧）；
+            # 不发送 HTTP/1.1 逐跳头 Connection: keep-alive（RFC 9113 HTTP/2 禁止该头）。
+            "Cache-Control": "no-cache, no-transform",
             "X-Accel-Buffering": "no",
         },
     )

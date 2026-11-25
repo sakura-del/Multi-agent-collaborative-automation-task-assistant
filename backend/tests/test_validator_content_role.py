@@ -228,3 +228,121 @@ class TestWorkflowPassesRoleToValidator:
         report = await workflow.validate_node(_FakeTask(uuid.uuid4()), result)
 
         assert report.passed is True, f"review 汇总不该失败：{report.feedback}"
+
+    async def test_search_node_skips_llm_semantic_check(self) -> None:
+        """确定性 search 节点不走 LLM 语义评审，避免引用库模式死循环重试转人工（Issue #58）。"""
+        import json
+
+        from app.llm.models import LLMResponse, MessageRole, Usage
+        from tests.llm.mock_llm import MockLLM
+
+        hostile_llm = MockLLM(
+            responses=[
+                LLMResponse(
+                    content=json.dumps(
+                        {
+                            "logic_consistent": False,
+                            "factual_accurate": False,
+                            "issues": ["文献条数少于预期"],
+                            "suggestions": ["补充检索"],
+                        }
+                    ),
+                    finish_reason="stop",
+                    usage=Usage(),
+                    role=MessageRole.ASSISTANT,
+                )
+            ]
+        )
+        validator = ValidatorAgent(
+            llm=hostile_llm,
+            rules={"min_length": 1, "required_keywords": []},
+        )
+        report = await validator.execute(
+            {
+                "node_id": "n1",
+                "title": "检索引用库核心文献",
+                "result": "- RAG Paper (doi:10.48550/arxiv.2005.11401) https://doi.org/10.48550/arxiv.2005.11401",
+                "content_role": "aggregated",
+                "execution_result": {
+                    "node_id": "n1",
+                    "content": "- RAG Paper",
+                    "duration_ms": 0,
+                    "node_type": "search",
+                },
+            }
+        )
+
+        assert report["passed"] is True
+        assert hostile_llm.call_count == 0
+
+
+class TestReferenceLibraryPlanClamp:
+    """引用库模式下的计划阈值钳制（Issue #58）。"""
+
+    def test_clamp_plan_caps_required_evidence_and_search_targets(self) -> None:
+        from app.orchestration.contracts import PlanNode, TaskPlan
+        from app.orchestration.workflows.literature_review import clamp_plan_for_reference_library
+
+        plan = TaskPlan(
+            version=1,
+            topic="RAG 引用库闭环综述",
+            research_questions=["问题一？", "问题二？", "问题三？"],
+            search_queries=["RAG"],
+            acceptance_criteria=["可回溯引用"],
+            nodes=[
+                PlanNode(
+                    id="n1",
+                    type="search",
+                    title="检索核心文献",
+                    dependencies=[],
+                    input={"queries": ["RAG"], "target_count": 12, "max_results": 15},
+                    required_evidence=12,
+                ),
+                PlanNode(
+                    id="n2",
+                    type="extract",
+                    title="抽取证据",
+                    dependencies=["n1"],
+                    input={"total_target": 20},
+                    required_evidence=8,
+                ),
+                PlanNode(
+                    id="n3",
+                    type="write",
+                    title="撰写综述",
+                    dependencies=["n2"],
+                    input={"reference_count": 20},
+                    required_evidence=20,
+                ),
+                PlanNode(
+                    id="n4",
+                    type="validate",
+                    title="校验引用",
+                    dependencies=["n3"],
+                    input={},
+                    required_evidence=0,
+                ),
+                PlanNode(
+                    id="n5",
+                    type="review",
+                    title="终审综述",
+                    dependencies=["n4"],
+                    input={},
+                    required_evidence=10,
+                ),
+            ],
+        )
+
+        clamped = clamp_plan_for_reference_library(plan, 2)
+        by_id = {node.id: node for node in clamped.nodes}
+
+        assert by_id["n1"].required_evidence == 2
+        assert by_id["n1"].input["target_count"] == 2
+        assert by_id["n1"].input["max_results"] == 2
+        assert by_id["n2"].required_evidence == 2
+        assert by_id["n2"].input["total_target"] == 2
+        assert by_id["n3"].required_evidence == 2
+        assert by_id["n3"].input["reference_count"] == 2
+        # 原为 0 的节点保持 0
+        assert by_id["n4"].required_evidence == 0
+        assert by_id["n5"].required_evidence == 2

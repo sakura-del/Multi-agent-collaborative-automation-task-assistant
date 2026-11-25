@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { X } from "lucide-vue-next";
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
@@ -181,6 +181,44 @@ onMounted(async () => {
         credentials.value = [];
     }
 });
+
+// 勾选「使用我的引用库」时，若当前文献数大于引用库可用条数，自动同步到可用条数（Issue #58）
+watch([useReferenceLibrary, libraryCount], ([enabled, count]) => {
+    if (enabled && count !== null && count > 0 && Number(maxDocuments.value) > count) {
+        maxDocuments.value = count;
+    }
+});
+
+function isEnterKey(event: KeyboardEvent): boolean {
+    return event.key === "Enter" || event.code === "Enter" || event.keyCode === 13;
+}
+
+/** 关键词输入框按键处理：按 Enter 只添加标签，绝不触发外层表单隐式提交（Issue #58）。 */
+function onKeywordKeydown(event: KeyboardEvent) {
+    if (!isEnterKey(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.isComposing) return;
+    addKeyword();
+}
+
+/** 种子论文输入框按键处理：按 Enter 只添加种子，绝不触发外层表单隐式提交（Issue #58）。 */
+function onSeedDoiKeydown(event: KeyboardEvent) {
+    if (!isEnterKey(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.isComposing) return;
+    addSeedDoi();
+}
+
+/** 表单级兜底：拦截来自关键词/种子输入框的 Enter，防止任何浏览器/输入法路径误触整表提交。 */
+function onFormKeydown(event: KeyboardEvent) {
+    if (!isEnterKey(event)) return;
+    const target = event.target as HTMLElement | null;
+    if (target?.id === "task-keyword" || target?.id === "task-seed-doi") {
+        event.preventDefault();
+    }
+}
 
 function addKeyword() {
     const value = keywordDraft.value.trim().replace(/,$/, "");
@@ -364,7 +402,12 @@ function handleSubmit() {
 </script>
 
 <template>
-    <Card as="form" class="max-w-3xl gap-4 p-4" @submit.prevent="handleSubmit">
+    <Card
+        as="form"
+        class="max-w-3xl gap-4 p-4"
+        @submit.prevent="handleSubmit"
+        @keydown="onFormKeydown"
+    >
         <div class="grid gap-1.5">
             <span class="text-sm font-medium leading-none">工作流预设</span>
             <div
@@ -445,7 +488,7 @@ function handleSubmit() {
                     data-test="seed-doi-input"
                     type="text"
                     placeholder="例如：10.1145/3442381.3450000 或经典论文题名（留空将自动检索 Top 3 种子）"
-                    @keydown.enter.prevent="addSeedDoi"
+                    @keydown="onSeedDoiKeydown"
                     @blur="addSeedDoi"
                 />
                 <ul v-if="seedDois.length" class="flex flex-wrap gap-1.5 pt-1">
@@ -506,7 +549,7 @@ function handleSubmit() {
                 data-test="keyword-input"
                 type="text"
                 placeholder="输入关键词后按回车"
-                @keydown.enter.prevent="addKeyword"
+                @keydown="onKeywordKeydown"
                 @blur="addKeyword"
             />
             <ul v-if="keywords.length" class="flex flex-wrap gap-1.5 pt-1">

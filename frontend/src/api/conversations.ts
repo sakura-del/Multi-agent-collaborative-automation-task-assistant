@@ -253,7 +253,9 @@ export async function streamChatMessage(
  * @param final true = 保留不完整帧等待下一片；false = 全量解析（收尾）
  */
 export function parseSseChunk(buffer: string, handlers: StreamHandlers, keepTail = false): string {
-  const frames = buffer.split("\n\n");
+  // 兼容中间代理/网关将换行规范化为 CRLF（\r\n）的情形，避免分帧失效
+  const normalized = buffer.replace(/\r\n/g, "\n");
+  const frames = normalized.split("\n\n");
   const tail = keepTail ? (frames.pop() ?? "") : "";
   for (const frame of frames) {
     if (!frame.trim()) continue;

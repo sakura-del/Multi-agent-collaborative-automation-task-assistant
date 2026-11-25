@@ -89,3 +89,16 @@ class TestContextChain:
         chain.reverse()
         assert chain == ["问题一", "回答一"]
         assert "分支A" not in chain
+
+
+class TestSseResponseHeaders:
+    def test_stream_endpoint_omits_http2_forbidden_connection_header(self) -> None:
+        """SSE 响应头不能带 HTTP/1.1 逐跳头 Connection，并应禁止代理缓冲与改写（Issue #58）。"""
+        import inspect
+
+        from app.api.v1.endpoints.conversations import stream_message
+
+        source = inspect.getsource(stream_message)
+        assert '"Connection"' not in source
+        assert "no-transform" in source
+        assert "X-Accel-Buffering" in source
