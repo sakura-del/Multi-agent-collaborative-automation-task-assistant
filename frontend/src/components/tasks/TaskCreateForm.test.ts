@@ -818,6 +818,12 @@ describe("TaskCreateForm 默认模型", () => {
         expect(wrapper.emitted("submit")).toBeUndefined();
         expect(wrapper.text()).toContain("RAG");
         expect((keywordInput.element as HTMLInputElement).value).toBe("");
+        // 提交按钮必须为 type="button"（彻底关闭多字段表单的浏览器隐式回车提交）
+        expect(wrapper.find('[data-test="submit"]').attributes("type")).toBe("button");
+
+        // 显式点击「创建任务」按钮仍可正常提交
+        await wrapper.find('[data-test="submit"]').trigger("click");
+        expect(wrapper.emitted("submit")).toHaveLength(1);
     });
 
     it("勾选使用我的引用库时，自动将文献数上限同步为引用库可用条数（Issue #58）", async () => {

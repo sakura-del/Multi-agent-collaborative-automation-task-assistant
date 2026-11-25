@@ -478,7 +478,7 @@ function handleSubmit() {
             v-if="isCitationSnowballing"
             class="grid gap-3 rounded-lg border border-border bg-muted/20 p-3"
         >
-            <div class="grid gap-1.5">
+            <div class="grid gap-1.5" @keydown.capture="onSeedDoiKeydown">
                 <Label for="task-seed-doi">
                     种子论文 DOI / 标题（选填，回车添加，最多 {{ SEED_MAX }} 篇）
                 </Label>
@@ -488,7 +488,6 @@ function handleSubmit() {
                     data-test="seed-doi-input"
                     type="text"
                     placeholder="例如：10.1145/3442381.3450000 或经典论文题名（留空将自动检索 Top 3 种子）"
-                    @keydown="onSeedDoiKeydown"
                     @blur="addSeedDoi"
                 />
                 <ul v-if="seedDois.length" class="flex flex-wrap gap-1.5 pt-1">
@@ -541,7 +540,7 @@ function handleSubmit() {
             </div>
         </div>
 
-        <div class="grid gap-1.5">
+        <div class="grid gap-1.5" @keydown.capture="onKeywordKeydown">
             <Label for="task-keyword">关键词（回车添加，1–10 个）</Label>
             <Input
                 id="task-keyword"
@@ -549,7 +548,6 @@ function handleSubmit() {
                 data-test="keyword-input"
                 type="text"
                 placeholder="输入关键词后按回车"
-                @keydown="onKeywordKeydown"
                 @blur="addKeyword"
             />
             <ul v-if="keywords.length" class="flex flex-wrap gap-1.5 pt-1">
@@ -846,7 +844,13 @@ function handleSubmit() {
         <ErrorBanner :message="props.error" testid="form-error" />
 
         <div class="flex gap-2">
-            <Button data-test="submit" type="submit" :disabled="!canSubmit">
+            <!-- 使用 type="button" + @click 显式提交，彻底禁用多字段表单的浏览器原生回车隐式提交（Issue #58） -->
+            <Button
+                data-test="submit"
+                type="button"
+                :disabled="!canSubmit"
+                @click="handleSubmit"
+            >
                 <span>{{ props.pending ? "创建中…" : "创建任务" }}</span>
             </Button>
         </div>
