@@ -372,4 +372,51 @@ describe("StyleView 删除确认（2026-10-26）", () => {
     expect(deleteCitationStyle).not.toHaveBeenCalled();
     expect(wrapper.find('[data-test="style-delete-confirm-my-style"]').exists()).toBe(false);
   });
+
+  it("骨架屏及新增元素不使用 style-preview- 前缀", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(listCitationStyles).mockReturnValue(new Promise(() => {}) as never);
+      vi.mocked(previewCitationStyles).mockReturnValue(new Promise(() => {}) as never);
+
+      const wrapper = mount(StyleView);
+      vi.advanceTimersByTime(220);
+      await flushPromises();
+
+      const previewMatched = wrapper.findAll('[data-test^="style-preview-"]');
+      expect(previewMatched).toHaveLength(0);
+      expect(wrapper.find('[data-test="style-empty"]').exists()).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("删除请求 pending 期间保留 ConfirmBar 加载态，失败后保留确认条允许重试", async () => {
+    let rejectDelete!: (err: Error) => void;
+    vi.mocked(deleteCitationStyle).mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          rejectDelete = reject;
+        }),
+    );
+
+    const wrapper = await mountView();
+    await wrapper.get('[data-test="style-delete-my-style"]').trigger("click");
+    await flushPromises();
+
+    await wrapper.get('[data-test="style-delete-confirm-my-style"]').trigger("click");
+    await wrapper.vm.$nextTick();
+
+    const pendingConfirm = wrapper.find('[data-test="style-delete-confirm-my-style"]');
+    expect(pendingConfirm.exists()).toBe(true);
+    expect(pendingConfirm.attributes("disabled")).toBeDefined();
+    expect(pendingConfirm.find("svg.animate-spin").exists()).toBe(true);
+
+    rejectDelete(new Error("删除样式失败"));
+    await flushPromises();
+    expect(wrapper.find('[data-test="style-upload-error"]').text()).toContain("删除样式失败");
+    const retryBtn = wrapper.find('[data-test="style-delete-confirm-my-style"]');
+    expect(retryBtn.exists()).toBe(true);
+    expect(retryBtn.attributes("disabled")).toBeUndefined();
+  });
 });

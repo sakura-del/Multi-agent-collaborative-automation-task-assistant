@@ -174,6 +174,19 @@ describe("ReferenceLibraryView", () => {
     expect(clearLibrary).toHaveBeenCalledTimes(1);
   });
 
+  it("可以取消清空引用库", async () => {
+    const wrapper = await mountView();
+    await wrapper.find('[data-test="library-clear"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.find('[data-test="library-clear-confirm"]').exists()).toBe(true);
+
+    await wrapper.find('[data-test="library-clear-cancel"]').trigger("click");
+    await flushPromises();
+
+    expect(clearLibrary).not.toHaveBeenCalled();
+    expect(wrapper.find('[data-test="library-clear-confirm"]').exists()).toBe(false);
+  });
+
   it("列表加载失败时展示错误横幅", async () => {
     vi.mocked(listLibraryItems).mockRejectedValue(new Error("网络错误"));
 
@@ -357,5 +370,34 @@ describe("ReferenceLibraryView 编辑条目", () => {
     await flushPromises();
 
     expect(listLibraryItems).toHaveBeenLastCalledWith({ limit: 20, offset: 0 });
+  });
+
+  it("单条删除请求 pending 期间保留 ConfirmBar 加载态，失败后保留确认条允许重试", async () => {
+    let rejectDelete!: (err: Error) => void;
+    vi.mocked(deleteLibraryItem).mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          rejectDelete = reject;
+        }),
+    );
+
+    const wrapper = await mountView();
+    await wrapper.get('[data-test="library-delete-item-1"]').trigger("click");
+    await flushPromises();
+
+    await wrapper.get('[data-test="library-delete-confirm-item-1"]').trigger("click");
+    await wrapper.vm.$nextTick();
+
+    const pendingConfirm = wrapper.find('[data-test="library-delete-confirm-item-1"]');
+    expect(pendingConfirm.exists()).toBe(true);
+    expect(pendingConfirm.attributes("disabled")).toBeDefined();
+    expect(pendingConfirm.find("svg.animate-spin").exists()).toBe(true);
+
+    rejectDelete(new Error("删除条目失败"));
+    await flushPromises();
+    expect(wrapper.find('[data-test="library-action-error"]').text()).toContain("删除条目失败");
+    const retryBtn = wrapper.find('[data-test="library-delete-confirm-item-1"]');
+    expect(retryBtn.exists()).toBe(true);
+    expect(retryBtn.attributes("disabled")).toBeUndefined();
   });
 });

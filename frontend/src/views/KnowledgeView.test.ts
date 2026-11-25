@@ -279,4 +279,22 @@ describe("Issue #36：勾选就绪文档新建论文抽取表", () => {
     expect(btn.exists()).toBe(true);
     expect(btn.text()).toContain("新建抽取表（已选 1 篇）");
   });
+
+  it("加载挂起期间不渲染空态（!store.loading 守卫）", async () => {
+    setActivePinia(createPinia());
+    const { useKnowledgeStore } = await import("@/stores/knowledge");
+    const store = useKnowledgeStore();
+    store.documents = [];
+    store.stats = stats();
+    store.loading = true;
+    store.loadAll = vi.fn().mockReturnValue(new Promise(() => {}));
+
+    const wrapper = mount(KnowledgeView, {
+      global: {
+        provide: { [routerKey as symbol]: {} },
+        stubs: { DocumentUpload: true },
+      },
+    });
+    expect(wrapper.find('[data-test="knowledge-empty"]').exists()).toBe(false);
+  });
 });

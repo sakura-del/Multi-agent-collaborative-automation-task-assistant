@@ -1,7 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
+import DOMPurify from "dompurify";
 
+import { useTheme } from "@/composables/useTheme";
 import ScreeningView from "@/views/ScreeningView.vue";
+
+const { mermaidInitializeMock, mermaidRenderMock } = vi.hoisted(() => ({
+  mermaidInitializeMock: vi.fn(),
+  mermaidRenderMock: vi.fn(async (_id: string, _code: string) => ({
+    svg: '<svg data-mock="default"><g></g></svg>',
+  })),
+}));
+
+vi.mock("mermaid", () => ({
+  default: {
+    initialize: mermaidInitializeMock,
+    render: mermaidRenderMock,
+  },
+}));
 
 vi.mock("@/api/screening", () => ({
   recordSearch: vi.fn(),
@@ -303,14 +319,15 @@ describe("ScreeningView", () => {
     expect(createDecision).toHaveBeenCalled();
   });
 
-  it("刷新时记录与计数都会重新拉取（数据一致性的前提）", async () => {
-    // 说明：曾尝试断言「两条请求并行发起」来防「新记录 + 旧计数」的中间帧，
-    // 但该断言在串行实现下同样通过（mock 的挂起方式骗过时序判定），属于
-    // **假测试**，已删除。这里只保留能可靠断言的契约：刷新时两者都刷新。
+  it("Pin-in-Place：决策成功后不整表刷新记录，仅原地更新并原子刷新 PRISMA 计数", async () => {
     vi.mocked(createDecision).mockResolvedValue({
       record_id: "r1",
-      current_stage: "title_abstract",
+      current_stage: "fulltext",
     });
+    const updatedPrisma = { ...PRISMA, title_abstract: { screened: 1, excluded: 0 } };
+    vi.mocked(getPrismaCounts)
+      .mockResolvedValueOnce(PRISMA)
+      .mockResolvedValueOnce(updatedPrisma);
 
     const wrapper = mount(ScreeningView, { props: { taskId: "task-1" } });
     await flushPromises();
@@ -320,8 +337,12 @@ describe("ScreeningView", () => {
     await wrapper.find('[data-test="screening-include-r1"]').trigger("click");
     await flushPromises();
 
-    expect(vi.mocked(listScreeningRecords).mock.calls.length).toBe(recordsCallsBefore + 1);
+    // 不整表重刷列表（避免滚动跳位）
+    expect(vi.mocked(listScreeningRecords).mock.calls.length).toBe(recordsCallsBefore);
+    // 独立静默刷新 PRISMA 计数
     expect(vi.mocked(getPrismaCounts).mock.calls.length).toBe(prismaCallsBefore + 1);
+    // 原地更新阶段徽标
+    expect(wrapper.find('[data-test="screening-row-r1"]').text()).toContain("全文");
   });
 
   it("默认关闭时不请求主动排序", async () => {
@@ -399,7 +420,7 @@ describe("ScreeningView", () => {
     expect(wrapper.find('[data-test="screening-row-r1"]').exists()).toBe(true);
   });
 
-  it("开启后提交决策会刷新排序", async () => {
+  it("开启后提交决策不自动重排，显示手动重排按钮，点击后才刷新排序", async () => {
     vi.mocked(getScreeningPriority).mockResolvedValue(priorityResult());
     vi.mocked(createDecision).mockResolvedValue({
       record_id: "r1",
@@ -415,7 +436,16 @@ describe("ScreeningView", () => {
     await wrapper.find('[data-test="screening-include-r1"]').trigger("click");
     await flushPromises();
 
+    // 不打断用户：提交决策后不自动重排
+    expect(vi.mocked(getScreeningPriority).mock.calls.length).toBe(before);
+    const reorderBtn = wrapper.find('[data-test="screening-priority-reorder"]');
+    expect(reorderBtn.exists()).toBe(true);
+    expect(reorderBtn.text()).toContain("点击重排");
+
+    await reorderBtn.trigger("click");
+    await flushPromises();
     expect(vi.mocked(getScreeningPriority).mock.calls.length).toBe(before + 1);
+    expect(wrapper.find('[data-test="screening-priority-reorder"]').exists()).toBe(false);
   });
 
   it("切到全文阶段会关闭并禁用智能排序", async () => {
@@ -479,5 +509,303 @@ describe("ScreeningView", () => {
     const text = wrapper.text();
     expect(text).toContain("doi:10.48550/arxiv.2005.11401");
     expect(text).not.toContain("arxiv:doi:");
+  });
+
+  it("Pin-in-Place 决策失败时回滚乐观状态并展示行级温和回弹提示", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(createDecision).mockRejectedValue(new Error("服务器繁忙"));
+
+      const wrapper = mount(ScreeningView, { props: { taskId: "task-1" } });
+      await flushPromises();
+
+      const row = wrapper.find('[data-test="screening-row-r1"]');
+      expect(row.text()).toContain("标题/摘要");
+
+      await wrapper.find('[data-test="screening-include-r1"]').trigger("click");
+      await flushPromises();
+
+      expect(row.text()).toContain("标题/摘要");
+      expect(row.text()).not.toContain("全文");
+      expect(row.classes()).toContain("ring-destructive/60");
+      expect(wrapper.find('[data-test="screening-error"]').text()).toContain("服务器繁忙");
+
+      vi.advanceTimersByTime(850);
+      await flushPromises();
+      expect(row.classes()).not.toContain("ring-destructive/60");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("排除表单支持取消按钮与 Esc 键收起，且不发请求", async () => {
+    vi.useFakeTimers();
+    try {
+      const wrapper = mount(ScreeningView, { props: { taskId: "task-1" } });
+      await flushPromises();
+
+      await wrapper.find('[data-test="screening-exclude-r1"]').trigger("click");
+      await flushPromises();
+      expect(wrapper.find('[data-test="screening-exclude-form-r1"]').exists()).toBe(true);
+
+      const cancelBtn = wrapper.find('[data-test="screening-exclude-cancel-r1"]');
+      expect(cancelBtn.exists()).toBe(true);
+      await cancelBtn.trigger("click");
+      vi.advanceTimersByTime(220);
+      await flushPromises();
+      expect(wrapper.find('[data-test="screening-exclude-form-r1"]').exists()).toBe(false);
+      expect(createDecision).not.toHaveBeenCalled();
+
+      // 再次打开并用 Esc 关闭
+      await wrapper.find('[data-test="screening-exclude-r1"]').trigger("click");
+      await flushPromises();
+      await wrapper.find('[data-test="screening-exclude-reason-r1"]').trigger("keydown", { key: "Escape" });
+      vi.advanceTimersByTime(220);
+      await flushPromises();
+      expect(wrapper.find('[data-test="screening-exclude-form-r1"]').exists()).toBe(false);
+      expect(createDecision).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("加载挂起期间不显示空态（!loading 守卫）", async () => {
+    vi.mocked(listScreeningRecords).mockReturnValue(new Promise(() => {}) as never);
+    const wrapper = mount(ScreeningView, { props: { taskId: "task-1" } });
+    await flushPromises();
+    expect(wrapper.find('[data-test="screening-empty"]').exists()).toBe(false);
+  });
+
+  it("IME 组合输入（isComposing / keyCode=229）按 Esc 与 Enter 不误关闭或误提交排除表单", async () => {
+    vi.mocked(createDecision).mockResolvedValue({
+      record_id: "r1",
+      current_stage: "title_abstract",
+    });
+
+    const wrapper = mount(ScreeningView, { props: { taskId: "task-1" } });
+    await flushPromises();
+
+    await wrapper.find('[data-test="screening-exclude-r1"]').trigger("click");
+    await flushPromises();
+    const reasonInput = wrapper.get('[data-test="screening-exclude-reason-r1"]');
+    await reasonInput.setValue("中文输入中");
+
+    // 1) isComposing: true 按 Esc 不得关闭表单
+    await reasonInput.trigger("keydown", { key: "Escape", isComposing: true });
+    await flushPromises();
+    expect(reasonInput.element.closest('[aria-hidden="true"]')).toBeNull();
+    expect(createDecision).not.toHaveBeenCalled();
+
+    // 2) isComposing: true 按 Enter 不得提交
+    await reasonInput.trigger("keydown", { key: "Enter", isComposing: true });
+    await flushPromises();
+    expect(createDecision).not.toHaveBeenCalled();
+    expect(reasonInput.element.closest('[aria-hidden="true"]')).toBeNull();
+
+    // 3) keyCode === 229 按 Esc / Enter 同样不得关闭或提交
+    await reasonInput.trigger("keydown", { key: "Escape", keyCode: 229 });
+    await reasonInput.trigger("keydown", { key: "Enter", keyCode: 229 });
+    await flushPromises();
+    expect(createDecision).not.toHaveBeenCalled();
+    expect(reasonInput.element.closest('[aria-hidden="true"]')).toBeNull();
+
+    // 4) 结束组合后按 Enter 正常提交
+    await reasonInput.trigger("keydown", { key: "Enter", isComposing: false });
+    await flushPromises();
+    expect(createDecision).toHaveBeenCalledWith("r1", {
+      stage: "title_abstract",
+      verdict: "exclude",
+      exclusion_reason: "中文输入中",
+    });
+  });
+
+  it("并发操作多条记录时保持各自独立的禁用锁，互不提前解锁", async () => {
+    vi.mocked(listScreeningRecords).mockResolvedValue([
+      recordRow({ record_id: "r1", title: "第一篇" }),
+      recordRow({ record_id: "r2", title: "第二篇" }),
+    ]);
+
+    let resolveR1!: (v: { record_id: string; current_stage: string }) => void;
+    let resolveR2!: (v: { record_id: string; current_stage: string }) => void;
+    vi.mocked(createDecision)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveR1 = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveR2 = resolve;
+          }),
+      );
+
+    const wrapper = mount(ScreeningView, { props: { taskId: "task-1" } });
+    await flushPromises();
+
+    const r1Include = wrapper.get('[data-test="screening-include-r1"]');
+    const r2Include = wrapper.get('[data-test="screening-include-r2"]');
+
+    await r1Include.trigger("click");
+    await r2Include.trigger("click");
+    await wrapper.vm.$nextTick();
+
+    // 两条记录同时在请求中：各自按钮均保持 disabled
+    expect(r1Include.attributes("disabled")).toBeDefined();
+    expect(r2Include.attributes("disabled")).toBeDefined();
+
+    // r2 先返回：r2 解锁，r1 必须仍然保持 disabled
+    resolveR2({ record_id: "r2", current_stage: "fulltext" });
+    await flushPromises();
+    expect(r2Include.attributes("disabled")).toBeUndefined();
+    expect(r1Include.attributes("disabled")).toBeDefined();
+
+    // r1 返回后才解锁
+    resolveR1({ record_id: "r1", current_stage: "fulltext" });
+    await flushPromises();
+    expect(r1Include.attributes("disabled")).toBeUndefined();
+  });
+
+  it("排除理由为空提交时渲染 aria-invalid=\"true\" 并聚焦到输入框（R4）", async () => {
+    const hostEl = document.createElement("div");
+    document.body.appendChild(hostEl);
+    const wrapper = mount(ScreeningView, {
+      attachTo: hostEl,
+      props: { taskId: "task-1" },
+    });
+    try {
+      await flushPromises();
+
+      await wrapper.get('[data-test="screening-exclude-r1"]').trigger("click");
+      await flushPromises();
+
+      const reasonInput = wrapper.get('[data-test="screening-exclude-reason-r1"]');
+      await wrapper.get('[data-test="screening-exclude-submit-r1"]').trigger("click");
+      await flushPromises();
+
+      expect(reasonInput.attributes("aria-invalid")).toBe("true");
+      expect(document.activeElement).toBe(reasonInput.element);
+    } finally {
+      wrapper.unmount();
+      hostEl.remove();
+    }
+  });
+
+  it("成功提示 [data-test=\"screening-success\"] 留在组件子树内且避开右上角 Toaster 与右下角悬浮球", async () => {
+    vi.mocked(createDecision).mockResolvedValue({
+      record_id: "r1",
+      current_stage: "fulltext",
+    });
+
+    const wrapper = mount(ScreeningView, { props: { taskId: "task-1" } });
+    await flushPromises();
+    await wrapper.get('[data-test="screening-include-r1"]').trigger("click");
+    await flushPromises();
+
+    const banner = wrapper.find('[data-test="screening-success"]');
+    expect(banner.exists()).toBe(true);
+    const cls = (banner.attributes("class") ?? "").split(/\s+/);
+    expect(cls).not.toContain("top-16");
+    expect(cls).toContain("fixed");
+    expect(cls).toContain("bottom-5");
+    expect(cls).toContain("right-20");
+  });
+
+  it("Mermaid 异步渲染响应深浅主题并丢弃过期请求结果", async () => {
+    const { setTheme } = useTheme();
+    setTheme("light");
+    const sanitizeSpy = vi
+      .spyOn(DOMPurify, "sanitize")
+      .mockImplementation((dirty) => String(dirty));
+
+    const raceMermaid = "flowchart TD\n    RACE_START --> RACE_END";
+    vi.mocked(getPrismaCounts).mockResolvedValue({ ...PRISMA, mermaid: raceMermaid });
+
+    let wrapper: ReturnType<typeof mount> | null = null;
+    try {
+      let rejectFirst!: (err: Error) => void;
+      let resolveSecond!: (v: { svg: string }) => void;
+      let resolveThird!: (v: { svg: string }) => void;
+      let resolveFourth!: (v: { svg: string }) => void;
+      let raceCall = 0;
+
+      mermaidRenderMock.mockImplementation((_id: string, code: string) => {
+        if (code !== raceMermaid) {
+          return Promise.resolve({ svg: '<svg data-mock="other"><g></g></svg>' });
+        }
+        raceCall += 1;
+        if (raceCall === 1) {
+          return new Promise<{ svg: string }>((_, reject) => {
+            rejectFirst = reject;
+          });
+        }
+        if (raceCall === 2) {
+          return new Promise<{ svg: string }>((resolve) => {
+            resolveSecond = resolve;
+          });
+        }
+        if (raceCall === 3) {
+          return new Promise<{ svg: string }>((resolve) => {
+            resolveThird = resolve;
+          });
+        }
+        return new Promise<{ svg: string }>((resolve) => {
+          resolveFourth = resolve;
+        });
+      });
+
+      wrapper = mount(ScreeningView, { props: { taskId: "task-1" } });
+      await vi.waitFor(() => expect(raceCall).toBe(1));
+      expect(mermaidInitializeMock).toHaveBeenCalledWith(
+        expect.objectContaining({ securityLevel: "strict", theme: "neutral" }),
+      );
+
+      // 在首次渲染尚未返回时切换为深色模式触发第二次渲染
+      setTheme("dark");
+      await vi.waitFor(() => expect(raceCall).toBe(2));
+      expect(mermaidInitializeMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ securityLevel: "strict", theme: "dark" }),
+      );
+
+      // 第二次（较新）先返回
+      resolveSecond({ svg: '<svg data-ver="latest"><text>latest</text></svg>' });
+      await flushPromises();
+      expect(sanitizeSpy).toHaveBeenCalledWith(
+        '<svg data-ver="latest"><text>latest</text></svg>',
+        { USE_PROFILES: { svg: true, svgFilters: true } },
+      );
+      expect(wrapper.find('[data-test="screening-mermaid-diagram"]').html()).toContain("latest");
+
+      // 第一次（过期）后返回报错，不得覆盖最新渲染或置错状态
+      rejectFirst(new Error("stale mermaid error"));
+      await flushPromises();
+      const diagramHtml = wrapper.find('[data-test="screening-mermaid-diagram"]').html();
+      expect(diagramHtml).toContain("latest");
+      expect(wrapper.text()).not.toContain("流程图预览暂不可用");
+
+      // 再验证过期成功返回同样被丢弃
+      setTheme("light");
+      await vi.waitFor(() => expect(raceCall).toBe(3));
+      setTheme("dark");
+      await vi.waitFor(() => expect(raceCall).toBe(4));
+
+      resolveFourth({ svg: '<svg data-ver="v4"><text>v4-fresh</text></svg>' });
+      await flushPromises();
+      resolveThird({ svg: '<svg data-ver="v3"><text>v3-stale</text></svg>' });
+      await flushPromises();
+
+      const updatedHtml = wrapper.find('[data-test="screening-mermaid-diagram"]').html();
+      expect(updatedHtml).toContain("v4-fresh");
+      expect(updatedHtml).not.toContain("v3-stale");
+    } finally {
+      wrapper?.unmount();
+      mermaidRenderMock.mockReset();
+      mermaidRenderMock.mockImplementation(async () => ({
+        svg: '<svg data-mock="default"><g></g></svg>',
+      }));
+      sanitizeSpy.mockRestore();
+      setTheme("light");
+    }
   });
 });

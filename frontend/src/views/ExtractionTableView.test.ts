@@ -243,10 +243,168 @@ describe("ExtractionTableView（Issue #36）", () => {
     expect(actionClasses).toContain("sm:justify-between");
     expect(actionClasses).not.toContain("justify-between");
 
+    // 先点删除按钮只弹出 ConfirmBar，不立即删除
     await wrapper.get('[data-test="extraction-delete-tbl-1"]').trigger("click");
+    await flushPromises();
+    expect(deleteExtractionTable).not.toHaveBeenCalled();
+    expect(wrapper.find('[data-test="extraction-delete-confirm-tbl-1"]').exists()).toBe(true);
+
+    // 点取消可安全收回
+    await wrapper.get('[data-test="extraction-delete-cancel-tbl-1"]').trigger("click");
+    await flushPromises();
+    expect(deleteExtractionTable).not.toHaveBeenCalled();
+    expect(wrapper.find('[data-test="extraction-delete-confirm-tbl-1"]').exists()).toBe(false);
+
+    // 再次点击并确认后真正删除
+    await wrapper.get('[data-test="extraction-delete-tbl-1"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('[data-test="extraction-delete-confirm-tbl-1"]').trigger("click");
     await flushPromises();
     expect(deleteExtractionTable).toHaveBeenCalledWith("tbl-1");
     expect(wrapper.find('[data-test="extraction-list-item-tbl-1"]').exists()).toBe(false);
     expect(wrapper.find('[data-test="extraction-list-item-tbl-2"]').exists()).toBe(true);
+  });
+
+  it("列表卡片展示基于 scaleX 的单元抽取进度条，并在无 total_cells 时保持兼容", async () => {
+    vi.mocked(listExtractionTables).mockResolvedValue([
+      {
+        id: "tbl-progress",
+        task_id: null,
+        title: "进度测试表",
+        status: "running",
+        column_count: 2,
+        source_count: 5,
+        completed_cells: 6,
+        failed_cells: 1,
+        total_cells: 10,
+        created_at: "2026-11-24T05:00:00Z",
+        updated_at: "2026-11-24T05:05:00Z",
+      },
+      {
+        id: "tbl-legacy",
+        task_id: null,
+        title: "旧摘要表",
+        status: "draft",
+        column_count: 2,
+        source_count: 2,
+        created_at: "2026-11-24T05:00:00Z",
+        updated_at: "2026-11-24T05:05:00Z",
+      },
+    ]);
+
+    const wrapper = mount(ExtractionTableView, {
+      global: { stubs: { Teleport: true } },
+    });
+    await flushPromises();
+
+    const progressItem = wrapper.get('[data-test="extraction-list-item-tbl-progress"]');
+    const progressBar = progressItem.find('[data-test="extraction-progress-bar-tbl-progress"]');
+    expect(progressBar.exists()).toBe(true);
+    expect(progressBar.attributes("style")).toContain("scaleX(0.7)");
+    expect(progressItem.text()).toContain("6/10");
+    expect(progressItem.text()).toContain("失败 1");
+
+    const legacyItem = wrapper.get('[data-test="extraction-list-item-tbl-legacy"]');
+    expect(legacyItem.find('[data-test="extraction-progress-bar-tbl-legacy"]').exists()).toBe(false);
+  });
+
+  it("添加列时仅填中文名与指令可自动派生 key 并提交", async () => {
+    const withDerivedCol: ExtractionTableOut = {
+      ...SAMPLE_TABLE,
+      columns: [
+        ...SAMPLE_TABLE.columns,
+        { key: "col_000000", label: "基线方法", prompt: "提取论文中的基线对比方法" },
+      ],
+    };
+    vi.mocked(addExtractionColumn).mockResolvedValue(withDerivedCol);
+    vi.mocked(runExtractionTable).mockResolvedValue({ ...withDerivedCol, status: "running" });
+
+    const wrapper = mount(ExtractionTableView, {
+      props: { tableId: "tbl-1" },
+      global: { stubs: { Teleport: true } },
+    });
+    await flushPromises();
+
+    await wrapper.find('[data-test="extraction-add-col-toggle"]').trigger("click");
+    await wrapper.find('[data-test="new-col-label"]').setValue("基线方法");
+    await wrapper.find('[data-test="new-col-prompt"]').setValue("提取论文中的基线对比方法");
+    await wrapper.find('[data-test="new-col-submit"]').trigger("click");
+    await flushPromises();
+
+    expect(addExtractionColumn).toHaveBeenCalledTimes(1);
+    const payload = vi.mocked(addExtractionColumn).mock.calls[0][1];
+    expect(payload.column.key).toMatch(/^col_[0-9a-f]{6}$/);
+    expect(payload.column.label).toBe("基线方法");
+  });
+
+  it("列表加载挂起期间不显示空态（!loading 守卫）", async () => {
+    vi.mocked(listExtractionTables).mockReturnValue(new Promise(() => {}) as never);
+    const wrapper = mount(ExtractionTableView, {
+      global: { stubs: { Teleport: true } },
+    });
+    await flushPromises();
+    expect(wrapper.find('[data-test="extraction-list-empty"]').exists()).toBe(false);
+  });
+
+  it("添加列时若 label 合法但 prompt 为空且隐藏 key 非法，不误展开技术标识区并聚焦 prompt（R4）", async () => {
+    const hostEl = document.createElement("div");
+    document.body.appendChild(hostEl);
+    const wrapper = mount(ExtractionTableView, {
+      attachTo: hostEl,
+      props: { tableId: "tbl-1" },
+      global: { stubs: { Teleport: true } },
+    });
+    try {
+      await flushPromises();
+
+      await wrapper.get('[data-test="extraction-add-col-toggle"]').trigger("click");
+      await wrapper.get('[data-test="new-col-label"]').setValue("实验配置");
+      await wrapper.get('[data-test="new-col-key"]').setValue("123-bad");
+      await wrapper.get('[data-test="new-col-prompt"]').setValue(" ");
+      await wrapper.get('[data-test="new-col-submit"]').trigger("click");
+      await flushPromises();
+
+      expect(addExtractionColumn).not.toHaveBeenCalled();
+      const keyInput = wrapper.get('[data-test="new-col-key"]');
+      const promptInput = wrapper.get('[data-test="new-col-prompt"]');
+      expect(keyInput.element.closest('[aria-hidden="true"]')).not.toBeNull();
+      expect(promptInput.attributes("aria-invalid")).toBe("true");
+      expect(document.activeElement).toBe(promptInput.element);
+    } finally {
+      wrapper.unmount();
+      hostEl.remove();
+    }
+  });
+
+  it("添加列时若主字段均合法仅隐藏 key 非法，自动展开技术标识区并聚焦 key（R4）", async () => {
+    const hostEl = document.createElement("div");
+    document.body.appendChild(hostEl);
+    const wrapper = mount(ExtractionTableView, {
+      attachTo: hostEl,
+      props: { tableId: "tbl-1" },
+      global: { stubs: { Teleport: true } },
+    });
+    try {
+      await flushPromises();
+
+      await wrapper.get('[data-test="extraction-add-col-toggle"]').trigger("click");
+      await wrapper.get('[data-test="new-col-label"]').setValue("实验配置");
+      await wrapper.get('[data-test="new-col-prompt"]').setValue("提取核心超参数与硬件环境");
+      await wrapper.get('[data-test="new-col-key"]').setValue("123-bad");
+
+      const keyInput = wrapper.get('[data-test="new-col-key"]');
+      expect(keyInput.element.closest('[aria-hidden="true"]')).not.toBeNull();
+
+      await wrapper.get('[data-test="new-col-submit"]').trigger("click");
+      await flushPromises();
+
+      expect(addExtractionColumn).not.toHaveBeenCalled();
+      expect(keyInput.element.closest('[aria-hidden="true"]')).toBeNull();
+      expect(keyInput.attributes("aria-invalid")).toBe("true");
+      expect(document.activeElement).toBe(keyInput.element);
+    } finally {
+      wrapper.unmount();
+      hostEl.remove();
+    }
   });
 });

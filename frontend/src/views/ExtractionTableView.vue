@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { routerKey } from "vue-router";
+import { useReducedMotion } from "motion-v";
 import {
   ArrowLeft,
+  ChevronDown,
+  ChevronUp,
   Download,
   FileSearch,
   Loader2,
@@ -27,39 +30,56 @@ import {
   type ExtractionTableStatus,
   type ExtractionTableSummaryOut,
 } from "@/api/extractions";
+import AnimatedCollapse from "@/components/common/AnimatedCollapse.vue";
+import ConfirmBar from "@/components/common/ConfirmBar.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import PageHeader from "@/components/common/PageHeader.vue";
 import { Alert } from "@/components/ui/alert";
 import { Badge, type BadgeVariants } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import MotionDrawer from "@/components/ui/drawer/MotionDrawer.vue";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useDelayedLoading } from "@/composables/useDelayedLoading";
+import { toastSuccess } from "@/lib/toast";
 import { highlightQuote } from "@/utils/claim-highlight";
 import { formatEvidenceLocator } from "@/utils/claim-verdict";
+import { deriveExtractionKey } from "@/utils/extraction-key";
 import { formatDateTime } from "@/utils/task-status";
 
 const props = defineProps<{
   tableId?: string;
 }>();
 const router = inject(routerKey, null);
+const reducedMotion = useReducedMotion();
 
 const loading = ref(false);
+const showSkeleton = useDelayedLoading(loading);
 const error = ref<string | null>(null);
 const tables = ref<ExtractionTableSummaryOut[]>([]);
 const table = ref<ExtractionTableOut | null>(null);
 const activeTableId = ref<string | null>(props.tableId || null);
 
+// 列表删除二次确认
+const confirmDeleteId = ref<string | null>(null);
+const deletingId = ref<string | null>(null);
+
 // 导出 CSV 选项
 const includeQuotes = ref(true);
 const exporting = ref(false);
 
-// 添加列弹窗
+// 添加列折叠表单与 B3 自动派生
 const addColOpen = ref(false);
+const showAdvancedKey = ref(false);
+const keyDirty = ref(false);
+let syncingKey = false;
 const newColLabel = ref("");
 const newColKey = ref("");
 const newColPrompt = ref("");
 const addingCol = ref(false);
+const addColErrors = ref<{ label?: boolean; key?: boolean; prompt?: boolean }>({});
+const addColFormRef = ref<HTMLElement | null>(null);
 const running = ref(false);
 
 // 原文溯源抽屉
@@ -186,13 +206,68 @@ function backToList() {
   void loadList();
 }
 
+function existingColumnKeys(): string[] {
+  return table.value?.columns.map((c) => c.key) ?? [];
+}
+
+watch(newColLabel, (val) => {
+  if (addColErrors.value.label && val.trim()) {
+    addColErrors.value.label = false;
+  }
+  if (keyDirty.value) return;
+  syncingKey = true;
+  newColKey.value = val.trim() ? deriveExtractionKey(val, existingColumnKeys()) : "";
+  syncingKey = false;
+});
+
+function onNewColKeyInput(val: string | number) {
+  if (syncingKey) return;
+  const text = String(val);
+  keyDirty.value = text.trim().length > 0;
+  if (addColErrors.value.key && /^[a-z][a-z0-9_]{0,47}$/.test(text.trim().toLowerCase())) {
+    addColErrors.value.key = false;
+  }
+}
+
+watch(newColPrompt, (val) => {
+  if (addColErrors.value.prompt && val.trim().length >= 2) {
+    addColErrors.value.prompt = false;
+  }
+});
+
+function cellProgress(item: ExtractionTableSummaryOut): {
+  show: boolean;
+  completed: number;
+  failed: number;
+  total: number;
+  ratio: number;
+} {
+  const total = item.total_cells ?? 0;
+  const completed = item.completed_cells ?? 0;
+  const failed = item.failed_cells ?? 0;
+  const done = completed + failed;
+  const ratio = total > 0 ? Math.max(0, Math.min(1, done / total)) : 0;
+  return {
+    show: total > 0,
+    completed,
+    failed,
+    total,
+    ratio,
+  };
+}
+
 async function handleDelete(id: string) {
+  deletingId.value = id;
   error.value = null;
   try {
     await deleteExtractionTable(id);
     tables.value = tables.value.filter((item) => item.id !== id);
+    confirmDeleteId.value = null;
+    toastSuccess("已删除抽取表");
   } catch (err) {
     error.value = (err as Error).message || "删除抽取表失败";
+  } finally {
+    deletingId.value = null;
   }
 }
 
@@ -210,20 +285,54 @@ async function handleRunAll() {
   }
 }
 
+function cancelAddCol() {
+  addColOpen.value = false;
+  showAdvancedKey.value = false;
+  addColErrors.value = {};
+}
+
+async function focusFirstInvalidAddCol() {
+  if (addColErrors.value.key && !addColErrors.value.label && !addColErrors.value.prompt) {
+    showAdvancedKey.value = true;
+  }
+  await nextTick();
+  const invalidEl = addColFormRef.value?.querySelector<HTMLElement>('[aria-invalid="true"]');
+  if (invalidEl) {
+    invalidEl.scrollIntoView?.({
+      block: "center",
+      behavior: reducedMotion.value ? "auto" : "smooth",
+    });
+    invalidEl.focus?.({ preventScroll: true });
+  }
+}
+
 async function handleAddColumnSubmit() {
   if (!table.value) return;
   const label = newColLabel.value.trim();
-  const key = newColKey.value.trim().toLowerCase();
+  const rawKey = newColKey.value.trim().toLowerCase();
+  const key = rawKey || (label ? deriveExtractionKey(label, existingColumnKeys()) : "");
   const prompt = newColPrompt.value.trim();
-  if (!/^[a-z][a-z0-9_]{0,47}$/.test(key)) {
-    error.value = "列标识须以小写字母开头，仅含小写字母、数字和下划线";
-    return;
-  }
-  if (!label || prompt.length < 2) {
-    error.value = "请填写完整的列名称与抽取指令";
+
+  const labelInvalid = !label;
+  const keyInvalid = !/^[a-z][a-z0-9_]{0,47}$/.test(key);
+  const promptInvalid = prompt.length < 2;
+
+  if (labelInvalid || keyInvalid || promptInvalid) {
+    addColErrors.value = {
+      label: labelInvalid,
+      key: keyInvalid,
+      prompt: promptInvalid,
+    };
+    if (labelInvalid || promptInvalid) {
+      error.value = "请填写完整的列名称与抽取指令";
+    } else {
+      error.value = "列标识须以小写字母开头，仅含小写字母、数字和下划线";
+    }
+    await focusFirstInvalidAddCol();
     return;
   }
 
+  addColErrors.value = {};
   addingCol.value = true;
   error.value = null;
   try {
@@ -236,10 +345,15 @@ async function handleAddColumnSubmit() {
       column_keys: [key],
     });
     addColOpen.value = false;
+    showAdvancedKey.value = false;
+    keyDirty.value = false;
+    syncingKey = true;
     newColLabel.value = "";
     newColKey.value = "";
     newColPrompt.value = "";
+    syncingKey = false;
     ensurePolling();
+    toastSuccess("已添加列并开始补抽");
   } catch (err) {
     error.value = (err as Error).message || "新增列失败";
   } finally {
@@ -264,6 +378,7 @@ async function handleExportCsv() {
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
+    toastSuccess("已导出 CSV");
   } catch (err) {
     error.value = (err as Error).message || "导出 CSV 失败";
   } finally {
@@ -274,12 +389,6 @@ async function handleExportCsv() {
 function openCellDrawer(source: ExtractionSourceOut, columnLabel: string, cell: ExtractionCellOut) {
   if (cell.status !== "extracted") return;
   drawerCell.value = { source, columnLabel, cell };
-}
-
-function onKeydown(event: KeyboardEvent) {
-  if (event.key === "Escape" && drawerCell.value) {
-    drawerCell.value = null;
-  }
 }
 
 watch(
@@ -296,7 +405,6 @@ watch(
 );
 
 onMounted(() => {
-  window.addEventListener("keydown", onKeydown);
   if (activeTableId.value) {
     void loadDetail(activeTableId.value);
   } else {
@@ -306,7 +414,6 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   stopPolling();
-  window.removeEventListener("keydown", onKeydown);
 });
 </script>
 
@@ -315,17 +422,31 @@ onBeforeUnmount(() => {
     <!-- 列表模式（/extractions） -->
     <template v-if="!activeTableId">
       <PageHeader
-        eyebrow="Structured extraction"
+        eyebrow="数据抽取"
         title="论文数据抽取表"
         description="按自定义列批量抽取文献核心信息，逐格绑定原文引用与页码定位，支持导出 CSV。"
       />
 
-      <ErrorBanner :message="error" testid="extraction-error" />
+      <ErrorBanner :message="error" testid="extraction-error" @dismiss="error = null" />
 
-      <p v-if="loading && !tables.length" class="text-sm text-muted-foreground">加载中…</p>
+      <div
+        v-if="showSkeleton && !tables.length"
+        class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
+        data-test="extraction-list-skeleton"
+      >
+        <div
+          v-for="i in 3"
+          :key="i"
+          class="h-36 rounded-lg border border-border bg-card p-4"
+        >
+          <div class="h-4 w-2/3 animate-pulse rounded bg-muted motion-reduce:animate-none" />
+          <div class="mt-3 h-3 w-1/2 animate-pulse rounded bg-muted/80 motion-reduce:animate-none" />
+          <div class="mt-6 h-7 w-24 animate-pulse rounded bg-muted/60 motion-reduce:animate-none" />
+        </div>
+      </div>
 
       <EmptyState
-        v-else-if="!tables.length"
+        v-else-if="!loading && !tables.length"
         testid="extraction-list-empty"
         title="还没有论文抽取表"
         description="前往「知识库」勾选已就绪 PDF，或在「PRISMA 筛选」点击「生成数据抽取表」即可创建。"
@@ -336,7 +457,7 @@ onBeforeUnmount(() => {
       </EmptyState>
 
       <ul
-        v-else
+        v-else-if="tables.length"
         class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
         data-test="extraction-table-list"
       >
@@ -362,7 +483,31 @@ onBeforeUnmount(() => {
             <p class="mt-2 text-xs text-muted-foreground tabular-nums">
               {{ item.source_count }} 篇论文 · {{ item.column_count }} 个字段
             </p>
-            <p class="mt-1 text-[11px] text-muted-foreground">
+            <div v-if="cellProgress(item).show" class="mt-2 space-y-1">
+              <div class="flex items-center justify-between text-[11px] text-muted-foreground tabular-nums">
+                <span>
+                  已完成 {{ cellProgress(item).completed }}/{{ cellProgress(item).total }} 格
+                </span>
+                <span v-if="cellProgress(item).failed > 0" class="text-destructive">
+                  失败 {{ cellProgress(item).failed }}
+                </span>
+              </div>
+              <div
+                class="h-1.5 w-full overflow-hidden rounded-full bg-muted"
+                role="progressbar"
+                :aria-valuenow="cellProgress(item).completed + cellProgress(item).failed"
+                aria-valuemin="0"
+                :aria-valuemax="cellProgress(item).total"
+                :aria-label="`${item.title} 抽取进度`"
+              >
+                <div
+                  :data-test="`extraction-progress-bar-${item.id}`"
+                  class="h-full w-full origin-left rounded-full bg-primary transition-transform duration-200 ease-out motion-reduce:transition-none"
+                  :style="{ transform: `scaleX(${cellProgress(item).ratio})` }"
+                />
+              </div>
+            </div>
+            <p class="mt-1.5 text-[11px] text-muted-foreground">
               更新于 {{ formatDateTime(item.updated_at) }}
             </p>
           </div>
@@ -377,11 +522,23 @@ onBeforeUnmount(() => {
               variant="ghost"
               :data-test="`extraction-delete-${item.id}`"
               aria-label="删除抽取表"
-              @click="handleDelete(item.id)"
+              @click="confirmDeleteId = item.id"
             >
               <Trash2 :size="14" />
             </Button>
           </div>
+          <ConfirmBar
+            v-if="confirmDeleteId === item.id"
+            class="mt-2.5"
+            title="确认删除该抽取表？"
+            consequence="删除后将永久清除已抽取的数据列与原文溯源，不可恢复。"
+            confirm-label="确认删除"
+            :loading="deletingId === item.id"
+            :confirm-testid="`extraction-delete-confirm-${item.id}`"
+            :cancel-testid="`extraction-delete-cancel-${item.id}`"
+            @confirm="handleDelete(item.id)"
+            @cancel="confirmDeleteId = null"
+          />
         </li>
       </ul>
     </template>
@@ -405,7 +562,7 @@ onBeforeUnmount(() => {
             <Loader2
               v-if="table.status === 'running'"
               :size="11"
-              class="mr-1 animate-spin"
+              class="mr-1 animate-spin motion-reduce:animate-none"
               aria-hidden="true"
             />
             {{ STATUS_LABELS[table.status] }}
@@ -421,7 +578,7 @@ onBeforeUnmount(() => {
             @click="addColOpen = !addColOpen"
           >
             <Plus :size="13" aria-hidden="true" />
-            添加列
+            {{ addColOpen ? "收起" : "添加列" }}
           </Button>
 
           <Button
@@ -457,57 +614,100 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <ErrorBanner :message="error || table?.error || null" testid="extraction-error" />
+      <ErrorBanner :message="error || table?.error || null" testid="extraction-error" @dismiss="error = null" />
 
-      <!-- 添加列内联表单 -->
-      <div
-        v-if="addColOpen && table"
-        class="mb-4 rounded-lg border border-border bg-muted/30 p-3.5"
-        data-test="extraction-add-col-form"
-      >
-        <div class="grid gap-2 sm:grid-cols-[10rem_10rem_minmax(0,1fr)_auto]">
-          <div>
-            <Label for="new-col-label" class="sr-only">列名称</Label>
-            <Input
-              id="new-col-label"
-              v-model="newColLabel"
-              data-test="new-col-label"
-              placeholder="列名称（如：开源代码）"
-              class="h-8 text-xs"
-            />
+      <!-- 添加列折叠表单 -->
+      <AnimatedCollapse v-if="table" :open="addColOpen">
+        <div
+          ref="addColFormRef"
+          class="mb-4 space-y-2.5 rounded-lg border border-border bg-muted/30 p-3.5"
+          data-test="extraction-add-col-form"
+        >
+          <div class="grid gap-2 sm:grid-cols-[12rem_minmax(0,1fr)_auto]">
+            <div>
+              <Label for="new-col-label" class="sr-only">列名称</Label>
+              <Input
+                id="new-col-label"
+                v-model="newColLabel"
+                data-test="new-col-label"
+                :aria-invalid="addColErrors.label ? 'true' : undefined"
+                placeholder="列名称（如：开源代码）"
+                class="h-8 text-xs"
+              />
+            </div>
+            <div>
+              <Label for="new-col-prompt" class="sr-only">抽取指令</Label>
+              <Input
+                id="new-col-prompt"
+                v-model="newColPrompt"
+                data-test="new-col-prompt"
+                :aria-invalid="addColErrors.prompt ? 'true' : undefined"
+                placeholder="抽取指令（例如：提取代码仓库或权重链接）"
+                class="h-8 text-xs"
+              />
+            </div>
+            <div class="flex items-center gap-1.5">
+              <Button
+                size="sm"
+                :disabled="addingCol"
+                data-test="new-col-submit"
+                @click="handleAddColumnSubmit"
+              >
+                {{ addingCol ? "补抽中…" : "添加并补抽该列" }}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                data-test="new-col-cancel"
+                @click="cancelAddCol"
+              >
+                取消
+              </Button>
+            </div>
           </div>
-          <div>
-            <Label for="new-col-key" class="sr-only">列标识</Label>
-            <Input
-              id="new-col-key"
-              v-model="newColKey"
-              data-test="new-col-key"
-              placeholder="key（如：code_url）"
-              class="h-8 font-mono text-xs"
-            />
+
+          <div class="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              class="h-7 px-2 text-xs text-muted-foreground"
+              data-test="new-col-advanced-toggle"
+              @click="showAdvancedKey = !showAdvancedKey"
+            >
+              <ChevronUp v-if="showAdvancedKey" :size="13" aria-hidden="true" />
+              <ChevronDown v-else :size="13" aria-hidden="true" />
+              <span>自定义技术标识（默认自动生成{{ newColKey ? `：${newColKey}` : "" }}）</span>
+            </Button>
           </div>
-          <div>
-            <Label for="new-col-prompt" class="sr-only">抽取指令</Label>
-            <Input
-              id="new-col-prompt"
-              v-model="newColPrompt"
-              data-test="new-col-prompt"
-              placeholder="抽取指令（例如：提取代码仓库或权重链接）"
-              class="h-8 text-xs"
-            />
-          </div>
-          <Button
-            size="sm"
-            :disabled="addingCol"
-            data-test="new-col-submit"
-            @click="handleAddColumnSubmit"
-          >
-            {{ addingCol ? "补抽中…" : "添加并补抽该列" }}
-          </Button>
+
+          <AnimatedCollapse :open="showAdvancedKey" :keep-mounted="true">
+            <div class="grid gap-1.5 sm:max-w-xs">
+              <Label for="new-col-key" class="text-xs text-muted-foreground">技术标识（key）</Label>
+              <Input
+                id="new-col-key"
+                :model-value="newColKey"
+                data-test="new-col-key"
+                :aria-invalid="addColErrors.key ? 'true' : undefined"
+                placeholder="key（如：code_url）"
+                class="h-8 font-mono text-xs"
+                @update:model-value="(val) => { newColKey = String(val); onNewColKeyInput(val); }"
+              />
+            </div>
+          </AnimatedCollapse>
         </div>
-      </div>
+      </AnimatedCollapse>
 
-      <p v-if="loading && !table" class="text-sm text-muted-foreground">加载中…</p>
+      <div
+        v-if="showSkeleton && !table"
+        class="space-y-2 rounded-lg border border-border bg-card p-4"
+        data-test="extraction-detail-skeleton"
+      >
+        <div class="h-8 w-full animate-pulse rounded bg-muted motion-reduce:animate-none" />
+        <div class="h-14 w-full animate-pulse rounded bg-muted/80 motion-reduce:animate-none" />
+        <div class="h-14 w-full animate-pulse rounded bg-muted/60 motion-reduce:animate-none" />
+      </div>
 
       <!-- 横向对比矩阵 -->
       <div
@@ -605,7 +805,7 @@ onBeforeUnmount(() => {
                     v-else-if="getCell(src, col.key)!.status === 'pending'"
                     class="inline-flex items-center gap-1 text-muted-foreground"
                   >
-                    <Loader2 :size="11" class="animate-spin" aria-hidden="true" />
+                    <Loader2 :size="11" class="animate-spin motion-reduce:animate-none" aria-hidden="true" />
                     抽取中…
                   </span>
 
@@ -622,93 +822,91 @@ onBeforeUnmount(() => {
     </template>
 
     <!-- 右侧滑出：单元格原文溯源抽屉 -->
-    <Teleport to="body">
-      <div
-        v-if="drawerCell"
-        class="fixed inset-0 z-50 flex justify-end bg-black/35"
-        data-test="extraction-evidence-drawer"
-        role="dialog"
-        aria-modal="true"
-        aria-label="单元格原文溯源"
-        @click.self="drawerCell = null"
-      >
-        <aside class="flex h-full w-full max-w-md flex-col border-l border-border bg-card shadow-xl">
-          <header class="flex items-start justify-between gap-2 border-b border-border px-4 py-3.5">
-            <div class="min-w-0">
-              <p class="flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
-                <FileSearch :size="13" aria-hidden="true" />
-                原文溯源 · {{ drawerCell.columnLabel }}
-              </p>
-              <h2 class="mt-0.5 text-sm font-semibold text-foreground">
-                {{ drawerCell.source.title }}
-              </h2>
-            </div>
-            <button
-              type="button"
-              class="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-              aria-label="关闭溯源抽屉"
-              data-test="extraction-drawer-close"
-              @click="drawerCell = null"
-            >
-              <X :size="16" />
-            </button>
-          </header>
-
-          <div class="flex-1 space-y-4 overflow-y-auto px-4 py-4 text-xs">
-            <div>
-              <p class="text-[11px] font-medium text-muted-foreground">抽取结果</p>
-              <p
-                class="mt-1 rounded-md border border-border bg-muted/30 p-2.5 text-sm leading-relaxed text-foreground"
-                data-test="extraction-drawer-value"
-              >
-                {{ drawerCell.cell.value }}
-              </p>
-              <div class="mt-2 flex flex-wrap items-center gap-2">
-                <Badge
-                  :variant="drawerCell.cell.evidence_scope === 'full_text' ? 'outline' : 'warning'"
-                >
-                  {{ drawerCell.cell.evidence_scope === "full_text" ? "基于全文分块" : "基于题录/摘要" }}
-                </Badge>
-                <span
-                  v-if="typeof drawerCell.cell.confidence === 'number'"
-                  class="text-[11px] text-muted-foreground"
-                >
-                  把握 {{ Math.round(drawerCell.cell.confidence * 100) }}%
-                </span>
-              </div>
-            </div>
-
-            <Alert v-if="drawerCell.cell.evidence_scope === 'abstract_only'" variant="warning">
-              该条文献来源于外部检索题录，仅读取了标题与摘要。
-            </Alert>
-
-            <p
-              v-if="drawerLocatorLabel"
-              class="inline-flex w-fit items-center rounded border border-border bg-muted/60 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
-              data-test="extraction-cell-locator"
-            >
-              出处定位：{{ drawerLocatorLabel }}
+    <MotionDrawer
+      :open="Boolean(drawerCell)"
+      side="right"
+      width-class="w-full max-w-md"
+      aria-label="单元格原文溯源"
+      :panel-attrs="{ 'data-test': 'extraction-evidence-drawer' }"
+      @update:open="(v) => { if (!v) drawerCell = null; }"
+    >
+      <template v-if="drawerCell">
+        <header class="flex items-start justify-between gap-2 border-b border-border px-4 py-3.5">
+          <div class="min-w-0">
+            <p class="flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
+              <FileSearch :size="13" aria-hidden="true" />
+              原文溯源 · {{ drawerCell.columnLabel }}
             </p>
-
-            <div v-if="drawerHighlight.html" class="space-y-1.5">
-              <p class="text-[11px] font-medium text-muted-foreground">原文片段</p>
-              <!-- highlightQuote 内部先做 HTML 转义，仅插入固定 class 的 <mark> -->
-              <p
-                class="rounded-md bg-muted/60 p-3 text-xs leading-relaxed text-foreground"
-                data-test="extraction-cell-passage"
-                v-html="drawerHighlight.html"
-              />
-              <p
-                v-if="drawerCell.cell.quote && !drawerHighlight.matched"
-                class="text-[11px] text-muted-foreground"
-              >
-                未在片段中精确匹配引文，已展示完整原文片段供核对。
-              </p>
-            </div>
-            <p v-else class="text-muted-foreground">未附带原文片段。</p>
+            <h2 class="mt-0.5 text-sm font-semibold text-foreground">
+              {{ drawerCell.source.title }}
+            </h2>
           </div>
-        </aside>
-      </div>
-    </Teleport>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="关闭溯源抽屉"
+            data-test="extraction-drawer-close"
+            @click="drawerCell = null"
+          >
+            <X :size="16" />
+          </Button>
+        </header>
+
+        <div class="flex-1 space-y-4 overflow-y-auto px-4 py-4 text-xs">
+          <div>
+            <p class="text-[11px] font-medium text-muted-foreground">抽取结果</p>
+            <p
+              class="mt-1 rounded-md border border-border bg-muted/30 p-2.5 text-sm leading-relaxed text-foreground"
+              data-test="extraction-drawer-value"
+            >
+              {{ drawerCell.cell.value }}
+            </p>
+            <div class="mt-2 flex flex-wrap items-center gap-2">
+              <Badge
+                :variant="drawerCell.cell.evidence_scope === 'full_text' ? 'outline' : 'warning'"
+              >
+                {{ drawerCell.cell.evidence_scope === "full_text" ? "基于全文分块" : "基于题录/摘要" }}
+              </Badge>
+              <span
+                v-if="typeof drawerCell.cell.confidence === 'number'"
+                class="text-[11px] text-muted-foreground tabular-nums"
+              >
+                把握 {{ Math.round(drawerCell.cell.confidence * 100) }}%
+              </span>
+            </div>
+          </div>
+
+          <Alert v-if="drawerCell.cell.evidence_scope === 'abstract_only'" variant="warning">
+            该条文献来源于外部检索题录，仅读取了标题与摘要。
+          </Alert>
+
+          <p
+            v-if="drawerLocatorLabel"
+            class="inline-flex w-fit items-center rounded border border-border bg-muted/60 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+            data-test="extraction-cell-locator"
+          >
+            出处定位：{{ drawerLocatorLabel }}
+          </p>
+
+          <div v-if="drawerHighlight.html" class="space-y-1.5">
+            <p class="text-[11px] font-medium text-muted-foreground">原文片段</p>
+            <!-- highlightQuote 内部先做 HTML 转义，仅插入固定 class 的 <mark> -->
+            <p
+              class="rounded-md bg-muted/60 p-3 text-xs leading-relaxed text-foreground"
+              data-test="extraction-cell-passage"
+              v-html="drawerHighlight.html"
+            />
+            <p
+              v-if="drawerCell.cell.quote && !drawerHighlight.matched"
+              class="text-[11px] text-muted-foreground"
+            >
+              未在片段中精确匹配引文，已展示完整原文片段供核对。
+            </p>
+          </div>
+          <p v-else class="text-muted-foreground">未附带原文片段。</p>
+        </div>
+      </template>
+    </MotionDrawer>
   </section>
 </template>

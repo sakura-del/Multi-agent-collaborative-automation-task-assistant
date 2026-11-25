@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import { computed, inject, onMounted, ref } from "vue";
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { routerKey } from "vue-router";
-import { Check, CircleX, MinusCircle, Sparkles, Table2 } from "lucide-vue-next";
+import { AnimatePresence, Motion, useReducedMotion } from "motion-v";
+import DOMPurify from "dompurify";
+import { Check, CircleX, Code2, Copy, MinusCircle, Sparkles, Table2 } from "lucide-vue-next";
 
+import AnimatedCollapse from "@/components/common/AnimatedCollapse.vue";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import FunnelChart from "@/components/charts/FunnelChart.vue";
 import type { FunnelStageInput } from "@/components/charts/build-funnel";
@@ -16,6 +19,10 @@ import { Badge, type BadgeVariants } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useDelayedLoading } from "@/composables/useDelayedLoading";
+import { useTheme } from "@/composables/useTheme";
+import { TRANSITION_ENTER, TRANSITION_MICRO } from "@/lib/ease";
+import { toastError, toastSuccess } from "@/lib/toast";
 import type { ExtractionTableOut } from "@/api/extractions";
 import {
   createDecision,
@@ -40,19 +47,87 @@ import { cleanAbstractLatex } from "@/utils/latex-text";
  */
 const props = defineProps<{ taskId: string }>();
 const router = inject(routerKey, null);
+const reducedMotion = useReducedMotion();
+const { isDark } = useTheme();
 
+const sectionRef = ref<HTMLElement | null>(null);
 const records = ref<ScreeningRecord[]>([]);
 const prisma = ref<PrismaCounts | null>(null);
 const loading = ref(false);
+const showSkeleton = useDelayedLoading(() => loading.value && !records.value.length);
 const error = ref<string | null>(null);
 const success = ref<string | null>(null);
-const busyId = ref<string | null>(null);
+const busyIds = ref<Set<string>>(new Set());
+
+function isRecordBusy(recordId: string): boolean {
+  return busyIds.value.has(recordId);
+}
+
+function setRecordBusy(recordId: string, busy: boolean) {
+  const next = new Set(busyIds.value);
+  if (busy) {
+    next.add(recordId);
+  } else {
+    next.delete(recordId);
+  }
+  busyIds.value = next;
+}
 const excludeFormId = ref<string | null>(null);
+const instantCloseExcludeId = ref<string | null>(null);
 const excludeReason = ref("");
+const excludeReasonErrorId = ref<string | null>(null);
+const rollbackFlashId = ref<string | null>(null);
+const priorityStale = ref(false);
 const stageFilter = ref("");
 const extractionDialogOpen = ref(false);
 const extractionSources = ref<ExtractionCandidateSource[]>([]);
 const loadingIncluded = ref(false);
+
+const mermaidSvg = ref("");
+const mermaidRenderError = ref(false);
+const mermaidCopied = ref(false);
+
+let rollbackTimer: ReturnType<typeof setTimeout> | null = null;
+let successTimer: ReturnType<typeof setTimeout> | null = null;
+let mermaidCopyTimer: ReturnType<typeof setTimeout> | null = null;
+let mermaidRenderSeq = 0;
+let mermaidModulePromise: Promise<typeof import("mermaid")> | null = null;
+
+function loadMermaid() {
+  if (!mermaidModulePromise) {
+    mermaidModulePromise = import("mermaid").catch((err) => {
+      mermaidModulePromise = null;
+      throw err;
+    });
+  }
+  return mermaidModulePromise;
+}
+
+function setSuccessBanner(message: string | null) {
+  if (successTimer !== null) {
+    clearTimeout(successTimer);
+    successTimer = null;
+  }
+  success.value = message;
+  if (message) {
+    successTimer = setTimeout(() => {
+      successTimer = null;
+      success.value = null;
+    }, 3200);
+  }
+}
+
+function triggerRollbackFlash(recordId: string) {
+  if (rollbackTimer !== null) {
+    clearTimeout(rollbackTimer);
+    rollbackTimer = null;
+  }
+  rollbackFlashId.value = recordId;
+  rollbackTimer = setTimeout(() => {
+    rollbackTimer = null;
+    rollbackFlashId.value = null;
+  }, 800);
+}
 
 const includedCount = computed(() => {
   const fromPrisma = prisma.value?.included ?? 0;
@@ -204,6 +279,75 @@ onMounted(() => {
   void refresh();
 });
 
+onBeforeUnmount(() => {
+  ++mermaidRenderSeq;
+  if (rollbackTimer !== null) {
+    clearTimeout(rollbackTimer);
+    rollbackTimer = null;
+  }
+  if (successTimer !== null) {
+    clearTimeout(successTimer);
+    successTimer = null;
+  }
+  if (mermaidCopyTimer !== null) {
+    clearTimeout(mermaidCopyTimer);
+    mermaidCopyTimer = null;
+  }
+});
+
+watch(
+  [() => prisma.value?.mermaid, isDark],
+  async ([source, dark]) => {
+    const seq = ++mermaidRenderSeq;
+    const code = source?.trim() ?? "";
+    if (!code) {
+      mermaidSvg.value = "";
+      mermaidRenderError.value = false;
+      return;
+    }
+    try {
+      const mermaid = (await loadMermaid()).default;
+      if (seq !== mermaidRenderSeq) return;
+      mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: "strict",
+        theme: dark ? "dark" : "neutral",
+        fontFamily: "inherit",
+      });
+      const { svg } = await mermaid.render(`prisma-mermaid-${Date.now()}-${seq}`, code);
+      if (seq !== mermaidRenderSeq) return;
+      mermaidSvg.value = DOMPurify.sanitize(svg, {
+        USE_PROFILES: { svg: true, svgFilters: true },
+      });
+      mermaidRenderError.value = false;
+    } catch {
+      if (seq !== mermaidRenderSeq) return;
+      mermaidSvg.value = "";
+      mermaidRenderError.value = true;
+    }
+  },
+  { immediate: true },
+);
+
+async function copyMermaidSource() {
+  const code = prisma.value?.mermaid ?? "";
+  if (!code) return;
+  try {
+    await navigator.clipboard.writeText(code);
+    mermaidCopied.value = true;
+    if (mermaidCopyTimer !== null) {
+      clearTimeout(mermaidCopyTimer);
+    }
+    mermaidCopyTimer = setTimeout(() => {
+      mermaidCopyTimer = null;
+      mermaidCopied.value = false;
+    }, 1800);
+    toastSuccess("已复制 Mermaid 源码");
+  } catch {
+    toastError("复制失败，请手动选中源码复制");
+  }
+}
+
 /**
  * 拉取主动排序结果。
  *
@@ -216,6 +360,7 @@ async function loadPriority() {
   priorityError.value = null;
   try {
     priority.value = await getScreeningPriority(props.taskId);
+    priorityStale.value = false;
   } catch (err) {
     priorityError.value = (err as Error).message || "主动排序加载失败";
     priority.value = null;
@@ -230,6 +375,7 @@ async function togglePriority() {
   if (!priorityEnabled.value) {
     priority.value = null;
     priorityError.value = null;
+    priorityStale.value = false;
     return;
   }
   await loadPriority();
@@ -246,6 +392,7 @@ async function handleStageChange() {
     priorityEnabled.value = false;
     priority.value = null;
     priorityError.value = null;
+    priorityStale.value = false;
   }
   await refresh();
 }
@@ -254,17 +401,12 @@ async function refresh() {
   loading.value = true;
   error.value = null;
   try {
-    // 先并行取回两份数据，再**一起**赋值：
-    // 若像早期实现那样先 `records.value = await ...` 再 `prisma.value = await ...`，
-    // 中间会有一帧「新记录 + 旧计数」的不一致画面（实测截图捕获到
-    // 「已排除」成功提示与「标题/摘要排除 0」同时存在，看起来像计数没更新）。
     const [nextRecords, nextPrisma] = await Promise.all([
       listScreeningRecords(props.taskId, stageFilter.value || undefined),
       getPrismaCounts(props.taskId),
     ]);
     records.value = nextRecords;
     prisma.value = nextPrisma;
-    // 排序依赖任务内决策标签：决策/刷新后必须重算，否则列表顺序会停在旧标签上。
     if (priorityEnabled.value) {
       await loadPriority();
     }
@@ -276,42 +418,67 @@ async function refresh() {
 }
 
 async function handleInclude(record: ScreeningRecord) {
-  busyId.value = record.record_id;
-  error.value = null;
-  success.value = null;
-  try {
-    await createDecision(record.record_id, {
-      stage: stageFor(record),
-      verdict: "include",
-    });
-    success.value = `已纳入「${record.title}」`;
-    await refresh();
-  } catch (err) {
-    error.value = (err as Error).message || "操作失败";
-  } finally {
-    busyId.value = null;
-  }
+  await submitDecision(
+    record,
+    { stage: stageFor(record), verdict: "include" },
+    `已纳入「${record.title}」`,
+  );
 }
 
 function handleMaybe(record: ScreeningRecord) {
-  void submitDecision(record, { stage: stageFor(record), verdict: "maybe" }, `待定「${record.title}」`);
+  void submitDecision(
+    record,
+    { stage: stageFor(record), verdict: "maybe" },
+    `待定「${record.title}」`,
+  );
 }
 
 function openExclude(record: ScreeningRecord) {
+  instantCloseExcludeId.value = null;
+  excludeReasonErrorId.value = null;
   excludeFormId.value = record.record_id;
   excludeReason.value = "";
-  success.value = null;
+  setSuccessBanner(null);
+}
+
+function cancelExclude() {
+  excludeReasonErrorId.value = null;
+  excludeFormId.value = null;
+  excludeReason.value = "";
+}
+
+function onExcludeInputKeydown(record: ScreeningRecord, event: KeyboardEvent) {
+  if (event.isComposing || event.keyCode === 229) return;
+  if (event.key === "Enter") {
+    event.preventDefault();
+    void submitExclude(record);
+  } else if (event.key === "Escape") {
+    event.stopPropagation();
+    event.preventDefault();
+    cancelExclude();
+  }
 }
 
 async function submitExclude(record: ScreeningRecord) {
   // 排除必须给理由（PRISMA 2020 要求报告排除理由分类）：前端先拦，避免无意义往返
   if (!excludeReason.value.trim()) {
     error.value = "排除必须填写理由";
+    excludeReasonErrorId.value = record.record_id;
+    await nextTick();
+    const inputEl = sectionRef.value?.querySelector<HTMLElement>(
+      `[data-test="screening-exclude-reason-${record.record_id}"]`,
+    );
+    inputEl?.scrollIntoView?.({
+      block: "center",
+      behavior: reducedMotion.value ? "auto" : "smooth",
+    });
+    inputEl?.focus?.({ preventScroll: true });
     return;
   }
   const reason = excludeReason.value.trim();
-  // 先收起表单再提交/刷新：否则成功后表单会一直挂着（等刷新回来才消失），
-  // 用户容易重复点「确认排除」
+  excludeReasonErrorId.value = null;
+  // 提交后同步销毁表单（守卫提交瞬间收起，不因退场延迟挂起）
+  instantCloseExcludeId.value = record.record_id;
   excludeFormId.value = null;
   excludeReason.value = "";
   await submitDecision(
@@ -321,40 +488,83 @@ async function submitExclude(record: ScreeningRecord) {
       verdict: "exclude",
       exclusion_reason: reason,
     },
-    `已排除「${record.title}」`
+    `已排除「${record.title}」`,
   );
 }
 
 async function submitDecision(
   record: ScreeningRecord,
   payload: { stage: "title_abstract" | "fulltext"; verdict: "include" | "exclude" | "maybe"; exclusion_reason?: string },
-  okMessage: string
+  okMessage: string,
 ) {
-  busyId.value = record.record_id;
+  if (isRecordBusy(record.record_id)) return;
+  setRecordBusy(record.record_id, true);
   error.value = null;
-  success.value = null;
+  setSuccessBanner(null);
+
+  const snapshot = {
+    current_stage: record.current_stage,
+    current_verdict: record.current_verdict,
+    current_exclusion_reason: record.current_exclusion_reason,
+  };
+
+  // B4 Pin-in-Place：原地乐观更新状态，绝不整表 refresh 造成滚动跳位
+  if (payload.verdict === "include") {
+    record.current_stage = record.current_stage === "title_abstract" ? "fulltext" : "included";
+    record.current_verdict = "include";
+    record.current_exclusion_reason = null;
+  } else if (payload.verdict === "maybe") {
+    record.current_verdict = "maybe";
+  } else {
+    record.current_stage = payload.stage;
+    record.current_verdict = "exclude";
+    record.current_exclusion_reason = payload.exclusion_reason ?? null;
+  }
+
   try {
-    await createDecision(record.record_id, payload);
-    success.value = okMessage;
-    await refresh();
+    const updated = await createDecision(record.record_id, payload);
+    record.current_stage = updated.current_stage;
+    setSuccessBanner(okMessage);
+    toastSuccess(okMessage);
+    if (priorityEnabled.value && priority.value?.status === "ready") {
+      priorityStale.value = true;
+    }
+    try {
+      const nextPrisma = await getPrismaCounts(props.taskId);
+      prisma.value = nextPrisma;
+    } catch {
+      // PRISMA 计数静默刷新失败不回滚已落库决策
+    }
   } catch (err) {
-    error.value = (err as Error).message || "操作失败";
+    record.current_stage = snapshot.current_stage;
+    record.current_verdict = snapshot.current_verdict;
+    record.current_exclusion_reason = snapshot.current_exclusion_reason;
+    triggerRollbackFlash(record.record_id);
+    const msg = (err as Error).message || "操作失败";
+    error.value = msg;
+    toastError(msg);
   } finally {
-    busyId.value = null;
+    setRecordBusy(record.record_id, false);
   }
 }
 </script>
 
 <template>
-  <section>
-    <PageHeader eyebrow="PRISMA screening" title="PRISMA 筛选" :description="hint" />
+  <section ref="sectionRef">
+    <PageHeader eyebrow="PRISMA 筛选" title="PRISMA 筛选" :description="hint" />
 
-    <ErrorBanner :message="error" testid="screening-error" />
+    <ErrorBanner :message="error" testid="screening-error" @dismiss="error = null" />
 
-    <Alert v-if="success" variant="success" class="mb-3" data-test="screening-success">
-      <Check />
-      <span>{{ success }}</span>
-    </Alert>
+    <!-- 严禁 Teleport：保留在组件树内，脱离垂直文档流实现零 CLS 且避开右上角 Toaster 与右下角悬浮球 -->
+    <div
+      v-if="success"
+      data-test="screening-success"
+      role="status"
+      class="pointer-events-auto fixed bottom-5 left-4 right-20 z-30 flex items-center gap-2 rounded-lg border border-success/40 bg-card px-3 py-2 text-xs font-medium text-foreground shadow-raised sm:left-auto sm:right-20 sm:max-w-md"
+    >
+      <Check :size="14" class="shrink-0 text-success" aria-hidden="true" />
+      <span class="truncate">{{ success }}</span>
+    </div>
 
     <!-- 筛选工具栏：阶段过滤 + 智能排序同一行紧凑收纳 -->
     <div class="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2">
@@ -409,37 +619,78 @@ async function submitDecision(
       class="mb-3"
       data-test="screening-priority-status"
     >
-      <span v-if="priorityLoading">正在计算优先级…</span>
-      <span v-else-if="priorityError">{{ priorityError }}</span>
-      <span v-else-if="priority">{{ priority.message }}</span>
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <span v-if="priorityLoading">正在计算优先级…</span>
+        <span v-else-if="priorityError">{{ priorityError }}</span>
+        <span v-else-if="priority">{{ priority.message }}</span>
+        <Button
+          v-if="priorityStale"
+          size="sm"
+          variant="outline"
+          type="button"
+          data-test="screening-priority-reorder"
+          :disabled="priorityLoading"
+          @click="loadPriority"
+        >
+          推荐顺序已更新，点击重排
+        </Button>
+      </div>
     </Alert>
 
     <div class="grid gap-5" :class="prisma && (hasPrismaData || prisma.mermaid) ? 'xl:grid-cols-[minmax(0,1fr)_22rem] xl:items-start' : ''">
       <!-- 左侧：候选筛选队列（首屏焦点） -->
       <div class="min-w-0">
-        <p v-if="loading && !records.length" class="text-sm text-muted-foreground">加载中…</p>
+        <div v-if="showSkeleton && !records.length" class="space-y-2" data-test="screening-skeleton">
+          <div
+            v-for="i in 3"
+            :key="i"
+            class="h-40 rounded-lg border border-border bg-card p-3.5"
+          >
+            <div class="h-4 w-2/3 animate-pulse rounded bg-muted motion-reduce:animate-none" />
+            <div class="mt-2 h-3 w-1/3 animate-pulse rounded bg-muted/80 motion-reduce:animate-none" />
+            <div class="mt-3 h-12 w-full animate-pulse rounded bg-muted/60 motion-reduce:animate-none" />
+          </div>
+        </div>
 
         <EmptyState
-          v-else-if="!records.length"
+          v-else-if="!loading && !records.length"
           testid="screening-empty"
           title="还没有候选记录"
           description="先在任务里执行检索，检索结果会作为快照进入筛选队列；跨源重复已在落库时去除。"
         />
 
-        <ul v-else class="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
+        <ul v-else-if="records.length" class="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
           <li
             v-for="record in displayRecords"
             :key="record.record_id"
-            class="px-3.5 py-3 transition-colors hover:bg-muted/25"
+            :class="[
+              'px-3.5 py-3 transition-colors duration-150',
+              excludeFormId === record.record_id ? '' : '[content-visibility:auto] [contain-intrinsic-size:auto_168px]',
+              rollbackFlashId === record.record_id
+                ? 'bg-destructive/5 ring-1 ring-inset ring-destructive/60'
+                : 'hover:bg-muted/25',
+            ]"
             :data-test="`screening-row-${record.record_id}`"
           >
             <div class="flex flex-wrap items-start justify-between gap-2">
               <div class="min-w-0 flex-1">
                 <div class="flex flex-wrap items-center gap-1.5">
                   <span class="text-sm font-medium text-foreground">{{ cleanAbstractLatex(record.title) }}</span>
-                  <Badge :variant="STAGE_TONE[record.current_stage] ?? 'muted'">
-                    {{ STAGE_LABELS[record.current_stage] ?? record.current_stage }}
-                  </Badge>
+                  <AnimatePresence mode="popLayout" :initial="false">
+                    <Motion
+                      :key="`${record.record_id}-stage-${record.current_stage}`"
+                      as="span"
+                      class="inline-flex"
+                      :initial="{ opacity: 0 }"
+                      :animate="{ opacity: 1 }"
+                      :exit="{ opacity: 0 }"
+                      :transition="reducedMotion ? TRANSITION_MICRO : TRANSITION_ENTER"
+                    >
+                      <Badge :variant="STAGE_TONE[record.current_stage] ?? 'muted'">
+                        {{ STAGE_LABELS[record.current_stage] ?? record.current_stage }}
+                      </Badge>
+                    </Motion>
+                  </AnimatePresence>
                   <Badge
                     v-if="priorityRanks.get(record.record_id)"
                     variant="success"
@@ -447,20 +698,42 @@ async function submitDecision(
                   >
                     推荐优先 #{{ priorityRanks.get(record.record_id) }}
                   </Badge>
-                  <Badge
-                    v-if="record.current_verdict === 'exclude'"
-                    variant="destructive"
-                    :data-test="`screening-excluded-badge-${record.record_id}`"
-                  >
-                    已排除{{ record.current_exclusion_reason ? `：${record.current_exclusion_reason}` : "" }}
-                  </Badge>
-                  <Badge
-                    v-else-if="record.current_verdict === 'maybe'"
-                    variant="warning"
-                    :data-test="`screening-maybe-badge-${record.record_id}`"
-                  >
-                    待定
-                  </Badge>
+                  <AnimatePresence mode="popLayout" :initial="false">
+                    <Motion
+                      v-if="record.current_verdict === 'exclude'"
+                      :key="`${record.record_id}-verdict-exclude`"
+                      as="span"
+                      class="inline-flex"
+                      :initial="{ opacity: 0 }"
+                      :animate="{ opacity: 1 }"
+                      :exit="{ opacity: 0 }"
+                      :transition="reducedMotion ? TRANSITION_MICRO : TRANSITION_ENTER"
+                    >
+                      <Badge
+                        variant="destructive"
+                        :data-test="`screening-excluded-badge-${record.record_id}`"
+                      >
+                        已排除{{ record.current_exclusion_reason ? `：${record.current_exclusion_reason}` : "" }}
+                      </Badge>
+                    </Motion>
+                    <Motion
+                      v-else-if="record.current_verdict === 'maybe'"
+                      :key="`${record.record_id}-verdict-maybe`"
+                      as="span"
+                      class="inline-flex"
+                      :initial="{ opacity: 0 }"
+                      :animate="{ opacity: 1 }"
+                      :exit="{ opacity: 0 }"
+                      :transition="reducedMotion ? TRANSITION_MICRO : TRANSITION_ENTER"
+                    >
+                      <Badge
+                        variant="warning"
+                        :data-test="`screening-maybe-badge-${record.record_id}`"
+                      >
+                        待定
+                      </Badge>
+                    </Motion>
+                  </AnimatePresence>
                 </div>
                 <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                   <span>{{ record.authors.join("；") || "（无作者）" }}</span>
@@ -481,7 +754,7 @@ async function submitDecision(
                   size="sm"
                   :data-test="`screening-include-${record.record_id}`"
                   type="button"
-                  :disabled="busyId === record.record_id"
+                  :disabled="isRecordBusy(record.record_id)"
                   @click="handleInclude(record)"
                 >
                   <Check :size="14" aria-hidden="true" />
@@ -492,7 +765,7 @@ async function submitDecision(
                   size="sm"
                   :data-test="`screening-maybe-${record.record_id}`"
                   type="button"
-                  :disabled="busyId === record.record_id"
+                  :disabled="isRecordBusy(record.record_id)"
                   @click="handleMaybe(record)"
                 >
                   <MinusCircle :size="14" aria-hidden="true" />
@@ -503,7 +776,7 @@ async function submitDecision(
                   size="sm"
                   :data-test="`screening-exclude-${record.record_id}`"
                   type="button"
-                  :disabled="busyId === record.record_id"
+                  :disabled="isRecordBusy(record.record_id)"
                   @click="openExclude(record)"
                 >
                   <CircleX :size="14" aria-hidden="true" />
@@ -520,36 +793,51 @@ async function submitDecision(
               {{ cleanAbstractLatex(record.abstract) }}
             </p>
 
-            <div
-              v-if="excludeFormId === record.record_id"
-              class="mt-2.5 flex flex-wrap items-end gap-2 rounded-md border border-border bg-muted/40 p-2.5"
-              :data-test="`screening-exclude-form-${record.record_id}`"
+            <AnimatedCollapse
+              v-if="instantCloseExcludeId !== record.record_id"
+              :open="excludeFormId === record.record_id"
             >
-              <div class="grid min-w-56 flex-1 gap-1.5">
-                <Label :for="`screening-exclude-reason-${record.record_id}`" class="text-xs">排除理由（必填）</Label>
-                <Input
-                  :id="`screening-exclude-reason-${record.record_id}`"
-                  v-model="excludeReason"
-                  :data-test="`screening-exclude-reason-${record.record_id}`"
-                  type="text"
-                  placeholder="如：不相关 / 无全文 / 人群不符"
-                  @keydown.enter.prevent="submitExclude(record)"
-                />
-              </div>
-              <Button
-                size="sm"
-                :data-test="`screening-exclude-submit-${record.record_id}`"
-                type="button"
-                @click="submitExclude(record)"
+              <div
+                class="mt-2.5 flex flex-wrap items-end gap-2 rounded-md border border-border bg-muted/40 p-2.5"
+                :data-test="`screening-exclude-form-${record.record_id}`"
               >
-                确认排除
-              </Button>
-            </div>
+                <div class="grid min-w-56 flex-1 gap-1.5">
+                  <Label :for="`screening-exclude-reason-${record.record_id}`" class="text-xs">排除理由（必填）</Label>
+                  <Input
+                    :id="`screening-exclude-reason-${record.record_id}`"
+                    v-model="excludeReason"
+                    :data-test="`screening-exclude-reason-${record.record_id}`"
+                    :aria-invalid="excludeReasonErrorId === record.record_id ? 'true' : undefined"
+                    type="text"
+                    placeholder="如：不相关 / 无全文 / 人群不符"
+                    @input="excludeReasonErrorId === record.record_id && (excludeReasonErrorId = null)"
+                    @keydown="onExcludeInputKeydown(record, $event)"
+                  />
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  :data-test="`screening-exclude-cancel-${record.record_id}`"
+                  type="button"
+                  @click="cancelExclude"
+                >
+                  取消
+                </Button>
+                <Button
+                  size="sm"
+                  :data-test="`screening-exclude-submit-${record.record_id}`"
+                  type="button"
+                  @click="submitExclude(record)"
+                >
+                  确认排除
+                </Button>
+              </div>
+            </AnimatedCollapse>
           </li>
         </ul>
       </div>
 
-      <!-- 右侧：PRISMA 漏斗与 Mermaid 源码检查器 -->
+      <!-- 右侧：PRISMA 漏斗与 Mermaid 流程图 -->
       <aside v-if="prisma && (hasPrismaData || prisma.mermaid)" class="space-y-4">
         <FunnelChart
           v-if="hasPrismaData"
@@ -561,12 +849,55 @@ async function submitDecision(
         />
 
         <div v-if="prisma.mermaid" class="rounded-lg border border-border bg-card p-3">
-          <h2 class="mb-2 text-xs font-semibold tracking-tight text-foreground">PRISMA 流程图（Mermaid 源码）</h2>
-          <pre
-            class="max-h-64 overflow-auto rounded-md bg-muted/50 p-2.5 font-mono text-[11px] leading-relaxed text-muted-foreground"
-            data-test="screening-mermaid"
-            >{{ prisma.mermaid }}</pre
-          >
+          <div class="mb-2 flex items-center justify-between gap-2">
+            <h2 class="text-xs font-semibold tracking-tight text-foreground">PRISMA 流程图</h2>
+            <Button
+              variant="ghost"
+              size="sm"
+              type="button"
+              class="h-7 px-2 text-xs"
+              data-test="screening-mermaid-copy"
+              @click="copyMermaidSource"
+            >
+              <AnimatePresence mode="wait" :initial="false">
+                <Motion
+                  :key="mermaidCopied ? 'copied' : 'copy'"
+                  as="span"
+                  class="inline-flex items-center gap-1"
+                  :initial="{ opacity: 0, scale: reducedMotion ? 1 : 0.85 }"
+                  :animate="{ opacity: 1, scale: 1 }"
+                  :exit="{ opacity: 0, scale: reducedMotion ? 1 : 0.85 }"
+                  :transition="TRANSITION_MICRO"
+                >
+                  <Check v-if="mermaidCopied" :size="12" class="text-success" aria-hidden="true" />
+                  <Copy v-else :size="12" aria-hidden="true" />
+                  <span>{{ mermaidCopied ? "已复制" : "复制源码" }}</span>
+                </Motion>
+              </AnimatePresence>
+            </Button>
+          </div>
+
+          <div
+            v-if="mermaidSvg"
+            class="mb-2.5 overflow-x-auto rounded-md border border-border bg-background p-2 [&>svg]:mx-auto [&>svg]:h-auto [&>svg]:max-w-full"
+            data-test="screening-mermaid-diagram"
+            v-html="mermaidSvg"
+          />
+          <p v-else-if="mermaidRenderError" class="mb-2 text-[11px] text-muted-foreground">
+            流程图预览暂不可用，可复制下方 Mermaid 源码在论文工具中渲染。
+          </p>
+
+          <div class="space-y-1">
+            <p class="flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
+              <Code2 :size="12" aria-hidden="true" />
+              <span>Mermaid 源码</span>
+            </p>
+            <pre
+              class="max-h-48 overflow-auto rounded-md bg-muted/50 p-2.5 font-mono text-[11px] leading-relaxed text-muted-foreground"
+              data-test="screening-mermaid"
+              >{{ prisma.mermaid }}</pre
+            >
+          </div>
         </div>
       </aside>
     </div>

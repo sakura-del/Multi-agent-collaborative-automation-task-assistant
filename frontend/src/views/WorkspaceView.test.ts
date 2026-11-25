@@ -404,4 +404,22 @@ describe("WorkspaceView：真实缺陷修复（2026-10-26）", () => {
     const manageLink = row.findAll("a").find((link) => link.text().includes("管理成员"));
     expect(manageLink).toBeTruthy();
   });
+
+  it("席位进度条使用 GPU scaleX 缩放，且加载挂起期间不显示空态", async () => {
+    vi.mocked(listWorkspaces).mockResolvedValue([
+      workspace({ seat_used: 2, seat_limit: 5 }),
+    ] as never);
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const bar = wrapper.find('[data-test="workspace-seat-bar-w1"]');
+    expect(bar.exists()).toBe(true);
+    expect(bar.attributes("style")).toContain("scaleX(0.4)");
+
+    vi.mocked(listWorkspaces).mockReturnValue(new Promise(() => {}) as never);
+    const pendingWrapper = mountView();
+    await flushPromises();
+    expect(pendingWrapper.find('[data-test="workspaces-empty"]').exists()).toBe(false);
+  });
 });

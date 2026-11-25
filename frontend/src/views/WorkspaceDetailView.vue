@@ -1,12 +1,15 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { ArrowLeft, Copy, UserMinus } from "lucide-vue-next";
 import { useRoute, useRouter } from "vue-router";
 
+import ConfirmBar from "@/components/common/ConfirmBar.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import { Badge, type BadgeVariants } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useDelayedLoading } from "@/composables/useDelayedLoading";
+import { toastError, toastSuccess } from "@/lib/toast";
 import {
   changeMemberRole,
   createInvite,
@@ -41,9 +44,41 @@ const workspaceId = computed(() => String(route.params.id ?? ""));
 const workspace = ref<Workspace | null>(null);
 const members = ref<WorkspaceMember[]>([]);
 const loading = ref(false);
+const showSkeleton = useDelayedLoading(() => loading.value && !workspace.value);
 const error = ref<string | null>(null);
 const success = ref<string | null>(null);
-const busyUserId = ref<string | null>(null);
+const busyUserIds = ref<Set<string>>(new Set());
+const confirmRemoveUserId = ref<string | null>(null);
+
+function isUserBusy(userId: string): boolean {
+  return busyUserIds.value.has(userId);
+}
+
+function setUserBusy(userId: string, busy: boolean) {
+  const next = new Set(busyUserIds.value);
+  if (busy) {
+    next.add(userId);
+  } else {
+    next.delete(userId);
+  }
+  busyUserIds.value = next;
+}
+const confirmLeave = ref(false);
+const leaving = ref(false);
+const rollbackUserId = ref<string | null>(null);
+let rollbackTimer: ReturnType<typeof setTimeout> | null = null;
+
+function triggerRollbackFlash(userId: string) {
+  if (rollbackTimer !== null) {
+    clearTimeout(rollbackTimer);
+    rollbackTimer = null;
+  }
+  rollbackUserId.value = userId;
+  rollbackTimer = setTimeout(() => {
+    rollbackTimer = null;
+    rollbackUserId.value = null;
+  }, 800);
+}
 
 const generatedInvite = ref<{ code: string; role: string; expiresAt: string | null } | null>(null);
 const copied = ref(false);
@@ -94,6 +129,13 @@ onMounted(() => {
   void refresh();
 });
 
+onBeforeUnmount(() => {
+  if (rollbackTimer !== null) {
+    clearTimeout(rollbackTimer);
+    rollbackTimer = null;
+  }
+});
+
 async function refresh() {
   loading.value = true;
   error.value = null;
@@ -127,34 +169,47 @@ function canEditRole(member: WorkspaceMember): boolean {
 }
 
 async function handleRemove(member: WorkspaceMember) {
-  busyUserId.value = member.user_id;
+  if (isUserBusy(member.user_id)) return;
+  setUserBusy(member.user_id, true);
   error.value = null;
   try {
     await removeMember(workspaceId.value, member.user_id);
-    success.value = `已移除 ${member.username}`;
+    confirmRemoveUserId.value = null;
+    const msg = `已移除 ${member.username}`;
+    success.value = msg;
+    toastSuccess(msg);
     await refresh();
   } catch (err) {
-    error.value = (err as Error).message || "移除失败";
+    const msg = (err as Error).message || "移除失败";
+    error.value = msg;
+    toastError(msg);
   } finally {
-    busyUserId.value = null;
+    setUserBusy(member.user_id, false);
   }
 }
 
 async function handleRoleChange(member: WorkspaceMember, role: string) {
-  busyUserId.value = member.user_id;
+  if (isUserBusy(member.user_id)) return;
+  const prevRole = member.role;
+  const nextRole = role as Exclude<WorkspaceRole, "owner">;
+  setUserBusy(member.user_id, true);
   error.value = null;
+  // 乐观更新当前角色，失败则即时还原并温和回弹提示
+  member.role = nextRole;
   try {
-    await changeMemberRole(
-      workspaceId.value,
-      member.user_id,
-      role as Exclude<WorkspaceRole, "owner">
-    );
-    success.value = `已把 ${member.username} 设为${ROLE_LABELS[role as WorkspaceRole]}`;
+    await changeMemberRole(workspaceId.value, member.user_id, nextRole);
+    const msg = `已把 ${member.username} 设为${ROLE_LABELS[nextRole]}`;
+    success.value = msg;
+    toastSuccess(msg);
     await refresh();
   } catch (err) {
-    error.value = (err as Error).message || "改角色失败";
+    member.role = prevRole;
+    triggerRollbackFlash(member.user_id);
+    const msg = (err as Error).message || "改角色失败";
+    error.value = msg;
+    toastError(msg);
   } finally {
-    busyUserId.value = null;
+    setUserBusy(member.user_id, false);
   }
 }
 
@@ -170,13 +225,20 @@ async function handleRoleChange(member: WorkspaceMember, role: string) {
  * 正确行为：退出即离开该页 → 回团队列表。
  */
 async function handleLeave() {
+  leaving.value = true;
   error.value = null;
   try {
     await leaveWorkspace(workspaceId.value);
+    confirmLeave.value = false;
+    toastSuccess("已退出工作区");
     await router.push({ name: "workspaces" });
   } catch (err) {
     // 退出失败要留在原页并说明原因（不能假装成功跳走）
-    error.value = (err as Error).message || "退出失败";
+    const msg = (err as Error).message || "退出失败";
+    error.value = msg;
+    toastError(msg);
+  } finally {
+    leaving.value = false;
   }
 }
 
@@ -203,6 +265,7 @@ async function copyCode() {
   try {
     await navigator.clipboard.writeText(generatedInvite.value.code);
     copied.value = true;
+    toastSuccess("已复制邀请码");
   } catch {
     error.value = "复制失败，请手动选中邀请码复制";
   }
@@ -249,7 +312,7 @@ function formatDate(value: string): string {
       </div>
     </header>
 
-    <ErrorBanner :message="error" testid="workspace-detail-error" />
+    <ErrorBanner :message="error" testid="workspace-detail-error" @dismiss="error = null" />
 
     <p
       v-if="success"
@@ -304,15 +367,23 @@ function formatDate(value: string): string {
       </div>
     </div>
 
-    <p v-if="loading" class="text-sm text-muted-foreground">加载中…</p>
+    <div
+      v-if="showSkeleton"
+      class="space-y-2 rounded-lg border border-border bg-card p-3"
+      data-test="workspace-detail-skeleton"
+    >
+      <div class="h-4 w-1/4 animate-pulse rounded bg-muted motion-reduce:animate-none" />
+      <div class="h-12 w-full animate-pulse rounded bg-muted/80 motion-reduce:animate-none" />
+      <div class="h-12 w-full animate-pulse rounded bg-muted/60 motion-reduce:animate-none" />
+    </div>
 
     <EmptyState
-      v-else-if="!members.length && !error"
+      v-else-if="!loading && !members.length && !error"
       title="还没有成员"
       description="生成邀请码发给同学，对方粘贴后即可加入。"
     />
 
-    <section v-else class="overflow-hidden rounded-lg border border-border bg-card">
+    <section v-else-if="members.length" class="overflow-hidden rounded-lg border border-border bg-card">
       <header class="flex items-center justify-between border-b border-border px-3 py-2">
         <h2 class="text-sm font-medium">成员（席位）</h2>
         <span v-if="workspace" class="text-xs text-muted-foreground tabular-nums">
@@ -323,7 +394,12 @@ function formatDate(value: string): string {
         <li
           v-for="member in members"
           :key="member.user_id"
-          class="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-sm"
+          :class="[
+            'flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-sm transition-colors duration-150',
+            rollbackUserId === member.user_id
+              ? 'bg-destructive/5 ring-1 ring-inset ring-destructive/60'
+              : '',
+          ]"
           :data-test="`member-row-${member.user_id}`"
         >
           <div class="flex min-w-0 items-center gap-2.5">
@@ -355,7 +431,7 @@ function formatDate(value: string): string {
               :value="member.role"
               :aria-label="`修改 ${member.username} 的角色`"
               class="rounded-md border border-input bg-background px-2 py-1 text-xs"
-              :disabled="busyUserId === member.user_id"
+              :disabled="isUserBusy(member.user_id)"
               :data-test="`member-role-select-${member.user_id}`"
               @change="
                 handleRoleChange(
@@ -372,15 +448,27 @@ function formatDate(value: string): string {
               v-if="canRemove(member)"
               variant="ghost"
               size="sm"
-              :disabled="busyUserId === member.user_id"
+              :disabled="isUserBusy(member.user_id)"
               :aria-label="`移除 ${member.username}`"
               :data-test="`member-remove-${member.user_id}`"
-              @click="handleRemove(member)"
+              @click="confirmRemoveUserId = member.user_id"
             >
               <UserMinus />
               移除
             </Button>
           </div>
+          <ConfirmBar
+            v-if="confirmRemoveUserId === member.user_id"
+            class="mt-2 w-full"
+            :title="`确认将「${member.username}」移出团队？`"
+            consequence="移除后该成员将立即失去该工作区及共享任务的访问权限，需重新邀请才能加入。"
+            confirm-label="确认移除"
+            :loading="isUserBusy(member.user_id)"
+            :confirm-testid="`member-remove-confirm-${member.user_id}`"
+            :cancel-testid="`member-remove-cancel-${member.user_id}`"
+            @confirm="handleRemove(member)"
+            @cancel="confirmRemoveUserId = null"
+          />
         </li>
       </ul>
     </section>
@@ -388,13 +476,32 @@ function formatDate(value: string): string {
     <!-- 危险操作独立分区：退出是不可逆的成员变更，不该和「邀请」混在一起 -->
     <section v-if="myRole" class="mt-6 rounded-lg border border-destructive/25 p-3">
       <h2 class="text-sm font-medium text-destructive">危险操作</h2>
-      <div v-if="myRole !== 'owner'" class="mt-1.5 flex flex-wrap items-center gap-2">
-        <Button variant="ghost" size="sm" data-test="workspace-leave" @click="handleLeave">
-          退出该团队
-        </Button>
-        <span class="text-xs text-muted-foreground">
-          退出后不再看到该团队的共享任务，可由拥有者重新邀请
-        </span>
+      <div v-if="myRole !== 'owner'" class="mt-1.5 space-y-2">
+        <div class="flex flex-wrap items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            data-test="workspace-leave"
+            :disabled="leaving"
+            @click="confirmLeave = true"
+          >
+            退出该团队
+          </Button>
+          <span class="text-xs text-muted-foreground">
+            退出后不再看到该团队的共享任务，可由拥有者重新邀请
+          </span>
+        </div>
+        <ConfirmBar
+          v-if="confirmLeave"
+          title="确认退出该团队？"
+          consequence="退出后你将不再看到该团队的共享任务，需由拥有者重新邀请才能返回。"
+          confirm-label="确认退出"
+          :loading="leaving"
+          confirm-testid="workspace-leave-confirm"
+          cancel-testid="workspace-leave-cancel"
+          @confirm="handleLeave"
+          @cancel="confirmLeave = false"
+        />
       </div>
       <!-- 拥有者是团队的最后一个锚点：没有转让/解散功能前，退出会留下无主团队 -->
       <p v-else class="mt-1.5 text-xs text-muted-foreground">

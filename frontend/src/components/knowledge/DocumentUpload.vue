@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
+import { toastSuccess } from "@/lib/toast";
 import { useKnowledgeStore } from "@/stores/knowledge";
 import type { ChunkStrategy } from "@/api/types";
 
@@ -18,6 +19,7 @@ const ACCEPTED = [".pdf", ".docx", ".md", ".markdown", ".txt"];
 const emit = defineEmits<{ uploaded: [] }>();
 const store = useKnowledgeStore();
 
+const filePicker = ref<{ reset: () => void } | null>(null);
 const selectedFile = ref<File | null>(null);
 const title = ref("");
 const strategy = ref<ChunkStrategy>("recursive");
@@ -70,6 +72,8 @@ async function handleSubmit() {
     await store.upload(selectedFile.value as File, title.value.trim(), strategy.value);
     selectedFile.value = null;
     title.value = "";
+    filePicker.value?.reset?.();
+    toastSuccess("文档已上传，正在建立索引");
     emit("uploaded");
   } catch (caught) {
     // 就近展示错误信息（不含栈）
@@ -85,6 +89,7 @@ async function handleSubmit() {
         <Label for="document-file">文件</Label>
         <FilePicker
           id="document-file"
+          ref="filePicker"
           data-test="document-file"
           :accept="ACCEPTED.join(',')"
           placeholder="选择 pdf / docx / md / txt"
@@ -110,13 +115,13 @@ async function handleSubmit() {
           data-test="document-strategy"
           class="flex h-9 rounded-md border border-input bg-background px-3 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
         >
-          <option value="recursive">recursive</option>
-          <option value="fixed">fixed</option>
-          <option value="semantic">semantic</option>
+          <option value="recursive">智能分段（推荐）</option>
+          <option value="fixed">固定长度分段</option>
+          <option value="semantic">按语义分段</option>
         </select>
       </div>
       <Button data-test="document-submit" type="submit" :disabled="store.uploading">
-        <Loader2 v-if="store.uploading" class="animate-spin" aria-hidden="true" />
+        <Loader2 v-if="store.uploading" class="animate-spin motion-reduce:animate-none" aria-hidden="true" />
         <Upload v-else :size="15" aria-hidden="true" />
         <span>{{ store.uploading ? `上传中 ${store.uploadProgress}%` : "上传" }}</span>
       </Button>
@@ -132,12 +137,12 @@ async function handleSubmit() {
       aria-valuemax="100"
     >
       <div
-        class="h-full rounded-full bg-primary transition-[width] duration-200"
-        :style="{ width: `${store.uploadProgress}%` }"
+        class="h-full w-full origin-left rounded-full bg-primary transition-transform duration-200 ease-out motion-reduce:transition-none"
+        :style="{ transform: `scaleX(${Math.max(0, Math.min(100, store.uploadProgress)) / 100})` }"
       />
     </div>
 
-    <ErrorBanner :message="localError" testid="upload-error" />
-    <ErrorBanner v-if="!localError" :message="store.error" testid="upload-error" />
+    <ErrorBanner :message="localError" testid="upload-error" @dismiss="localError = null" />
+    <ErrorBanner v-if="!localError" :message="store.error" testid="upload-error" @dismiss="store.error = null" />
   </Card>
 </template>

@@ -154,6 +154,17 @@ describe("DocumentUpload", () => {
 
     expect(wrapper.find('[data-test="upload-error"]').text()).toBeTruthy();
   });
+
+  it("分块策略选项以中文展示并保留标准 value", () => {
+    const wrapper = mount(DocumentUpload);
+    const options = wrapper.findAll('[data-test="document-strategy"] option');
+    expect(options.map((o) => o.attributes("value"))).toEqual(["recursive", "fixed", "semantic"]);
+    expect(options.map((o) => o.text())).toEqual([
+      "智能分段（推荐）",
+      "固定长度分段",
+      "按语义分段",
+    ]);
+  });
 });
 
 describe("DocumentTable", () => {
@@ -196,6 +207,19 @@ describe("DocumentTable", () => {
 
     await wrapper.find('[data-test="document-delete-confirm-doc-1"]').trigger("click");
     expect(wrapper.emitted("remove")).toEqual([["doc-1"]]);
+  });
+
+  it("删除确认支持点击取消安全收回且不触发 remove", async () => {
+    const wrapper = mount(DocumentTable, {
+      props: { documents: [documentRow()] },
+    });
+
+    await wrapper.find('[data-test="document-delete-doc-1"]').trigger("click");
+    expect(wrapper.find('[data-test="document-delete-confirm-doc-1"]').exists()).toBe(true);
+    await wrapper.find('[data-test="document-delete-cancel-doc-1"]').trigger("click");
+
+    expect(wrapper.emitted("remove")).toBeUndefined();
+    expect(wrapper.find('[data-test="document-delete-confirm-doc-1"]').exists()).toBe(false);
   });
 
   it("shows a concise failure reason without a stack trace", () => {

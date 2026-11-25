@@ -39,6 +39,7 @@
 import { computed, onMounted, ref } from "vue";
 import { CircleCheck, Loader2, Trash2, Upload } from "lucide-vue-next";
 
+import ConfirmBar from "@/components/common/ConfirmBar.vue";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import FilePicker from "@/components/common/FilePicker.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
@@ -47,6 +48,8 @@ import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { useDelayedLoading } from "@/composables/useDelayedLoading";
+import { toastSuccess } from "@/lib/toast";
 import {
   deleteCitationStyle,
   listCitationStyles,
@@ -62,6 +65,7 @@ const previews = ref<CitationStylePreview[]>([]);
 const previewError = ref<string | null>(null);
 const defaultStyleId = ref("");
 const loading = ref(false);
+const showSkeleton = useDelayedLoading(() => loading.value && !styles.value.length);
 const loadError = ref<string | null>(null);
 const uploadError = ref<string | null>(null);
 const successMessage = ref<string | null>(null);
@@ -174,9 +178,11 @@ async function handleUpload() {
   uploading.value = true;
   try {
     const created = await uploadCitationStyle(selectedFile.value as File);
-    successMessage.value = `已上传样式「${created.title}」（${created.style_id}）`;
+    const msg = `已上传样式「${created.title}」（${created.style_id}）`;
+    successMessage.value = msg;
+    toastSuccess(`已上传样式「${created.title}」`);
     selectedFile.value = null;
-    filePicker.value?.reset();
+    filePicker.value?.reset?.();
     await refresh();
   } catch (error) {
     // 后端 400 的 detail（含逐条 reasons）在这里展示
@@ -199,13 +205,15 @@ function cancelDelete() {
 
 /** 确认后才真正删除。 */
 async function confirmDelete(styleId: string) {
-  confirmingDeleteId.value = null;
   uploadError.value = null;
   successMessage.value = null;
   deletingId.value = styleId;
   try {
     await deleteCitationStyle(styleId);
-    successMessage.value = `已删除自定义样式 ${styleId}`;
+    confirmingDeleteId.value = null;
+    const msg = `已删除自定义样式 ${styleId}`;
+    successMessage.value = msg;
+    toastSuccess("已删除引用样式");
     await refresh();
   } catch (error) {
     uploadError.value = (error as Error).message || "样式删除失败";
@@ -217,9 +225,9 @@ async function confirmDelete(styleId: string) {
 
 <template>
   <section>
-    <PageHeader eyebrow="Citation styles" title="引用样式" :description="hint" />
+    <PageHeader eyebrow="引用样式" title="引用样式" :description="hint" />
 
-    <ErrorBanner :message="loadError" testid="style-load-error" />
+    <ErrorBanner :message="loadError" testid="style-load-error" @dismiss="loadError = null" />
 
     <form
       class="mb-3 flex flex-wrap items-end gap-3 rounded-lg border border-border bg-card p-4"
@@ -238,32 +246,43 @@ async function confirmDelete(styleId: string) {
         />
       </div>
       <Button data-test="style-upload-submit" type="submit" :disabled="uploading">
-        <Loader2 v-if="uploading" class="animate-spin" aria-hidden="true" />
+        <Loader2 v-if="uploading" class="animate-spin motion-reduce:animate-none" aria-hidden="true" />
         <Upload v-else :size="15" aria-hidden="true" />
         <span>{{ uploading ? "上传中…" : "上传样式" }}</span>
       </Button>
     </form>
 
-    <ErrorBanner :message="uploadError" testid="style-upload-error" />
+    <ErrorBanner :message="uploadError" testid="style-upload-error" @dismiss="uploadError = null" />
     <Alert
       v-if="successMessage"
       variant="success"
       class="mb-3"
       data-test="style-upload-success"
+      @update:open="(v) => { if (!v) successMessage = null; }"
     >
       <CircleCheck />
       <span>{{ successMessage }}</span>
     </Alert>
 
-    <p v-if="loading && !styles.length" class="text-sm text-muted-foreground">加载中…</p>
+    <div v-if="showSkeleton" class="space-y-2" data-test="style-list-skeleton">
+      <div
+        v-for="i in 3"
+        :key="i"
+        class="h-24 rounded-lg border border-border bg-card p-3"
+      >
+        <div class="h-4 w-1/3 animate-pulse rounded bg-muted motion-reduce:animate-none" />
+        <div class="mt-2 h-3 w-1/2 animate-pulse rounded bg-muted/80 motion-reduce:animate-none" />
+        <div class="mt-3 h-8 w-full animate-pulse rounded bg-muted/60 motion-reduce:animate-none" />
+      </div>
+    </div>
     <EmptyState
-      v-else-if="!styles.length"
+      v-else-if="!loading && !styles.length"
       testid="style-empty"
       title="还没有可用样式"
       description="上传一个 .csl 文件即可作为自定义引用样式使用。"
     />
 
-    <template v-else>
+    <template v-else-if="styles.length">
       <!-- 预览口径说明：用户需要知道预览用的不是自己的文献 -->
       <div
         v-if="!previewError"
@@ -275,7 +294,7 @@ async function confirmDelete(styleId: string) {
           （中文期刊 + 英文会议），与最终导出使用同一个渲染引擎。
         </span>
       </div>
-      <ErrorBanner :message="previewError" testid="style-preview-error" />
+      <ErrorBanner :message="previewError" testid="style-preview-error" @dismiss="previewError = null" />
 
       <ul class="space-y-2">
         <li
@@ -313,30 +332,18 @@ async function confirmDelete(styleId: string) {
           </div>
 
           <!-- 删除确认：后端会 unlink 磁盘文件，误点就得重新上传 -->
-          <div
+          <ConfirmBar
             v-if="confirmingDeleteId === style.style_id"
-            class="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-destructive/30 bg-destructive/8 px-2.5 py-1.5"
-          >
-            <span class="text-xs text-foreground">
-              删除后文件将从磁盘移除，需要重新上传。确认删除「{{ style.title }}」？
-            </span>
-            <button
-              type="button"
-              :data-test="`style-delete-confirm-${style.style_id}`"
-              class="rounded bg-destructive px-2 py-0.5 text-xs font-medium text-destructive-foreground"
-              @click="confirmDelete(style.style_id)"
-            >
-              确认删除
-            </button>
-            <button
-              type="button"
-              :data-test="`style-delete-cancel-${style.style_id}`"
-              class="rounded border border-border px-2 py-0.5 text-xs font-medium"
-              @click="cancelDelete"
-            >
-              取消
-            </button>
-          </div>
+            class="mt-2"
+            :title="`确认删除「${style.title}」？`"
+            consequence="删除后 .csl 文件将从磁盘移除，需要重新上传。"
+            confirm-label="确认删除"
+            :loading="deletingId === style.style_id"
+            :confirm-testid="`style-delete-confirm-${style.style_id}`"
+            :cancel-testid="`style-delete-cancel-${style.style_id}`"
+            @confirm="confirmDelete(style.style_id)"
+            @cancel="cancelDelete"
+          />
 
           <!-- 预览：真实渲染结果（后端 citeproc 渲染，与导出同一引擎） -->
           <div

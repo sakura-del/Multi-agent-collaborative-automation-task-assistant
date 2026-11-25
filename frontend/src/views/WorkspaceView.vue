@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { Check, Copy, Plus, Users } from "lucide-vue-next";
 
+import AnimatedCollapse from "@/components/common/AnimatedCollapse.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import PageHeader from "@/components/common/PageHeader.vue";
@@ -9,6 +10,8 @@ import { Badge, type BadgeVariants } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useDelayedLoading } from "@/composables/useDelayedLoading";
+import { toastSuccess } from "@/lib/toast";
 import {
   acceptInvite,
   createInvite,
@@ -87,6 +90,7 @@ const ROLE_TONE: Record<WorkspaceRole, NonNullable<BadgeVariants["variant"]>> = 
 };
 
 const isEmpty = computed(() => workspaces.value.length === 0);
+const showSkeleton = useDelayedLoading(() => loading.value && isEmpty.value);
 
 onMounted(() => {
   void refresh();
@@ -153,7 +157,9 @@ async function submitCreate() {
       slug: newSlug.value.trim(),
       seat_limit: newSeatLimit.value,
     });
-    success.value = `已创建「${workspace.name}」`;
+    const msg = `已创建「${workspace.name}」`;
+    success.value = msg;
+    toastSuccess(msg);
     showCreate.value = false;
     newName.value = "";
     newSlug.value = "";
@@ -177,7 +183,9 @@ async function submitJoin() {
   error.value = null;
   try {
     const workspace = await acceptInvite(code);
-    success.value = `已加入「${workspace.name}」`;
+    const msg = `已加入「${workspace.name}」`;
+    success.value = msg;
+    toastSuccess(msg);
     inviteCode.value = "";
     await refresh();
   } catch (err) {
@@ -211,6 +219,7 @@ async function copyCode() {
   try {
     await navigator.clipboard.writeText(generatedInvite.value.code);
     copied.value = true;
+    toastSuccess("已复制邀请码");
   } catch {
     // 剪贴板被拒（非 HTTPS / 无权限）：码已经显示在页面上，用户可以手动选中复制
     error.value = "复制失败，请手动选中邀请码复制";
@@ -257,7 +266,7 @@ const summary = computed(() => {
 <template>
   <section>
     <PageHeader
-      eyebrow="Team workspaces"
+      eyebrow="团队工作区"
       title="团队"
       description="团队工作区内的任务对所有成员可见；导师可作为「只读」成员查看并批注。"
     >
@@ -267,7 +276,7 @@ const summary = computed(() => {
       </Button>
     </PageHeader>
 
-    <ErrorBanner :message="error" testid="workspaces-error" />
+    <ErrorBanner :message="error" testid="workspaces-error" @dismiss="error = null" />
 
     <!-- 汇总：机构版**按席位计费**，用户要能一眼看到自己一共占了多少席位。 -->
     <div
@@ -319,44 +328,45 @@ const summary = computed(() => {
     </p>
 
     <!-- 创建表单 -->
-    <form
-      v-if="showCreate"
-      class="mb-4 rounded-lg border border-border bg-card p-3"
-      data-test="workspace-create-form"
-      @submit.prevent="submitCreate"
-    >
-      <div class="grid gap-2 sm:grid-cols-3">
-        <div>
-          <Label for="ws-name">团队名</Label>
-          <Input
-            id="ws-name"
-            v-model="newName"
-            placeholder="例如：张三课题组"
-          />
+    <AnimatedCollapse :open="showCreate">
+      <form
+        class="mb-4 rounded-lg border border-border bg-card p-3"
+        data-test="workspace-create-form"
+        @submit.prevent="submitCreate"
+      >
+        <div class="grid gap-2 sm:grid-cols-3">
+          <div>
+            <Label for="ws-name">团队名</Label>
+            <Input
+              id="ws-name"
+              v-model="newName"
+              placeholder="例如：张三课题组"
+            />
+          </div>
+          <div>
+            <Label for="ws-slug">标识（URL 用）</Label>
+            <Input
+              id="ws-slug"
+              v-model="newSlug"
+              placeholder="zhangsan-lab"
+              @input="onSlugInput"
+            />
+          </div>
+          <div>
+            <Label for="ws-seat">席位上限</Label>
+            <Input id="ws-seat" v-model.number="newSeatLimit" type="number" min="1" max="500" />
+          </div>
         </div>
-        <div>
-          <Label for="ws-slug">标识（URL 用）</Label>
-          <Input
-            id="ws-slug"
-            v-model="newSlug"
-            placeholder="zhangsan-lab"
-            @input="onSlugInput"
-          />
+        <div class="mt-2 flex gap-1.5">
+          <Button type="submit" size="sm" :disabled="creating">
+            {{ creating ? "创建中…" : "创建" }}
+          </Button>
+          <Button type="button" variant="ghost" size="sm" @click="showCreate = false">
+            取消
+          </Button>
         </div>
-        <div>
-          <Label for="ws-seat">席位上限</Label>
-          <Input id="ws-seat" v-model.number="newSeatLimit" type="number" min="1" max="500" />
-        </div>
-      </div>
-      <div class="mt-2 flex gap-1.5">
-        <Button type="submit" size="sm" :disabled="creating">
-          {{ creating ? "创建中…" : "创建" }}
-        </Button>
-        <Button type="button" variant="ghost" size="sm" @click="showCreate = false">
-          取消
-        </Button>
-      </div>
-    </form>
+      </form>
+    </AnimatedCollapse>
 
     <!-- 用邀请码加入 -->
     <form
@@ -403,16 +413,26 @@ const summary = computed(() => {
       </div>
     </div>
 
-    <p v-if="loading" class="text-sm text-muted-foreground">加载中…</p>
+    <div v-if="showSkeleton" class="grid gap-2 sm:grid-cols-2" data-test="workspaces-skeleton">
+      <div
+        v-for="i in 2"
+        :key="i"
+        class="h-32 rounded-lg border border-border bg-card p-3"
+      >
+        <div class="h-4 w-1/2 animate-pulse rounded bg-muted motion-reduce:animate-none" />
+        <div class="mt-2 h-3 w-1/3 animate-pulse rounded bg-muted/80 motion-reduce:animate-none" />
+        <div class="mt-4 h-2 w-full animate-pulse rounded bg-muted/60 motion-reduce:animate-none" />
+      </div>
+    </div>
 
     <EmptyState
-      v-else-if="isEmpty && !error"
+      v-else-if="!loading && isEmpty && !error"
       data-test="workspaces-empty"
       title="还没有加入任何团队"
       description="创建一个团队并邀请同学，或粘贴导师给的邀请码加入。"
     />
 
-    <ul v-else class="grid gap-2 sm:grid-cols-2">
+    <ul v-else-if="!isEmpty" class="grid gap-2 sm:grid-cols-2">
       <li
         v-for="workspace in workspaces"
         :key="workspace.workspace_id"
@@ -456,11 +476,12 @@ const summary = computed(() => {
           :aria-label="`${workspace.name} 席位占用`"
         >
           <div
+            :data-test="`workspace-seat-bar-${workspace.workspace_id}`"
             :class="[
-              'h-full rounded-full transition-[width] duration-200',
+              'h-full w-full origin-left rounded-full transition-transform duration-200 ease-out motion-reduce:transition-none',
               isSeatFull(workspace) ? 'bg-warning' : 'bg-primary/60',
             ]"
-            :style="{ width: `${seatPercent(workspace)}%` }"
+            :style="{ transform: `scaleX(${seatPercent(workspace) / 100})` }"
           />
         </div>
         <div class="mt-2 flex gap-1.5">

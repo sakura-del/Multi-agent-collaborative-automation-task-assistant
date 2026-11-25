@@ -180,7 +180,22 @@ describe("WorkspaceDetailView", () => {
     await flushPromises();
 
     vi.mocked(listMembers).mockResolvedValue([member()] as never);
+    // 先点移除只弹出确认条，不直接删
     await wrapper.get('[data-test="member-remove-u2"]').trigger("click");
+    await flushPromises();
+    expect(removeMember).not.toHaveBeenCalled();
+    expect(wrapper.find('[data-test="member-remove-confirm-u2"]').exists()).toBe(true);
+
+    // 点取消收回确认条
+    await wrapper.get('[data-test="member-remove-cancel-u2"]').trigger("click");
+    await flushPromises();
+    expect(removeMember).not.toHaveBeenCalled();
+    expect(wrapper.find('[data-test="member-remove-confirm-u2"]').exists()).toBe(false);
+
+    // 再次点移除并确认执行
+    await wrapper.get('[data-test="member-remove-u2"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('[data-test="member-remove-confirm-u2"]').trigger("click");
     await flushPromises();
 
     expect(removeMember).toHaveBeenCalledWith("w1", "u2");
@@ -261,6 +276,19 @@ describe("WorkspaceDetailView：真实缺陷修复（2026-10-26）", () => {
     await leaveBtn.trigger("click");
     await flushPromises();
 
+    // 先弹出二次确认条，支持取消
+    expect(push).not.toHaveBeenCalled();
+    expect(wrapper.find('[data-test="workspace-leave-confirm"]').exists()).toBe(true);
+    await wrapper.get('[data-test="workspace-leave-cancel"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.find('[data-test="workspace-leave-confirm"]').exists()).toBe(false);
+
+    // 确认退出后跳走（不再 refresh 到 404）
+    await wrapper.get('[data-test="workspace-leave"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('[data-test="workspace-leave-confirm"]').trigger("click");
+    await flushPromises();
+
     // 必须跳走（而不是留在原地显示 404 错误）
     expect(push).toHaveBeenCalled();
     // 目标是团队列表：`{ name: "workspaces" }`（具名路由，不是字符串路径）
@@ -278,6 +306,8 @@ describe("WorkspaceDetailView：真实缺陷修复（2026-10-26）", () => {
     await flushPromises();
 
     await wrapper.find('[data-test="workspace-leave"]').trigger("click");
+    await flushPromises();
+    await wrapper.find('[data-test="workspace-leave-confirm"]').trigger("click");
     await flushPromises();
 
     expect(push).not.toHaveBeenCalled();
@@ -332,5 +362,90 @@ describe("WorkspaceDetailView：真实缺陷修复（2026-10-26）", () => {
     const box = wrapper.find('[data-test="workspace-detail-invite"]');
     expect(box.exists()).toBe(true);
     expect(box.text()).toMatch(/2026|有效期|过期/);
+  });
+
+  it("改角色乐观更新失败时立即还原原角色并展示 800ms 行级温和回弹提示", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(getWorkspace).mockResolvedValue(workspace() as never);
+      vi.mocked(listMembers).mockResolvedValue([
+        member(),
+        member({ user_id: "u2", username: "李四", role: "member" }),
+      ] as never);
+      vi.mocked(changeMemberRole).mockRejectedValue(new Error("权限不足"));
+
+      const wrapper = mountView();
+      await flushPromises();
+
+      const row = wrapper.get('[data-test="member-row-u2"]');
+      expect(wrapper.get('[data-test="member-role-u2"]').text()).toBe("成员");
+
+      await wrapper.get('[data-test="member-role-select-u2"]').setValue("viewer");
+      await flushPromises();
+
+      expect(wrapper.get('[data-test="member-role-u2"]').text()).toBe("成员");
+      expect(row.classes()).toContain("ring-destructive/60");
+      expect(wrapper.get('[data-test="workspace-detail-error"]').text()).toContain("权限不足");
+
+      vi.advanceTimersByTime(850);
+      await flushPromises();
+      expect(row.classes()).not.toContain("ring-destructive/60");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("同时修改两位成员角色时各自保持独立行级锁定，互不提前解锁", async () => {
+    vi.mocked(getWorkspace).mockResolvedValue(workspace() as never);
+    vi.mocked(listMembers).mockResolvedValue([
+      member(),
+      member({ user_id: "u2", username: "李四", role: "member" }),
+      member({ user_id: "u3", username: "王五", role: "member" }),
+    ] as never);
+
+    let resolveU2!: (v: unknown) => void;
+    let resolveU3!: (v: unknown) => void;
+    vi.mocked(changeMemberRole)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveU2 = resolve;
+          }) as never,
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveU3 = resolve;
+          }) as never,
+      );
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const sel2 = wrapper.get('[data-test="member-role-select-u2"]');
+    const sel3 = wrapper.get('[data-test="member-role-select-u3"]');
+    const rm2 = wrapper.get('[data-test="member-remove-u2"]');
+
+    await sel2.setValue("viewer");
+    await sel3.setValue("admin");
+    await wrapper.vm.$nextTick();
+
+    // u2 与 u3 均在请求中，各自控件保持 disabled
+    expect(sel2.attributes("disabled")).toBeDefined();
+    expect(rm2.attributes("disabled")).toBeDefined();
+    expect(sel3.attributes("disabled")).toBeDefined();
+
+    // u3 先完成：u3 解锁，但 u2 仍必须保持 disabled
+    resolveU3(member({ user_id: "u3", role: "admin" }));
+    await flushPromises();
+    expect(sel3.attributes("disabled")).toBeUndefined();
+    expect(sel2.attributes("disabled")).toBeDefined();
+    expect(rm2.attributes("disabled")).toBeDefined();
+
+    // u2 完成后解锁
+    resolveU2(member({ user_id: "u2", role: "viewer" }));
+    await flushPromises();
+    expect(sel2.attributes("disabled")).toBeUndefined();
+    expect(rm2.attributes("disabled")).toBeUndefined();
   });
 });

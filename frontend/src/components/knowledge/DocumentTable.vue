@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 import { Trash2 } from "lucide-vue-next";
 
+import ConfirmBar from "@/components/common/ConfirmBar.vue";
 import StatusBadge from "@/components/common/StatusBadge.vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -40,6 +41,7 @@ const confirming = ref<string | null>(null);
 
 /** 来源列只在来源确实有差异时显示（实测全是 upload）。 */
 const showSource = computed(() => shouldShowSourceColumn(props.documents));
+const colSpan = computed(() => 6 + (props.selectable ? 1 : 0) + (showSource.value ? 1 : 0));
 const selectedSet = computed(() => new Set(props.selectedIds ?? []));
 const readyDocuments = computed(() =>
   props.documents.filter((doc) => doc.index_status === "ready"),
@@ -50,11 +52,15 @@ const allReadySelected = computed(
     readyDocuments.value.every((doc) => selectedSet.value.has(doc.id)),
 );
 
-function requestRemove(docId: string) {
-  if (confirming.value !== docId) {
-    confirming.value = docId;
-    return;
-  }
+function openConfirm(docId: string) {
+  confirming.value = confirming.value === docId ? null : docId;
+}
+
+function cancelConfirm() {
+  confirming.value = null;
+}
+
+function confirmRemove(docId: string) {
   confirming.value = null;
   emit("remove", docId);
 }
@@ -104,89 +110,93 @@ function requestRemove(docId: string) {
         </tr>
       </thead>
       <tbody>
-        <tr
-          v-for="doc in documents"
-          :key="doc.id"
-          :data-test="`document-row-${doc.id}`"
-          class="border-b border-border align-top last:border-b-0 hover:bg-muted/40"
-        >
-          <td v-if="selectable" class="px-3 py-2.5" data-label="选择">
-            <input
-              type="checkbox"
-              :data-test="`document-select-${doc.id}`"
-              :checked="selectedSet.has(doc.id)"
-              :disabled="doc.index_status !== 'ready'"
-              :aria-label="`选择 ${doc.title}`"
-              :title="doc.index_status === 'ready' ? '勾选加入论文抽取表' : '仅已就绪文档可加入抽取表'"
-              class="accent-foreground"
-              @change="emit('toggleSelect', doc.id)"
-            />
-          </td>
-          <td class="px-3 py-2.5" data-label="标题">
-            <span class="block font-medium text-foreground" :title="doc.title">
-              {{ doc.title }}
-            </span>
-            <!-- 只在文件名与标题实质不同时显示（否则纯噪音） -->
-            <span
-              v-if="shouldShowOriginalName(doc)"
-              :data-test="`doc-original-name-${doc.id}`"
-              class="mt-0.5 block truncate text-xs text-muted-foreground"
-              :title="doc.original_name ?? ''"
-            >
-              {{ doc.original_name }}
-            </span>
-          </td>
-          <td class="px-3 py-2.5" data-label="类型">
-            <Badge variant="outline">{{ docTypeLabel(doc.doc_type) }}</Badge>
-          </td>
-          <td v-if="showSource" class="px-3 py-2.5 text-muted-foreground" data-label="来源">
-            {{ doc.source }}
-          </td>
-          <td class="px-3 py-2.5" data-label="索引状态">
-            <StatusBadge :status="doc.index_status" />
-            <span
-              v-if="doc.index_status === 'failed'"
-              class="mt-1 block text-xs text-destructive"
-            >
-              索引失败{{ doc.failure_reason ? `：${doc.failure_reason}` : "" }}
-            </span>
-          </td>
-          <td
-            class="px-3 py-2.5 text-right text-muted-foreground tabular-nums"
-            data-label="分块"
+        <template v-for="doc in documents" :key="doc.id">
+          <tr
+            :data-test="`document-row-${doc.id}`"
+            class="border-b border-border align-top last:border-b-0 hover:bg-muted/40"
           >
-            {{ doc.chunk_count }}
-          </td>
-          <td
-            class="px-3 py-2.5 text-xs text-muted-foreground max-lg:hidden"
-            data-label="创建时间"
-          >
-            {{ formatDateTime(doc.created_at) }}
-          </td>
-          <td class="px-2 py-2.5" data-label="操作">
-            <div class="flex items-center justify-end gap-1.5">
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                :title="confirming === doc.id ? '再次点击确认删除' : '删除文档'"
-                :aria-label="`删除 ${doc.title}`"
-                :data-test="`document-delete-${doc.id}`"
-                @click="requestRemove(doc.id)"
+            <td v-if="selectable" class="px-3 py-2.5" data-label="选择">
+              <input
+                type="checkbox"
+                :data-test="`document-select-${doc.id}`"
+                :checked="selectedSet.has(doc.id)"
+                :disabled="doc.index_status !== 'ready'"
+                :aria-label="`选择 ${doc.title}`"
+                :title="doc.index_status === 'ready' ? '勾选加入论文抽取表' : '仅已就绪文档可加入抽取表'"
+                class="accent-foreground"
+                @change="emit('toggleSelect', doc.id)"
+              />
+            </td>
+            <td class="px-3 py-2.5" data-label="标题">
+              <span class="block font-medium text-foreground" :title="doc.title">
+                {{ doc.title }}
+              </span>
+              <!-- 只在文件名与标题实质不同时显示（否则纯噪音） -->
+              <span
+                v-if="shouldShowOriginalName(doc)"
+                :data-test="`doc-original-name-${doc.id}`"
+                class="mt-0.5 block truncate text-xs text-muted-foreground"
+                :title="doc.original_name ?? ''"
               >
-                <Trash2 :size="15" />
-              </Button>
-              <Button
-                v-if="confirming === doc.id"
-                variant="destructive"
-                size="sm"
-                :data-test="`document-delete-confirm-${doc.id}`"
-                @click="requestRemove(doc.id)"
+                {{ doc.original_name }}
+              </span>
+            </td>
+            <td class="px-3 py-2.5" data-label="类型">
+              <Badge variant="outline">{{ docTypeLabel(doc.doc_type) }}</Badge>
+            </td>
+            <td v-if="showSource" class="px-3 py-2.5 text-muted-foreground" data-label="来源">
+              {{ doc.source }}
+            </td>
+            <td class="px-3 py-2.5" data-label="索引状态">
+              <StatusBadge :status="doc.index_status" />
+              <span
+                v-if="doc.index_status === 'failed'"
+                class="mt-1 block text-xs text-destructive"
               >
-                确认删除
-              </Button>
-            </div>
-          </td>
-        </tr>
+                索引失败{{ doc.failure_reason ? `：${doc.failure_reason}` : "" }}
+              </span>
+            </td>
+            <td
+              class="px-3 py-2.5 text-right text-muted-foreground tabular-nums"
+              data-label="分块"
+            >
+              {{ doc.chunk_count }}
+            </td>
+            <td
+              class="px-3 py-2.5 text-xs text-muted-foreground max-lg:hidden"
+              data-label="创建时间"
+            >
+              {{ formatDateTime(doc.created_at) }}
+            </td>
+            <td class="px-2 py-2.5" data-label="操作">
+              <div class="flex items-center justify-end gap-1.5">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  :title="confirming === doc.id ? '收起确认' : '删除文档'"
+                  :aria-label="`删除 ${doc.title}`"
+                  :data-test="`document-delete-${doc.id}`"
+                  @click="openConfirm(doc.id)"
+                >
+                  <Trash2 :size="15" />
+                </Button>
+              </div>
+            </td>
+          </tr>
+          <tr v-if="confirming === doc.id" class="border-b border-border bg-muted/20 last:border-b-0">
+            <td :colspan="colSpan" class="px-3 py-2">
+              <ConfirmBar
+                :title="`确认删除「${doc.title}」？`"
+                consequence="删除后将永久移除该文档及所有索引分块，不可恢复。"
+                confirm-label="确认删除"
+                :confirm-testid="`document-delete-confirm-${doc.id}`"
+                :cancel-testid="`document-delete-cancel-${doc.id}`"
+                @confirm="confirmRemove(doc.id)"
+                @cancel="cancelConfirm"
+              />
+            </td>
+          </tr>
+        </template>
       </tbody>
     </table>
   </div>

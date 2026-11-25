@@ -29,16 +29,20 @@
  * 需要改冷门字段时删了重导更直接。
  */
 import { computed, onMounted, ref } from "vue";
-import { Loader2, Pencil, Search, Trash2, X } from "lucide-vue-next";
+import { CircleCheck, Pencil, Search, Trash2, X } from "lucide-vue-next";
 
+import ConfirmBar from "@/components/common/ConfirmBar.vue";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
 import PageHeader from "@/components/common/PageHeader.vue";
+import { Alert } from "@/components/ui/alert";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Pagination } from "@/components/ui/pagination";
 import { Input } from "@/components/ui/input";
+import { useDelayedLoading } from "@/composables/useDelayedLoading";
+import { toastSuccess } from "@/lib/toast";
 import {
   clearLibrary,
   deleteLibraryItem,
@@ -51,6 +55,7 @@ import type { LibraryItemOut, LibrarySummaryOut } from "@/api/types";
 const items = ref<LibraryItemOut[]>([]);
 const summary = ref<LibrarySummaryOut | null>(null);
 const loading = ref(false);
+const showSkeleton = useDelayedLoading(() => loading.value && !items.value.length);
 const loadError = ref<string | null>(null);
 const actionError = ref<string | null>(null);
 const successMessage = ref<string | null>(null);
@@ -151,13 +156,15 @@ function cancelDelete() {
 }
 
 async function confirmDelete(item: LibraryItemOut) {
-  confirmingDeleteId.value = null;
   actionError.value = null;
   successMessage.value = null;
   deletingId.value = item.item_id;
   try {
     await deleteLibraryItem(item.item_id);
-    successMessage.value = `已删除「${item.title || item.ref_id}」`;
+    confirmingDeleteId.value = null;
+    const msg = `已删除「${item.title || item.ref_id}」`;
+    successMessage.value = msg;
+    toastSuccess("已从引用库删除");
     // 删的是本页最后一条时回退一页，避免停在空白页
     await refresh(items.value.length <= 1 && page.value > 1 ? page.value - 1 : page.value);
   } catch (error) {
@@ -173,7 +180,9 @@ async function confirmClear() {
   successMessage.value = null;
   try {
     const result = await clearLibrary();
-    successMessage.value = `已清空引用库（${result.deleted} 条）`;
+    const msg = `已清空引用库（${result.deleted} 条）`;
+    successMessage.value = msg;
+    toastSuccess(msg);
     confirmingClear.value = false;
     await refresh();
   } catch (error) {
@@ -231,7 +240,9 @@ async function saveEdit(item: LibraryItemOut) {
   successMessage.value = null;
   try {
     await updateLibraryItem(item.item_id, changes);
-    successMessage.value = `已更新「${title || item.ref_id}」`;
+    const msg = `已更新「${title || item.ref_id}」`;
+    successMessage.value = msg;
+    toastSuccess("已更新文献信息");
     editingId.value = null;
     await refresh();
   } catch (error) {
@@ -246,22 +257,25 @@ async function saveEdit(item: LibraryItemOut) {
 <template>
   <section>
     <PageHeader
-      eyebrow="Reference library"
+      eyebrow="引用库"
       title="引用库"
       :description="hint"
       description-testid="library-hint"
     />
 
-    <ErrorBanner :message="loadError" testid="library-load-error" />
-    <ErrorBanner :message="actionError" testid="library-action-error" />
+    <ErrorBanner :message="loadError" testid="library-load-error" @dismiss="loadError = null" />
+    <ErrorBanner :message="actionError" testid="library-action-error" @dismiss="actionError = null" />
 
-    <p
+    <Alert
       v-if="successMessage"
-      class="mb-3 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm"
+      variant="success"
+      class="mb-3"
       data-test="library-success"
+      @update:open="(v) => { if (!v) successMessage = null; }"
     >
-      {{ successMessage }}
-    </p>
+      <CircleCheck />
+      <span>{{ successMessage }}</span>
+    </Alert>
 
     <!--
       摘要始终渲染（0 条也显示）：用户需要知道「引用库为空」这个事实本身。
@@ -269,44 +283,36 @@ async function saveEdit(item: LibraryItemOut) {
       和清空按钮一起藏了，空库时页面只有一句「还是空的」，看不到计数。
       清空按钮只在有条目时才显示（空库没什么可清）。
     -->
-    <div v-if="summary" class="mb-3 flex flex-wrap items-center justify-between gap-2">
-      <p class="text-xs text-muted-foreground" data-test="library-summary">
-        共 <strong>{{ summary.total }}</strong> 条 · 可作文献源
-        <strong>{{ summary.usable_as_source }}</strong> 条
-      </p>
-      <div v-if="summary.total > 0 && !confirmingClear" class="flex items-center gap-2">
-        <Button
-          variant="ghost"
-          size="sm"
-          data-test="library-clear"
-          @click="confirmingClear = true"
-        >
-          清空引用库
-        </Button>
+    <div v-if="summary" class="mb-3 space-y-2">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <p class="text-xs text-muted-foreground" data-test="library-summary">
+          共 <strong>{{ summary.total }}</strong> 条 · 可作文献源
+          <strong>{{ summary.usable_as_source }}</strong> 条
+        </p>
+        <div v-if="summary.total > 0 && !confirmingClear" class="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            data-test="library-clear"
+            @click="confirmingClear = true"
+          >
+            清空引用库
+          </Button>
+        </div>
       </div>
-      <div
-        v-else-if="summary.total > 0"
-        class="flex flex-wrap items-center gap-2 rounded-md border border-destructive/30 bg-destructive/8 px-2.5 py-1.5"
-      >
-        <span class="text-xs">清空后无法恢复，确认删除全部 {{ summary.total }} 条？</span>
-        <button
-          type="button"
-          data-test="library-clear-confirm"
-          class="rounded bg-destructive px-2 py-0.5 text-xs font-medium text-destructive-foreground"
-          :disabled="clearing"
-          @click="confirmClear"
-        >
-          {{ clearing ? "清空中…" : "确认清空" }}
-        </button>
-        <button
-          type="button"
-          data-test="library-clear-cancel"
-          class="rounded border border-border px-2 py-0.5 text-xs font-medium"
-          @click="confirmingClear = false"
-        >
-          取消
-        </button>
-      </div>
+
+      <ConfirmBar
+        v-if="summary.total > 0 && confirmingClear"
+        class="w-full"
+        :title="`确认清空全部 ${summary.total} 条文献？`"
+        consequence="清空后将永久删除引用库内所有文献条目，后续任务将无法引用，不可恢复。"
+        confirm-label="确认清空"
+        :loading="clearing"
+        confirm-testid="library-clear-confirm"
+        cancel-testid="library-clear-cancel"
+        @confirm="confirmClear"
+        @cancel="confirmingClear = false"
+      />
     </div>
 
     <!-- 搜索与年份筛选栏（Issue #56）：仅在引用库非空或已有筛选条件时展示 -->
@@ -360,9 +366,19 @@ async function saveEdit(item: LibraryItemOut) {
       </span>
     </form>
 
-    <p v-if="loading && !items.length" class="text-sm text-muted-foreground">加载中…</p>
+    <div v-if="showSkeleton" class="space-y-2" data-test="library-skeleton">
+      <div
+        v-for="i in 3"
+        :key="i"
+        class="h-28 rounded-lg border border-border bg-card p-3"
+      >
+        <div class="h-4 w-3/5 animate-pulse rounded bg-muted motion-reduce:animate-none" />
+        <div class="mt-2 h-3 w-2/5 animate-pulse rounded bg-muted/80 motion-reduce:animate-none" />
+        <div class="mt-3 h-3 w-1/3 animate-pulse rounded bg-muted/60 motion-reduce:animate-none" />
+      </div>
+    </div>
     <div
-      v-else-if="!items.length && hasActiveFilter"
+      v-else-if="!loading && !items.length && hasActiveFilter"
       data-test="library-filtered-empty"
       class="rounded-lg border border-border bg-card px-4 py-8 text-center"
     >
@@ -379,19 +395,24 @@ async function saveEdit(item: LibraryItemOut) {
       </Button>
     </div>
     <EmptyState
-      v-else-if="!items.length"
+      v-else-if="!loading && !items.length"
       testid="library-empty"
       title="引用库还是空的"
       description="去「导入文献」页粘贴 BibTeX / RIS，解析后点「保存到引用库」即可。"
     />
 
-    <ul v-else class="space-y-2">
+    <ul v-else-if="items.length" class="space-y-2">
       <Card
         v-for="item in items"
         :key="item.item_id"
         as="li"
         size="compact"
-        class="gap-0 px-3 py-2.5"
+        :class="[
+          'gap-0 px-3 py-2.5',
+          editingId === item.item_id || confirmingDeleteId === item.item_id
+            ? ''
+            : '[content-visibility:auto] [contain-intrinsic-size:auto_128px]',
+        ]"
         :data-test="`library-row-${item.item_id}`"
       >
         <div class="flex items-start justify-between gap-3">
@@ -467,48 +488,39 @@ async function saveEdit(item: LibraryItemOut) {
             </label>
           </div>
           <div class="flex items-center gap-2">
-            <button
+            <Button
               type="button"
+              size="sm"
               :data-test="`library-edit-save-${item.item_id}`"
-              class="rounded bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground"
               :disabled="savingEdit"
               @click="saveEdit(item)"
             >
               {{ savingEdit ? "保存中…" : "保存" }}
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant="outline"
+              size="sm"
               :data-test="`library-edit-cancel-${item.item_id}`"
-              class="rounded border border-border px-2 py-0.5 text-xs font-medium"
               @click="cancelEdit"
             >
               取消
-            </button>
+            </Button>
           </div>
         </div>
 
-        <div
+        <ConfirmBar
           v-if="confirmingDeleteId === item.item_id"
-          class="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-destructive/30 bg-destructive/8 px-2.5 py-1.5"
-        >
-          <span class="text-xs">确认从引用库删除「{{ item.title || item.ref_id }}」？</span>
-          <button
-            type="button"
-            :data-test="`library-delete-confirm-${item.item_id}`"
-            class="rounded bg-destructive px-2 py-0.5 text-xs font-medium text-destructive-foreground"
-            @click="confirmDelete(item)"
-          >
-            确认删除
-          </button>
-          <button
-            type="button"
-            :data-test="`library-delete-cancel-${item.item_id}`"
-            class="rounded border border-border px-2 py-0.5 text-xs font-medium"
-            @click="cancelDelete"
-          >
-            取消
-          </button>
-        </div>
+          class="mt-2"
+          :title="`确认从引用库删除「${item.title || item.ref_id}」？`"
+          consequence="删除后该条目将从引用库移除，后续任务将无法引用它。"
+          confirm-label="确认删除"
+          :loading="deletingId === item.item_id"
+          :confirm-testid="`library-delete-confirm-${item.item_id}`"
+          :cancel-testid="`library-delete-cancel-${item.item_id}`"
+          @confirm="confirmDelete(item)"
+          @cancel="cancelDelete"
+        />
       </Card>
     </ul>
 

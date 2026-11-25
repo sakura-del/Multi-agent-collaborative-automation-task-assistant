@@ -332,4 +332,46 @@ describe("TemplateView 示例标注与删除确认（2026-10-26）", () => {
       wrapper.find('[data-test="template-delete-confirm-tpl-9e961b86377bb8b1"]').exists()
     ).toBe(false);
   });
+
+  it("整页文案绝不出现「生成成稿」，且加载挂起期间不显示空态", async () => {
+    const wrapper = await mountView();
+    expect(wrapper.text()).not.toContain("生成成稿");
+
+    vi.mocked(listTemplates).mockReturnValue(new Promise(() => {}) as never);
+    const pendingWrapper = mount(TemplateView);
+    await flushPromises();
+    expect(pendingWrapper.find('[data-test="template-empty"]').exists()).toBe(false);
+  });
+
+  it("删除请求 pending 期间保留 ConfirmBar 加载态，失败后保留确认条允许重试", async () => {
+    let rejectDelete!: (err: Error) => void;
+    vi.mocked(deleteTemplate).mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          rejectDelete = reject;
+        }),
+    );
+
+    const wrapper = await mountView();
+    await wrapper.get('[data-test="template-delete-tpl-9e961b86377bb8b1"]').trigger("click");
+    await flushPromises();
+
+    const confirmBtn = wrapper.get('[data-test="template-delete-confirm-tpl-9e961b86377bb8b1"]');
+    await confirmBtn.trigger("click");
+    await wrapper.vm.$nextTick();
+
+    // pending 期间确认条仍在且确认按钮带禁用与加载旋转图标
+    const pendingConfirm = wrapper.find('[data-test="template-delete-confirm-tpl-9e961b86377bb8b1"]');
+    expect(pendingConfirm.exists()).toBe(true);
+    expect(pendingConfirm.attributes("disabled")).toBeDefined();
+    expect(pendingConfirm.find("svg.animate-spin").exists()).toBe(true);
+
+    // 失败后确认条保留在原地且可再次点击重试或取消
+    rejectDelete(new Error("删除模板失败"));
+    await flushPromises();
+    expect(wrapper.find('[data-test="template-upload-error"]').text()).toContain("删除模板失败");
+    const retryBtn = wrapper.find('[data-test="template-delete-confirm-tpl-9e961b86377bb8b1"]');
+    expect(retryBtn.exists()).toBe(true);
+    expect(retryBtn.attributes("disabled")).toBeUndefined();
+  });
 });

@@ -12,6 +12,9 @@ import CreateExtractionDialog, {
 import DocumentTable from "@/components/knowledge/DocumentTable.vue";
 import DocumentUpload from "@/components/knowledge/DocumentUpload.vue";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { useDelayedLoading } from "@/composables/useDelayedLoading";
+import { toastSuccess } from "@/lib/toast";
 import type { ExtractionTableOut } from "@/api/extractions";
 import { useKnowledgeStore } from "@/stores/knowledge";
 import type { KnowledgeDocument } from "@/api/types";
@@ -58,6 +61,7 @@ async function handleRemove(docId: string) {
   try {
     await store.remove(docId);
     selectedDocIds.value = selectedDocIds.value.filter((id) => id !== docId);
+    toastSuccess("已删除文档");
   } catch (error) {
     actionError.value = (error as Error).message;
   }
@@ -109,6 +113,7 @@ function handleExtractionCreated(created: ExtractionTableOut) {
 // ===== 汇总 =====
 
 const documents = computed<KnowledgeDocument[]>(() => store.documents);
+const showSkeleton = useDelayedLoading(() => store.loading && !documents.value.length);
 const totalDocs = computed(() => store.stats?.total_docs ?? documents.value.length);
 const totalChunks = computed(() => store.stats?.total_chunks ?? 0);
 /** 索引失败文档数：唯一需要用户动手的一类。 */
@@ -160,7 +165,7 @@ const isFiltered = computed(() => typeFilter.value !== "all" || keyword.value.tr
     <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
       <PageHeader
         class="mb-0"
-        eyebrow="Evidence library"
+        eyebrow="文献知识库"
         title="知识库"
         description="文献综述的证据来源。支持 pdf / docx / md / txt，单文件 ≤ 30 MB。"
       />
@@ -175,7 +180,7 @@ const isFiltered = computed(() => typeFilter.value !== "all" || keyword.value.tr
       </Button>
     </div>
 
-    <ErrorBanner :message="actionError" />
+    <ErrorBanner :message="actionError" @dismiss="actionError = null" />
 
     <!-- 汇总：三张卡。第二张「需要处理」只在 >0 时用警示色 —— 它是唯一
          需要用户动手的信息（索引失败要重新上传）。 -->
@@ -246,38 +251,30 @@ const isFiltered = computed(() => typeFilter.value !== "all" || keyword.value.tr
     <!-- 搜索 + 类型筛选 -->
     <div v-if="documents.length" class="mb-3 flex flex-wrap items-center gap-2">
       <div class="flex flex-wrap gap-1" role="group" aria-label="按类型筛选">
-        <button
+        <Button
           type="button"
+          size="sm"
+          :variant="typeFilter === 'all' ? 'default' : 'secondary'"
           data-test="kb-filter-all"
           :aria-pressed="typeFilter === 'all'"
-          :class="[
-            'rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
-            typeFilter === 'all'
-              ? 'bg-foreground text-background'
-              : 'bg-muted text-muted-foreground hover:text-foreground',
-          ]"
           @click="typeFilter = 'all'"
         >
-          全部
-          <span class="ml-1 tabular-nums opacity-70">{{ documents.length }}</span>
-        </button>
-        <button
+          <span>全部</span>
+          <span class="ml-1 tabular-nums opacity-75">{{ documents.length }}</span>
+        </Button>
+        <Button
           v-for="option in typeOptions"
           :key="option.type"
           type="button"
+          size="sm"
+          :variant="typeFilter === option.type ? 'default' : 'secondary'"
           :data-test="`kb-filter-${option.type}`"
           :aria-pressed="typeFilter === option.type"
-          :class="[
-            'rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
-            typeFilter === option.type
-              ? 'bg-foreground text-background'
-              : 'bg-muted text-muted-foreground hover:text-foreground',
-          ]"
           @click="typeFilter = option.type"
         >
-          {{ option.label }}
-          <span class="ml-1 tabular-nums opacity-70">{{ option.count }}</span>
-        </button>
+          <span>{{ option.label }}</span>
+          <span class="ml-1 tabular-nums opacity-75">{{ option.count }}</span>
+        </Button>
       </div>
 
       <div class="relative ml-auto flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
@@ -295,28 +292,34 @@ const isFiltered = computed(() => typeFilter.value !== "all" || keyword.value.tr
         <div class="relative w-full sm:w-64">
           <Search
             :size="14"
-            class="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground"
+            class="pointer-events-none absolute top-1/2 left-2.5 z-10 -translate-y-1/2 text-muted-foreground"
             aria-hidden="true"
           />
-          <input
+          <Input
             v-model="keyword"
             data-test="kb-search"
             type="search"
             placeholder="搜索标题或文件名…"
             aria-label="搜索文档"
-            class="w-full rounded-md border border-input bg-card py-1.5 pr-2.5 pl-8 text-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring"
+            class="h-8 pl-8 text-xs"
           />
         </div>
       </div>
     </div>
 
-    <p v-if="store.loading && !documents.length" class="text-sm text-muted-foreground">
-      加载中…
-    </p>
+    <div
+      v-if="showSkeleton"
+      class="space-y-2 rounded-lg border border-border bg-card p-4"
+      data-test="kb-skeleton"
+    >
+      <div class="h-8 w-full animate-pulse rounded bg-muted motion-reduce:animate-none" />
+      <div class="h-12 w-full animate-pulse rounded bg-muted/80 motion-reduce:animate-none" />
+      <div class="h-12 w-full animate-pulse rounded bg-muted/60 motion-reduce:animate-none" />
+    </div>
 
     <!-- 真·空态（区别于筛选无结果） -->
     <EmptyState
-      v-else-if="!documents.length"
+      v-else-if="!store.loading && !documents.length"
       testid="knowledge-empty"
       title="知识库还是空的"
       description="上传一篇文档（pdf / docx / md / txt）即可用于文献综述的证据检索。"
@@ -328,27 +331,29 @@ const isFiltered = computed(() => typeFilter.value !== "all" || keyword.value.tr
 
     <!-- 筛选/搜索无结果：给「怎么回到有结果」的引导 -->
     <div
-      v-else-if="!visibleDocuments.length"
+      v-else-if="!store.loading && !visibleDocuments.length"
       data-test="kb-filtered-empty"
       class="rounded-lg border border-border bg-card px-4 py-10 text-center"
     >
       <p class="text-sm font-medium">没有符合条件的文档</p>
       <p class="mt-1 text-xs text-muted-foreground">试试换个关键词，或切回「全部」。</p>
-      <button
+      <Button
         type="button"
+        variant="outline"
+        size="sm"
         data-test="kb-reset-filters"
-        class="mt-3 rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted"
+        class="mt-3"
         @click="
           typeFilter = 'all';
           keyword = '';
         "
       >
         清除筛选
-      </button>
+      </Button>
     </div>
 
     <DocumentTable
-      v-else
+      v-else-if="visibleDocuments.length"
       :documents="visibleDocuments"
       :selectable="true"
       :selected-ids="selectedDocIds"

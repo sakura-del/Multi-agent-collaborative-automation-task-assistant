@@ -2,6 +2,7 @@
 import BePromptInput from "@/components/motion/BePromptInput.vue";
 import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
+import { Motion, useReducedMotion } from "motion-v";
 import { CircleCheck, FileInput, Loader2, RotateCcw, Save } from "lucide-vue-next";
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
@@ -12,6 +13,8 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { TRANSITION_ENTER, TRANSITION_MICRO } from "@/lib/ease";
+import { toastSuccess } from "@/lib/toast";
 import { importReferences } from "@/api/references";
 import { saveLibraryItems } from "@/api/reference-library";
 import type {
@@ -37,6 +40,7 @@ import { toCslItemPayloads } from "@/utils/reference-payload";
 // 保存是**部分成功**的：能进的进，不能进的带原因逐条展示
 // （缺年份/缺 URL 的条目不能当文献源用，后端会拒）。
 const router = useRouter();
+const reduced = useReducedMotion();
 
 const content = ref("");
 const format = ref<ReferenceImportFormat>("auto");
@@ -123,6 +127,7 @@ async function handleSave() {
   saving.value = true;
   try {
     saveResult.value = await saveLibraryItems(payloads);
+    toastSuccess("已保存到引用库");
   } catch (err) {
     saveError.value = (err as Error).message || "保存失败";
   } finally {
@@ -170,7 +175,7 @@ function metaText(item: ImportedReferenceItem): string {
 <template>
   <section class="min-w-0">
     <PageHeader
-      eyebrow="Reference import"
+      eyebrow="导入文献"
       title="导入参考文献"
       description="粘贴 BibTeX 或 RIS 文本即可解析预览；支持从 Zotero / EndNote 直接导出。解析后可以保存到引用库，创建任务时选择「我的引用库」就会用这些文献。"
     />
@@ -203,7 +208,7 @@ function metaText(item: ImportedReferenceItem): string {
           </select>
         </div>
         <Button data-test="import-submit" type="submit" :disabled="importing">
-          <Loader2 v-if="importing" class="animate-spin" aria-hidden="true" />
+          <Loader2 v-if="importing" class="animate-spin motion-reduce:animate-none" aria-hidden="true" />
           <FileInput v-else :size="15" aria-hidden="true" />
           <span>{{ importing ? "解析中…" : "解析预览" }}</span>
         </Button>
@@ -214,7 +219,7 @@ function metaText(item: ImportedReferenceItem): string {
       </div>
     </Card>
 
-    <ErrorBanner :message="error" testid="import-error" />
+    <ErrorBanner :message="error" testid="import-error" @dismiss="error = null" />
 
     <Alert v-if="hasResult" variant="success" class="mb-3" data-test="import-summary">
       <CircleCheck />
@@ -224,7 +229,7 @@ function metaText(item: ImportedReferenceItem): string {
     <!-- 保存到引用库：这是本页的真实出口（此前解析完什么也做不了） -->
     <Card v-if="hasResult && !isEmpty" class="mb-3 flex-row flex-wrap items-center gap-2 px-3 py-2.5">
       <Button data-test="import-save" :disabled="saving || savableCount === 0" @click="handleSave">
-        <Loader2 v-if="saving" class="animate-spin" aria-hidden="true" />
+        <Loader2 v-if="saving" class="animate-spin motion-reduce:animate-none" aria-hidden="true" />
         <Save v-else :size="15" aria-hidden="true" />
         <span>{{ saving ? "保存中…" : `保存 ${savableCount} 条到引用库` }}</span>
       </Button>
@@ -233,7 +238,7 @@ function metaText(item: ImportedReferenceItem): string {
       </span>
     </Card>
 
-    <ErrorBanner :message="saveError" testid="import-save-error" />
+    <ErrorBanner :message="saveError" testid="import-save-error" @dismiss="saveError = null" />
 
     <Alert v-if="saveResult" variant="muted" class="mb-3" data-test="import-save-result">
       <CircleCheck />
@@ -245,14 +250,16 @@ function metaText(item: ImportedReferenceItem): string {
             {{ item.title || item.ref_id }}：{{ item.reason }}
           </li>
         </ul>
-        <button
+        <Button
           type="button"
+          variant="link"
+          size="sm"
           data-test="import-goto-library"
-          class="w-fit text-xs font-medium text-primary underline-offset-2 hover:underline"
+          class="h-auto w-fit p-0 text-xs"
           @click="goToLibrary"
         >
           去引用库查看 →
-        </button>
+        </Button>
       </div>
     </Alert>
 
@@ -263,8 +270,12 @@ function metaText(item: ImportedReferenceItem): string {
       description="请检查内容是否为合法 BibTeX / RIS 格式。"
     />
 
-    <ul
+    <Motion
       v-if="hasResult && !isEmpty"
+      as="ul"
+      :initial="{ opacity: 0, y: reduced ? 0 : 6 }"
+      :animate="{ opacity: 1, y: 0 }"
+      :transition="reduced ? TRANSITION_MICRO : TRANSITION_ENTER"
       class="space-y-2"
       data-test="import-preview"
     >
@@ -286,6 +297,6 @@ function metaText(item: ImportedReferenceItem): string {
           </code>
         </div>
       </li>
-    </ul>
+    </Motion>
   </section>
 </template>

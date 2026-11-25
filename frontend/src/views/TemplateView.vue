@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 import { CircleCheck, Download, FileText, Loader2, Trash2, Upload } from "lucide-vue-next";
 
+import ConfirmBar from "@/components/common/ConfirmBar.vue";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import FilePicker from "@/components/common/FilePicker.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
@@ -12,6 +13,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useDelayedLoading } from "@/composables/useDelayedLoading";
+import { toastSuccess } from "@/lib/toast";
 import { deleteTemplate, listTemplates, renderTemplate, uploadTemplate } from "@/api/templates";
 import type { TemplateOut } from "@/api/types";
 
@@ -38,6 +41,7 @@ const ACCEPTED = [".docx"];
 
 const templates = ref<TemplateOut[]>([]);
 const loading = ref(false);
+const showSkeleton = useDelayedLoading(() => loading.value && !templates.value.length);
 const loadError = ref<string | null>(null);
 const uploadError = ref<string | null>(null);
 const renderError = ref<string | null>(null);
@@ -120,9 +124,10 @@ async function handleUpload() {
       templateName.value.trim() || "未命名模板"
     );
     uploadMessage.value = `已上传模板「${created.name}」（识别到 ${created.placeholders.length} 个占位符）`;
+    toastSuccess(`已上传模板「${created.name}」`);
     selectedFile.value = null;
     templateName.value = "";
-    filePicker.value?.reset();
+    filePicker.value?.reset?.();
     await refresh();
   } catch (error) {
     // 后端 400 的 detail（含逐条 reasons）在这里展示
@@ -170,6 +175,7 @@ async function handleValidate(template: TemplateOut) {
       `模板「${template.name}」校验通过，已下载填充示例文本的 .docx。` +
       `该文件仅用于确认版式与占位符是否齐全，不是真实综述成稿；` +
       `真实成稿请在任务详情页导出（那里使用任务正文与已渲染的参考文献）。`;
+    toastSuccess("模板校验通过，已下载示例文件");
   } catch (error) {
     renderError.value = (error as Error).message || "模板校验失败";
   } finally {
@@ -204,7 +210,6 @@ function cancelDelete() {
 
 /** 确认后才真正删除（后端会 unlink 磁盘文件）。 */
 async function confirmDelete(template: TemplateOut) {
-  confirmingDeleteId.value = null;
   uploadError.value = null;
   renderError.value = null;
   uploadMessage.value = null;
@@ -212,7 +217,9 @@ async function confirmDelete(template: TemplateOut) {
   deletingId.value = template.template_id;
   try {
     await deleteTemplate(template.template_id);
+    confirmingDeleteId.value = null;
     uploadMessage.value = `已删除模板「${template.name}」`;
+    toastSuccess("已删除 Word 模板");
     await refresh();
   } catch (error) {
     uploadError.value = (error as Error).message || "模板删除失败";
@@ -243,9 +250,9 @@ function placeholderLabel(item: TemplateOut["placeholders"][number]): string {
 
 <template>
   <section>
-    <PageHeader eyebrow="Document templates" title="Word 模板" :description="hint" />
+    <PageHeader eyebrow="Word 模板" title="Word 模板" :description="hint" />
 
-    <ErrorBanner :message="loadError" testid="template-load-error" />
+    <ErrorBanner :message="loadError" testid="template-load-error" @dismiss="loadError = null" />
 
     <form
       class="mb-3 flex flex-wrap items-end gap-3 rounded-lg border border-border bg-card p-4"
@@ -274,19 +281,20 @@ function placeholderLabel(item: TemplateOut["placeholders"][number]): string {
         />
       </div>
       <Button data-test="template-upload-submit" type="submit" :disabled="uploading">
-        <Loader2 v-if="uploading" class="animate-spin" aria-hidden="true" />
+        <Loader2 v-if="uploading" class="animate-spin motion-reduce:animate-none" aria-hidden="true" />
         <Upload v-else :size="15" aria-hidden="true" />
         <span>{{ uploading ? "上传中…" : "上传模板" }}</span>
       </Button>
     </form>
 
-    <ErrorBanner :message="uploadError" testid="template-upload-error" />
-    <ErrorBanner :message="renderError" testid="template-render-error" />
+    <ErrorBanner :message="uploadError" testid="template-upload-error" @dismiss="uploadError = null" />
+    <ErrorBanner :message="renderError" testid="template-render-error" @dismiss="renderError = null" />
     <Alert
       v-if="uploadMessage"
       variant="success"
       class="mb-3"
       data-test="template-upload-success"
+      @update:open="(v) => { if (!v) uploadMessage = null; }"
     >
       <CircleCheck />
       <span>{{ uploadMessage }}</span>
@@ -296,19 +304,30 @@ function placeholderLabel(item: TemplateOut["placeholders"][number]): string {
       variant="muted"
       class="mb-3"
       data-test="template-render-success"
+      @update:open="(v) => { if (!v) renderMessage = null; }"
     >
       <CircleCheck />
       <span>{{ renderMessage }}</span>
     </Alert>
 
-    <p v-if="loading && !templates.length" class="text-sm text-muted-foreground">加载中…</p>
+    <div v-if="showSkeleton" class="space-y-2" data-test="template-list-skeleton">
+      <div
+        v-for="i in 3"
+        :key="i"
+        class="h-24 rounded-lg border border-border bg-card p-3"
+      >
+        <div class="h-4 w-1/3 animate-pulse rounded bg-muted motion-reduce:animate-none" />
+        <div class="mt-2 h-3 w-2/3 animate-pulse rounded bg-muted/80 motion-reduce:animate-none" />
+        <div class="mt-3 h-3 w-1/4 animate-pulse rounded bg-muted/60 motion-reduce:animate-none" />
+      </div>
+    </div>
     <EmptyState
-      v-else-if="!templates.length"
+      v-else-if="!loading && !templates.length"
       testid="template-empty"
       title="还没有模板"
       description="上传一个 .docx 文件，Markdown 成稿就能套用它的版式导出。"
     />
-    <template v-else>
+    <template v-else-if="templates.length">
       <!-- 示例标注：用户必须知道「校验」下载的是占位文本，不是真实成稿 -->
       <p
         data-test="template-sample-note"
@@ -345,7 +364,7 @@ function placeholderLabel(item: TemplateOut["placeholders"][number]): string {
               >
                 <Loader2
                   v-if="renderingId === template.template_id"
-                  class="animate-spin"
+                  class="animate-spin motion-reduce:animate-none"
                   aria-hidden="true"
                 />
                 <Download v-else :size="15" aria-hidden="true" />
@@ -366,30 +385,18 @@ function placeholderLabel(item: TemplateOut["placeholders"][number]): string {
           </div>
 
           <!-- 删除确认：后端会 unlink 磁盘文件 -->
-          <div
+          <ConfirmBar
             v-if="confirmingDeleteId === template.template_id"
-            class="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-destructive/30 bg-destructive/8 px-2.5 py-1.5"
-          >
-            <span class="text-xs text-foreground">
-              删除后文件将从磁盘移除，需要重新上传。确认删除「{{ template.name }}」？
-            </span>
-            <button
-              type="button"
-              :data-test="`template-delete-confirm-${template.template_id}`"
-              class="rounded bg-destructive px-2 py-0.5 text-xs font-medium text-destructive-foreground"
-              @click="confirmDelete(template)"
-            >
-              确认删除
-            </button>
-            <button
-              type="button"
-              :data-test="`template-delete-cancel-${template.template_id}`"
-              class="rounded border border-border px-2 py-0.5 text-xs font-medium"
-              @click="cancelDelete"
-            >
-              取消
-            </button>
-          </div>
+            class="mt-2"
+            :title="`确认删除「${template.name}」？`"
+            consequence="删除后 .docx 文件将从磁盘移除，需要重新上传。"
+            confirm-label="确认删除"
+            :loading="deletingId === template.template_id"
+            :confirm-testid="`template-delete-confirm-${template.template_id}`"
+            :cancel-testid="`template-delete-cancel-${template.template_id}`"
+            @confirm="confirmDelete(template)"
+            @cancel="cancelDelete"
+          />
 
           <div v-if="template.placeholders.length" class="mt-1.5 flex flex-wrap gap-1">
             <code
