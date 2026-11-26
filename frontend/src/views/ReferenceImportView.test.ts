@@ -14,8 +14,10 @@ vi.mock("@/api/reference-library", () => ({
   saveLibraryItems: vi.fn(),
 }));
 
+const { pushMock } = vi.hoisted(() => ({ pushMock: vi.fn() }));
+
 vi.mock("vue-router", () => ({
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => ({ push: pushMock }),
 }));
 
 function importResult(overrides: Partial<ReferenceImportResponse> = {}): ReferenceImportResponse {
@@ -244,6 +246,20 @@ describe("ReferenceImportView 保存到引用库", () => {
     expect(result.exists()).toBe(true);
     expect(result.text()).toContain("新增 2 条");
     expect(wrapper.find('[data-test="import-goto-library"]').exists()).toBe(true);
+  });
+
+  it("保存成功后提供「返回创建任务」入口，跳转 /tasks 让建任务草稿恢复（用户 m00465）", async () => {
+    const wrapper = mount(ReferenceImportView);
+    await flushPromises();
+    await importFirst(wrapper);
+
+    await wrapper.find('[data-test="import-save"]').trigger("click");
+    await flushPromises();
+
+    const back = wrapper.find('[data-test="import-goto-task-create"]');
+    expect(back.exists()).toBe(true);
+    await back.trigger("click");
+    expect(pushMock).toHaveBeenCalledWith("/tasks");
   });
 
   it("部分成功时逐条展示拒绝原因", async () => {

@@ -139,6 +139,11 @@ function goToLibrary() {
   void router.push("/references/library");
 }
 
+/** 保存后回建任务页：那里会自动展开表单并恢复未提交的草稿（用户 m00465） */
+function goToCreateTask() {
+  void router.push("/tasks");
+}
+
 function handleReset() {
   content.value = "";
   result.value = null;
@@ -260,6 +265,19 @@ function metaText(item: ImportedReferenceItem): string {
         >
           去引用库查看 →
         </Button>
+        <div class="mt-1 flex flex-wrap items-center gap-3">
+          <Button
+            type="button"
+            size="sm"
+            data-test="import-goto-task-create"
+            @click="goToCreateTask"
+          >
+            返回创建任务 →
+          </Button>
+          <span class="text-xs text-muted-foreground">
+            返回后之前的建任务草稿会自动恢复，不用重新填写。
+          </span>
+        </div>
       </div>
     </Alert>
 

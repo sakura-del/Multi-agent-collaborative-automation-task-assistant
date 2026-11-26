@@ -11,6 +11,12 @@ import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { toastInfo, toastWarning } from "@/lib/toast";
+import {
+    clearTaskDraft,
+    loadTaskDraft,
+    saveTaskDraft,
+    type TaskCreateDraftValues,
+} from "@/lib/task-draft";
 import { getBillingUsage } from "@/api/billing";
 import { listCitationStyles } from "@/api/citation-styles";
 import { listLLMCredentials } from "@/api/llm-credentials";
@@ -34,6 +40,9 @@ const props = withDefaults(
         pending?: boolean;
         error?: string | null;
         documents?: Array<{ id: string; title: string }>;
+        // 草稿按用户隔离（localStorage 命名空间）；父组件传 auth.user?.id，
+        // 未登录/单测未注入时为 undefined → 落 anonymous 命名空间
+        draftUserId?: string | null;
     }>(),
     { pending: false, error: null, documents: () => [] },
 );
@@ -146,6 +155,149 @@ const selectedCredentialInfo = computed(
         ) ?? null,
 );
 
+// ===== 草稿保留（2026-11-26 用户反馈：去导入文献再回来，填好的内容全丢了）=====
+// 表单挂在 AnimatedCollapse 里且未 keepMounted：收起表单、点「前往导入文献」、
+// 甚至误刷新都会把已填内容连同组件一起丢掉。这里按用户命名空间落 localStorage，
+// 恢复后「自动展开表单」由父组件（TaskListView）负责，避免表单直接操作父状态。
+const restoredFromDraft = ref(false);
+const draftDirty = ref(false);
+
+/** 当前表单快照（白名单字段，与 task-draft 的 sanitize 对齐） */
+function draftValues(): TaskCreateDraftValues {
+    return {
+        workflowPreset: workflowPreset.value,
+        topic: topic.value,
+        draftText: draftText.value,
+        seedDois: [...seedDois.value],
+        seedDraft: seedDraft.value,
+        snowballDirection: snowballDirection.value,
+        keywords: [...keywords.value],
+        keywordDraft: keywordDraft.value,
+        maxDocuments: maxDocuments.value,
+        dateFrom: dateFrom.value,
+        dateTo: dateTo.value,
+        language: language.value,
+        citationStyle: citationStyle.value,
+        offlineDataset: offlineDataset.value,
+        useReferenceLibrary: useReferenceLibrary.value,
+        verifyReferences: verifyReferences.value,
+        modelSource: modelSource.value,
+        selectedCredential: selectedCredential.value,
+        selectedDocuments: [...selectedDocuments.value],
+    };
+}
+
+/** 把草稿写回表单；越界/非法值直接忽略，保持表单自身默认值 */ 
+function applyDraft(values: TaskCreateDraftValues) {
+    const presetIds = WORKFLOW_PRESETS.map((preset) => preset.id);
+    if (presetIds.includes(values.workflowPreset as WorkflowPreset)) {
+        workflowPreset.value = values.workflowPreset as WorkflowPreset;
+    }
+    topic.value = values.topic;
+    draftText.value = values.draftText;
+    seedDois.value = values.seedDois.slice(0, SEED_MAX);
+    seedDraft.value = values.seedDraft;
+    if (
+        values.snowballDirection === "both" ||
+        values.snowballDirection === "backward" ||
+        values.snowballDirection === "forward"
+    ) {
+        snowballDirection.value = values.snowballDirection;
+    }
+    keywords.value = values.keywords;
+    keywordDraft.value = values.keywordDraft;
+    const documents = Number(values.maxDocuments);
+    if (Number.isFinite(documents) && documents >= DOC_MIN) {
+        maxDocuments.value = documents;
+    }
+    dateFrom.value = values.dateFrom;
+    dateTo.value = values.dateTo;
+    if (values.language === "zh" || values.language === "en") {
+        language.value = values.language;
+    }
+    if (values.citationStyle) {
+        citationStyle.value = values.citationStyle;
+    }
+    offlineDataset.value = values.offlineDataset;
+    useReferenceLibrary.value = values.useReferenceLibrary;
+    verifyReferences.value = values.verifyReferences;
+    if (values.modelSource === "platform" || values.modelSource === "byok") {
+        modelSource.value = values.modelSource;
+    }
+    selectedCredential.value = values.selectedCredential;
+    selectedDocuments.value = values.selectedDocuments;
+}
+
+// 挂载即恢复：恢复过程本身不标记 dirty（onMounted 里的接口默认值调整也不会
+// 把草稿改成「用户没写过」的内容）。
+const initialDraft = loadTaskDraft(props.draftUserId);
+if (initialDraft) {
+    applyDraft(initialDraft.values);
+    restoredFromDraft.value = true;
+}
+
+/** 只有真实交互才算「有草稿」：避免打开表单就被保存一份空草稿 */
+function markDraftDirty() {
+    draftDirty.value = true;
+}
+
+function persistDraft() {
+    if (!draftDirty.value) return;
+    saveTaskDraft(props.draftUserId, draftValues());
+}
+
+watch(() => draftValues(), persistDraft);
+
+/** 去导入文献前先落盘：导入页没有返回入口时用户至少不会丢内容 */
+function goToImport() {
+    draftDirty.value = true;
+    persistDraft();
+    goTo("/references/import");
+}
+
+/** 回到表单初始状态（不含接口派生值：styleOptions/libraryCount 等） */
+function resetToDefaults() {
+    workflowPreset.value = DEFAULT_WORKFLOW_PRESET;
+    topic.value = "";
+    draftText.value = "";
+    seedDois.value = [];
+    seedDraft.value = "";
+    snowballDirection.value = "both";
+    keywords.value = [];
+    keywordDraft.value = "";
+    maxDocuments.value = activePreset.value.defaults.maxDocuments;
+    dateFrom.value = "";
+    dateTo.value = "";
+    language.value = "zh";
+    citationStyle.value = "gbt7714";
+    offlineDataset.value = false;
+    useReferenceLibrary.value = false;
+    verifyReferences.value = activePreset.value.defaults.verifyReferences;
+    selectedDocuments.value = [];
+    modelSource.value = "platform";
+    selectedCredential.value = "";
+    validationMessages.value = [];
+    validationErrorFields.value = new Set();
+}
+
+/** 放弃草稿：清存储并回到默认表单（提示由这里负责） */
+function discardDraft() {
+    draftDirty.value = false;
+    restoredFromDraft.value = false;
+    clearTaskDraft(props.draftUserId);
+    resetToDefaults();
+    toastInfo("草稿已清除");
+}
+
+/** 提交成功后由父组件调用：清掉已提交的草稿，避免下次进来回填旧内容 */
+function clearDraft() {
+    draftDirty.value = false;
+    restoredFromDraft.value = false;
+    clearTaskDraft(props.draftUserId);
+}
+
+defineExpose({ clearDraft });
+
 const canSubmit = computed(() => !props.pending);
 
 onMounted(async () => {
@@ -182,12 +334,18 @@ onMounted(async () => {
         }));
         if (options.length) {
             styleOptions.value = options;
-            const preferred = options.find(
-                (option) => option.style_id === data.default_style_id,
-            );
-            citationStyle.value = preferred
-                ? preferred.style_id
-                : options[0].style_id;
+            // 草稿恢复的引用格式优先；只有它已不在当前选项里才退回默认项
+            const restoredStyleStillValid =
+                restoredFromDraft.value &&
+                options.some((option) => option.style_id === citationStyle.value);
+            if (!restoredStyleStillValid) {
+                const preferred = options.find(
+                    (option) => option.style_id === data.default_style_id,
+                );
+                citationStyle.value = preferred
+                    ? preferred.style_id
+                    : options[0].style_id;
+            }
         }
     } else {
         // 列表不可用时静默降级为内置两项：创建任务不能被引用样式接口拖垮
@@ -200,6 +358,11 @@ onMounted(async () => {
         typeof summaryResult.value?.usable_as_source === "number"
     ) {
         libraryCount.value = summaryResult.value.usable_as_source;
+        // 草稿里勾了「使用我的引用库」，但引用库其实是空的：禁用态却勾选
+        // 会让提交必然失败（reference_library=true 空库），恢复时直接取消
+        if (libraryCount.value === 0 && useReferenceLibrary.value) {
+            useReferenceLibrary.value = false;
+        }
     } else {
         libraryCount.value = 0;
     }
@@ -213,8 +376,8 @@ onMounted(async () => {
         credentials.value = list;
         // 用户把某把凭据标成「默认」，建任务就该显式选中「自带模型」：
         // 否则会静默走平台模型，平台密钥缺失时任务直接卡在规划阶段
-        //（实测「Missing credentials」）。
-        if (modelSource.value === "platform") {
+        //（实测「Missing credentials」）。草稿恢复时尊重用户当时的选择。
+        if (!restoredFromDraft.value && modelSource.value === "platform") {
             const preferred = list.find(
                 (item) => item.is_default && item.status === "active",
             );
@@ -222,6 +385,14 @@ onMounted(async () => {
                 modelSource.value = "byok";
                 selectedCredential.value = preferred.credential_id;
             }
+        }
+        // 草稿里选的凭据已失效（被删除/停用）→ 回平台模型，避免提交必失败
+        const activeIds = new Set(
+            list.filter((item) => item.status === "active").map((item) => item.credential_id),
+        );
+        if (modelSource.value === "byok" && !activeIds.has(selectedCredential.value)) {
+            modelSource.value = "platform";
+            selectedCredential.value = "";
         }
     } else {
         credentials.value = [];
@@ -232,6 +403,11 @@ onMounted(async () => {
 watch([useReferenceLibrary, libraryCount], ([enabled, count]) => {
     if (enabled) {
         offlineDataset.value = false;
+    }
+    // 引用库为空时不允许保持勾选（禁用态却勾选 → 提交 reference_library=true 必失败）
+    if (enabled && count === 0) {
+        useReferenceLibrary.value = false;
+        return;
     }
     if (enabled && count !== null && count > 0 && Number(maxDocuments.value) > count) {
         maxDocuments.value = count;
@@ -567,7 +743,27 @@ async function handleSubmit() {
         class="min-w-0 max-w-3xl gap-4 p-4"
         @submit.prevent
         @keydown="onFormKeydown"
+        @input.capture="markDraftDirty"
+        @change.capture="markDraftDirty"
+        @click.capture="markDraftDirty"
     >
+        <!-- 草稿恢复提示：从导入文献页回来 / 刷新页面后自动回填，页面零解释容易像 bug -->
+        <div
+            v-if="restoredFromDraft"
+            data-test="draft-restored"
+            role="status"
+            class="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
+        >
+            <span>已恢复上次未提交的草稿（离开本页或收起表单都不会丢失）</span>
+            <button
+                type="button"
+                data-test="draft-discard"
+                class="text-primary underline underline-offset-2 hover:opacity-85"
+                @click="discardDraft"
+            >
+                清除草稿
+            </button>
+        </div>
         <div class="grid gap-1.5">
             <span class="text-sm font-medium leading-none">工作流预设</span>
             <div
@@ -825,10 +1021,13 @@ async function handleSubmit() {
                             <a
                                 href="/references/import"
                                 class="text-primary underline underline-offset-2 hover:opacity-85"
-                                @click.prevent="goTo('/references/import')"
+                                @click.prevent="goToImport()"
                             >
                                 前往导入文献 →
                             </a>
+                            <span data-test="import-draft-hint" class="text-muted-foreground">
+                                （导入后返回本页，草稿会自动恢复）
+                            </span>
                         </span>
                     </span>
                 </label>

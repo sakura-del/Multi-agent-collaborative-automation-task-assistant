@@ -6,6 +6,7 @@ import { createRouter, createMemoryHistory } from "vue-router";
 
 import TaskListView from "@/views/TaskListView.vue";
 import type { TaskSummary } from "@/api/types";
+import { saveTaskDraft, taskDraftStorageKey } from "@/lib/task-draft";
 
 // 真实渲染 TaskCreateForm 时它会在 onMounted 拉「引用库可用篇数 / 引用样式 /
 // 模型凭据」。单测里不能让它发真请求（happy-dom 会报 AsyncTaskManager 中止的
@@ -79,12 +80,21 @@ async function mountWith(
     /** 用真实 TaskCreateForm（默认为 stub），用于验证「新建表单」相关接线。 */
     realForm?: boolean;
     documents?: Array<{ id: string; title: string }>;
+    /** 注入登录用户（草稿按用户 id 隔离，自动展开要在挂载时就能读到 auth.user）。 */
+    user?: { id: string } | null;
   },
 ) {
   setActivePinia(createPinia());
   const router = makeRouter();
   await router.push("/tasks");
   await router.isReady();
+
+  // 登录态：草稿命名空间与「有草稿 → 自动展开表单」都依赖 auth.user.id
+  const { useAuthStore } = await import("@/stores/auth");
+  const auth = useAuthStore();
+  if (options?.user) {
+    auth.user = options.user as never;
+  }
 
   // 直接注入 store 状态，避免打网络。
   // `loadList` 必须 stub 掉：组件 `onMounted` 会调它，真跑会尝试连后端
@@ -511,5 +521,76 @@ describe("M3 任务列表 UX 与动效收口", () => {
     );
     expect(localStorage.getItem("vp:welcome_banner")).toBeNull();
     localStorage.clear();
+  });
+});
+
+// 草稿保留（2026-11-26 用户反馈）：从导入文献页回来 / 刷新后，
+// 建任务页要自动展开并回填上次未提交的内容；提交成功后清草稿。
+describe("任务创建草稿保留", () => {
+  const draftUser = { id: "user-draft-tasklist" };
+
+  function draftValues(overrides: Record<string, unknown> = {}) {
+    return {
+      workflowPreset: "literature_review",
+      topic: "导入文献回来后应当自动恢复的综述草稿主题",
+      draftText: "",
+      seedDois: [],
+      seedDraft: "",
+      snowballDirection: "both",
+      keywords: ["RAG"],
+      keywordDraft: "",
+      maxDocuments: 15,
+      dateFrom: "",
+      dateTo: "",
+      language: "zh",
+      citationStyle: "gbt7714",
+      offlineDataset: false,
+      useReferenceLibrary: false,
+      verifyReferences: false,
+      modelSource: "platform",
+      selectedCredential: "",
+      selectedDocuments: [],
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it("存在未提交草稿时自动展开表单并回填内容", async () => {
+    saveTaskDraft(draftUser.id, draftValues() as never);
+
+    const wrapper = await mountWith([task()], { realForm: true, user: draftUser });
+    await flushPromises();
+
+    expect(wrapper.find('[data-test="draft-restored"]').exists()).toBe(true);
+    expect(
+      (wrapper.find('[data-test="topic"]').element as HTMLInputElement).value,
+    ).toBe("导入文献回来后应当自动恢复的综述草稿主题");
+  });
+
+  it("没有草稿时保持收起，不凭空展开表单", async () => {
+    const wrapper = await mountWith([task()], { realForm: true, user: draftUser });
+    await flushPromises();
+
+    expect(wrapper.find('[data-test="topic"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="draft-restored"]').exists()).toBe(false);
+  });
+
+  it("创建成功后清除草稿，下次新建不再回填旧内容", async () => {
+    saveTaskDraft(draftUser.id, draftValues() as never);
+    const wrapper = await mountWith([task()], { realForm: true, user: draftUser });
+    await flushPromises();
+
+    const { useTaskStore } = await import("@/stores/tasks");
+    const store = useTaskStore();
+    store.create = vi.fn().mockResolvedValue({ task_id: "t-created" }) as never;
+
+    await wrapper.get('[data-test="submit"]').trigger("click");
+    await flushPromises();
+
+    expect(store.create).toHaveBeenCalledTimes(1);
+    expect(localStorage.getItem(taskDraftStorageKey(draftUser.id))).toBeNull();
   });
 });

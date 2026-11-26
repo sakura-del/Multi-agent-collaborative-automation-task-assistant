@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Pagination } from "@/components/ui/pagination";
 import { useDelayedLoading } from "@/composables/useDelayedLoading";
 import { trackEvent } from "@/api/growth";
+import { hasTaskDraft } from "@/lib/task-draft";
 import { useAuthStore } from "@/stores/auth";
 import { useKnowledgeStore } from "@/stores/knowledge";
 import { useTaskStore } from "@/stores/tasks";
@@ -58,6 +59,18 @@ const keyword = ref("");
 const filter = ref<"all" | "needs-me" | "active" | "done">("all");
 const showSkeleton = useDelayedLoading(() => store.listLoading && !store.items.length);
 
+// 建任务草稿（2026-11-26 用户反馈：去导入文献再回来，填写内容全丢）
+const formRef = ref<InstanceType<typeof TaskCreateForm> | null>(null);
+const draftUserId = computed(() => auth.user?.id ?? null);
+
+/** 有未提交草稿时自动展开表单：用户从导入文献页回来应当看到原来的内容 */
+function revealDraftIfAny() {
+  if (showForm.value) return;
+  if (hasTaskDraft(auth.user?.id)) {
+    showForm.value = true;
+  }
+}
+
 /**
  * 打开/收起新建表单，并在首次展开时加载知识库文档。
  *
@@ -75,7 +88,14 @@ function toggleCreateForm() {
 
 onMounted(() => {
   void refresh(1);
+  revealDraftIfAny();
 });
+
+// 登录态可能晚于首屏就绪（缓存用户/会话校验）：用户就绪后再检查一次草稿
+watch(
+  () => auth.user?.id ?? null,
+  () => revealDraftIfAny(),
+);
 
 /** 视图筛选值 → 后端状态分组（写法不同：needs-me vs needs_me）。 */
 const GROUP_MAP: Record<"all" | "needs-me" | "active" | "done", TaskStatusGroup> = {
@@ -136,6 +156,8 @@ async function handleCreate(payload: TaskCreate) {
     const created = await store.create(payload);
     trackEvent("task_created", { is_demo: Boolean(payload.is_demo) });
     auth.dismissWelcome();
+    // 提交成功即清草稿：下次新建不应回填已提交的内容
+    formRef.value?.clearDraft();
     showForm.value = false;
     await router.push({ name: "task-detail", params: { taskId: created.task_id } });
   } catch (error) {
@@ -401,10 +423,12 @@ const rows = computed(() =>
 
     <AnimatedCollapse :open="showForm">
       <TaskCreateForm
+        ref="formRef"
         class="mb-5"
         :pending="submitting"
         :error="errorMessage"
         :documents="knowledge.documents"
+        :draft-user-id="draftUserId"
         @submit="handleCreate"
         @dismiss-error="errorMessage = null"
       />

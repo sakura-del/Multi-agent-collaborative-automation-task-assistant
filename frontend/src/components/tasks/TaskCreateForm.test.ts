@@ -14,6 +14,7 @@ vi.mock("@/api/client", () => ({
 }));
 
 import api from "@/api/client";
+import { saveTaskDraft, taskDraftStorageKey } from "@/lib/task-draft";
 
 // 表单只负责校验与 payload 组装：提交动作由父组件（TaskListView）发起
 function mountForm(props: Record<string, unknown> = {}) {
@@ -1094,5 +1095,160 @@ describe("TaskCreateForm 默认模型", () => {
         await wrapper.find('button[aria-label="移除 RAG"]').trigger("click");
         await flushPromises();
         expect(kwInput.classes()).not.toContain("border-destructive");
+    });
+});
+
+// 草稿保留（2026-11-26 用户反馈）：新用户去导入文献 / 收起表单 / 误刷新后，
+// 建任务页已填内容不能丢。表单自己负责存取，父组件负责自动展开与成功后清理。
+describe("TaskCreateForm 草稿保留", () => {
+    beforeEach(() => {
+        vi.mocked(api.get).mockRejectedValue(new Error("样式列表不可用"));
+    });
+
+    it("真实输入后自动落盘到该用户的草稿命名空间", async () => {
+        localStorage.clear();
+        const wrapper = mountForm({ draftUserId: "user-draft-1" });
+
+        await wrapper
+            .find('[data-test="topic"]')
+            .setValue("导入文献后回来草稿不能丢的范围综述研究");
+        await wrapper.find('[data-test="keyword-input"]').setValue("draft");
+        await wrapper.find('[data-test="keyword-add-btn"]').trigger("click");
+        await flushPromises();
+
+        const raw = localStorage.getItem(taskDraftStorageKey("user-draft-1"));
+        expect(raw).toBeTruthy();
+        expect(JSON.parse(raw!).values.topic).toBe(
+            "导入文献后回来草稿不能丢的范围综述研究",
+        );
+    });
+
+    it("挂载时恢复已有草稿并显示恢复提示", async () => {
+        localStorage.clear();
+        saveTaskDraft("user-draft-restore", {
+            workflowPreset: "literature_review",
+            topic: "上次没提交的综述主题草稿",
+            draftText: "",
+            seedDois: [],
+            seedDraft: "",
+            snowballDirection: "both",
+            keywords: ["RAG", "agent"],
+            keywordDraft: "",
+            maxDocuments: 10,
+            dateFrom: "",
+            dateTo: "",
+            language: "en",
+            citationStyle: "apa",
+            offlineDataset: false,
+            useReferenceLibrary: false,
+            verifyReferences: false,
+            modelSource: "platform",
+            selectedCredential: "",
+            selectedDocuments: [],
+        });
+
+        const wrapper = mountForm({ draftUserId: "user-draft-restore" });
+        await flushPromises();
+
+        expect(
+            (wrapper.find('[data-test="topic"]').element as HTMLInputElement).value,
+        ).toBe("上次没提交的综述主题草稿");
+        expect(wrapper.find('[data-test="draft-restored"]').exists()).toBe(true);
+        expect(wrapper.text()).toContain("已恢复上次未提交的草稿");
+    });
+
+    it("点「清除草稿」后存储被删除、表单回到默认状态、提示消失", async () => {
+        localStorage.clear();
+        saveTaskDraft("user-draft-discard", {
+            workflowPreset: "literature_review",
+            topic: "要被清除的草稿主题",
+            draftText: "",
+            seedDois: [],
+            seedDraft: "",
+            snowballDirection: "both",
+            keywords: ["RAG"],
+            keywordDraft: "",
+            maxDocuments: 15,
+            dateFrom: "",
+            dateTo: "",
+            language: "zh",
+            citationStyle: "gbt7714",
+            offlineDataset: false,
+            useReferenceLibrary: false,
+            verifyReferences: false,
+            modelSource: "platform",
+            selectedCredential: "",
+            selectedDocuments: [],
+        });
+
+        const wrapper = mountForm({ draftUserId: "user-draft-discard" });
+        await flushPromises();
+        await wrapper.find('[data-test="draft-discard"]').trigger("click");
+        await flushPromises();
+
+        expect(localStorage.getItem(taskDraftStorageKey("user-draft-discard"))).toBeNull();
+        expect(wrapper.find('[data-test="draft-restored"]').exists()).toBe(false);
+        expect(
+            (wrapper.find('[data-test="topic"]').element as HTMLInputElement).value,
+        ).toBe("");
+    });
+
+    it("没有草稿时不显示恢复提示（不能凭空出现「已恢复」）", async () => {
+        localStorage.clear();
+        const wrapper = mountForm({ draftUserId: "user-without-draft" });
+        await flushPromises();
+
+        expect(wrapper.find('[data-test="draft-restored"]').exists()).toBe(false);
+    });
+
+    it("父组件提交成功后调用 clearDraft 会清掉草稿", async () => {
+        localStorage.clear();
+        const wrapper = mountForm({ draftUserId: "user-clear-after-submit" });
+        await wrapper
+            .find('[data-test="topic"]')
+            .setValue("提交成功后应当清理草稿的主题");
+        await flushPromises();
+        expect(
+            localStorage.getItem(taskDraftStorageKey("user-clear-after-submit")),
+        ).toBeTruthy();
+
+        (wrapper.vm as unknown as { clearDraft: () => void }).clearDraft();
+        await flushPromises();
+
+        expect(
+            localStorage.getItem(taskDraftStorageKey("user-clear-after-submit")),
+        ).toBeNull();
+    });
+
+    it("引用库为空时，恢复出的「使用我的引用库」勾选会被自动取消", async () => {
+        localStorage.clear();
+        saveTaskDraft("user-draft-empty-library", {
+            workflowPreset: "literature_review",
+            topic: "引用库为空时草稿里的勾选要自动取消",
+            draftText: "",
+            seedDois: [],
+            seedDraft: "",
+            snowballDirection: "both",
+            keywords: ["RAG"],
+            keywordDraft: "",
+            maxDocuments: 5,
+            dateFrom: "",
+            dateTo: "",
+            language: "zh",
+            citationStyle: "gbt7714",
+            offlineDataset: false,
+            useReferenceLibrary: true,
+            verifyReferences: false,
+            modelSource: "platform",
+            selectedCredential: "",
+            selectedDocuments: [],
+        });
+
+        const wrapper = mountForm({ draftUserId: "user-draft-empty-library" });
+        await flushPromises();
+
+        const checkbox = wrapper.find('[data-test="reference-library"]');
+        // api.get 全部 reject → 摘要失败 → libraryCount = 0 → 禁用且取消勾选
+        expect((checkbox.element as HTMLInputElement).checked).toBe(false);
     });
 });
