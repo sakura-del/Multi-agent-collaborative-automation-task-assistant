@@ -138,6 +138,14 @@ class CslItem(BaseModel):
     issued_year: int | None = None
     doi: str | None = None
     url: str | None = None
+    abstract: str | None = None
+    """题录摘要（可选中文字段，Issue #67 Step 1）。
+
+    来源：RIS ``AB``/``N2``、BibTeX ``abstract``、NoteExpress ``{Abstract}``。
+    它只是**题录摘要证据**，不冒充全文分片；缺省 ``None`` 保持旧数据兼容
+    （2026-11-26 之前入库的条目没有该字段）。
+    """
+
     medium: str | None = None
     """载体标识代码（GB/T 7714—2025 附录 A.2）：``MM`` 缩微资料 / ``MT`` / ``DK`` / ``CD`` 等。
 
@@ -152,7 +160,8 @@ class CslItem(BaseModel):
     def from_csl_json(cls, data: Mapping[str, Any]) -> CslItem:
         """标准 CSL-JSON dict → ``CslItem``。
 
-        - 只取本模型建模的字段，**忽略**其它 CSL 字段（如 ``abstract`` / ``keyword``）；
+        - 只取本模型建模的字段，**忽略**其它 CSL 字段（如 ``keyword``）；
+        - ``abstract`` 会保留（截断至 4000 字），供题录摘要证据使用；
         - ``id`` / ``type`` / ``title`` 缺失或空白 → :class:`ValidationException`；
         - ``issued`` 兼容 ``date-parts`` / ``raw`` / ``year`` / 纯年份字符串；
         - ``language`` 缺失时按 ADR §4.2 的字符集启发式判定（不臆造 zh-CN）。
@@ -191,6 +200,7 @@ class CslItem(BaseModel):
             "issued_year": parse_year(data.get("issued")),
             "doi": normalize_doi(_first_present(data, "DOI", "doi")),
             "url": _text(_first_present(data, "URL", "url")) or None,
+            "abstract": _text(data.get("abstract"))[:4000] or None,
             "medium": _text(data.get("medium")) or None,
             "language": language
             or detect_language(title=title, authors=[author_sort_text(name) for name in authors]),
@@ -214,6 +224,7 @@ class CslItem(BaseModel):
             "page": self.page,
             "publisher": self.publisher,
             "publisher-place": self.publisher_place,
+            "abstract": self.abstract,
             "medium": self.medium,
         }
         for key, value in optional.items():

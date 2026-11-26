@@ -1,14 +1,14 @@
-"""参考文献导入 HTTP 端点测试（Phase 1 P1-E 接线）。
+"""参考文献导入 HTTP 端点测试（Phase 1 P1-E 接线；Issue #67 Step 1 扩格式）。
 
 对应计划 §1.5 的「遗留：`POST /references/import` 端点未接线」。
 
 端点：
-    POST /api/v1/references/import   导入 BibTeX / RIS，返回解析后的条目预览
+    POST /api/v1/references/import   导入 BibTeX / RIS / NoteExpress，返回解析后的条目预览
 
 设计约定：
 - **纯解析、不落库**：导入只做「文本 → CslItem 列表」的预览，用户确认后再另走保存；
   这样避免半成品数据污染引用库，也让前端能做「导入前预览」。
-- 格式可显式指定（`format=bibtex|ris`），也可省略由服务端按内容探测。
+- 格式可显式指定（`format=bibtex|ris|noteexpress`），也可省略由服务端按内容探测。
 - 非法输入 → **400** 且 `detail` 可读（逐条定位信息，绝不静默返回半成品）。
 """
 
@@ -28,7 +28,8 @@ BIBTEX_SAMPLE = """
   title = {Ragas: Automated Evaluation of Retrieval Augmented Generation},
   journal = {arXiv preprint},
   year = {2023},
-  doi = {10.18653/v1/2023.evalnlp-1.16}
+  doi = {10.18653/v1/2023.evalnlp-1.16},
+  abstract = {We introduce Ragas, an evaluation framework for retrieval augmented generation.}
 }
 """
 
@@ -42,8 +43,24 @@ VL  - 38
 IS  - 4
 SP  - 100
 EP  - 110
+AB  - 本文提出面向中文文献综述的自动化方法，覆盖检索、抽取与写作三个环节。
 DO  - 10.1234/zh.journal.2024.001
 ER  -
+"""
+
+NOTEEXPRESS_SAMPLE = """{Reference Type}: Journal Article
+{Title}: 检索增强生成在软件工程中的应用综述
+{Authors}: 张犬俊;李四
+{Journal}: 软件学报
+{Year}: 2026
+{Volume}: 37
+{Issue}: 3
+{Pages}: 1-18
+{Abstract}: 检索增强生成（RAG）已成为大语言模型落地软件工程的重要范式。
+本文系统梳理了代码生成、缺陷修复与测试三个方向的研究进展。
+{Keywords}: 检索增强生成;软件工程;大模型
+{DOI}: 10.13328/j.cnki.jos.007567
+{URL}: https://d.wanfangdata.com.cn/periodical/rjxb202603017
 """
 
 
@@ -81,6 +98,7 @@ class TestImportBibtex:
         assert "Ragas" in item["title"]
         assert item["authors"] == ["Es, Shahul", "James, Jithin"]
         assert item["year"] == 2023
+        assert item["abstract"].startswith("We introduce Ragas")
 
     def test_autodetects_bibtex_without_format(self, client: TestClient) -> None:
         response = client.post("/api/v1/references/import", json={"content": BIBTEX_SAMPLE})
@@ -114,6 +132,7 @@ class TestImportRis:
         assert item["authors"] == ["牛耕田", "李泽"]
         assert item["year"] == 2024
         assert item["page"] == "100-110"
+        assert item["abstract"].startswith("本文提出面向中文文献综述的自动化方法")
 
     def test_autodetects_ris_without_format(self, client: TestClient) -> None:
         response = client.post("/api/v1/references/import", json={"content": RIS_SAMPLE})
@@ -128,6 +147,43 @@ class TestImportRis:
         )
 
         assert response.status_code == 400
+
+
+class TestImportNoteexpress:
+    def test_imports_noteexpress_entry_with_multiline_abstract(self, client: TestClient) -> None:
+        response = client.post(
+            "/api/v1/references/import",
+            json={"content": NOTEEXPRESS_SAMPLE, "format": "noteexpress"},
+        )
+
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["format"] == "noteexpress"
+        assert len(payload["items"]) == 1
+        item = payload["items"][0]
+        assert item["title"] == "检索增强生成在软件工程中的应用综述"
+        assert item["authors"] == ["张犬俊", "李四"]
+        assert item["year"] == 2026
+        assert item["page"] == "1-18"
+        assert item["container_title"] == "软件学报"
+        # 多行摘要要拼回一个字段（续行不能丢）
+        assert item["abstract"].startswith("检索增强生成（RAG）")
+        assert "代码生成、缺陷修复与测试" in item["abstract"]
+
+    def test_autodetects_noteexpress_without_format(self, client: TestClient) -> None:
+        response = client.post("/api/v1/references/import", json={"content": NOTEEXPRESS_SAMPLE})
+
+        assert response.status_code == 200, response.text
+        assert response.json()["format"] == "noteexpress"
+
+    def test_invalid_noteexpress_returns_400(self, client: TestClient) -> None:
+        response = client.post(
+            "/api/v1/references/import",
+            json={"content": "{Title}: 没有记录类型", "format": "noteexpress"},
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"]
 
 
 class TestEdgeCases:

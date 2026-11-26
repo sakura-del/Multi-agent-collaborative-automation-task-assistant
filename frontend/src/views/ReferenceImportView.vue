@@ -3,7 +3,7 @@ import BePromptInput from "@/components/motion/BePromptInput.vue";
 import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 import { Motion, useReducedMotion } from "motion-v";
-import { CircleCheck, FileInput, Loader2, RotateCcw, Save } from "lucide-vue-next";
+import { CircleCheck, FileInput, FileUp, Loader2, RotateCcw, Save } from "lucide-vue-next";
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
@@ -24,6 +24,7 @@ import type {
   ReferenceImportResponse,
 } from "@/api/types";
 import { toCslItemPayloads } from "@/utils/reference-payload";
+import { MAX_IMPORT_FILE_BYTES, decodeReferenceFile } from "@/utils/reference-file";
 
 // 参考文献导入页（Phase 1 P1-E · 2026-10-26 补上真实出口）。
 //
@@ -33,12 +34,14 @@ import { toCslItemPayloads } from "@/utils/reference-payload";
 // **什么也做不了**：可点元素只有「解析预览」和「重新开始」，后端没有引用库表，
 // 任务文献只来自检索源。用户把 Zotero 导出的 .bib 粘进来，看到结果，然后没有下文。
 //
-// ## 现在的链路
+// ## 现在的链路（Issue #67 Step 1 扩到 NoteExpress / 本地文件）
 //
-// 粘贴 → 解析预览 → **保存到引用库** → 创建任务时选「我的引用库」→ 任务用这些文献
+// 粘贴或选择本地文件（.bib / .ris / .net / .txt） → 解析预览
+// → **保存到引用库** → 创建任务时选「我的引用库」→ 任务用这些文献
 //
-// 保存是**部分成功**的：能进的进，不能进的带原因逐条展示
-// （缺年份/缺 URL 的条目不能当文献源用，后端会拒）。
+// 本地文件优先按 UTF-8 严格解码，失败自动回退 GB18030 ——
+// 知网/维普/万方导出的 .net 文件在 Windows 上常是 GBK 编码，
+// 只按 UTF-8 解码会得到一堆替换字符（`�`），用户会以为文件坏了。
 const router = useRouter();
 const reduced = useReducedMotion();
 
@@ -50,14 +53,25 @@ const importing = ref(false);
 const saving = ref(false);
 const saveError = ref<string | null>(null);
 const saveResult = ref<LibrarySaveResponse | null>(null);
+const fileInput = ref<HTMLInputElement | null>(null);
+const pickedFileName = ref<string | null>(null);
 
 const FORMAT_OPTIONS: { value: ReferenceImportFormat; label: string }[] = [
   { value: "auto", label: "自动识别" },
   { value: "bibtex", label: "BibTeX" },
   { value: "ris", label: "RIS" },
+  { value: "noteexpress", label: "NoteExpress" },
 ];
 
-const formatLabel = computed(() => (result.value?.format === "ris" ? "RIS" : "BibTeX"));
+const FORMAT_LABELS: Record<Exclude<ReferenceImportFormat, "auto">, string> = {
+  bibtex: "BibTeX",
+  ris: "RIS",
+  noteexpress: "NoteExpress",
+};
+
+const formatLabel = computed(() =>
+  result.value ? FORMAT_LABELS[result.value.format] : "BibTeX"
+);
 const hasResult = computed(() => result.value !== null);
 const isEmpty = computed(() => result.value !== null && result.value.count === 0);
 
@@ -87,12 +101,40 @@ const saveSummary = computed(() => {
   return parts.join(" · ");
 });
 
+/** 单文件上限常量在 `utils/reference-file.ts` 里（与解码逻辑同处，便于单测）。 */
+function triggerFilePick() {
+  fileInput.value?.click();
+}
+
+async function handleFileChange(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = "";
+  if (!file) {
+    return;
+  }
+  if (file.size > MAX_IMPORT_FILE_BYTES) {
+    error.value = "文件过大（上限 5 MB），题录文件通常只有几十 KB，请确认选对了文件";
+    return;
+  }
+  try {
+    content.value = decodeReferenceFile(await file.arrayBuffer());
+    pickedFileName.value = file.name;
+    error.value = null;
+    result.value = null;
+    saveError.value = null;
+    saveResult.value = null;
+  } catch {
+    error.value = "读取文件失败，请确认文件未损坏，或直接粘贴文本内容";
+  }
+}
+
 async function handleImport() {
   error.value = null;
   saveError.value = null;
   saveResult.value = null;
   if (!content.value.trim()) {
-    error.value = "请先粘贴 BibTeX 或 RIS 内容";
+    error.value = "请先选择文件或粘贴 BibTeX / RIS / NoteExpress 内容";
     return;
   }
   importing.value = true;
@@ -150,6 +192,7 @@ function handleReset() {
   error.value = null;
   saveError.value = null;
   saveResult.value = null;
+  pickedFileName.value = null;
 }
 
 function authorText(item: ImportedReferenceItem): string {
@@ -182,7 +225,7 @@ function metaText(item: ImportedReferenceItem): string {
     <PageHeader
       eyebrow="导入文献"
       title="导入参考文献"
-      description="粘贴 BibTeX 或 RIS 文本即可解析预览；支持从 Zotero / EndNote 直接导出。解析后可以保存到引用库，创建任务时选择「我的引用库」就会用这些文献。"
+      description="粘贴 BibTeX / RIS / NoteExpress 文本，或选择知识库/维普/万方导出的 .net / .txt 文件；支持从 Zotero / EndNote / 知网 / 维普 / 万方导出。解析后可以保存到引用库，创建任务时选择「我的引用库」就会用这些文献。"
     />
 
     <Card as="form" class="mb-3 min-w-0 gap-3 p-4" data-test="import-form" @submit.prevent="handleImport">
@@ -192,11 +235,36 @@ function metaText(item: ImportedReferenceItem): string {
           id="import-content"
           v-model="content"
           data-test="import-content"
-          placeholder="粘贴 BibTeX（@article{...}）或 RIS（TY  - JOUR ... ER  - ）"
-          hint="支持 @article / @inproceedings 等；RIS 以 TY  - 开头"
+          placeholder="粘贴 BibTeX（@article{...}）、RIS（TY  - JOUR ... ER  - ）或 NoteExpress（{Reference Type}: ...）"
+          hint="支持 @article / @inproceedings 等；RIS 以 TY  - 开头；NoteExpress 为 {Tag}: 值 形式"
           min-height="10rem"
           @submit="handleImport"
         />
+      </div>
+      <div class="flex flex-wrap items-center gap-3">
+        <input
+          ref="fileInput"
+          type="file"
+          accept=".bib,.ris,.net,.txt"
+          class="hidden"
+          data-test="import-file"
+          @change="handleFileChange"
+        />
+        <Button
+          data-test="import-file-button"
+          type="button"
+          variant="outline"
+          @click="triggerFilePick"
+        >
+          <FileUp :size="15" aria-hidden="true" />
+          <span>选择本地文件</span>
+        </Button>
+        <span v-if="pickedFileName" class="text-xs text-muted-foreground" data-test="import-file-name">
+          已读取 {{ pickedFileName }}（UTF-8 / GB18030 自动识别）
+        </span>
+        <span v-else class="text-xs text-muted-foreground">
+          支持 .bib / .ris / .net / .txt；中文导出文件按 UTF-8 → GB18030 自动回退
+        </span>
       </div>
       <div class="flex flex-wrap items-end gap-3">
         <div class="grid gap-1.5">
@@ -307,6 +375,9 @@ function metaText(item: ImportedReferenceItem): string {
         <div class="mt-0.5 text-xs text-muted-foreground">{{ authorText(item) }}</div>
         <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <Badge variant="muted">{{ item.type }}</Badge>
+          <Badge v-if="item.abstract?.trim()" variant="success" data-test="abstract-badge">
+            有摘要
+          </Badge>
           <span v-if="metaText(item)">{{ metaText(item) }}</span>
         </div>
         <div v-if="item.doi" class="mt-1">

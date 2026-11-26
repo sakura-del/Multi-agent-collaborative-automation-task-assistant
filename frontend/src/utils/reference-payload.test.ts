@@ -28,6 +28,7 @@ function item(overrides: Partial<ImportedReferenceItem> = {}): ImportedReference
     publisher: null,
     doi: "10.1234/a",
     url: null,
+    abstract: null,
     ...overrides,
   };
 }
@@ -101,6 +102,16 @@ describe("toCslItemPayload", () => {
     const payload = toCslItemPayload(item({ authors: ["", "  "] }));
 
     expect(payload.author).toEqual([]);
+  });
+
+  it("摘要透传为 abstract（Issue #67 Step 1：导入的题录摘要不能丢）", () => {
+    const payload = toCslItemPayload(item({ abstract: "万方题录摘要：RAG 综述。" }));
+
+    expect(payload.abstract).toBe("万方题录摘要：RAG 综述。");
+  });
+
+  it("无摘要时不写 abstract 字段", () => {
+    expect(toCslItemPayload(item({ abstract: null }))).not.toHaveProperty("abstract");
   });
 });
 

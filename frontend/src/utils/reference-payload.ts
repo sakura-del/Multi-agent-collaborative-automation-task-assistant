@@ -64,7 +64,16 @@ export function toCslItemPayload(item: ImportedReferenceItem): Record<string, un
   if (item.year !== null && item.year !== undefined) {
     payload.issued_year = item.year;
   }
-  for (const key of ["container_title", "volume", "issue", "page", "publisher", "doi", "url"] as const) {
+  for (const key of [
+    "container_title",
+    "volume",
+    "issue",
+    "page",
+    "publisher",
+    "doi",
+    "url",
+    "abstract",
+  ] as const) {
     const value = item[key];
     if (value !== null && value !== undefined && value !== "") {
       payload[key] = value;

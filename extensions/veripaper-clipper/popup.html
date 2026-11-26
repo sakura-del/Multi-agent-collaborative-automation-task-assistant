@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VeriPaper Clipper</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #ffffff;
+        --fg: #18181b;
+        --muted: #71717a;
+        --border: #e4e4e7;
+        --primary: #18181b;
+        --primary-fg: #fafafa;
+        --ok: #15803d;
+        --error: #b91c1c;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #18181b;
+          --fg: #fafafa;
+          --muted: #a1a1aa;
+          --border: #3f3f46;
+          --primary: #fafafa;
+          --primary-fg: #18181b;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        width: 360px;
+        margin: 0;
+        padding: 14px;
+        font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Microsoft YaHei", sans-serif;
+        color: var(--fg);
+        background: var(--bg);
+      }
+      h1 { margin: 0 0 2px; font-size: 15px; }
+      p.hint { margin: 0 0 12px; color: var(--muted); font-size: 12px; }
+      label { display: block; margin: 10px 0 4px; font-size: 12px; color: var(--muted); }
+      input {
+        width: 100%;
+        padding: 7px 9px;
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+      }
+      .row { display: flex; gap: 8px; margin-top: 12px; }
+      button {
+        flex: 1;
+        padding: 8px 10px;
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+      }
+      button.primary { background: var(--primary); color: var(--primary-fg); border-color: var(--primary); }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      .status { margin-top: 10px; font-size: 12px; min-height: 18px; }
+      .status.ok { color: var(--ok); }
+      .status.error { color: var(--error); }
+      .preview {
+        margin-top: 10px;
+        padding: 10px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        display: none;
+      }
+      .preview.visible { display: block; }
+      .preview .title { font-weight: 600; margin-bottom: 4px; }
+      .preview .meta { color: var(--muted); font-size: 12px; }
+      .badges { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px; }
+      .badge {
+        font-size: 11px;
+        padding: 1px 7px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        color: var(--muted);
+      }
+      a { color: inherit; }
+      footer { margin-top: 12px; color: var(--muted); font-size: 11px; }
+    </style>
+  </head>
+  <body>
+    <h1>VeriPaper Clipper</h1>
+    <p class="hint">
+      在知网 / 维普 / 万方详情页点「提取题录」，确认后一键保存到引用库（仅题录+摘要，不抓全文）。
+    </p>
+
+    <details id="settings">
+      <summary style="cursor: pointer; color: var(--muted); font-size: 12px">连接设置</summary>
+      <label for="api-base">VeriPaper 地址</label>
+      <input id="api-base" type="url" placeholder="https://veripaper.me" />
+      <label for="api-key">API Key（仅保存在本机浏览器扩展存储中）</label>
+      <input id="api-key" type="password" placeholder="maa_..." autocomplete="off" />
+      <div class="row">
+        <button id="save-settings" type="button">保存设置</button>
+      </div>
+    </details>
+
+    <div class="row">
+      <button id="extract" class="primary" type="button">提取当前页题录</button>
+    </div>
+    <div class="row">
+      <button id="save" type="button" disabled>保存到引用库</button>
+    </div>
+
+    <div id="status" class="status" role="status"></div>
+
+    <div id="preview" class="preview">
+      <div class="title" id="preview-title"></div>
+      <div class="meta" id="preview-meta"></div>
+      <div class="badges">
+        <span class="badge" id="badge-doi">DOI</span>
+        <span class="badge" id="badge-abstract">含摘要</span>
+        <span class="badge">中文源</span>
+      </div>
+    </div>
+
+    <footer>
+      Key 在 <a href="https://veripaper.me/settings/api-keys" target="_blank" rel="noopener noreferrer">VeriPaper 设置 · 开放 API</a> 生成。
+      本扩展不向第三方发送任何数据。
+    </footer>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

@@ -29,6 +29,7 @@ function importResult(overrides: Partial<ReferenceImportResponse> = {}): Referen
         publisher: null,
         doi: "10.18653/v1/2023.evalnlp-1.16",
         url: null,
+        abstract: null,
       },
     ],
     ...overrides,

@@ -1,4 +1,4 @@
-"""BibTeX / RIS → CSL-JSON 导入（Phase 1 P1-E，计划 §1.5）。
+"""BibTeX / RIS / NoteExpress → CSL-JSON 导入（Phase 1 P1-E；Issue #67 Step 1）。
 
 本模块是 :mod:`app.tools.csl.exporters` 的**逆运算**（round-trip 测试锁定）：
 
@@ -9,6 +9,12 @@
   \\textasciicircum{} \\textbackslash{}``）在此反转义。
 - ``parse_ris``：按 ``TY  -`` 起、``ER  -`` 止切记录，把 RIS 标签映射为 ``CslItem`` 字段
   （``SP``+``EP`` → ``page``，``LA`` → ``language``，未知标签忽略）。
+- ``parse_noteexpress``：解析 NoteExpress ``.net`` 文本导出（维普/知网/万方最常用的
+  「导出题录」格式）：``{Tag}: value`` 行 + 续行，``{Reference Type}:`` 起新记录。
+  NE 导出的摘要常为多行续行，会拼回 ``Abstract`` 字段（截断 4000 字）。
+
+摘要字段（``abstract``）在三种格式里都会保留：RIS ``AB``/``N2``、BibTeX ``abstract``、
+NoteExpress ``{Abstract}``。它只作**题录摘要证据**，不冒充全文分片。
 
 设计约定：
 
@@ -99,6 +105,49 @@ RIS_TYPE_TO_CSL: dict[str, str] = {
     "PAT": "patent",
 }
 
+#: NoteExpress ``{Reference Type}`` 标签 → CSL type（key 已 casefold）。
+#:
+#: 覆盖维普/知网/万方「导出题录 → NoteExpress」的常见类型；中文标签也做别名，
+#: 因为中文版 NoteExpress 导出会把类型写成中文（如「期刊文章」）。
+NOTEEXPRESS_TYPE_TO_CSL: dict[str, str] = {
+    "journal article": "article-journal",
+    "journal": "article-journal",
+    "article": "article-journal",
+    "期刊文章": "article-journal",
+    "期刊论文": "article-journal",
+    "magazine article": "article-magazine",
+    "newspaper article": "article-newspaper",
+    "thesis": "thesis",
+    "dissertation": "thesis",
+    "学位论文": "thesis",
+    "conference proceedings": "paper-conference",
+    "conference paper": "paper-conference",
+    "conference": "paper-conference",
+    "会议论文": "paper-conference",
+    "book": "book",
+    "专著": "book",
+    "book section": "chapter",
+    "chapter": "chapter",
+    "book chapter": "chapter",
+    "report": "report",
+    "研究报告": "report",
+    "web page": "webpage",
+    "website": "webpage",
+    "网页": "webpage",
+    "patent": "patent",
+    "专利": "patent",
+    "standard": "standard",
+    "标准": "standard",
+    "dataset": "dataset",
+    "数据集": "dataset",
+    "preprint": "manuscript",
+    "manuscript": "manuscript",
+    "预印本": "manuscript",
+}
+
+#: 摘要在导入/存储侧的硬上限（与 ``CslItem.from_csl_json`` 一致）。
+MAX_ABSTRACT_LENGTH = 4000
+
 #: 导出转义 → 原文的单次正则反转义表（含 exporter 使用的 3 个 LaTeX 文本命令）。
 #:
 #: 单次替换（而不是连续 ``replace``）保证 ``\\textbackslash{}\\&`` 这类组合不会被二次反转义。
@@ -134,6 +183,19 @@ _RIS_LINE_RE = re.compile(r"^(?P<tag>[A-Z][A-Z0-9])\s{1,2}-\s?(?P<value>.*)$")
 
 #: 页码范围分隔符（`150--160` / `150–160` / `150—160` → `150-160`）。
 _PAGE_RANGE_RE = re.compile(r"\s*[-\u2013\u2014]+\s*")
+
+#: NoteExpress 字段行：``{Tag}: value``（中文版导出用全角冒号，一并容忍）。
+#: tag 允许字母/数字/空格/斜杠/下划线/连字符与 CJK（如 ``{文献类型}``）。
+_NOTE_EXPRESS_LINE_RE = re.compile(
+    r"^\{(?P<tag>[A-Za-z0-9 /_\-\u4e00-\u9fff]+)\}[：:]\s*(?P<value>.*)$"
+)
+
+#: NoteExpress ``{Reference Type}`` 标签的别名（用于识别记录起点）。
+_NOTE_EXPRESS_TYPE_TAGS = frozenset({"reference type", "文献类型"})
+
+#: NoteExpress 作者分隔符：英文分号 / 中文分号；中文逗号单独处理（见 ``_noteexpress_authors``）。
+_NOTE_EXPRESS_AUTHOR_SPLIT_RE = re.compile(r"[;；]+")
+_NOTE_EXPRESS_CJK_COMMA_RE = re.compile(r"[，]+")
 
 
 # ===== public API =====
@@ -212,6 +274,77 @@ def parse_ris(text: str) -> list[CslItem]:
     if current is not None:
         raise ValidationException("RIS 记录缺少 ER 结束标记")
     return [_csl_item_from_ris_record(record) for record in records]
+
+
+def parse_noteexpress(text: str) -> list[CslItem]:
+    """把 NoteExpress ``.net`` 文本导出解析为 ``list[CslItem]``。
+
+    格式（维普/知网/万方「导出题录 → NoteExpress」）：
+
+        {Reference Type}: Journal Article
+        {Title}: 检索增强生成在软件工程中的应用综述
+        {Authors}: 张犬俊;李四
+        {Journal}: 计算机学报
+        {Year}: 2026
+        {Abstract}: 第一行摘要
+        第二行续行
+        {Keywords}: 检索增强生成;大模型
+
+    - 记录以 ``{Reference Type}:`` 开始，空行分隔（也容忍无空行、直接以类型行起新记录）；
+    - 不以 ``{Tag}:`` 开头的非空行是**续行**，拼到上一个字段值（摘要常为多行）；
+    - 空输入 → ``[]``；缺 ``{Reference Type}`` 起头 / 缺 ``Title`` → ValidationException。
+    """
+    if not isinstance(text, str):
+        raise ValidationException("NoteExpress 输入必须是字符串")
+
+    records: list[dict[str, str]] = []
+    current: dict[str, str] | None = None
+    last_tag: str | None = None
+
+    def _flush() -> None:
+        nonlocal current, last_tag
+        if current is not None:
+            records.append(current)
+        current = None
+        last_tag = None
+
+    for line_number, raw_line in enumerate(text.splitlines(), start=1):
+        line = raw_line.rstrip()
+        if line_number == 1:
+            line = line.lstrip("\ufeff")
+        if not line.strip():
+            # 空行是记录分隔（结束当前记录）
+            _flush()
+            continue
+
+        match = _NOTE_EXPRESS_LINE_RE.match(line)
+        if match is None:
+            if current is None or last_tag is None:
+                raise ValidationException(
+                    f"NoteExpress 第 {line_number} 行不是合法的字段行（且没有可续接的字段）："
+                    f"{line.strip()[:40]!r}"
+                )
+            previous = current.get(last_tag, "")
+            current[last_tag] = f"{previous}\n{line.strip()}" if previous else line.strip()
+            continue
+
+        tag = match.group("tag").strip()
+        value = match.group("value").strip()
+        if tag.casefold() in _NOTE_EXPRESS_TYPE_TAGS:
+            _flush()
+            current = {tag: value}
+            last_tag = tag
+            continue
+        if current is None:
+            raise ValidationException(
+                f"NoteExpress 第 {line_number} 行在记录起始（Reference Type）之前出现字段 {tag}"
+            )
+        # 同一标签重复出现：按出现顺序以换行拼接（导出工具有时拆多行写摘要/关键词）
+        current[tag] = f"{current[tag]}\n{value}" if tag in current else value
+        last_tag = tag
+
+    _flush()
+    return [_csl_item_from_noteexpress(record) for record in records]
 
 
 # ===== BibTeX 扫描 =====
@@ -419,6 +552,7 @@ def _csl_item_from_bibtex_entry(entry_type: str, key: str, fields: Mapping[str, 
         issued_year=parse_year(_first_field(fields, "year", "date")),
         doi=doi,
         url=_first_field(fields, "url") or None,
+        abstract=_first_field(fields, "abstract")[:MAX_ABSTRACT_LENGTH] or None,
         language=detect_language(title=title, authors=[author_sort_text(name) for name in authors]),
     )
 
@@ -517,6 +651,7 @@ def _csl_item_from_ris_record(record: Mapping[str, list[str]]) -> CslItem:
         issued_year=parse_year(_ris_first(record, "PY", "Y1", "DA")),
         doi=doi,
         url=url,
+        abstract=_ris_first(record, "AB", "N2")[:MAX_ABSTRACT_LENGTH] or None,
         language=detect_language(
             title=title,
             authors=[author_sort_text(name) for name in authors],
@@ -530,3 +665,90 @@ def _ris_page(start: str, end: str) -> str | None:
     if start and end:
         return f"{start}-{end}"
     return start or end or None
+
+
+# ===== NoteExpress 映射 =====
+
+
+def _noteexpress_field(record: Mapping[str, str], *names: str) -> str:
+    """按标签别名取第一个非空值（大小写不敏感；中文标签同样走别名）。"""
+    normalized = {tag.casefold(): value for tag, value in record.items()}
+    for name in names:
+        value = normalized.get(name.casefold())
+        if value and value.strip():
+            return value.strip()
+    return ""
+
+
+def _noteexpress_abstract(record: Mapping[str, str]) -> str | None:
+    """摘要字段：多行续行已在扫描期拼好，这里截断到统一上限。"""
+    raw = _noteexpress_field(record, "Abstract", "摘要")
+    if not raw:
+        return None
+    return raw[:MAX_ABSTRACT_LENGTH]
+
+
+def _noteexpress_authors(raw: str) -> list[CslName]:
+    """``Authors`` 字段 → 姓名列表。
+
+    分隔符：英文分号 / 中文分号；中文逗号（``，``）也当作者分隔（中文导出常见）。
+    **ASCII 逗号不拆分** —— 西文姓名 ``Family, Given`` 依赖它区分姓/名。
+    """
+    authors: list[CslName] = []
+    for part in _NOTE_EXPRESS_AUTHOR_SPLIT_RE.split(raw):
+        for text in _NOTE_EXPRESS_CJK_COMMA_RE.split(part):
+            cleaned = text.strip()
+            if not cleaned:
+                continue
+            name = parse_csl_name(cleaned)
+            if name.family or name.given or name.literal:
+                authors.append(name)
+    return authors
+
+
+def _csl_item_from_noteexpress(record: Mapping[str, str]) -> CslItem:
+    raw_type = _noteexpress_field(record, "Reference Type", "文献类型")
+    if not raw_type:
+        raise ValidationException("NoteExpress 记录缺少 {Reference Type}")
+    csl_type = NOTEEXPRESS_TYPE_TO_CSL.get(raw_type.casefold(), "manuscript")
+
+    title = _noteexpress_field(record, "Title", "题名", "标题")
+    if not title:
+        raise ValidationException(f"NoteExpress 记录缺少标题（Title）：类型 {raw_type!r}")
+
+    authors = _noteexpress_authors(_noteexpress_field(record, "Authors", "Author", "作者"))
+    url = _noteexpress_field(record, "URL", "链接") or None
+    doi = normalize_doi(_noteexpress_field(record, "DOI")) or doi_from_url(url)
+    pages = _normalize_page(_noteexpress_field(record, "Pages", "Page", "页码", "页"))
+
+    return CslItem(
+        id=f"doi:{doi}" if doi else build_ref_id(doi=None, source_id=None, title=title),
+        type=csl_type,
+        title=title,
+        author=authors,
+        container_title=_noteexpress_field(
+            record,
+            "Journal",
+            "Book Title",
+            "Conference Name",
+            "刊名",
+            "期刊",
+            "书名",
+            "会议名称",
+        )
+        or None,
+        volume=_noteexpress_field(record, "Volume", "卷") or None,
+        issue=_noteexpress_field(record, "Issue", "期") or None,
+        page=pages or None,
+        publisher=_noteexpress_field(record, "Publisher", "出版社", "出版者") or None,
+        publisher_place=_noteexpress_field(record, "Place", "出版地") or None,
+        issued_year=parse_year(_noteexpress_field(record, "Year", "Date", "年份", "年")),
+        doi=doi,
+        url=url,
+        abstract=_noteexpress_abstract(record),
+        language=detect_language(
+            title=title,
+            authors=[author_sort_text(name) for name in authors],
+            explicit=_noteexpress_field(record, "Language", "语种") or None,
+        ),
+    )

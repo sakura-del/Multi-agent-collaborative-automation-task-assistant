@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "VeriPaper Clipper",
+  "version": "1.0.0",
+  "description": "把知网 / 维普 / 万方的题录（含摘要）一键保存到 VeriPaper 引用库（BYOK，零爬虫）。",
+  "permissions": ["activeTab", "storage", "scripting"],
+  "host_permissions": [
+    "https://veripaper.me/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "保存到 VeriPaper"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.wanfangdata.com.cn/*",
+        "https://qikan.cqvip.com/*",
+        "https://*.cqvip.com/*",
+        "https://kns.cnki.net/*",
+        "https://*.cnki.net/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

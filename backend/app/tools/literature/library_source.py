@@ -12,11 +12,12 @@
 | --- | --- | --- |
 | 数据来源 | 外部 HTTP | 本地 DB |
 | 可复现性 | 依赖外部服务当时的内容 | **完全可复现**（用户自己的库） |
-| 摘要 | 有 | **没有**（只存元数据） |
+| 摘要 | 有 | **有**（导入 RIS/BibTeX/NoteExpress 时保留的题录摘要） |
 | 数量 | 按 `max_results` 截断 | 按 `max_results` 截断 |
 
-**没有摘要是有意的非目标**（引用库计划 §2）：综述的证据来自元数据与正文引用，
-摘要不是必需；且存摘要会引入版权与存储成本。
+题录摘要（2026-11-26，Issue #67 Step 1 起保留）只作**摘要证据**：它能支撑
+「这篇文献讲了什么」的概述，但**不能冒充全文分片**——引用具体论断仍应以原文为准。
+2026-11-26 之前入库的历史条目没有摘要，按空串回落。
 
 ## `LiteratureRecord` 是冻结契约
 
@@ -79,7 +80,7 @@ def csl_item_to_record(item: CslItem) -> LiteratureRecord | None:
             source_id=item.id[:64],
             title=item.title[:500],
             authors=[_author_text(name) for name in item.author],
-            abstract="",
+            abstract=(item.abstract or "")[:4000],
             # 只有年份没有月日：取当年 1 月 1 日（明确、可解释，不是随机值）
             published_at=datetime(item.issued_year, 1, 1, tzinfo=UTC),
             source_url=HttpUrl(url),

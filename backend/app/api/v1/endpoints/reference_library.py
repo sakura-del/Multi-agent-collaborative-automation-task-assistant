@@ -7,7 +7,8 @@
     DELETE /api/v1/reference-library            清空
 
 约定（与 `citation_styles` / `templates` 一致）：
-- 全部端点要求 Bearer access token；跨用户访问统一 404（不泄漏存在性）；
+- 全部端点要求 Bearer access token；**保存端点额外接受 `X-API-Key`**
+  （浏览器剪藏扩展用，Issue #67 Step 2）；跨用户访问统一 404（不泄漏存在性）；
 - **部分成功如实报告**：`created` / `skipped` / `rejected` 三个数字都给；
 - 只有**全部被拒**时才 400，且列出逐条原因；
 - 业务逻辑全在 `ReferenceLibraryService`，本层只做 HTTP 映射。
@@ -29,7 +30,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_active_user
+from app.api.deps import get_current_active_user, get_current_user_or_api_key
 from app.core.exceptions import ValidationException
 from app.db.models.reference_library import ReferenceLibraryItem
 from app.db.models.user import User
@@ -121,6 +122,7 @@ class PatchRequest(BaseModel):
     issued_year: int | None = None
     doi: str | None = None
     url: str | None = None
+    abstract: str | None = None
     language: str | None = None
     medium: str | None = None
     author: list[dict] | None = None
@@ -162,6 +164,8 @@ def get_reference_library_service(
 
 CurrentUserDep = Annotated[User, Depends(get_current_active_user)]
 ServiceDep = Annotated[ReferenceLibraryService, Depends(get_reference_library_service)]
+ApiUserDep = Annotated[User, Depends(get_current_user_or_api_key)]
+"""双通道鉴权：Bearer JWT（网页）或 ``X-API-Key``（浏览器剪藏扩展，Issue #67 Step 2）。"""
 
 
 _CJK_RE = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf]")
@@ -251,9 +255,14 @@ async def library_summary(service: ServiceDep, current_user: CurrentUserDep) -> 
 async def save_items(
     payload: SaveRequest,
     service: ServiceDep,
-    current_user: CurrentUserDep,
+    current_user: ApiUserDep,
 ) -> SaveResponse:
     """批量保存；按 `ref_id` 幂等。
+
+    ## 双通道鉴权（Issue #67 Step 2）
+
+    网页走 Bearer JWT；浏览器剪藏扩展用 ``X-API-Key``（开放 API 的 Key）。
+    两个通道在 :func:`app.api.deps.get_current_user_or_api_key` 里统一收口。
 
     ## 部分成功是常态
 

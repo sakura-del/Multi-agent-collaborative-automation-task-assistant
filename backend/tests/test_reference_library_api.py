@@ -27,13 +27,16 @@ from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import app.db.models  # noqa: F401  确保全部 ORM 注册到 Base.metadata
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_current_user_or_api_key
 from app.api.v1.endpoints.reference_library import (
     router as reference_library_router,
 )
 from app.core.exceptions import UnauthorizedException
 from app.db.base import Base
+from app.db.models.reference_library import ReferenceLibraryItem
+from app.db.models.user import User
 from app.db.session import get_db
+from app.security.api_key_service import ApiKeyService
 
 USER_A = UUID("11111111-1111-1111-1111-111111111111")
 USER_B = UUID("22222222-2222-2222-2222-222222222222")
@@ -53,6 +56,7 @@ def csl_payload(
     issued_year: int | None = 2024,
     doi: str | None = "10.1234/a",
     url: str | None = None,
+    abstract: str | None = None,
 ) -> dict[str, Any]:
     """一条 `CslItem` 形态的载荷（与导入预览返回的结构一致）。"""
     return {
@@ -64,6 +68,7 @@ def csl_payload(
         "issued_year": issued_year,
         "doi": doi,
         "url": url,
+        "abstract": abstract,
         "language": "zh-CN",
     }
 
@@ -81,6 +86,7 @@ class _StubUser:
 class LibraryEnv:
     client: TestClient
     app: FastAPI
+    session_factory: Any
 
 
 @pytest.fixture
@@ -114,12 +120,15 @@ def library_env(tmp_path: Path) -> Iterator[LibraryEnv]:
     app: FastAPI = create_app()
     app.include_router(reference_library_router, prefix="/api/v1")
     app.dependency_overrides[get_db] = override_get_db
+    # save 端点走双通道鉴权：JWT 分支内部直接调用 get_current_user，
+    # 因此两个依赖都要覆盖（只覆盖 get_current_user 时 save 仍会 401）。
     app.dependency_overrides[get_current_user] = override_get_current_user
+    app.dependency_overrides[get_current_user_or_api_key] = override_get_current_user
 
     client = TestClient(app)
     client.__enter__()
     try:
-        yield LibraryEnv(client=client, app=app)
+        yield LibraryEnv(client=client, app=app, session_factory=session_factory)
     finally:
         client.__exit__(None, None, None)
         app.dependency_overrides.clear()
@@ -367,6 +376,28 @@ def test_patch_is_partial(library_env: LibraryEnv) -> None:
     assert resp.json()["title"] == "检索增强生成评估方法综述"
 
 
+def test_patch_abstract_is_stored_in_payload(library_env: LibraryEnv) -> None:
+    """补摘要落到 `payload` 真源（Issue #67 Step 1 前端「补摘要」用）。"""
+    _save(library_env, [csl_payload()])
+    item_id = _first_item_id(library_env)
+
+    resp = library_env.client.patch(
+        f"{API}/{item_id}", json={"abstract": "补上的摘要"}, headers=_auth(TOKEN_A)
+    )
+
+    assert resp.status_code == 200
+
+    async def _read() -> Any:
+        from sqlalchemy import select
+
+        async with library_env.session_factory() as session:
+            return await session.scalar(select(ReferenceLibraryItem))
+
+    stored = asyncio.run(_read())
+    assert stored is not None
+    assert stored.payload["abstract"] == "补上的摘要"
+
+
 def test_patch_rejects_item_that_fails_admission(library_env: LibraryEnv) -> None:
     """把年份改成空 → 重新准入检查必须拒绝（否则库里出现不可用条目）。"""
     _save(library_env, [csl_payload()])
@@ -516,3 +547,132 @@ def test_list_supports_keyword_and_year_filters(library_env: LibraryEnv) -> None
     by_year = library_env.client.get(API, params={"year": 2024}, headers=_auth(TOKEN_A)).json()
     assert by_year["total"] == 1
     assert by_year["items"][0]["ref_id"] == "doi:10.18653/v1/2024.eacl-demo.16"
+
+
+# ===== 剪藏扩展：真实 API Key 通道（Issue #67 Step 2）=====
+
+
+@dataclass
+class ClipperEnv:
+    client: TestClient
+    app: FastAPI
+    api_key: str
+    session_factory: Any
+
+
+@pytest.fixture
+def clipper_env(tmp_path: Path) -> Iterator[ClipperEnv]:
+    """真实 `X-API-Key` 通道：**不覆盖鉴权依赖**，走生产实现。
+
+    这是浏览器剪藏扩展的唯一入口（扩展没有登录态，只有用户自己生成的 Key），
+    所以必须用真实依赖做集成测试，而不是 `dependency_overrides`。
+    """
+    from app.main import create_app
+
+    engine = create_async_engine(
+        f"sqlite+aiosqlite:///{tmp_path / 'clipper.db'}",
+        connect_args={"timeout": 10},
+    )
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def _seed() -> tuple[User, str]:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        async with session_factory() as session:
+            user = User(
+                username="clipper",
+                email="clipper@example.com",
+                password_hash="x",
+                is_active=True,
+            )
+            session.add(user)
+            await session.commit()
+            await session.refresh(user)
+        service = ApiKeyService(session_factory)
+        _, plaintext = await service.create(user.id, name="veripaper-clipper")
+        return user, plaintext
+
+    async def override_get_db() -> Any:
+        async with session_factory() as session:
+            yield session
+
+    _user, api_key = asyncio.run(_seed())
+    app: FastAPI = create_app()
+    app.include_router(reference_library_router, prefix="/api/v1")
+    app.dependency_overrides[get_db] = override_get_db
+
+    client = TestClient(app)
+    client.__enter__()
+    try:
+        yield ClipperEnv(client=client, app=app, api_key=api_key, session_factory=session_factory)
+    finally:
+        client.__exit__(None, None, None)
+        app.dependency_overrides.clear()
+        asyncio.run(engine.dispose())
+
+
+def _key_headers(env: ClipperEnv) -> dict[str, str]:
+    return {"X-API-Key": env.api_key}
+
+
+class TestClipperApiKeyPath:
+    def test_requires_api_key(self, clipper_env: ClipperEnv) -> None:
+        assert clipper_env.client.get(API).status_code == 401
+
+    def test_api_key_can_save_browser_clip_with_abstract(self, clipper_env: ClipperEnv) -> None:
+        payload = csl_payload(
+            ref_id="doi:10.13328/j.cnki.jos.007567",
+            doi="10.13328/j.cnki.jos.007567",
+            title="检索增强生成在软件工程中的应用综述",
+            issued_year=2026,
+            url="https://d.wanfangdata.com.cn/periodical/rjxb202603017",
+            abstract="检索增强生成（RAG）已成为大语言模型落地软件工程的重要范式。",
+        )
+
+        resp = clipper_env.client.post(
+            API, json={"items": [payload]}, headers=_key_headers(clipper_env)
+        )
+
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["created"] == 1
+
+    def test_api_key_save_is_idempotent(self, clipper_env: ClipperEnv) -> None:
+        payload = csl_payload(
+            ref_id="doi:10.13328/j.cnki.jos.007567", doi="10.13328/j.cnki.jos.007567"
+        )
+        first = clipper_env.client.post(
+            API, json={"items": [payload]}, headers=_key_headers(clipper_env)
+        )
+        second = clipper_env.client.post(
+            API, json={"items": [payload]}, headers=_key_headers(clipper_env)
+        )
+
+        assert first.status_code == 201
+        assert second.status_code == 201
+        assert second.json()["created"] == 0
+        assert second.json()["skipped"] == 1
+
+    def test_abstract_is_persisted_in_item_payload(self, clipper_env: ClipperEnv) -> None:
+        """摘要必须进 `payload`（真源），不能只存在请求里。"""
+        abstract = "万方题录摘要：代码生成、缺陷修复与测试三个方向。"
+        payload = csl_payload(
+            ref_id="doi:10.13328/j.cnki.jos.007567",
+            doi="10.13328/j.cnki.jos.007567",
+            abstract=abstract,
+        )
+        assert (
+            clipper_env.client.post(
+                API, json={"items": [payload]}, headers=_key_headers(clipper_env)
+            ).status_code
+            == 201
+        )
+
+        async def _read() -> Any:
+            from sqlalchemy import select
+
+            async with clipper_env.session_factory() as session:
+                return await session.scalar(select(ReferenceLibraryItem))
+
+        stored = asyncio.run(_read())
+        assert stored is not None
+        assert stored.payload["abstract"] == abstract

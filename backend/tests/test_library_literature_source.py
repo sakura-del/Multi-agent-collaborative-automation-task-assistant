@@ -35,6 +35,7 @@ def csl_item(
     issued_year: int | None = 2024,
     doi: str | None = "10.1234/a",
     url: str | None = None,
+    abstract: str | None = None,
 ) -> CslItem:
     return CslItem(
         id=ref_id,
@@ -45,6 +46,7 @@ def csl_item(
         issued_year=issued_year,
         doi=doi,
         url=url,
+        abstract=abstract,
         language="zh-CN",
     )
 
@@ -95,11 +97,22 @@ def test_published_at_uses_jan_first_of_issued_year() -> None:
     assert record.published_at.tzinfo == UTC
 
 
-def test_abstract_is_empty_not_fabricated() -> None:
-    """引用库只存元数据，没有摘要 —— 不能编一个假摘要。"""
+def test_abstract_is_empty_when_item_has_none() -> None:
+    """没有摘要的旧条目回落空串 —— 不能编一个假摘要。"""
     record = csl_item_to_record(csl_item())
     assert record is not None
     assert record.abstract == ""
+
+
+def test_abstract_is_passed_through_when_present() -> None:
+    """Issue #67 Step 1：导入时保留的题录摘要要透传到文献源（截断 4000 字）。"""
+    record = csl_item_to_record(csl_item(abstract="RAG 评测框架综述。"))
+    assert record is not None
+    assert record.abstract == "RAG 评测框架综述。"
+    long_abstract = "长" * 5000
+    truncated = csl_item_to_record(csl_item(abstract=long_abstract))
+    assert truncated is not None
+    assert len(truncated.abstract) == 4000
 
 
 # ===== LibraryLiteratureSource =====

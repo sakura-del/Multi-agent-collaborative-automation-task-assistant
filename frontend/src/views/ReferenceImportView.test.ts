@@ -38,6 +38,7 @@ function importResult(overrides: Partial<ReferenceImportResponse> = {}): Referen
         publisher: null,
         doi: "10.18653/v1/2023.evalnlp-1.16",
         url: null,
+        abstract: "We introduce Ragas, an evaluation framework for RAG.",
       },
       {
         id: "doi:10.1234/zh.2024.001",
@@ -52,6 +53,7 @@ function importResult(overrides: Partial<ReferenceImportResponse> = {}): Referen
         publisher: null,
         doi: "10.1234/zh.2024.001",
         url: null,
+        abstract: null,
       },
     ],
     ...overrides,
@@ -331,5 +333,106 @@ describe("ReferenceImportView 保存到引用库", () => {
 
     const footer = wrapper.find('[data-test="prompt-input-footer"]');
     expect(footer.classes()).toContain("flex-wrap");
+  });
+});
+
+/**
+ * Issue #67 Step 1：NoteExpress 格式、本地文件导入与摘要展示。
+ *
+ * 知网/维普/万方最常用的是 NoteExpress `.net` 导出；文件名可能是 GBK 编码，
+ * 所以本地文件链路必须能自动回退 GB18030（见 `utils/reference-file.test.ts`）。
+ */
+describe("ReferenceImportView · NoteExpress / 本地文件 / 摘要（Issue #67）", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(importReferences).mockResolvedValue(importResult());
+    vi.mocked(saveLibraryItems).mockResolvedValue({
+      created: 1,
+      skipped: 0,
+      merged: 0,
+      rejected: [],
+    });
+  });
+
+  it("格式下拉框含 NoteExpress 选项", async () => {
+    const wrapper = mount(ReferenceImportView);
+    await flushPromises();
+
+    const options = wrapper.find('[data-test="import-format"]').findAll("option");
+    expect(options.map((option) => option.text())).toContain("NoteExpress");
+  });
+
+  it("识别为 NoteExpress 时展示对应格式名", async () => {
+    vi.mocked(importReferences).mockResolvedValue(importResult({ format: "noteexpress" }));
+
+    const wrapper = mount(ReferenceImportView);
+    await flushPromises();
+    await fillContent(wrapper, "{Reference Type}: Journal Article");
+    await wrapper.find('[data-test="import-submit"]').trigger("submit");
+    await flushPromises();
+
+    expect(wrapper.find('[data-test="import-summary"]').text()).toContain("NoteExpress");
+  });
+
+  it("有摘要的条目显示「有摘要」徽标，无摘要的不显示", async () => {
+    const wrapper = mount(ReferenceImportView);
+    await flushPromises();
+    await fillContent(wrapper, "@article{a, title={T}}");
+    await wrapper.find('[data-test="import-submit"]').trigger("submit");
+    await flushPromises();
+
+    const badges = wrapper.findAll('[data-test="abstract-badge"]');
+    expect(badges).toHaveLength(1);
+    expect(badges[0].text()).toContain("有摘要");
+  });
+
+  it("保存时把摘要透传到 CslItem 载荷（不丢摘要）", async () => {
+    const wrapper = mount(ReferenceImportView);
+    await flushPromises();
+    await fillContent(wrapper, "@article{a, title={T}}");
+    await wrapper.find('[data-test="import-submit"]').trigger("submit");
+    await flushPromises();
+
+    await wrapper.find('[data-test="import-save"]').trigger("click");
+    await flushPromises();
+
+    const payload = vi.mocked(saveLibraryItems).mock.calls[0][0];
+    expect(payload[0]).toHaveProperty("abstract", "We introduce Ragas, an evaluation framework for RAG.");
+    // 无摘要的条目不应带空 abstract（少写字段，与导入器输出风格一致）
+    expect(payload[1]).not.toHaveProperty("abstract");
+  });
+
+  it("选择本地文件后填入文本并可解析", async () => {
+    const wrapper = mount(ReferenceImportView);
+    await flushPromises();
+
+    const file = new File(
+      ["{Reference Type}: Journal Article\n{Title}: 中文题录\n{Year}: 2026\n"],
+      "cnki-export.net",
+      { type: "text/plain" }
+    );
+    const fileInput = wrapper.find('[data-test="import-file"]');
+    Object.defineProperty(fileInput.element, "files", { value: [file], configurable: true });
+    await fileInput.trigger("change");
+    await flushPromises();
+
+    const textarea = wrapper.find('[data-test="import-content"]');
+    expect((textarea.element as HTMLTextAreaElement).value).toContain("中文题录");
+    expect(wrapper.find('[data-test="import-file-name"]').text()).toContain("cnki-export.net");
+
+    await wrapper.find('[data-test="import-submit"]').trigger("submit");
+    await flushPromises();
+
+    expect(importReferences).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(importReferences).mock.calls[0][0].content).toContain("中文题录");
+  });
+
+  it("选择本地文件按钮存在并标明支持的扩展名", async () => {
+    const wrapper = mount(ReferenceImportView);
+    await flushPromises();
+
+    expect(wrapper.find('[data-test="import-file-button"]').exists()).toBe(true);
+    expect(wrapper.text()).toMatch(/\.net/);
+    expect(wrapper.text()).toContain("GB18030");
   });
 });

@@ -530,9 +530,9 @@ export interface TemplateRenderRequest {
   filename?: string;
 }
 
-// ===== 参考文献导入契约（与后端 app/api/v1/endpoints/references.py 对齐，Phase 1 P1-E）=====
+// ===== 参考文献导入契约（与后端 app/api/v1/endpoints/references.py 对齐，Phase 1 P1-E；Issue #67 扩 NoteExpress/摘要）=====
 
-export type ReferenceImportFormat = "bibtex" | "ris" | "auto";
+export type ReferenceImportFormat = "bibtex" | "ris" | "noteexpress" | "auto";
 
 export interface ImportedReferenceItem {
   id: string | null;
@@ -547,6 +547,8 @@ export interface ImportedReferenceItem {
   publisher: string | null;
   doi: string | null;
   url: string | null;
+  /** 题录摘要（RIS AB/N2、BibTeX abstract、NoteExpress {Abstract}）；只作摘要证据，不冒充全文 */
+  abstract: string | null;
 }
 
 export interface ReferenceImportResponse {

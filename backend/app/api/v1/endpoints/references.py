@@ -14,13 +14,17 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.exceptions import ValidationException
-from app.tools.csl.importers import parse_bibtex, parse_ris
+from app.tools.csl.importers import (
+    parse_bibtex,
+    parse_noteexpress,
+    parse_ris,
+)
 from app.tools.csl.models import CslItem
 
 router = APIRouter(prefix="/references", tags=["references"])
@@ -30,7 +34,7 @@ __all__ = ["MAX_IMPORT_BYTES", "router"]
 #: 导入文本上限（1 MB ≈ 数千条 BibTeX/RIS，足够 Zotero/EndNote 整库导出）
 MAX_IMPORT_BYTES = 1024 * 1024
 
-ImportFormat = Literal["bibtex", "ris", "auto"]
+ImportFormat = Literal["bibtex", "ris", "noteexpress", "auto"]
 
 
 class ImportRequest(BaseModel):
@@ -42,8 +46,8 @@ class ImportRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    content: str = Field(description="BibTeX 或 RIS 文本内容")
-    format: str = Field(default="auto", description="bibtex / ris / auto")
+    content: str = Field(description="BibTeX / RIS / NoteExpress 文本内容")
+    format: str = Field(default="auto", description="bibtex / ris / noteexpress / auto")
 
 
 class ImportedItemOut(BaseModel):
@@ -63,32 +67,38 @@ class ImportedItemOut(BaseModel):
     publisher: str | None = None
     doi: str | None = None
     url: str | None = None
+    abstract: str | None = None
+    """题录摘要（有则展示「有摘要」徽标；不冒充全文）。"""
 
 
 class ImportResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    format: Literal["bibtex", "ris"]
+    format: Literal["bibtex", "ris", "noteexpress"]
     """实际采用的解析格式（`auto` 会被解析成具体值）。"""
 
     count: int
     items: list[ImportedItemOut] = Field(default_factory=list)
 
 
-def detect_format(content: str) -> Literal["bibtex", "ris"] | None:
+def detect_format(content: str) -> Literal["bibtex", "ris", "noteexpress"] | None:
     """按内容探测格式；无法判定返回 None。
 
     判据（保守，避免误判）：
     - RIS：出现行首 `TY  - `（两空格 + 连字符）；
+    - NoteExpress：出现行首 `{Tag}:` 字段行（导出必带 `{Reference Type}:`）；
     - BibTeX：出现 `@<type>{` 或 `@<type>(` 条目起始。
     """
     stripped = content.strip()
     if not stripped:
         return None
+    import re
+
     for line in stripped.splitlines():
         if line.lstrip().startswith("TY  -"):
             return "ris"
-    import re
+        if re.match(r"^\{[A-Za-z0-9 /_\-\u4e00-\u9fff]+\}[：:]", line.lstrip()):
+            return "noteexpress"
 
     if re.search(r"@[A-Za-z]+\s*[{(]", stripped):
         return "bibtex"
@@ -109,6 +119,7 @@ def _to_out(item: CslItem) -> ImportedItemOut:
         publisher=item.publisher,
         doi=item.doi,
         url=item.url,
+        abstract=item.abstract,
     )
 
 
@@ -143,27 +154,34 @@ async def import_references(payload: ImportRequest) -> ImportResponse:
         raise _bad_request(f"导入内容超过大小上限（{MAX_IMPORT_BYTES} 字节）")
 
     requested = payload.format.strip().lower()
-    if requested not in ("bibtex", "ris", "auto"):
-        raise _bad_request(f"不支持的导入格式：{payload.format!r}（可选 bibtex / ris / auto）")
+    if requested not in ("bibtex", "ris", "noteexpress", "auto"):
+        raise _bad_request(
+            f"不支持的导入格式：{payload.format!r}（可选 bibtex / ris / noteexpress / auto）"
+        )
 
-    resolved: Literal["bibtex", "ris"]
+    resolved: Literal["bibtex", "ris", "noteexpress"]
     if requested == "auto":
         detected = detect_format(content)
         if detected is None:
             raise _bad_request(
-                "无法识别内容格式：请显式指定 format=bibtex 或 format=ris，"
-                "或检查内容是否为合法 BibTeX/RIS"
+                "无法识别内容格式：请显式指定 format=bibtex / format=ris / "
+                "format=noteexpress，或检查内容是否为合法 BibTeX/RIS/NoteExpress 导出"
             )
         resolved = detected
     else:
-        resolved = "bibtex" if requested == "bibtex" else "ris"
+        resolved = cast('Literal["bibtex", "ris", "noteexpress"]', requested)
 
     # 空内容 → 空列表（不是错误：允许前端先提交再填充）
     if not content.strip():
         return ImportResponse(format=resolved, count=0, items=[])
 
+    parser = {
+        "bibtex": parse_bibtex,
+        "ris": parse_ris,
+        "noteexpress": parse_noteexpress,
+    }[resolved]
     try:
-        parsed = parse_bibtex(content) if resolved == "bibtex" else parse_ris(content)
+        parsed = parser(content)
     except ValidationException as exc:
         raise _bad_request(exc.message) from exc
 

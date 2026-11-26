@@ -292,6 +292,7 @@ class ReferenceLibraryService:
             "issued_year",
             "doi",
             "url",
+            "abstract",
             "type",
             "language",
             "medium",
