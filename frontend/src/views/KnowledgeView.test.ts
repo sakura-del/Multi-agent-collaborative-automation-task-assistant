@@ -129,6 +129,17 @@ describe("汇总：索引状态必须真实", () => {
     const wrapper = await mountWith([doc()], stats({ vector_index_ready: true }));
     expect(wrapper.find('[data-test="kb-index-status"]').text()).toContain("就绪");
   });
+
+  it("空知识库（0 篇文档 / 0 分块）不误报「向量与分块不一致」", async () => {
+    const wrapper = await mountWith(
+      [],
+      stats({ total_docs: 0, total_chunks: 0, vector_index_ready: false }),
+    );
+    const status = wrapper.find('[data-test="kb-index-status"]');
+    expect(status.text()).toContain("未就绪");
+    expect(status.text()).toContain("暂无文档");
+    expect(status.text()).not.toContain("不一致");
+  });
 });
 
 describe("搜索与筛选", () => {

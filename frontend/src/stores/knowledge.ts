@@ -39,6 +39,14 @@ export const useKnowledgeStore = defineStore("knowledge", () => {
       await loadAll();
       return created;
     } catch (caught) {
+      // 网络中断或超时时，服务端可能已落库成功；静默刷新列表避免前端仍显示 0 篇诱导重复上传
+      try {
+        const [list, summary] = await Promise.all([knowledgeApi.list(), knowledgeApi.stats()]);
+        documents.value = list.documents;
+        stats.value = summary;
+      } catch {
+        // 静默同步失败时保留原始上传错误
+      }
       error.value = (caught as Error).message;
       throw caught;
     } finally {

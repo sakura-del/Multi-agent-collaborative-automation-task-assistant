@@ -124,6 +124,7 @@ const failedCount = computed(() => {
 /** 正在索引：只需等待，不需要操作。 */
 const indexingCount = computed(() => store.stats?.indexing_count ?? 0);
 const indexReady = computed(() => Boolean(store.stats?.vector_index_ready));
+const isEmptyKnowledgeBase = computed(() => totalDocs.value === 0 && totalChunks.value === 0);
 
 // ===== 类型分布（筛选用的动态选项） =====
 
@@ -233,15 +234,23 @@ const isFiltered = computed(() => typeFilter.value !== "all" || keyword.value.tr
         <p
           :class="[
             'mt-1 flex items-center gap-1.5 text-sm font-medium',
-            indexReady ? 'text-success' : 'text-warning',
+            indexReady ? 'text-success' : isEmptyKnowledgeBase ? 'text-muted-foreground' : 'text-warning',
           ]"
         >
           <CheckCircle2 v-if="indexReady" :size="15" aria-hidden="true" />
           <AlertTriangle v-else :size="15" aria-hidden="true" />
-          <span>{{ indexReady ? "就绪" : "未就绪（向量与分块不一致）" }}</span>
+          <span>
+            {{
+              indexReady
+                ? "就绪"
+                : isEmptyKnowledgeBase
+                  ? "未就绪（暂无文档）"
+                  : "未就绪（向量与分块不一致）"
+            }}
+          </span>
         </p>
         <p v-if="!indexReady" class="mt-1 text-[11px] text-muted-foreground">
-          语义检索可能失效，请联系管理员重建索引
+          {{ isEmptyKnowledgeBase ? "上传文档后自动建立向量索引" : "语义检索可能失效，请联系管理员重建索引" }}
         </p>
       </div>
     </div>

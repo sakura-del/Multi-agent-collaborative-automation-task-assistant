@@ -123,7 +123,15 @@ async function handleSubmit() {
       <Button data-test="document-submit" type="submit" :disabled="store.uploading">
         <Loader2 v-if="store.uploading" class="animate-spin motion-reduce:animate-none" aria-hidden="true" />
         <Upload v-else :size="15" aria-hidden="true" />
-        <span>{{ store.uploading ? `上传中 ${store.uploadProgress}%` : "上传" }}</span>
+        <span>
+          {{
+            store.uploading
+              ? store.uploadProgress >= 100
+                ? "正在解析与索引…"
+                : `上传中 ${store.uploadProgress}%`
+              : "上传"
+          }}
+        </span>
       </Button>
     </div>
 

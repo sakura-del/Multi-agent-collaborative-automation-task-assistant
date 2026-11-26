@@ -22,6 +22,8 @@ export const knowledgeApi = {
     form.append("strategy", strategy);
     return api
       .post<KnowledgeDocument>("/knowledge/documents", form, {
+        // 大文件（≤30MB）需完成解析、分块与向量嵌入，显式放宽至 180s
+        timeout: 180000,
         onUploadProgress: (event) => {
           const total = event.total ?? 0;
           if (onProgress && total > 0) {

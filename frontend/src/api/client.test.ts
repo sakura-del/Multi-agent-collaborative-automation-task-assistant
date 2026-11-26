@@ -88,6 +88,13 @@ describe("api/client normalizeError 错误归一化", () => {
     expect(normalizeError("字符串异常").message).toBe("字符串异常");
   });
 
+  it("ERR_NETWORK 无响应时返回可读中文排查提示，不透出裸英文 Network Error", () => {
+    const netErr = new AxiosError("Network Error", "ERR_NETWORK");
+    const msg = normalizeError(netErr).message;
+    expect(msg).not.toBe("Network Error");
+    expect(msg).toContain("网络连接中断");
+  });
+
   it("502 HTML、空 422 数组、状态码兜底绝不透出 Request failed with status code", () => {
     const html502 = makeAxiosError(
       502,

@@ -357,6 +357,20 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    # 限流中间件（Phase 1 P1-D）。
+    # ⚠️ Starlette 的 add_middleware 是**后注册者先执行**（洋葱模型外层先跑）：
+    # 1) 限流需要 request.state.user_id（由 AuthContextMiddleware 注入），
+    #    因此 RateLimitMiddleware 必须在 AuthContext **之前**注册；
+    # 2) CORSMiddleware 必须在 RateLimitMiddleware **之后**注册（位于更外层），
+    #    否则限流直接返回的 429 响应没有 Access-Control-Allow-Origin 头，
+    #    跨域前端会把 429 误判为 Network Error；
+    # 3) MetricsMiddleware 最后注册（最外层），统计整条链路耗时与状态。
+    from app.api.rate_limit_middleware import RateLimitMiddleware
+
+    app.add_middleware(RateLimitMiddleware)
+    app.add_middleware(RequestIDMiddleware)
+    # 鉴权上下文中间件：预解析 token 注入 request.state，不强制拦截
+    app.add_middleware(AuthContextMiddleware)
     # CORS：阶段0允许前端开发服务器访问；Phase 3 起支持 Cloudflare Pages（正则放行预览域名）
     app.add_middleware(
         CORSMiddleware,
@@ -371,19 +385,7 @@ def create_app() -> FastAPI:
         # 缓存 OPTIONS 预检结果 24 小时，减少高延迟链路下的重复预检往返
         max_age=86400,
     )
-    # 限流中间件（Phase 1 P1-D）。
-    # ⚠️ Starlette 的 add_middleware 是**后注册者先执行**（洋葱模型外层先跑），
-    # 限流需要 request.state.user_id（由 AuthContextMiddleware 注入），
-    # 因此必须在 AuthContext **之前**注册，才能在链路上排在它之后执行。
-    # 内部 fail-open：组件故障绝不拦业务请求。
-    from app.api.rate_limit_middleware import RateLimitMiddleware
-
-    app.add_middleware(RateLimitMiddleware)
-    app.add_middleware(RequestIDMiddleware)
-    # 鉴权上下文中间件：预解析 token 注入 request.state，不强制拦截
-    app.add_middleware(AuthContextMiddleware)
-    # HTTP 指标（Phase 2 可观测性）：最后注册 → 洋葱模型最外层 → 最先执行、最后记录，
-    # 因此能覆盖整条链路耗时（含鉴权/限流），也不会被内层异常跳过。
+    # HTTP 指标（Phase 2 可观测性）：最后注册 → 洋葱模型最外层 → 最先执行、最后记录。
     # 内部 fail-open：指标故障绝不影响响应。
     from app.api.metrics_middleware import MetricsMiddleware
 

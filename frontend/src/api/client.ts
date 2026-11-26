@@ -158,6 +158,15 @@ export function normalizeError(error: unknown): ApiError {
     }
 
     const status = error.response?.status;
+    if (
+      status === undefined &&
+      (error.code === "ERR_NETWORK" || error.message.trim().toLowerCase() === "network error")
+    ) {
+      return new Error(
+        "网络连接中断，未能收到服务端响应；若正在上传大文件或本地文件正被占用，请关闭占用程序并刷新页面确认是否已入库后重试",
+      ) as ApiError;
+    }
+
     const rawData = error.response?.data;
     if (typeof rawData === "string") {
       const trimmed = rawData.trim();

@@ -81,6 +81,8 @@ describe("knowledge api", () => {
     expect(form.get("file_path")).toBeNull();
     const headers = (config?.headers ?? {}) as Record<string, string>;
     expect(headers["Content-Type"]).toBeUndefined();
+    // 大文件解析+向量化耗时较长，上传超时必须显著大于默认 15s
+    expect(config?.timeout).toBeGreaterThanOrEqual(120000);
   });
 
   it("forwards upload progress to the caller", async () => {
@@ -164,6 +166,18 @@ describe("DocumentUpload", () => {
       "固定长度分段",
       "按语义分段",
     ]);
+  });
+
+  it("文件上传到 100% 且仍在等待服务端索引时展示阶段提示", () => {
+    knowledgeStore.uploading = true;
+    knowledgeStore.uploadProgress = 100;
+    try {
+      const wrapper = mount(DocumentUpload);
+      expect(wrapper.find('[data-test="document-submit"]').text()).toContain("正在解析与索引");
+    } finally {
+      knowledgeStore.uploading = false;
+      knowledgeStore.uploadProgress = 0;
+    }
   });
 });
 

@@ -163,3 +163,24 @@ class TestFailOpen:
             assert limiter.calls == []
         finally:
             settings.rate_limit.enabled = original
+
+
+class TestCorsOnRateLimit:
+    """限流 429 响应必须经过 CORSMiddleware，防止跨域浏览器退化成 Network Error。"""
+
+    def test_app_429_preserves_cors_headers(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from app.api.rate_limit_middleware import RateLimitMiddleware
+        from app.main import create_app
+
+        limiter = _FakeLimiter(allow=False)
+        monkeypatch.setattr(RateLimitMiddleware, "_build_limiter", lambda self: limiter)
+
+        app = create_app()
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/knowledge/documents",
+                headers={"Origin": "http://localhost:5173"},
+            )
+
+        assert response.status_code == 429
+        assert response.headers.get("access-control-allow-origin") == "http://localhost:5173"
