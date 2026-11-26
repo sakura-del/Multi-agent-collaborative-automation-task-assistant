@@ -34,6 +34,7 @@
 | 后端测试 | **3157 passed**, 21 skipped；覆盖率 **90%**；`mypy` 0 错误（219 文件）；`.csl` 4 红已由 `.gitattributes`（`*.csl -text`）消除 |
 | 前端测试 | Vitest **458 passed**（+6 skipped）；**Playwright E2E 44 场景**（chromium + mobile-chrome 双视口） |
 | 发布方式 | **前端：Cloudflare Pages `Direct Upload`**（`node scripts/deploy-pages.mjs`，凭据 `C:/Users/Lenovo/cf-secrets.env`）。⚠️ 2026-11-20 核实：**不是** git 构建——仓库 `main` 落后 78 个提交，线上包却已含 v0.2.0 的 `admin-console`/`我的模型`，`git push` 不会触发任何构建；**后端：bundle + `deploy/ecs` 目录 `docker compose build backend`** |
+| 平台模型 | **混合降级路由（2026-11-26 上线，`26f73c9`+`5710a58`）**：主 = `qwen3.8-27b-uncensored-fp8` @ `model.rhdata.cn`；降级 = `deepseek-v4.1-flash` @ OpenCode Go（`deepseek` provider 承载，请求头 `x-opencode-session`）。生产 `.env` 配置、验证证据、回滚见 [runbook](docs/runbooks/2026-11-26-platform-model-hybrid-routing.md) |
 | CI | ⚠️ **2026-10-28 起 CI 因 GitHub Actions 账单额度停摆**（报 spending limit），作业 0~2s 就 X，**不是代码问题**。⚠️ **GitHub 直连时通时不通**：不通时走代理（`git -c http.proxy=http://127.0.0.1:7894 ...`，`gh` 需 `$env:HTTPS_PROXY`） |
 | 服务器 | `root@47.253.81.6`，HEAD **`9fceda6`**（CD 自动部署），backend 镜像 `c476209d879c`（1.78 GB，已无 chromadb）；80/443 仅接受 Cloudflare 回源（`DOCKER-USER`，第三方探测 443=0/4）；UFW active；SSH 3 把密钥、X11 关、MaxAuthTries 3；监控两层已上线（站内 2 分钟 / 站外 5 分钟），**webhook 已配置并验证**（`/etc/veripaper/notify.env` + 仓库 secret `WECOM_WEBHOOK_URL`，2026-11-13）（回滚锚点 `shadow-mock`=`79ac91a4374c`），五容器 healthy，公网 `ready`，嵌入 = **SiliconFlow BGE-M3**（1600 RPM / 400k TPM），**user=2（Lingrove=admin + `yanglin125210@gmail.com`=user，**保留作以后的用户测试账号**）/ task 86 / doc_chunk 2835 / 两表各 2835**（2026-11-11 清掉 26 个测试账号后），磁盘 38% |
 
