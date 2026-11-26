@@ -54,8 +54,10 @@ from app.tools.literature.source_registry import (
 
 logger = get_logger(__name__)
 
-#: 万方开放 API 默认地址（测试用 MockTransport 注入 client，不需要改这里）
-DEFAULT_BASE_URL = "http://api.wfdata.com"
+#: 万方开放 API 默认地址（测试用 MockTransport 注入 client，不需要改这里）。
+#: 官方脚本写的是 http://api.wfdata.com，但 2026-11-26 实测该监听直接返回
+#: `400 Bad Request`（text/plain），只有 https 才能得到正常 JSON 响应。
+DEFAULT_BASE_URL = "https://api.wfdata.com"
 #: 检索接口路径（官方脚本唯一使用的检索入口）
 QUERY_PATH = "/openwanfang/getQuery"
 
@@ -287,13 +289,34 @@ def _string_list(value: Any) -> list[str]:
     return [single] if single else []
 
 
+def _resource_fields(item: dict[str, Any]) -> dict[str, Any]:
+    """返回真实的题录字段对象。
+
+    万方线上响应的形状是 `{resourceType, uid, fields: {}, Periodical: {...}}`：
+    `fields` 往往是空对象，题录字段放在按资源类型命名的子对象里
+    （`Periodical` / `Thesis` / `Conference` / `Patent` / `Standard` ...）。
+    文档与部分旧版响应也会把字段直接放在 `fields` 里，两种都兼容。
+    """
+    fields = item.get("fields")
+    if isinstance(fields, dict) and fields:
+        return fields
+    for key, value in item.items():
+        if key in {"fields", "resourceType", "resource_type", "uid"}:
+            continue
+        if isinstance(value, dict) and value:
+            return value
+    if isinstance(fields, dict):
+        return fields
+    return {}
+
+
 def _parse_document(item: Any) -> LiteratureRecord:
     """单条万方 document → `LiteratureRecord`；缺必需字段 → ValidationException。"""
     if not isinstance(item, dict):
         raise ValidationException("万方检索结果条目必须是对象")
-    fields = item.get("fields")
-    if not isinstance(fields, dict):
-        raise ValidationException("万方检索结果缺少 fields 对象")
+    fields = _resource_fields(item)
+    if not fields:
+        raise ValidationException("万方检索结果缺少题录字段")
 
     document_id = _first_text(fields.get("Id"))
     if not document_id:
@@ -325,7 +348,7 @@ def _parse_document(item: Any) -> LiteratureRecord:
 
 def _detail_url(item: dict[str, Any], document_id: str) -> str:
     """无 DOI 时用万方公开详情页作为来源链接。"""
-    resource_type = _text(item.get("resource_type")).strip()
+    resource_type = _text(item.get("resourceType") or item.get("resource_type")).strip()
     path = _DETAIL_PATH_BY_RESOURCE_TYPE.get(resource_type, "periodical")
     return f"https://d.wanfangdata.com.cn/{path}/{document_id}"
 

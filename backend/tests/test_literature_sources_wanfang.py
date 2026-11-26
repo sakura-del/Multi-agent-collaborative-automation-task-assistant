@@ -57,7 +57,13 @@ def _document(
         fields["PublishDate"] = publish_date
     if publish_year is not None:
         fields["PublishYear"] = publish_year
-    return {"resource_type": resource_type, "fields": fields}
+    # 线上真实响应：题录字段在按资源类型命名的子对象里，`fields` 是空对象
+    return {
+        "resourceType": resource_type,
+        "uid": f"uid-{document_id}",
+        "fields": {},
+        resource_type: fields,
+    }
 
 
 def _payload(*documents: dict[str, Any]) -> dict[str, Any]:
@@ -272,3 +278,31 @@ async def test_document_without_id_raises_validation_error() -> None:
     async with _source(_json_handler(_payload(broken))) as (source, _captured):
         with pytest.raises(ValidationException):
             await source.search(_search())
+
+
+def test_default_base_url_uses_https() -> None:
+    """官方脚本写的是 http，但实测 http 监听直接 400；默认必须是 https。"""
+    from app.tools.literature.wanfang import DEFAULT_BASE_URL
+
+    assert DEFAULT_BASE_URL == "https://api.wfdata.com"
+
+
+async def test_parses_legacy_flat_fields_shape() -> None:
+    """兼容旧版/文档形状：字段直接放在 `fields` 里。"""
+    legacy = {
+        "resource_type": "Periodical",
+        "fields": {
+            "Id": "periodical_legacy",
+            "Title": ["扁平字段形状"],
+            "Creator": ["王五"],
+            "PublishYear": 2022,
+            "DOI": "10.3969/legacy.2022.001",
+        },
+    }
+    async with _source(_json_handler(_payload(legacy))) as (source, _captured):
+        records = await source.search(_search())
+
+    assert len(records) == 1
+    assert records[0].source_id == "wanfang:periodical_legacy"
+    assert records[0].title == "扁平字段形状"
+    assert str(records[0].source_url) == "https://doi.org/10.3969/legacy.2022.001"
