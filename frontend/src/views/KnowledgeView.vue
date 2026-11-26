@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, onMounted, ref } from "vue";
 import { routerKey } from "vue-router";
-import { AlertTriangle, CheckCircle2, FileText, Layers, Search, Table2 } from "lucide-vue-next";
+import { AlertTriangle, CheckCircle2, FileText, Layers, Search, Table2, UploadCloud } from "lucide-vue-next";
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
@@ -18,6 +18,7 @@ import { toastSuccess } from "@/lib/toast";
 import type { ExtractionTableOut } from "@/api/extractions";
 import { useKnowledgeStore } from "@/stores/knowledge";
 import type { KnowledgeDocument } from "@/api/types";
+import { collectFilesFromDataTransfer } from "@/utils/file-drop";
 import { docTypeLabel, needsAttention } from "@/utils/knowledge-display";
 
 // 知识库页：汇总（含**真实**索引状态）+ 搜索/筛选 + 上传 + 文档表。
@@ -42,6 +43,41 @@ const typeFilter = ref<string>("all");
 /** 勾选用于新建论文抽取表的已就绪文档 ID 列表。 */
 const selectedDocIds = ref<string[]>([]);
 const extractionDialogOpen = ref(false);
+const uploadRef = ref<{ enqueueFiles: (files: File[]) => void } | null>(null);
+const isDraggingOver = ref(false);
+let dragDepth = 0;
+
+function hasDraggedFiles(dt: DataTransfer | null): boolean {
+  if (!dt) return false;
+  const types = Array.from(dt.types ?? []);
+  return types.length === 0 || types.includes("Files");
+}
+
+function resetPageDrag() {
+  dragDepth = 0;
+  isDraggingOver.value = false;
+}
+
+function onPageDragEnter(event: DragEvent) {
+  if (!hasDraggedFiles(event.dataTransfer)) return;
+  dragDepth += 1;
+  isDraggingOver.value = true;
+}
+
+function onPageDragLeave() {
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (dragDepth === 0) {
+    isDraggingOver.value = false;
+  }
+}
+
+async function onPageDrop(event: DragEvent) {
+  resetPageDrag();
+  const files = await collectFilesFromDataTransfer(event.dataTransfer);
+  if (files.length) {
+    uploadRef.value?.enqueueFiles(files);
+  }
+}
 
 onMounted(() => {
   void refresh();
@@ -162,7 +198,31 @@ const isFiltered = computed(() => typeFilter.value !== "all" || keyword.value.tr
 </script>
 
 <template>
-  <section>
+  <section
+    class="relative"
+    @dragenter.prevent="onPageDragEnter"
+    @dragover.prevent
+    @dragleave="onPageDragLeave"
+    @drop.prevent="onPageDrop"
+  >
+    <!-- 全页拖拽导入蒙层 -->
+    <div
+      v-if="isDraggingOver"
+      data-test="kb-drop-overlay"
+      class="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-6 backdrop-blur-xs"
+    >
+      <div
+        class="flex max-w-md flex-col items-center gap-2 rounded-xl border-2 border-dashed border-primary bg-card px-8 py-10 text-center shadow-lg"
+      >
+        <UploadCloud :size="32" class="text-primary" aria-hidden="true" />
+        <p class="text-sm font-semibold text-foreground">
+          松开即可导入文件或文件夹
+        </p>
+        <p class="text-xs text-muted-foreground">
+          自动识别 pdf / docx / md / txt，支持多文件与子目录批量解析
+        </p>
+      </div>
+    </div>
     <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
       <PageHeader
         class="mb-0"
@@ -255,7 +315,7 @@ const isFiltered = computed(() => typeFilter.value !== "all" || keyword.value.tr
       </div>
     </div>
 
-    <DocumentUpload @uploaded="refresh" />
+    <DocumentUpload ref="uploadRef" @uploaded="refresh" @drag-settled="resetPageDrag" />
 
     <!-- 搜索 + 类型筛选 -->
     <div v-if="documents.length" class="mb-3 flex flex-wrap items-center gap-2">

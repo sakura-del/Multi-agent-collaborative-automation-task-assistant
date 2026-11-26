@@ -55,6 +55,58 @@ export const useKnowledgeStore = defineStore("knowledge", () => {
     }
   }
 
+  /**
+   * 批量有限并发上传（默认并发 2），单篇失败不中断其余文档，全部完成后统一刷新一次列表。
+   */
+  async function uploadBatch(
+    items: Array<{ id: string; file: File; title: string }>,
+    strategy: ChunkStrategy = "recursive",
+    options?: {
+      concurrency?: number;
+      onProgress?: (id: string, percent: number) => void;
+      onItemDone?: (id: string, ok: boolean, errorMessage?: string) => void;
+    },
+  ): Promise<{ succeeded: number; failed: number }> {
+    if (!items.length) return { succeeded: 0, failed: 0 };
+    uploading.value = true;
+    uploadProgress.value = 0;
+    error.value = null;
+
+    const concurrency = Math.max(1, Math.min(options?.concurrency ?? 2, 4));
+    let cursor = 0;
+    let succeeded = 0;
+    let failed = 0;
+
+    async function worker() {
+      while (cursor < items.length) {
+        const current = items[cursor++];
+        try {
+          await knowledgeApi.upload(current.file, current.title, strategy, (percent) => {
+            options?.onProgress?.(current.id, percent);
+          });
+          succeeded += 1;
+          options?.onItemDone?.(current.id, true);
+        } catch (caught) {
+          failed += 1;
+          options?.onItemDone?.(current.id, false, (caught as Error).message || "上传失败");
+        } finally {
+          uploadProgress.value = Math.round(((succeeded + failed) / items.length) * 100);
+        }
+      }
+    }
+
+    try {
+      await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => worker()));
+      if (succeeded > 0) {
+        await loadAll();
+      }
+      return { succeeded, failed };
+    } finally {
+      uploading.value = false;
+      uploadProgress.value = 0;
+    }
+  }
+
   async function remove(docId: string): Promise<void> {
     error.value = null;
     try {
@@ -75,6 +127,7 @@ export const useKnowledgeStore = defineStore("knowledge", () => {
     error,
     loadAll,
     upload,
+    uploadBatch,
     remove,
   };
 });

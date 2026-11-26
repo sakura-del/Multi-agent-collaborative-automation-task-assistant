@@ -309,3 +309,46 @@ describe("Issue #36：勾选就绪文档新建论文抽取表", () => {
     expect(wrapper.find('[data-test="knowledge-empty"]').exists()).toBe(false);
   });
 });
+
+describe("Issue #71：全页拖拽文件与文件夹导入", () => {
+  it("页面拖入显示全屏蒙层，拖出隐藏，松手转交 DocumentUpload.enqueueFiles", async () => {
+    setActivePinia(createPinia());
+    const { useKnowledgeStore } = await import("@/stores/knowledge");
+    const store = useKnowledgeStore();
+    store.documents = [];
+    store.stats = stats({ total_docs: 0, total_chunks: 0, vector_index_ready: false });
+    store.loadAll = async () => {};
+    store.loading = false;
+
+    const enqueueFiles = vi.fn();
+    const wrapper = mount(KnowledgeView, {
+      global: {
+        provide: { [routerKey as symbol]: {} },
+        stubs: {
+          DocumentUpload: {
+            name: "DocumentUpload",
+            template: "<div data-test='stub-upload' />",
+            methods: { enqueueFiles },
+          },
+        },
+      },
+    });
+
+    const section = wrapper.find("section");
+    await section.trigger("dragenter", { dataTransfer: { types: ["Files"] } });
+    expect(wrapper.find('[data-test="kb-drop-overlay"]').exists()).toBe(true);
+
+    await section.trigger("dragleave");
+    expect(wrapper.find('[data-test="kb-drop-overlay"]').exists()).toBe(false);
+
+    const file = new File(["hello"], "dragged.pdf", { type: "application/pdf" });
+    await section.trigger("dragenter", { dataTransfer: { types: ["Files"] } });
+    await section.trigger("drop", { dataTransfer: { files: [file], types: ["Files"] } });
+    await Promise.resolve();
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.find('[data-test="kb-drop-overlay"]').exists()).toBe(false);
+    expect(enqueueFiles).toHaveBeenCalledTimes(1);
+    expect(enqueueFiles.mock.calls[0][0].map((f: File) => f.name)).toEqual(["dragged.pdf"]);
+  });
+});

@@ -24,6 +24,7 @@ const knowledgeStore = {
   error: null as string | null,
   loadAll: vi.fn(),
   upload: vi.fn(),
+  uploadBatch: vi.fn(),
   remove: vi.fn(),
 };
 vi.mock("@/stores/knowledge", () => ({
@@ -178,6 +179,67 @@ describe("DocumentUpload", () => {
       knowledgeStore.uploading = false;
       knowledgeStore.uploadProgress = 0;
     }
+  });
+
+  it("支持多文件选择：过滤非法格式展示忽略提示、渲染待上传队列并调用 uploadBatch", async () => {
+    knowledgeStore.uploadBatch.mockResolvedValueOnce({ succeeded: 2, failed: 0 });
+    const wrapper = mount(DocumentUpload);
+
+    const inputWrapper = wrapper.find('[data-test="document-file"]');
+    Object.defineProperty(inputWrapper.element, "files", {
+      value: [pdfFile("a.pdf"), pdfFile("b.docx"), pdfFile("pic.png")],
+      writable: false,
+      configurable: true,
+    });
+    await inputWrapper.trigger("change");
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.find('[data-test="upload-queue"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="upload-skipped"]').text()).toContain("pic.png");
+    expect((wrapper.find('[data-test="document-title"]').element as HTMLInputElement).disabled).toBe(
+      true,
+    );
+
+    await wrapper.find("form").trigger("submit");
+    await wrapper.vm.$nextTick();
+
+    expect(knowledgeStore.uploadBatch).toHaveBeenCalledTimes(1);
+    expect(knowledgeStore.uploadBatch.mock.calls[0][0]).toHaveLength(2);
+    expect(wrapper.emitted("uploaded")).toHaveLength(1);
+  });
+
+  it("支持选择文件夹与拖拽文件进入队列，且部分失败时保留失败项", async () => {
+    knowledgeStore.uploadBatch.mockImplementationOnce(async (items, _strategy, opts) => {
+      opts?.onItemDone?.(items[0].id, true);
+      opts?.onItemDone?.(items[1].id, false, "索引超时");
+      return { succeeded: 1, failed: 1 };
+    });
+
+    const wrapper = mount(DocumentUpload);
+    const folderInput = wrapper.find('[data-test="document-folder-input"]');
+    Object.defineProperty(folderInput.element, "files", {
+      value: [pdfFile("ok.pdf"), pdfFile("bad.pdf")],
+      writable: false,
+      configurable: true,
+    });
+    await folderInput.trigger("change");
+    await wrapper.vm.$nextTick();
+
+    await wrapper.find("form").trigger("submit");
+    await wrapper.vm.$nextTick();
+
+    const queueText = wrapper.find('[data-test="upload-queue"]').exists()
+      ? wrapper.find('[data-test="upload-queue"]').text()
+      : wrapper.text();
+    expect(queueText).toContain("索引超时");
+    expect(wrapper.find('[data-test="upload-error"]').text()).toContain("1 篇");
+
+    // 卡片级拖拽加入新文件
+    await wrapper.find('[data-test="document-upload"]').trigger("drop", {
+      dataTransfer: { files: [pdfFile("drop.md")] },
+    });
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('[data-test="upload-queue"]').text()).toContain("drop.md");
   });
 });
 

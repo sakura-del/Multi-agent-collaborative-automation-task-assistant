@@ -28,9 +28,11 @@ const props = withDefaults(
   defineProps<{
     /** 未选择时的占位文案 */
     placeholder?: string;
+    /** 是否支持一次选择多个文件（默认 false 保持单选兼容） */
+    multiple?: boolean;
     class?: HTMLAttributes["class"];
   }>(),
-  { placeholder: "未选择文件", class: undefined }
+  { placeholder: "未选择文件", multiple: false, class: undefined }
 );
 
 // attrs（含 data-test / accept / @change / disabled）必须透传到 input，故禁用自动继承
@@ -42,7 +44,12 @@ const input = ref<HTMLInputElement | null>(null);
 /** 仅用于展示选中文件名；父组件的 @change 会照常触发（同一元素上可挂多个监听器） */
 function trackName(event: Event) {
   const target = event.target as HTMLInputElement;
-  fileName.value = target.files?.[0]?.name ?? "";
+  const count = target.files?.length ?? 0;
+  if (count > 1) {
+    fileName.value = `已选择 ${count} 个文件`;
+  } else {
+    fileName.value = target.files?.[0]?.name ?? "";
+  }
 }
 
 const displayName = computed(() => fileName.value || props.placeholder);
@@ -65,6 +72,7 @@ defineExpose({
     <input
       ref="input"
       v-bind="$attrs"
+      :multiple="props.multiple"
       type="file"
       class="absolute inset-0 z-10 cursor-pointer opacity-0 disabled:cursor-not-allowed"
       @change="trackName"
