@@ -130,6 +130,25 @@ class TestEnvOverridesYaml:
 
         assert settings.llm.extra_headers == {"x-opencode-session": "ses_veripaper_platform"}
 
+    def test_env_overrides_yaml_nested_dict_of_dict(self, yaml_config, monkeypatch) -> None:
+        """按 provider 区分的嵌套 JSON（LLM__PROVIDER_EXTRA_HEADERS）也要能注入。
+
+        2026-11-26 混合降级路由：主模型 Qwen 不带附加头，只有降级通道
+        OpenCode Go（provider=deepseek）需要 `x-opencode-session`。
+        """
+        from app.core.config import get_settings
+
+        monkeypatch.setenv(
+            "LLM__PROVIDER_EXTRA_HEADERS",
+            '{"deepseek": {"x-opencode-session": "ses_veripaper_platform"}}',
+        )
+
+        settings = get_settings()
+
+        assert settings.llm.provider_extra_headers == {
+            "deepseek": {"x-opencode-session": "ses_veripaper_platform"}
+        }
+
 
 class TestYamlStillProvidesDefaults:
     def test_yaml_value_used_when_no_env(self, yaml_config, monkeypatch) -> None:

@@ -137,6 +137,8 @@ class LLMManager:
         self._max_retries: int = 3
         # 平台网关附加请求头（如 OpenCode Go 的 x-opencode-session）
         self._default_headers: dict[str, str] = {}
+        # 按 provider 区分的附加头：混合路由时只给需要的厂商下发
+        self._provider_headers: dict[str, dict[str, str]] = {}
         if llm_config is not None:
             self._apply_config(llm_config)
 
@@ -146,6 +148,12 @@ class LLMManager:
         self._max_retries = getattr(config, "max_retries", 3)
         # 平台网关要求的路由头（如 OpenCode Go 缺 `x-opencode-session` 直接 400）
         self._default_headers = dict(getattr(config, "extra_headers", {}) or {})
+        # 按 provider 覆盖（混合路由：主 Qwen 不带头，降级 deepseek 头只在 deepseek 上）
+        provider_headers = getattr(config, "provider_extra_headers", {}) or {}
+        self._provider_headers = {
+            str(provider): {str(key): str(value) for key, value in headers.items()}
+            for provider, headers in provider_headers.items()
+        }
         # 读取各厂商 API Key 与 base_url
         for provider in ("openai", "glm", "qwen", "deepseek"):
             self._api_keys[provider] = getattr(config, f"{provider}_api_key", None)
@@ -188,6 +196,8 @@ class LLMManager:
         """获取或创建适配器实例（缓存复用）。"""
         key = (provider, model)
         if key not in self._instances:
+            # 混合路由：provider 专属头优先，其次全局头
+            headers = self._provider_headers.get(provider) or self._default_headers
             self._instances[key] = create_llm(
                 provider,
                 model,
@@ -195,7 +205,7 @@ class LLMManager:
                 base_url=self._base_urls.get(provider) or None,
                 timeout=self._timeout,
                 max_retries=self._max_retries,
-                default_headers=self._default_headers or None,
+                default_headers=headers or None,
             )
         return self._instances[key]
 

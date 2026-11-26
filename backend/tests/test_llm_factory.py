@@ -122,6 +122,50 @@ class TestLLMManagerConfig:
 
         assert llm.default_headers == {"x-opencode-session": "ses_veripaper_platform"}
 
+    def test_apply_config_hybrid_routing_endpoints_and_headers(self):
+        """混合降级路由：Qwen 主模型 + OpenCode Go deepseek-v4.1-flash 兜底。
+
+        两个平台共用 LLMManager 链路，但 key / base_url / 请求头各不相同：
+        - 主模型 openai provider 指向 Qwen 网关（不带头）；
+        - 降级 deepseek provider 指向 OpenCode Go（必须带 x-opencode-session）。
+        """
+
+        class _HybridConfig:
+            default_provider = "openai"
+            default_model = "qwen3.8-27b-uncensored-fp8"
+            request_timeout = 180
+            max_retries = 6
+            extra_headers: ClassVar[dict[str, str]] = {"x-platform": "vp"}
+            provider_extra_headers: ClassVar[dict[str, dict[str, str]]] = {
+                "deepseek": {"x-opencode-session": "ses_veripaper_platform"}
+            }
+            openai_api_key = "qwen-key"
+            openai_base_url = "https://model.rhdata.cn/v1"
+            deepseek_api_key = "oc_sk-test"
+            deepseek_base_url = "https://opencode.ai/inference/go/openai/v1"
+            glm_api_key = None
+            glm_base_url = ""
+            qwen_api_key = None
+            qwen_base_url = ""
+            fallback_chain: ClassVar[list] = [
+                type("Item", (), {"provider": "deepseek", "model": "deepseek-v4.1-flash"})(),
+            ]
+
+        manager = LLMManager(_HybridConfig())
+
+        primary = manager.get_primary()
+        assert primary.base_url == "https://model.rhdata.cn/v1"
+        assert primary.api_key == "qwen-key"
+        # 主模型只拿全局头，不会把 OpenCode 会话标识发给 Qwen
+        assert primary.default_headers == {"x-platform": "vp"}
+
+        fallback = manager._get_or_create("deepseek", "deepseek-v4.1-flash")
+        assert fallback.base_url == "https://opencode.ai/inference/go/openai/v1"
+        assert fallback.api_key == "oc_sk-test"
+        # provider 专属头覆盖全局头（不混合两套头）
+        assert fallback.default_headers == {"x-opencode-session": "ses_veripaper_platform"}
+        assert ("deepseek", "deepseek-v4.1-flash") in manager._fallback_chain
+
 
 class TestLLMManagerSwitchPrimary:
     """运行时切换主模型测试。"""

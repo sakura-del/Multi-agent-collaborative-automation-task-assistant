@@ -197,6 +197,14 @@ class LLMConfig(BaseModel):
     # .env 用 JSON 字符串配置（与 node_routing 同一套解析）：
     #   LLM__EXTRA_HEADERS={"x-opencode-session": "ses_veripaper_platform"}
     extra_headers: dict[str, str] = Field(default_factory=dict)
+    # ===== 按 provider 区分的附加请求头（混合路由，2026-11-26）=====
+    # 场景：主模型 Qwen（model.rhdata.cn）+ 降级模型 OpenCode Go deepseek-v4.1-flash
+    # 共用平台链路，但只有 OpenCode Go 要求 `x-opencode-session`。全量下发会把
+    # 第三方会话标识发给 Qwen 网关（无必要），所以按 provider 精确挂载。
+    # 命中 provider 时**覆盖**（而不是合并）extra_headers，避免两套头混在一起。
+    # .env JSON 例：
+    #   LLM__PROVIDER_EXTRA_HEADERS={"deepseek": {"x-opencode-session": "ses_veripaper_platform"}}
+    provider_extra_headers: dict[str, dict[str, str]] = Field(default_factory=dict)
     cost_budget: LLMCostBudget = LLMCostBudget()
     fallback_chain: list[LLMFallbackItem] = Field(default_factory=list)
 
