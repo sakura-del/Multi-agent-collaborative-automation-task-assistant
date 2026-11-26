@@ -358,8 +358,8 @@ class TaskExecution:
                     if task.quota_settled:
                         return  # 已结算：绝不重复退
                     fallback_base = task.fallback_token_base
-                    if self._is_byok_task(task) and fallback_base is None:
-                        # BYOK 从未预扣平台 token：只置标记，绝不退款
+                    if self._skips_platform_quota(task) and fallback_base is None:
+                        # BYOK 或首次示例免扣任务从未预扣平台 token：只置标记，绝不退款
                         task.quota_settled = True
                         await session.commit()
                         logger.info("quota_settlement_skipped_byok", task_id=str(task_id))
@@ -428,8 +428,8 @@ class TaskExecution:
         async with self._session_factory() as session:
             repo = TaskRepository(session)
             task = await repo.lock_for_update(task_id)
-            if self._is_byok_task(task):
-                # BYOK 不占平台 token：继续执行时也不该重新预扣
+            if self._skips_platform_quota(task):
+                # BYOK 或首次示例免扣任务不占平台 token：继续执行时也不该重新预扣
                 return
             used = int(task.used_tokens or 0)
             already_settled = bool(task.quota_settled)
@@ -459,7 +459,7 @@ class TaskExecution:
             async with self._session_factory() as session:
                 repo = TaskRepository(session)
                 task = await repo.lock_for_update(task_id)
-                if self._is_byok_task(task):
+                if self._skips_platform_quota(task):
                     # 未预扣过，撤销就是凭空加额度
                     return
                 used = int(task.used_tokens or 0)
@@ -1347,6 +1347,14 @@ class TaskExecution:
             return True
         snapshot = getattr(task, "model_snapshot", None)
         return isinstance(snapshot, dict) and bool(snapshot.get("is_byok"))
+
+    @staticmethod
+    def _skips_platform_quota(task: Any) -> bool:
+        """是否跳过平台 token 预扣/结算（BYOK 任务或首次示例免扣任务）。"""
+        if TaskExecution._is_byok_task(task):
+            return True
+        snapshot = getattr(task, "model_snapshot", None)
+        return isinstance(snapshot, dict) and bool(snapshot.get("demo_exempt"))
 
     async def _load_user_routes(self, session: Any, user_id: UUID) -> list[dict[str, Any]]:
         """读用户在「我的模型」页配置的节点路由（Issue #22 延伸）。"""

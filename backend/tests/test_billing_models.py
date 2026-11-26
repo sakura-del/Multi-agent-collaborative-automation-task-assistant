@@ -270,14 +270,11 @@ class TestSeedPlans:
         }
 
     def test_free_plan_is_restrictive(self) -> None:
-        """免费档必须严格：1 篇/月、无团队、无 API。
-
-        若免费档宽松，付费转化率与成本控制都会失效。
-        """
+        """免费档可体验 3 篇/月（Issue #61 P0-3），无团队、无 API。"""
         from app.db.models.billing import SEED_PLANS
 
         free = next(plan for plan in SEED_PLANS if plan["id"] == "free")
-        assert free["monthly_reviews"] == 1
+        assert free["monthly_reviews"] == 3
         assert free["allow_team"] is False
         assert free["allow_api_access"] is False
         assert free["max_workspaces"] == 0

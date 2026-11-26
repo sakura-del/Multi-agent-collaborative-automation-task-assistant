@@ -10,9 +10,10 @@ test.describe("公开页（Issue #26）", () => {
 
     // 对外分享的注册链接不能被弹回 /login（#26-2）
     await expect(page).toHaveURL(/\/register$/);
-    // 注册已并入邮箱验证码一体流：新邮箱首次验证自动建号（2026-11-23）
-    await expect(page.locator('[data-test="auth-title"]')).toHaveText("登录或创建账号");
-    await expect(page.locator('[data-test="auth-hint"]')).toContainText("新邮箱将自动建号");
+    // 注册已并入邮箱验证码一体流，/register 明确区分「创建账号」与「已有账号登录」（Issue #61 P1-4）
+    await expect(page.locator('[data-test="auth-title"]')).toHaveText("创建 VeriPaper 账号");
+    await expect(page.locator('[data-test="auth-hint"]')).toContainText("自动建号");
+    await expect(page.locator('[data-test="auth-switch-login"]')).toBeVisible();
     await expect(page.locator('[data-test="otp-email-input"]')).toBeVisible();
     // 旧的「用户名 + 邮箱 + 密码」注册表单已退役，不能只改文案却留着旧字段
     await expect(page.locator("#username")).toHaveCount(0);
@@ -79,5 +80,27 @@ test.describe("公开页（Issue #26）", () => {
     await back.click();
     await expect(page).toHaveURL(/\/login/);
     await expect(page.locator('[data-test="auth-title"]')).toHaveText("登录或创建账号");
+  });
+
+  test("Issue #61 公开页：免登录示例 /demo、隐私政策 /privacy、用户协议 /terms 与移动端无横向溢出", async ({ page }) => {
+    for (const path of ["/", "/demo", "/login", "/register", "/password-reset", "/privacy", "/terms"]) {
+      await page.goto(path);
+      const overflow = await page.evaluate(
+        () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      );
+      expect(overflow, `${path} 存在横向溢出`).toBe(false);
+    }
+
+    await page.goto("/demo");
+    await expect(page.locator('[data-test="demo-report-title"]')).toBeVisible();
+    await page.locator('[data-test="demo-page-marker-2"]').click();
+    await expect(page.locator('[data-test="demo-page-verifier"]')).toContainText("10.1016/j.jbi.2025.104612");
+
+    await page.goto("/privacy");
+    await expect(page.locator('[data-test="privacy-title"]')).toBeVisible();
+    await expect(page.locator("body")).toContainText("绝不");
+
+    await page.goto("/terms");
+    await expect(page.locator('[data-test="terms-title"]')).toBeVisible();
   });
 });

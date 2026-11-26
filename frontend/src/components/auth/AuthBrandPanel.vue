@@ -1,9 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { AnimatePresence, Motion, useReducedMotion } from "motion-v";
 import { Check, ShieldCheck } from "lucide-vue-next";
-
-import { DURATION, EASE_IN, EASE_OUT, OFFSET } from "@/lib/ease";
 
 /**
  * 认证流共用左侧品牌展示面板（登录 / 注册 / 密码重置统一使用，Issue #39）。
@@ -35,7 +32,6 @@ const AUTH_PROOFS = {
   },
 } as const;
 
-const reduced = useReducedMotion();
 const activeProofIndex = ref<1 | 2>(1);
 const activeProof = computed(() => AUTH_PROOFS[activeProofIndex.value]);
 
@@ -124,21 +120,8 @@ const TRUST_ITEMS = ["arXiv", "PubMed", "OpenAlex", "PRISMA 2020", "GB/T 7714-20
           data-test="login-proof-footer"
           class="border-t border-[#E5E7EB] bg-[#F9FAFB] px-4 py-3 text-xs dark:border-border dark:bg-muted/40"
         >
-          <AnimatePresence mode="popLayout" :initial="false">
-            <Motion
-              :key="activeProofIndex"
-              :initial="{ opacity: 0, y: reduced ? 0 : OFFSET.microY }"
-              :animate="{
-                opacity: 1,
-                y: 0,
-                transition: { duration: reduced ? DURATION.micro : DURATION.fast, ease: EASE_OUT },
-              }"
-              :exit="{
-                opacity: 0,
-                y: reduced ? 0 : -OFFSET.microY,
-                transition: { duration: DURATION.micro, ease: EASE_IN },
-              }"
-            >
+          <Transition name="vp-fade-micro" mode="out-in">
+            <div :key="activeProofIndex">
               <div class="flex flex-wrap items-center justify-between gap-2">
                 <span class="font-medium text-[#374151] dark:text-foreground">
                   [{{ activeProofIndex }}] {{ activeProof.source }}
@@ -151,8 +134,8 @@ const TRUST_ITEMS = ["arXiv", "PubMed", "OpenAlex", "PRISMA 2020", "GB/T 7714-20
               <p class="mt-1.5 font-mono text-[10.5px] leading-relaxed break-words text-[#6B7280] dark:text-muted-foreground">
                 {{ activeProof.citation }}
               </p>
-            </Motion>
-          </AnimatePresence>
+            </div>
+          </Transition>
         </div>
       </div>
     </div>

@@ -433,6 +433,9 @@ onMounted(load);
           <!-- 订阅到期日（缺陷 2）：与用量周期分开显示 -->
           <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
             <span data-test="plan-period-end">{{ periodEndText }}</span>
+            <span v-if="usage.max_documents_per_task">
+              平台模型单次上限 {{ usage.max_documents_per_task }} 篇文献
+            </span>
             <span v-if="usage.seats_purchased">
               已购 {{ usage.seats_purchased }} 席位
             </span>

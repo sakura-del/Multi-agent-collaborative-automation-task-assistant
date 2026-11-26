@@ -50,8 +50,11 @@ function buildRouter() {
     history: createMemoryHistory(),
     routes: [
       { path: "/", name: "home", component: stub },
+      { path: "/demo", name: "demo", component: stub },
       { path: "/login", name: "login", component: stub },
       { path: "/register", name: "register", component: stub },
+      { path: "/privacy", name: "privacy", component: stub },
+      { path: "/terms", name: "terms", component: stub },
       { path: "/password-reset", name: "password-reset", component: stub },
       { path: "/tasks", name: "tasks", component: stub },
     ],
@@ -237,5 +240,13 @@ describe("登录/注册一体流（Email OTP + Magic Link）", () => {
     const { wrapper } = await mountLogin("/login");
     expect(wrapper.findAll("h1")).toHaveLength(1);
     expect(wrapper.get("h1").attributes("data-test")).toBe("auth-title");
+  });
+
+  it("/register 展示创建账号文案与「已有账号登录」入口，底部挂载隐私政策与用户协议（Issue #61 P1-4/5）", async () => {
+    const { wrapper } = await mountLogin("/register");
+    expect(wrapper.get('[data-test="auth-title"]').text()).toBe("创建 VeriPaper 账号");
+    expect(wrapper.get('[data-test="auth-switch-login"]').attributes("href")).toBe("/login");
+    expect(wrapper.get('[data-test="login-privacy-link"]').attributes("href")).toBe("/privacy");
+    expect(wrapper.get('[data-test="login-terms-link"]').attributes("href")).toBe("/terms");
   });
 });

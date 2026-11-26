@@ -59,6 +59,10 @@ class TokenOut(BaseModel):
     refresh_token: str
     token_type: str = "bearer"
     expires_in: int = Field(..., description="access_token 有效期（秒）")
+    is_new_user: bool = Field(
+        default=False,
+        description="是否为本次认证首次自动创建的新账号（用于前端欢迎引导）",
+    )
 
 
 class TokenExpirePayload(BaseModel):

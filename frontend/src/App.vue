@@ -1,14 +1,11 @@
 <script setup lang="ts">
 import "vue-sonner/style.css";
-import { AnimatePresence, Motion, useReducedMotion } from "motion-v";
 import type { RouteLocationNormalizedLoaded } from "vue-router";
 import { Toaster } from "vue-sonner";
 
 import { useTheme } from "@/composables/useTheme";
-import { DURATION, EASE_IN, EASE_OUT, OFFSET } from "@/lib/ease";
 
 const { isDark } = useTheme();
-const reduced = useReducedMotion();
 
 /**
  * 顶层路由过渡键：
@@ -22,24 +19,9 @@ function topRouteKey(route: RouteLocationNormalizedLoaded): string {
 
 <template>
   <RouterView v-slot="{ Component, route }">
-    <AnimatePresence mode="wait" :initial="false">
-      <Motion
-        v-if="Component"
-        :key="topRouteKey(route)"
-        :initial="{ opacity: 0, y: reduced ? 0 : OFFSET.microY }"
-        :animate="{
-          opacity: 1,
-          y: 0,
-          transition: { duration: reduced ? DURATION.micro : 0.18, ease: EASE_OUT },
-        }"
-        :exit="{
-          opacity: 0,
-          transition: { duration: reduced ? DURATION.micro : 0.1, ease: EASE_IN },
-        }"
-      >
-        <component :is="Component" />
-      </Motion>
-    </AnimatePresence>
+    <Transition name="vp-route" mode="out-in">
+      <component :is="Component" v-if="Component" :key="topRouteKey(route)" />
+    </Transition>
   </RouterView>
   <Toaster
     position="top-right"

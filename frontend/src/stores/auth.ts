@@ -6,6 +6,15 @@ import { clearTokens, getAccessToken, getRefreshToken, persistTokens } from "@/a
 import type { LoginInput, RegisterInput, UserOut } from "@/api/types";
 
 const USER_CACHE_KEY = "veripaper_user";
+const WELCOME_BANNER_KEY = "vp:welcome_banner";
+
+function readWelcomeFlag(): boolean {
+  try {
+    return typeof localStorage !== "undefined" && localStorage.getItem(WELCOME_BANNER_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
 
 function readCachedUser(): UserOut | null {
   try {
@@ -27,7 +36,7 @@ function writeCachedUser(value: UserOut | null): void {
 }
 
 /** 判断 JWT 是否已过期（或将在 30 秒内过期），用于启动时提前静默刷新 */
-function isJwtExpired(token: string): boolean {
+export function isJwtExpired(token: string): boolean {
   try {
     const parts = token.split(".");
     if (parts.length !== 3) return false;
@@ -44,8 +53,29 @@ function isJwtExpired(token: string): boolean {
 export const useAuthStore = defineStore("auth", () => {
   const user = ref<UserOut | null>(null);
   const ready = ref(false);
+  const justRegistered = ref(readWelcomeFlag());
 
   const authenticated = computed(() => user.value !== null);
+
+  function markNewUserIfNeeded(tokens: { is_new_user?: boolean }) {
+    if (tokens.is_new_user) {
+      justRegistered.value = true;
+      try {
+        localStorage.setItem(WELCOME_BANNER_KEY, "1");
+      } catch {
+        /* 忽略存储受限环境 */
+      }
+    }
+  }
+
+  function dismissWelcome(): void {
+    justRegistered.value = false;
+    try {
+      localStorage.removeItem(WELCOME_BANNER_KEY);
+    } catch {
+      /* 忽略 */
+    }
+  }
 
   async function fetchAndCacheMe(): Promise<UserOut> {
     const me = await authApi.me();
@@ -99,17 +129,23 @@ export const useAuthStore = defineStore("auth", () => {
   }
 
   async function loginWithEmailOtp(email: string, code: string): Promise<void> {
-    persistTokens(await authApi.verifyEmailOtp({ email, code }));
+    const tokens = await authApi.verifyEmailOtp({ email, code });
+    persistTokens(tokens);
+    markNewUserIfNeeded(tokens);
     await fetchAndCacheMe();
   }
 
   async function loginWithMagicToken(magicToken: string): Promise<void> {
-    persistTokens(await authApi.verifyEmailOtp({ magic_token: magicToken }));
+    const tokens = await authApi.verifyEmailOtp({ magic_token: magicToken });
+    persistTokens(tokens);
+    markNewUserIfNeeded(tokens);
     await fetchAndCacheMe();
   }
 
   async function loginWithOAuthCode(code: string): Promise<void> {
-    persistTokens(await authApi.exchangeOAuthCode(code));
+    const tokens = await authApi.exchangeOAuthCode(code);
+    persistTokens(tokens);
+    markNewUserIfNeeded(tokens);
     await fetchAndCacheMe();
   }
 
@@ -136,12 +172,15 @@ export const useAuthStore = defineStore("auth", () => {
     clearTokens();
     writeCachedUser(null);
     user.value = null;
+    dismissWelcome();
   }
 
   return {
     user,
     ready,
     authenticated,
+    justRegistered,
+    dismissWelcome,
     bootstrap,
     login,
     loginWithEmailOtp,

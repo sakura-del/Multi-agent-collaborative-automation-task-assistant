@@ -34,6 +34,7 @@ import { useRoute, useRouter } from "vue-router";
 
 import AppSidebar from "@/components/layout/AppSidebar.vue";
 import CommandPalette from "@/components/layout/CommandPalette.vue";
+import FeedbackDialog from "@/components/common/FeedbackDialog.vue";
 import TopBar from "@/components/layout/TopBar.vue";
 import { DURATION, EASE_IN, EASE_OUT, OFFSET } from "@/lib/ease";
 import { hasActiveOverlays } from "@/lib/overlay";
@@ -124,6 +125,7 @@ const COLLAPSE_KEY = "vp:nav-collapsed";
 const navCollapsed = ref(localStorage.getItem(COLLAPSE_KEY) === "1");
 const mobileOpen = ref(false);
 const commandOpen = ref(false);
+const feedbackOpen = ref(false);
 
 watch(navCollapsed, (value) => {
   localStorage.setItem(COLLAPSE_KEY, value ? "1" : "0");
@@ -260,6 +262,7 @@ function handleLogout() {
       @update:collapsed="navCollapsed = $event"
       @update:mobile-open="mobileOpen = $event"
       @open-command="commandOpen = true"
+      @open-feedback="feedbackOpen = true"
       @logout="handleLogout"
     />
 
@@ -305,6 +308,7 @@ function handleLogout() {
       v-model:open="commandOpen"
       @logout="handleLogout"
     />
+    <FeedbackDialog v-model:open="feedbackOpen" />
 
     <!-- 全局会话小窗（Issue #8 P0）：默认收起时仅渲染轻量 FAB，避免首屏加载 292KB ChatShell 并抢占并发带宽 -->
     <template v-if="$route.name !== 'chat'">

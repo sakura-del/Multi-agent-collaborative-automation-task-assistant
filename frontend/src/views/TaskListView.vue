@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
-import { ChevronRight, Clock, List, Plus, Search } from "lucide-vue-next";
+import { ChevronRight, Clock, List, Loader2, Plus, Search, Sparkles, X } from "lucide-vue-next";
 
 import AnimatedCollapse from "@/components/common/AnimatedCollapse.vue";
 import BeTimeline from "@/components/motion/BeTimeline.vue";
@@ -14,6 +14,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Pagination } from "@/components/ui/pagination";
 import { useDelayedLoading } from "@/composables/useDelayedLoading";
+import { trackEvent } from "@/api/growth";
+import { useAuthStore } from "@/stores/auth";
 import { useKnowledgeStore } from "@/stores/knowledge";
 import { useTaskStore } from "@/stores/tasks";
 import type { TaskStatusGroup } from "@/api/tasks";
@@ -41,6 +43,7 @@ import {
 // 3. **没有汇总**：「待我确认」是唯一需要用户行动的状态，必须单独突出。
 // 4. **没有筛选/搜索**：20 条以上就找不到东西。
 // 5. **20 个「打开」按钮**：整行可点击，省掉一整列。
+const auth = useAuthStore();
 const store = useTaskStore();
 const knowledge = useKnowledgeStore();
 const router = useRouter();
@@ -48,6 +51,7 @@ const router = useRouter();
 const showForm = ref(false);
 const viewMode = ref<"list" | "timeline">("list");
 const submitting = ref(false);
+const demoRunning = ref(false);
 const errorMessage = ref<string | null>(null);
 const keyword = ref("");
 /** 筛选：`all` / `needs-me` / `active` / `done`。 */
@@ -130,12 +134,41 @@ async function handleCreate(payload: TaskCreate) {
   errorMessage.value = null;
   try {
     const created = await store.create(payload);
+    trackEvent("task_created", { is_demo: Boolean(payload.is_demo) });
+    auth.dismissWelcome();
     showForm.value = false;
     await router.push({ name: "task-detail", params: { taskId: created.task_id } });
   } catch (error) {
     errorMessage.value = (error as Error).message;
   } finally {
     submitting.value = false;
+  }
+}
+
+async function handleRunDemoTask() {
+  if (demoRunning.value || submitting.value) return;
+  demoRunning.value = true;
+  errorMessage.value = null;
+  trackEvent("demo_task_clicked");
+  try {
+    const created = await store.create({
+      topic: "检索增强生成（RAG）在学术文献综述中的引文忠实度研究（示例）",
+      keywords: ["retrieval-augmented generation", "citation grounding", "literature review"],
+      workflow_preset: "literature_review",
+      max_documents: 5,
+      offline_dataset: true,
+      verify_references: false,
+      is_demo: true,
+      output_language: "zh",
+      citation_style: "gbt7714",
+    });
+    trackEvent("task_created", { is_demo: true });
+    auth.dismissWelcome();
+    await router.push({ name: "task-detail", params: { taskId: created.task_id } });
+  } catch (error) {
+    errorMessage.value = (error as Error).message || "示例任务创建失败，请重试";
+  } finally {
+    demoRunning.value = false;
   }
 }
 
@@ -328,6 +361,44 @@ const rows = computed(() =>
 
     <ErrorBanner v-if="!showForm" :message="errorMessage" @dismiss="errorMessage = null" />
 
+    <!-- 新用户首次建号欢迎引导条（Issue #61 P1-4） -->
+    <div
+      v-if="auth.justRegistered"
+      data-test="welcome-onboarding-banner"
+      class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary/25 bg-primary/[0.05] px-4 py-3 text-xs"
+    >
+      <div class="min-w-0 space-y-0.5">
+        <p class="font-semibold text-foreground">
+          欢迎加入 VeriPaper！已为您开启免费体验版（每月 3 篇平台综述额度）
+        </p>
+        <p class="text-muted-foreground">
+          首次使用可先点击下方「一键运行示例任务」，约 1 分钟即可体验完整流程（不扣您的免费篇数），或直接点击右上角「新建任务」输入您的研究课题。
+        </p>
+      </div>
+      <div class="flex shrink-0 items-center gap-2">
+        <Button
+          v-if="!store.items.length"
+          size="sm"
+          variant="outline"
+          data-test="welcome-run-demo"
+          :disabled="demoRunning"
+          @click="handleRunDemoTask"
+        >
+          <Sparkles :size="13" aria-hidden="true" />
+          <span>{{ demoRunning ? "正在启动示例…" : "一键跑示例" }}</span>
+        </Button>
+        <button
+          type="button"
+          data-test="welcome-dismiss"
+          aria-label="关闭欢迎引导"
+          class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+          @click="auth.dismissWelcome()"
+        >
+          <X :size="14" aria-hidden="true" />
+        </button>
+      </div>
+    </div>
+
     <AnimatedCollapse :open="showForm">
       <TaskCreateForm
         class="mb-5"
@@ -481,11 +552,36 @@ const rows = computed(() =>
       v-else-if="!store.listLoading && !showSkeleton && !store.items.length && !isFiltered"
       testid="empty-state"
       title="还没有任务"
-      description="新建一个文献综述任务，系统会先规划再执行，可随时确认与干预。"
+      description="点击一键运行内置示例任务，1 分钟内体验 PRISMA 初筛与带引用综述成稿（首次免扣免费额度）；或新建您的研究课题。"
     >
       <template #icon>
-        <Plus class="mb-1 size-6 text-muted-foreground" aria-hidden="true" />
+        <Sparkles class="mb-1 size-6 text-primary" aria-hidden="true" />
       </template>
+      <div class="mt-1 flex flex-wrap items-center justify-center gap-2">
+        <Button
+          size="sm"
+          data-test="run-demo-task"
+          :disabled="demoRunning"
+          @click="handleRunDemoTask"
+        >
+          <Loader2
+            v-if="demoRunning"
+            class="size-3.5 animate-spin motion-reduce:animate-none"
+            aria-hidden="true"
+          />
+          <Sparkles v-else :size="14" aria-hidden="true" />
+          <span>{{ demoRunning ? "正在启动示例…" : "一键运行示例任务（约 1 分钟出效果）" }}</span>
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          data-test="empty-new-task"
+          @click="toggleCreateForm"
+        >
+          <Plus :size="14" aria-hidden="true" />
+          <span>输入自己的课题</span>
+        </Button>
+      </div>
     </EmptyState>
 
     <!-- 筛选/搜索无结果：给出「怎么回到有结果」的引导，不是空白表格 -->

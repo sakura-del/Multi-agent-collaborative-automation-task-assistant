@@ -46,7 +46,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.billing.model_prices import estimate_cost, lookup_price
 from app.core.config import get_settings
-from app.core.exceptions import AppException
+from app.core.exceptions import AppException, ValidationException
 from app.core.logging import get_logger
 from app.db.models.billing import (
     DEFAULT_PLAN_ID,
@@ -255,6 +255,28 @@ class PlanService:
         )
         return _in_memory_free_plan()
 
+    @staticmethod
+    def max_documents_for_plan(plan_id: str) -> int:
+        """各套餐使用平台模型时单次任务文献数上限（Issue #61 P0-3 控成本）。"""
+        if plan_id == DEFAULT_PLAN_ID:
+            return int(get_settings().billing.free_max_documents)
+        return 50
+
+    async def check_document_limit(self, user_id: uuid.UUID, max_documents: int) -> None:
+        """校验单次任务的文献数是否超出当前套餐的平台模型上限。"""
+        plan = await self.get_active_plan(user_id)
+        limit = self.max_documents_for_plan(plan.id)
+        if max_documents > limit:
+            raise ValidationException(
+                f"{plan.name}使用平台模型单次最多支持 {limit} 篇文献（当前选择 {max_documents} 篇）；"
+                "请将篇数调至 15 篇以内，或使用自带模型 / 升级套餐",
+                details={
+                    "plan_id": plan.id,
+                    "limit": limit,
+                    "requested": max_documents,
+                },
+            )
+
     async def _active_subscription(
         self, session: AsyncSession, user_id: uuid.UUID, now: datetime
     ) -> Subscription | None:
@@ -402,6 +424,7 @@ class PlanService:
             "max_workspaces": int(plan.max_workspaces),
             "max_seats_per_workspace": int(plan.max_seats_per_workspace),
             "price_cents": int(plan.price_cents),
+            "max_documents_per_task": self.max_documents_for_plan(plan.id),
             # ===== 订阅信息（与用量周期区分开）=====
             "period_end": subscription.period_end if subscription is not None else None,
             "seats_purchased": (

@@ -149,6 +149,7 @@ async def list_plans(db: DbDep) -> list[PlanOut]:
             allow_team=plan.allow_team,
             price_cents=plan.price_cents,
             description=plan.description,
+            max_documents_per_task=service.max_documents_for_plan(plan.id),
         )
         for plan in plans
     ]

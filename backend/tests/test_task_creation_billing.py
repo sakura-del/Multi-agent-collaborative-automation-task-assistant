@@ -197,36 +197,39 @@ def _subscribe(api, user: User, plan_id: str) -> None:
 
 
 class TestPlanQuotaBlocksCreate:
-    def test_free_second_task_returns_plan_quota_error(self, api) -> None:
-        """免费档 1 篇/月：第 2 篇返回 **PLAN_QUOTA_EXCEEDED**。"""
+    def test_free_fourth_task_returns_plan_quota_error(self, api) -> None:
+        """免费档 3 篇/月：第 4 篇返回 **PLAN_QUOTA_EXCEEDED**。"""
         user = _user(api, "q1")
         client = api.state.client
 
-        first = client.post("/api/v1/tasks", headers=_headers(user), json=_payload("a"))
-        assert first.status_code == 201, first.text
+        for idx in range(3):
+            ok = client.post("/api/v1/tasks", headers=_headers(user), json=_payload(f"ok{idx}"))
+            assert ok.status_code == 201, ok.text
 
-        second = client.post("/api/v1/tasks", headers=_headers(user), json=_payload("b"))
-        assert second.status_code == 429, second.text
-        body = second.json()
+        fourth = client.post("/api/v1/tasks", headers=_headers(user), json=_payload("fourth"))
+        assert fourth.status_code == 429, fourth.text
+        body = fourth.json()
         assert body["error_code"] == "PLAN_QUOTA_EXCEEDED"
-        assert body["details"]["limit"] == 1
-        assert body["details"]["used"] == 1
+        assert body["details"]["limit"] == 3
+        assert body["details"]["used"] == 3
 
     def test_rejected_task_not_submitted(self, api) -> None:
-        """**拒绝时不留下僵尸任务**：`submit` 不应被调用第二次。"""
+        """**拒绝时不留下僵尸任务**：第 4 次被拒时 `submit` 不应增加。"""
         user = _user(api, "q2")
         client = api.state.client
-        client.post("/api/v1/tasks", headers=_headers(user), json=_payload("a"))
-        assert api.state.execution.submit_calls == 1
+        for idx in range(3):
+            client.post("/api/v1/tasks", headers=_headers(user), json=_payload(f"a{idx}"))
+        assert api.state.execution.submit_calls == 3
 
         client.post("/api/v1/tasks", headers=_headers(user), json=_payload("b"))
 
-        assert api.state.execution.submit_calls == 1, "被拒绝的请求不能提交任务"
+        assert api.state.execution.submit_calls == 3, "被拒绝的请求不能提交任务"
 
     def test_upgrade_unblocks(self, api) -> None:
         user = _user(api, "q3")
         client = api.state.client
-        client.post("/api/v1/tasks", headers=_headers(user), json=_payload("a"))
+        for idx in range(3):
+            client.post("/api/v1/tasks", headers=_headers(user), json=_payload(f"a{idx}"))
         assert (
             client.post("/api/v1/tasks", headers=_headers(user), json=_payload("b")).status_code
             == 429
@@ -238,6 +241,23 @@ class TestPlanQuotaBlocksCreate:
             client.post("/api/v1/tasks", headers=_headers(user), json=_payload("c")).status_code
             == 201
         )
+
+    def test_free_plan_caps_platform_max_documents_at_15(self, api) -> None:
+        """免费版平台模型单次上限 15 篇（Issue #61 P0-3）；升级学生版后解锁 20 篇。"""
+        user = _user(api, "q_doc_cap")
+        client = api.state.client
+        over_cap = {**_payload("over"), "max_documents": 20}
+        rejected = client.post("/api/v1/tasks", headers=_headers(user), json=over_cap)
+        assert rejected.status_code == 422, rejected.text
+        assert "15" in rejected.text
+
+        at_cap = {**_payload("at15"), "max_documents": 15}
+        allowed = client.post("/api/v1/tasks", headers=_headers(user), json=at_cap)
+        assert allowed.status_code == 201, allowed.text
+
+        _subscribe(api, user, "student")
+        unlocked = client.post("/api/v1/tasks", headers=_headers(user), json=over_cap)
+        assert unlocked.status_code == 201, unlocked.text
 
 
 class TestTokenBudgetDistinguished:
@@ -283,8 +303,14 @@ class TestOrderOfChecks:
         """
         user = _user(api, "o1")
         client = api.state.client
-        # 先耗尽免费档的 1 篇
-        client.post("/api/v1/tasks", headers=_headers(user), json=_payload("a"))
+        # 先耗尽免费档的 3 篇
+        for idx in range(3):
+            assert (
+                client.post(
+                    "/api/v1/tasks", headers=_headers(user), json=_payload(f"a{idx}")
+                ).status_code
+                == 201
+            )
         # 再把 token 护栏也调到极小（两者同时超限）
         api.state.quota = QuotaService(redis_client=api.state.redis, daily_limit=1)
         api.dependency_overrides[tasks_endpoint.get_quota_service] = lambda: api.state.quota
@@ -422,6 +448,7 @@ class TestUsageEndpoint:
         assert body["plan_id"] == "free"
         assert body["period_end"] is None
         assert body["seats_purchased"] is None
-        # 免费档额度 1 篇，用掉 0 篇
-        assert body["monthly_reviews"] == 1
-        assert body["reviews_remaining"] == 1
+        # 免费档额度 3 篇，用掉 0 篇
+        assert body["monthly_reviews"] == 3
+        assert body["reviews_remaining"] == 3
+        assert body["max_documents_per_task"] == 15

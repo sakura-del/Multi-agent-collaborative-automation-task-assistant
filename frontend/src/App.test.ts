@@ -3,7 +3,6 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { createMemoryHistory, createRouter } from "vue-router";
 import { defineComponent, onMounted, onUnmounted } from "vue";
-import { Motion } from "motion-v";
 
 import App from "@/App.vue";
 
@@ -26,7 +25,7 @@ describe("App 全局壳层与路由过渡", () => {
     document.body.innerHTML = "";
   });
 
-  it("挂载 Toaster、路由过渡 Motion（reduced-motion 下 y 归零）且工作台内部切页时不重挂载 AppLayout", async () => {
+  it("挂载 Toaster、轻量 CSS 路由过渡且工作台内部切页时不重挂载 AppLayout", async () => {
     mockReducedMotion(true);
     setActivePinia(createPinia());
 
@@ -72,20 +71,14 @@ describe("App 全局壳层与路由过渡", () => {
     });
     await flushPromises();
 
-    // 验证 Toaster 已挂载且 App 外层路由使用 Motion 过渡并在 reduced-motion 下 y=0
+    // 验证 Toaster 已挂载且初始路由渲染正常
     expect(wrapper.find('[data-test="stub-login"]').exists()).toBe(true);
     expect(wrapper.findComponent({ name: "Toaster" }).exists()).toBe(true);
-    const motionComp = wrapper.findComponent(Motion);
-    expect(motionComp.exists()).toBe(true);
-    const motionInitial = (
-      motionComp as unknown as { props: (k: string) => { y?: number } | undefined }
-    ).props("initial");
-    expect(motionInitial?.y).toBe(0);
 
     // 切入工作台
     await router.push("/tasks");
     await flushPromises();
-    await new Promise((resolve) => setTimeout(resolve, 160));
+    await new Promise((resolve) => setTimeout(resolve, 200));
     await flushPromises();
     expect(layoutMountCount).toBe(1);
     expect(layoutUnmountCount).toBe(0);
@@ -94,7 +87,7 @@ describe("App 全局壳层与路由过渡", () => {
     // 工作台内部从 /tasks 切到 /knowledge：AppLayout 不得卸载重建
     await router.push("/knowledge");
     await flushPromises();
-    await new Promise((resolve) => setTimeout(resolve, 160));
+    await new Promise((resolve) => setTimeout(resolve, 200));
     await flushPromises();
     expect(layoutMountCount).toBe(1);
     expect(layoutUnmountCount).toBe(0);

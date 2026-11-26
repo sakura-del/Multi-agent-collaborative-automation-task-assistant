@@ -57,6 +57,9 @@ export default defineConfig({
           if (id.includes("reka-ui") || id.includes("clsx") || id.includes("tailwind-merge") || id.includes("class-variance-authority")) {
             return "vendor-ui";
           }
+          if (id.includes("motion-v") || id.includes("framer-motion")) {
+            return "vendor-motion";
+          }
         },
       },
     },

@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import { Loader2 } from "lucide-vue-next";
 
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
+import { trackEvent } from "@/api/growth";
 import { useAuthStore } from "@/stores/auth";
 
 const route = useRoute();
@@ -20,6 +21,7 @@ onMounted(async () => {
   }
   try {
     await auth.loginWithOAuthCode(code);
+    trackEvent("auth_success", { method: "oauth", is_new_user: auth.justRegistered });
     await router.replace({ name: "tasks" });
   } catch (error) {
     errorMessage.value = (error as Error).message || "第三方登录失败，请重试";

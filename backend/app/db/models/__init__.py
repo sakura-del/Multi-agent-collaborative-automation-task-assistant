@@ -30,6 +30,7 @@
 """
 
 from app.db.models.agent import Agent, AgentInteraction
+from app.db.models.analytics import AnalyticsEvent, UserFeedback
 from app.db.models.annotation import TaskAnnotation
 from app.db.models.api_key import ApiKey
 from app.db.models.audit import AuditLog
@@ -59,6 +60,7 @@ from app.db.models.workspace import Workspace, WorkspaceInvite, WorkspaceMember
 __all__ = [
     "Agent",
     "AgentInteraction",
+    "AnalyticsEvent",
     "ApiKey",
     "AuditLog",
     "CitationStyle",
@@ -90,6 +92,7 @@ __all__ = [
     "TaskRoutine",
     "UsageCounter",
     "User",
+    "UserFeedback",
     "UserTemplate",
     "ValidationResult",
     "VectorIndex",

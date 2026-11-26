@@ -392,6 +392,12 @@ class RateLimitRules(BaseModel):
     template_render: RateLimitRule = RateLimitRule(limit=10, window_seconds=60)
     """模板渲染：跑 docxtpl + python-docx 重打包，单次开销最大，限额最严。"""
 
+    analytics: RateLimitRule = RateLimitRule(limit=120, window_seconds=60)
+    """轻量漏斗埋点上报：允许正常页面浏览事件，防止恶意灌库。"""
+
+    feedback: RateLimitRule = RateLimitRule(limit=10, window_seconds=3600)
+    """站内反馈提交：防刷限流。"""
+
 
 class CaptchaConfig(BaseModel):
     """注册人机验证（ALTCHA 自托管 PoW，2026-11-13）。
@@ -444,6 +450,9 @@ class BillingConfig(BaseModel):
     2026-11-16 之前的任务只存 `used_tokens` 总量，无法还原拆分；
     估算时按该比例拆分并标记 `split_estimated=true`，不伪装成实测值。
     """
+
+    free_max_documents: int = Field(default=15, ge=1, le=50)
+    """免费版使用平台模型时单次任务允许的最大文献篇数上限（Issue #61 P0-3 控成本）。"""
 
 
 class RateLimitConfig(BaseModel):

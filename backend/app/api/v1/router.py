@@ -20,6 +20,7 @@ from app.api.v1.endpoints import (
     citation_styles,
     conversations,
     extractions,
+    growth,
     health,
     intent,
     llm_credentials,
@@ -79,3 +80,5 @@ api_router.include_router(billing.router)
 # 管理员看板（Issue #15 P2）：BYOK 渗透率，admin only、不走 API Key
 api_router.include_router(admin_byok.router)
 api_router.include_router(admin_console.router)
+# 漏斗埋点与站内用户反馈（Issue #61 P2）
+api_router.include_router(growth.router)

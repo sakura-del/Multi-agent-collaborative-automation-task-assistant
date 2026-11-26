@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, useId } from "vue";
-import { Motion, useReducedMotion } from "motion-v";
+import { computed, onBeforeUnmount, ref } from "vue";
 import {
   ArrowRight,
   Check,
@@ -19,7 +18,6 @@ import {
 } from "lucide-vue-next";
 
 import { Button } from "@/components/ui/button";
-import { SPRING_LAYOUT, TRANSITION_ENTER } from "@/lib/ease";
 import { toastInfo } from "@/lib/toast";
 import {
   DEMO_AGENT_STAGES,
@@ -32,9 +30,6 @@ import {
 } from "./landing-demo-data";
 
 export type ShowcaseTab = "prisma" | "matrix" | "review";
-
-const instanceId = useId();
-const reduced = useReducedMotion();
 
 const props = withDefaults(
   defineProps<{
@@ -249,18 +244,11 @@ onBeforeUnmount(() => {
             class="relative inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors"
             :class="
               currentTab === tab.id
-                ? 'text-white dark:text-primary-foreground'
+                ? 'bg-[#0F4C3A] text-white dark:bg-primary dark:text-primary-foreground'
                 : 'text-[#4B5563] hover:text-[#111827] dark:text-muted-foreground dark:hover:text-foreground'
             "
             @click="selectTabManual(tab.id)"
           >
-            <Motion
-              v-if="currentTab === tab.id"
-              :layout-id="reduced ? undefined : `showcase-tab-${instanceId}`"
-              :transition="SPRING_LAYOUT"
-              aria-hidden="true"
-              class="absolute inset-0 rounded-full bg-[#0F4C3A] dark:bg-primary"
-            />
             <span class="relative z-10 inline-flex items-center gap-1.5">
               <component :is="tab.icon" :size="13" aria-hidden="true" />
               <span>{{ tab.label }}</span>
@@ -270,13 +258,10 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <Motion
+    <div
       v-if="currentTab === 'prisma'"
       key="panel-prisma"
       data-test="showcase-panel-prisma"
-      :initial="{ opacity: reduced ? 1 : 0 }"
-      :animate="{ opacity: 1 }"
-      :transition="TRANSITION_ENTER"
       class="p-4 sm:p-6"
     >
       <!-- ==================== TAB 1：PRISMA 2020 智能筛选 ==================== -->
@@ -388,15 +373,12 @@ onBeforeUnmount(() => {
           </div>
         </li>
       </ul>
-    </Motion>
+    </div>
 
-    <Motion
+    <div
       v-else-if="currentTab === 'matrix'"
       key="panel-matrix"
       data-test="showcase-panel-matrix"
-      :initial="{ opacity: reduced ? 1 : 0 }"
-      :animate="{ opacity: 1 }"
-      :transition="TRANSITION_ENTER"
       class="p-4 sm:p-6"
     >
       <!-- ==================== TAB 2：文献提取表格 & 多智能体编排 ==================== -->
@@ -512,15 +494,12 @@ onBeforeUnmount(() => {
           <X :size="14" aria-hidden="true" />
         </Button>
       </div>
-    </Motion>
+    </div>
 
-    <Motion
+    <div
       v-else
       key="panel-review"
       data-test="showcase-panel-review"
-      :initial="{ opacity: reduced ? 1 : 0 }"
-      :animate="{ opacity: 1 }"
-      :transition="TRANSITION_ENTER"
       class="p-4 sm:p-6"
     >
       <!-- ==================== TAB 3：可溯源综述 & 模板导出 ==================== -->
@@ -685,6 +664,6 @@ onBeforeUnmount(() => {
           </div>
         </aside>
       </div>
-    </Motion>
+    </div>
   </div>
 </template>

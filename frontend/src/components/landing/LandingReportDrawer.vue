@@ -165,9 +165,14 @@ function close() {
 
         <!-- 抽屉底栏 -->
         <footer class="flex flex-wrap items-center justify-between gap-3 border-t border-[#E5E7EB] bg-white px-5 py-3 dark:border-border dark:bg-card">
-          <span class="text-xs text-[#6B7280] dark:text-muted-foreground">
-            支持导出高校 / 期刊自定义 Word（.docx）模板
-          </span>
+          <RouterLink
+            to="/demo"
+            data-test="drawer-open-demo-page"
+            class="text-xs font-medium text-[#0F4C3A] underline-offset-4 hover:underline dark:text-primary"
+            @click="close"
+          >
+            在新页面打开完整示例 →
+          </RouterLink>
           <button
             type="button"
             data-test="drawer-start-cta"

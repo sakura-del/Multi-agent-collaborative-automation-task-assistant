@@ -128,3 +128,41 @@ class AdminAuditPage(BaseModel):
 
     total: int
     items: list[AdminAuditRow] = Field(default_factory=list)
+
+
+class AdminFunnelOut(BaseModel):
+    """推广转化漏斗统计（Issue #61 P2-10）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    days: int
+    landing_visitors: int
+    demo_views: int
+    register_views: int
+    registered_users: int
+    task_creators: int
+    task_completed_users: int
+    demo_task_clicks: int
+
+
+class AdminFeedbackRow(BaseModel):
+    """用户站内反馈列表行（Issue #61 P2-11）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: uuid.UUID
+    user_id: uuid.UUID
+    username: str
+    email: str
+    category: str
+    content: str
+    page_path: str | None = None
+    status: str
+    created_at: datetime | None = None
+
+
+class AdminFeedbackPage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    total: int
+    items: list[AdminFeedbackRow] = Field(default_factory=list)

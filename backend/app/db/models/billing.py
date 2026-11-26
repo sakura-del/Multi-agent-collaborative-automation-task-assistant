@@ -83,28 +83,28 @@ def period_key_for(moment: datetime | None = None) -> str:
     return current.astimezone(UTC).strftime("%Y-%m")
 
 
-#: 四个套餐的种子数据（对齐路线图 §7「建议档位」）。
+#: 四个套餐的种子数据（对齐路线图 §7「建议档位」+ Issue #61 P0-3 新号体验额度）。
 #:
 #: | 套餐 | 篇数/月 | 团队 | API | 价格 |
 #: | --- | --- | --- | --- | --- |
-#: | free | 1 | ❌ | ❌ | ¥0 |
+#: | free | 3 | ❌ | ❌ | ¥0 |
 #: | student | 10 | ✅ | ❌ | ¥19 |
 #: | pro | 50 | ✅ | ✅ | ¥69 |
 #: | institution | 不限 | ✅ | ✅ | ¥1999 |
 #:
-#: **免费档必须严格**：宽松会让付费转化与成本控制同时失效。
+#: **免费档必须可控**：送 3 篇体验完整综述，同时在业务层对平台模型施加单次最多 15 篇上限。
 #: **API 只给专业档及以上**：脚本刷任务的成本风险远高于网页。
 SEED_PLANS: list[dict[str, Any]] = [
     {
         "id": "free",
         "name": "免费版",
-        "monthly_reviews": 1,
+        "monthly_reviews": 3,
         "max_workspaces": 0,
         "max_seats_per_workspace": 0,
         "allow_api_access": False,
         "allow_team": False,
         "price_cents": 0,
-        "description": "每月 1 篇综述，含 GB/T 7714—2025 引用与 Markdown/DOCX 导出",
+        "description": "每月 3 篇综述（平台模型单次最多 15 篇文献），含 GB/T 7714—2025 引用与 Markdown/DOCX 导出",
     },
     {
         "id": "student",

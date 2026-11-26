@@ -156,13 +156,14 @@ async def _generate_unique_username(repo: UserRepository, email: str) -> str:
     return f"u_{secrets.token_hex(6)}"
 
 
-def _issue_tokens(user: User) -> TokenOut:
+def _issue_tokens(user: User, *, is_new_user: bool = False) -> TokenOut:
     """签发 access_token 与 refresh_token（与 /auth/login 口径完全一致）。"""
     return TokenOut(
         access_token=create_access_token(user.id, role=user.role),
         refresh_token=create_refresh_token(user.id),
         token_type="bearer",
         expires_in=settings.jwt_access_token_expire_minutes * 60,
+        is_new_user=is_new_user,
     )
 
 
@@ -279,6 +280,7 @@ async def verify_email_otp(
     repo = UserRepository(db)
     user = await repo.get_by_email(verified_email)
     now = datetime.now(UTC)
+    is_new_user = user is None
 
     if user is None:
         username = await _generate_unique_username(repo, verified_email)
@@ -303,7 +305,7 @@ async def verify_email_otp(
     # 请求结束时消失，签发的 JWT 指向不存在的用户（/auth/me 401）。必须落库。
     await db.commit()
 
-    return _issue_tokens(user)
+    return _issue_tokens(user, is_new_user=is_new_user)
 
 
 # =====================================================================
@@ -517,6 +519,7 @@ async def oauth_callback(
     link = (await db.execute(stmt)).scalar_one_or_none()
     repo = UserRepository(db)
     now = datetime.now(UTC)
+    is_new_user = False
 
     if link is not None:
         user = await repo.get(link.user_id)
@@ -527,6 +530,7 @@ async def oauth_callback(
     else:
         user = await repo.get_by_email(verified_email)
         if user is None:
+            is_new_user = True
             username = await _generate_unique_username(repo, verified_email)
             user = User(
                 username=username,
@@ -562,7 +566,7 @@ async def oauth_callback(
     await store.setex(
         f"oauth:exchange:{_sha256_hex(exchange_code)}",
         OAUTH_EXCHANGE_TTL_SECONDS,
-        str(user.id),
+        json.dumps({"user_id": str(user.id), "is_new_user": is_new_user}),
     )
     return RedirectResponse(
         url=f"{_frontend_base_url()}/auth/callback?code={quote(exchange_code)}",
@@ -587,7 +591,16 @@ async def oauth_exchange(
     if not raw_uid:
         raise UnauthorizedException("授权登录码无效或已过期，请重新登录")
 
-    uid_str = raw_uid.decode("utf-8") if isinstance(raw_uid, bytes) else str(raw_uid)
+    raw_text = raw_uid.decode("utf-8") if isinstance(raw_uid, bytes) else str(raw_uid)
+    uid_str = raw_text
+    is_new_user = False
+    if raw_text.startswith("{"):
+        try:
+            parsed = json.loads(raw_text)
+            uid_str = str(parsed.get("user_id") or "")
+            is_new_user = bool(parsed.get("is_new_user", False))
+        except Exception:
+            uid_str = ""
     import uuid as _uuid
 
     try:
@@ -598,4 +611,4 @@ async def oauth_exchange(
     user = await UserRepository(db).get(user_uuid)
     if user is None or not user.is_active:
         raise UnauthorizedException("账号不存在或已被禁用")
-    return _issue_tokens(user)
+    return _issue_tokens(user, is_new_user=is_new_user)

@@ -18,12 +18,14 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.billing.services.plan_service import PlanService
 from app.core.config import settings
 from app.core.exceptions import ForbiddenException
 from app.core.quota import QuotaService
+from app.db.models.task import Task
 from app.orchestration.services.task_execution import TaskExecution
 from app.schemas.task import TaskCreate
 from app.security.llm_credential_service import LLMCredentialService
@@ -69,16 +71,34 @@ async def submit_review_task(
     contract = payload.to_contract()
     byok = payload.llm_credential_id is not None
 
+    # 仅「首次任务 + 离线示例」免扣篇数与日 token 配额（Issue #61 P1-6）；
+    # 已有过任意任务的用户再点示例按常规任务扣减，防止被滥用刷免费算力。
+    demo_exempt = False
+    if payload.is_demo and payload.offline_dataset and not byok:
+        existing_count = (
+            await db.scalar(select(func.count()).select_from(Task).where(Task.user_id == user_id))
+            or 0
+        )
+        if existing_count == 0:
+            demo_exempt = True
+            model_snapshot = {"demo_exempt": True, "is_byok": False}
+
+    # 〇 套餐单任务文献篇数上限（Issue #61 P0-3 控成本，仅限平台模型；BYOK 用户自费放行）
+    if not byok and not demo_exempt:
+        check_doc_limit = getattr(plan_service, "check_document_limit", None)
+        if callable(check_doc_limit):
+            await check_doc_limit(user_id, payload.max_documents)
+
     # ① 篇数（数据库原子扣减；超限抛 PLAN_QUOTA_EXCEEDED）
-    if not byok or settings.billing.byok_consumes_review_quota:
+    if not demo_exempt and (not byok or settings.billing.byok_consumes_review_quota):
         await plan_service.check_and_consume_review(user_id)
 
     # ② token 成本护栏（Redis；超限抛 TOKEN_BUDGET_EXCEEDED）
-    if quota is not None and not byok:
+    if quota is not None and not byok and not demo_exempt:
         await quota.check_and_consume(user_id, tokens=ESTIMATED_TOKENS_PER_TASK)
 
-    # 不带凭据时保持原调用形状：编排层替身（测试/验收）无需感知 BYOK 参数
-    if payload.llm_credential_id is None:
+    # 不带凭据且非示例免扣时保持原调用形状：编排层替身（测试/验收）无需感知额外参数
+    if payload.llm_credential_id is None and not demo_exempt:
         return await execution.submit(user_id, contract)
     return await execution.submit(
         user_id,

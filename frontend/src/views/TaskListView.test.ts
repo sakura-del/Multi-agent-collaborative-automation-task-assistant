@@ -487,4 +487,29 @@ describe("M3 任务列表 UX 与动效收口", () => {
     expect(alerts[0].attributes("data-test")).toBe("form-error");
     expect(alerts[0].text()).toContain("配额已满，请升级套餐");
   });
+
+  it("新用户首次进入空任务列表时展示欢迎引导，并支持一键运行示例任务（Issue #61 P1-4/6）", async () => {
+    localStorage.setItem("vp:welcome_banner", "1");
+    const wrapper = await mountWith([]);
+    const { useTaskStore } = await import("@/stores/tasks");
+    const store = useTaskStore();
+    const createSpy = vi.fn().mockResolvedValue({ task_id: "demo-1", status: "planning" });
+    store.create = createSpy;
+
+    expect(wrapper.find('[data-test="welcome-onboarding-banner"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="run-demo-task"]').exists()).toBe(true);
+
+    await wrapper.get('[data-test="run-demo-task"]').trigger("click");
+    await flushPromises();
+
+    expect(createSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        offline_dataset: true,
+        is_demo: true,
+        verify_references: false,
+      }),
+    );
+    expect(localStorage.getItem("vp:welcome_banner")).toBeNull();
+    localStorage.clear();
+  });
 });

@@ -1,12 +1,14 @@
 import { createRouter, createWebHistory } from "vue-router";
 
-import { useAuthStore } from "@/stores/auth";
+import { getAccessToken, getRefreshToken } from "@/api/client";
+import { isJwtExpired, useAuthStore } from "@/stores/auth";
 
 // 工作台壳子懒加载：避免未登录打开 /、/login、/password-reset 时提前下载侧栏、命令面板与动效依赖
 const AppLayout = () => import("@/layouts/AppLayout.vue");
 
 const AdminByokView = () => import("@/views/AdminByokView.vue");
 const AdminConsoleView = () => import("@/views/AdminConsoleView.vue");
+const DemoReviewView = () => import("@/views/DemoReviewView.vue");
 const DesignTimelineView = () => import("@/views/DesignTimelineView.vue");
 const ApiKeyView = () => import("@/views/ApiKeyView.vue");
 const PlanView = () => import("@/views/PlanView.vue");
@@ -19,6 +21,7 @@ const ModelSettingsView = () => import("@/views/ModelSettingsView.vue");
 const OAuthCallbackView = () => import("@/views/OAuthCallbackView.vue");
 const ObservabilityView = () => import("@/views/ObservabilityView.vue");
 const PasswordResetView = () => import("@/views/PasswordResetView.vue");
+const PrivacyView = () => import("@/views/PrivacyView.vue");
 const ReferenceImportView = () => import("@/views/ReferenceImportView.vue");
 const ReferenceLibraryView = () => import("@/views/ReferenceLibraryView.vue");
 const ScreeningView = () => import("@/views/ScreeningView.vue");
@@ -26,6 +29,7 @@ const StyleView = () => import("@/views/StyleView.vue");
 const TaskDetailView = () => import("@/views/TaskDetailView.vue");
 const TaskListView = () => import("@/views/TaskListView.vue");
 const TemplateView = () => import("@/views/TemplateView.vue");
+const TermsView = () => import("@/views/TermsView.vue");
 const VerifyEmailView = () => import("@/views/VerifyEmailView.vue");
 const WorkspaceDetailView = () => import("@/views/WorkspaceDetailView.vue");
 const WorkspaceView = () => import("@/views/WorkspaceView.vue");
@@ -62,6 +66,24 @@ export const router = createRouter({
       path: "/register",
       name: "register",
       component: LoginView,
+      meta: { public: true },
+    },
+    {
+      path: "/demo",
+      name: "demo",
+      component: DemoReviewView,
+      meta: { public: true },
+    },
+    {
+      path: "/privacy",
+      name: "privacy",
+      component: PrivacyView,
+      meta: { public: true },
+    },
+    {
+      path: "/terms",
+      name: "terms",
+      component: TermsView,
       meta: { public: true },
     },
     // 内部设计演示页（不进导航）：仅管理员鉴权访问，禁止生产匿名暴露（Issue #62）
@@ -166,17 +188,43 @@ export const router = createRouter({
   ],
 });
 
-// 鉴权守卫：等待会话恢复完成（ready）后再决定放行/跳转
+// 鉴权守卫：公开页首帧零阻塞（避免旧 refresh_token 触发长达数秒的白屏等待）；
+// 受保护页面等待会话恢复完成（ready）后再决定放行/跳转。
 router.beforeEach(async (to, from) => {
   const auth = useAuthStore();
+  if (to.meta.public) {
+    const isAuthRedirectRoute =
+      to.name === "landing" || to.name === "login" || to.name === "register";
+    if (!auth.ready) {
+      const accessToken = getAccessToken();
+      const refreshToken = getRefreshToken();
+      const needsNetworkRefresh = Boolean(refreshToken && (!accessToken || isJwtExpired(accessToken)));
+      if (isAuthRedirectRoute && !needsNetworkRefresh) {
+        await auth.bootstrap();
+      } else {
+        void auth.bootstrap().then(() => {
+          const cur = router.currentRoute.value.name;
+          if (
+            auth.authenticated &&
+            (cur === "landing" || cur === "login" || cur === "register")
+          ) {
+            void router.replace({ name: "tasks" });
+          }
+        });
+        return true;
+      }
+    }
+    if (auth.authenticated && isAuthRedirectRoute) {
+      return { name: "tasks" };
+    }
+    return true;
+  }
+
   if (!auth.ready) {
     await auth.bootstrap();
   }
-  if (!auth.authenticated && !to.meta.public) {
+  if (!auth.authenticated) {
     return { name: "login", query: { redirect: to.fullPath } };
-  }
-  if (auth.authenticated && (to.name === "landing" || to.name === "login" || to.name === "register")) {
-    return { name: "tasks" };
   }
   // 管理员页面：非 admin 直接回任务列表，不暴露「有这一页」的错误信息
   if (to.meta.requiresAdmin && auth.user?.role !== "admin") {

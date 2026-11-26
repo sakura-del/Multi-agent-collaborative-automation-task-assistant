@@ -64,6 +64,34 @@ export interface AdminUserPage {
   items: AdminUserRow[];
 }
 
+export interface AdminFunnelOut {
+  days: number;
+  landing_visitors: number;
+  demo_views: number;
+  register_views: number;
+  registered_users: number;
+  task_creators: number;
+  task_completed_users: number;
+  demo_task_clicks: number;
+}
+
+export interface AdminFeedbackRow {
+  id: string;
+  user_id: string;
+  username: string;
+  email: string;
+  category: string;
+  content: string;
+  page_path: string | null;
+  status: string;
+  created_at: string | null;
+}
+
+export interface AdminFeedbackPage {
+  total: number;
+  items: AdminFeedbackRow[];
+}
+
 /** 后台 KPI 概览（窗口内聚合，一次请求拿全） */
 export async function getAdminOverview(days: number): Promise<AdminOverview> {
   const response = await api.get<AdminOverview>("/admin/console/overview", {
@@ -103,6 +131,28 @@ export async function listAdminUsers(params: {
       ...(params.role ? { role: params.role } : {}),
       limit: params.limit ?? 20,
       offset: params.offset ?? 0,
+    },
+  });
+  return response.data;
+}
+
+/** 推广漏斗转化统计 */
+export async function getAdminFunnel(days: number): Promise<AdminFunnelOut> {
+  const response = await api.get<AdminFunnelOut>("/admin/console/funnel", {
+    params: { days },
+  });
+  return response.data;
+}
+
+/** 站内用户反馈列表 */
+export async function listAdminFeedback(params?: {
+  limit?: number;
+  offset?: number;
+}): Promise<AdminFeedbackPage> {
+  const response = await api.get<AdminFeedbackPage>("/admin/console/feedback", {
+    params: {
+      limit: params?.limit ?? 20,
+      offset: params?.offset ?? 0,
     },
   });
   return response.data;

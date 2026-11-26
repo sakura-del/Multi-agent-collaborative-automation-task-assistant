@@ -34,6 +34,7 @@ class PlanOut(BaseModel):
     allow_team: bool
     price_cents: int = Field(description="月费（分）；0 = 免费")
     description: str | None = None
+    max_documents_per_task: int = Field(default=50, description="平台模型单次任务文献篇数上限")
 
 
 class ModelUsageBucket(BaseModel):
@@ -126,6 +127,7 @@ class UsageOut(BaseModel):
     max_workspaces: int = Field(default=0, description="可创建工作区上限")
     max_seats_per_workspace: int = Field(default=0, description="单工作区席位上限")
     price_cents: int = Field(default=0, description="月费（分）；0 = 免费")
+    max_documents_per_task: int = Field(default=50, description="平台模型单次任务文献篇数上限")
 
     # ===== 订阅信息（与用量周期区分）=====
     period_end: datetime | None = Field(default=None, description="订阅到期时间；免费档为 null")

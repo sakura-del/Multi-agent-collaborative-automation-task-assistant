@@ -25,9 +25,13 @@ import { Motion, useReducedMotion } from "motion-v";
 import { Loader2, RefreshCw } from "lucide-vue-next";
 
 import {
+  getAdminFunnel,
   getAdminOverview,
+  listAdminFeedback,
   listAdminTasks,
   listAdminUsers,
+  type AdminFeedbackRow,
+  type AdminFunnelOut,
   type AdminOverview,
   type AdminTaskRow,
   type AdminUserRow,
@@ -58,8 +62,13 @@ const showOverviewSkeleton = useDelayedLoading(overviewLoading);
 const error = ref("");
 
 // ===== 表 =====
-type Tab = "tasks" | "users";
+type Tab = "tasks" | "users" | "growth";
 const tab = ref<Tab>("tasks");
+
+const funnel = ref<AdminFunnelOut | null>(null);
+const feedbacks = ref<AdminFeedbackRow[]>([]);
+const feedbackTotal = ref(0);
+const growthLoading = ref(false);
 
 const tasks = ref<AdminTaskRow[]>([]);
 const taskTotal = ref(0);
@@ -203,20 +212,41 @@ function onUserPageChange(page: number): void {
   void loadUsers();
 }
 
+async function loadGrowth(): Promise<void> {
+  growthLoading.value = true;
+  try {
+    const [funnelRes, fbRes] = await Promise.all([
+      getAdminFunnel(days.value),
+      listAdminFeedback({ limit: 50, offset: 0 }),
+    ]);
+    funnel.value = funnelRes;
+    feedbacks.value = fbRes.items;
+    feedbackTotal.value = fbRes.total;
+  } catch (err) {
+    error.value = (err as Error).message || "漏斗与反馈数据加载失败";
+  } finally {
+    growthLoading.value = false;
+  }
+}
+
 async function refreshManual(): Promise<void> {
   await Promise.all([
     loadOverview(),
-    tab.value === "tasks" ? loadTasks() : loadUsers(),
+    tab.value === "tasks" ? loadTasks() : tab.value === "users" ? loadUsers() : loadGrowth(),
   ]);
   if (!error.value) {
     toastSuccess("已刷新后台数据");
   }
 }
 
-watch(days, () => void loadOverview());
+watch(days, () => {
+  void loadOverview();
+  if (tab.value === "growth") void loadGrowth();
+});
 watch(tab, (value) => {
   if (value === "tasks" && tasks.value.length === 0) void loadTasks();
   if (value === "users" && users.value.length === 0) void loadUsers();
+  if (value === "growth") void loadGrowth();
 });
 
 onMounted(async () => {
@@ -352,6 +382,22 @@ onMounted(async () => {
               />
               <span class="relative z-10">用户</span>
             </button>
+            <button
+              type="button"
+              data-test="admin-tab-growth"
+              class="relative rounded px-2.5 py-1 text-xs transition-colors"
+              :class="tab === 'growth' ? 'font-medium text-primary' : 'text-muted-foreground hover:text-foreground'"
+              @click="tab = 'growth'"
+            >
+              <Motion
+                v-if="tab === 'growth'"
+                :layout-id="reduced ? undefined : `admin-tab-${instanceId}`"
+                :transition="SPRING_LAYOUT"
+                aria-hidden="true"
+                class="absolute inset-0 rounded bg-primary/10"
+              />
+              <span class="relative z-10">漏斗与反馈</span>
+            </button>
           </div>
         </div>
       </CardHeader>
@@ -469,7 +515,7 @@ onMounted(async () => {
           </div>
         </template>
 
-        <template v-else>
+        <template v-else-if="tab === 'users'">
           <!-- ===== 用户 ===== -->
           <div class="mb-3 flex flex-wrap items-center gap-2">
             <select
@@ -575,6 +621,87 @@ onMounted(async () => {
               aria-label="用户列表分页"
               @change="onUserPageChange"
             />
+          </div>
+        </template>
+
+        <template v-else>
+          <!-- ===== 推广漏斗与站内反馈（Issue #61 P2）===== -->
+          <div v-if="growthLoading" class="space-y-3 py-2">
+            <div class="h-20 animate-pulse rounded bg-muted/40 motion-reduce:animate-none" />
+            <div class="h-32 animate-pulse rounded bg-muted/40 motion-reduce:animate-none" />
+          </div>
+          <div v-else class="space-y-6">
+            <div v-if="funnel" data-test="admin-funnel-panel" class="space-y-2">
+              <h3 class="text-xs font-semibold text-muted-foreground">
+                近 {{ funnel.days }} 天转化漏斗
+              </h3>
+              <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                <div class="rounded-lg border border-border px-3 py-2.5">
+                  <p class="text-[11px] text-muted-foreground">落地页 / 示例访客</p>
+                  <p class="mt-0.5 text-base font-semibold tabular-nums">
+                    {{ formatNumber(funnel.landing_visitors) }}
+                    <span class="text-xs font-normal text-muted-foreground">
+                      · 示例 {{ formatNumber(funnel.demo_views) }}
+                    </span>
+                  </p>
+                </div>
+                <div class="rounded-lg border border-border px-3 py-2.5">
+                  <p class="text-[11px] text-muted-foreground">注册页访客 / 新注册用户</p>
+                  <p class="mt-0.5 text-base font-semibold tabular-nums">
+                    {{ formatNumber(funnel.register_views) }} → {{ formatNumber(funnel.registered_users) }}
+                  </p>
+                </div>
+                <div class="rounded-lg border border-border px-3 py-2.5">
+                  <p class="text-[11px] text-muted-foreground">创建任务用户 / 一键示例点击</p>
+                  <p class="mt-0.5 text-base font-semibold tabular-nums">
+                    {{ formatNumber(funnel.task_creators) }}
+                    <span class="text-xs font-normal text-muted-foreground">
+                      · 示例点击 {{ formatNumber(funnel.demo_task_clicks) }}
+                    </span>
+                  </p>
+                </div>
+                <div class="rounded-lg border border-border px-3 py-2.5">
+                  <p class="text-[11px] text-muted-foreground">任务完成用户</p>
+                  <p class="mt-0.5 text-base font-semibold text-emerald-700 tabular-nums dark:text-emerald-400">
+                    {{ formatNumber(funnel.task_completed_users) }}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div class="space-y-2">
+              <div class="flex items-center justify-between">
+                <h3 class="text-xs font-semibold text-muted-foreground">
+                  用户站内反馈（共 {{ formatNumber(feedbackTotal) }} 条）
+                </h3>
+              </div>
+              <EmptyState
+                v-if="feedbacks.length === 0"
+                title="暂无站内反馈"
+                description="用户通过工作台左下角「意见反馈」提交的建议或问题会显示在这里。"
+              />
+              <ul v-else class="divide-y divide-border rounded-lg border border-border">
+                <li
+                  v-for="fb in feedbacks"
+                  :key="fb.id"
+                  data-test="admin-feedback-row"
+                  class="space-y-1 px-3.5 py-2.5 text-xs"
+                >
+                  <div class="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline" class="text-[10px]">{{ fb.category }}</Badge>
+                    <span class="font-medium">{{ fb.username }}</span>
+                    <span class="text-muted-foreground">({{ fb.email }})</span>
+                    <span v-if="fb.page_path" class="font-mono text-[10px] text-muted-foreground">
+                      {{ fb.page_path }}
+                    </span>
+                    <span class="ml-auto text-[11px] text-muted-foreground tabular-nums">
+                      {{ formatDateTime(fb.created_at) }}
+                    </span>
+                  </div>
+                  <p class="leading-relaxed text-foreground">{{ fb.content }}</p>
+                </li>
+              </ul>
+            </div>
           </div>
         </template>
 

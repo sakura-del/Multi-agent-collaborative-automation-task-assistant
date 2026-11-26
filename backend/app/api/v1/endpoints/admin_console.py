@@ -27,6 +27,7 @@ from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_admin_user
+from app.db.models.analytics import AnalyticsEvent, UserFeedback
 from app.db.models.audit import AuditLog
 from app.db.models.billing import Plan, Subscription
 from app.db.models.llm_credential import LLMCredential
@@ -36,6 +37,9 @@ from app.db.session import get_db
 from app.schemas.admin_console import (
     AdminAuditPage,
     AdminAuditRow,
+    AdminFeedbackPage,
+    AdminFeedbackRow,
+    AdminFunnelOut,
     AdminOverviewOut,
     AdminTaskPage,
     AdminTaskRow,
@@ -315,3 +319,92 @@ async def list_audit(
             for row in rows
         ],
     )
+
+
+@router.get("/funnel", response_model=AdminFunnelOut, summary="推广漏斗统计（只读）")
+async def get_funnel(
+    _admin: AdminDep,
+    db: DbDep,
+    days: Annotated[int, Query(ge=1, le=90, description="统计窗口（天）")] = 7,
+) -> AdminFunnelOut:
+    """统计最近 N 天内「落地页访客 → 注册页 → 建号 → 建任务 → 任务完成」漏斗。"""
+    since = datetime.now(UTC) - timedelta(days=days)
+
+    async def _distinct_visitors(event_name: str) -> int:
+        val = await db.scalar(
+            select(func.count(func.distinct(AnalyticsEvent.visitor_id))).where(
+                AnalyticsEvent.event_name == event_name,
+                AnalyticsEvent.created_at >= since,
+            )
+        )
+        return int(val or 0)
+
+    landing_visitors = await _distinct_visitors("landing_view")
+    demo_views = await _distinct_visitors("demo_view")
+    register_views = await _distinct_visitors("register_view")
+    demo_task_clicks = await _distinct_visitors("demo_task_clicked")
+
+    registered_users = int(
+        await db.scalar(select(func.count()).select_from(User).where(User.created_at >= since)) or 0
+    )
+    task_creators = int(
+        await db.scalar(
+            select(func.count(func.distinct(Task.user_id))).where(Task.created_at >= since)
+        )
+        or 0
+    )
+    task_completed_users = int(
+        await db.scalar(
+            select(func.count(func.distinct(Task.user_id))).where(
+                Task.status == "completed",
+                Task.created_at >= since,
+            )
+        )
+        or 0
+    )
+
+    return AdminFunnelOut(
+        days=days,
+        landing_visitors=landing_visitors,
+        demo_views=demo_views,
+        register_views=register_views,
+        registered_users=registered_users,
+        task_creators=task_creators,
+        task_completed_users=task_completed_users,
+        demo_task_clicks=demo_task_clicks,
+    )
+
+
+@router.get("/feedback", response_model=AdminFeedbackPage, summary="站内用户反馈列表（只读）")
+async def list_feedback(
+    _admin: AdminDep,
+    db: DbDep,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> AdminFeedbackPage:
+    """按创建时间倒序返回用户提交的站内反馈。"""
+    total = int(await db.scalar(select(func.count()).select_from(UserFeedback)) or 0)
+    rows = (
+        await db.execute(
+            select(UserFeedback, User.username, User.email)
+            .join(User, User.id == UserFeedback.user_id)
+            .order_by(UserFeedback.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+    ).all()
+    items = [
+        AdminFeedbackRow(
+            id=fb.id,
+            user_id=fb.user_id,
+            username=username,
+            email=email,
+            category=fb.category,
+            content=fb.content,
+            page_path=fb.page_path,
+            status=fb.status,
+            created_at=fb.created_at,
+        )
+        for fb, username, email in rows
+    ]
+    return AdminFeedbackPage(total=total, items=items)

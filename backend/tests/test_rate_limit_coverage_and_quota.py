@@ -76,6 +76,9 @@ class TestAllWriteEndpointsAreCovered:
             ("POST", "/api/v1/llm-credentials", "verify"),
             ("POST", "/api/v1/llm-credentials/probe", "verify"),
             ("POST", "/api/v1/llm-credentials/abc/test", "verify"),
+            # 漏斗埋点与站内反馈
+            ("POST", "/api/v1/analytics/events", "analytics"),
+            ("POST", "/api/v1/feedback", "feedback"),
         ],
     )
     def test_write_endpoint_has_rule(self, method: str, path: str, expected_label: str) -> None:

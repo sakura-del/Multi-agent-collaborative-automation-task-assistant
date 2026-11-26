@@ -1,20 +1,21 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import { AnimatePresence, Motion, useReducedMotion } from "motion-v";
 import { ArrowRight, BookOpenCheck, Check, ChevronDown, Github, Monitor, Moon, Sun } from "lucide-vue-next";
 
-import LandingReportDrawer from "@/components/landing/LandingReportDrawer.vue";
 import LandingShowcase, { type ShowcaseTab } from "@/components/landing/LandingShowcase.vue";
 import { TRUST_SOURCES } from "@/components/landing/landing-demo-data";
+import { trackEvent } from "@/api/growth";
 import { useTheme, type ThemeMode } from "@/composables/useTheme";
-import { DURATION, EASE_IN, EASE_OUT, OFFSET } from "@/lib/ease";
+
+const LandingReportDrawer = defineAsyncComponent(
+  () => import("@/components/landing/LandingReportDrawer.vue"),
+);
 
 const GITHUB_REPO_URL =
   "https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant";
 
 const router = useRouter();
-const reduced = useReducedMotion();
 const { mode, isDark, setTheme, toggleTheme } = useTheme();
 
 const themeMenuOpen = ref(false);
@@ -67,6 +68,7 @@ function onThemeMenuKeydown(event: KeyboardEvent) {
 }
 
 onMounted(() => {
+  trackEvent("landing_view");
   if (typeof document !== "undefined") {
     document.addEventListener("pointerdown", onDocumentPointerDown);
     window.addEventListener("keydown", onThemeMenuKeydown);
@@ -91,10 +93,9 @@ function goRegister() {
 function jumpToShowcase(tab: ShowcaseTab) {
   activeTab.value = tab;
   const prefersReduced =
-    reduced.value ||
-    (typeof window !== "undefined" &&
-      typeof window.matchMedia === "function" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   showcaseAnchor.value?.scrollIntoView({
     behavior: prefersReduced ? "auto" : "smooth",
     block: "center",
@@ -142,6 +143,13 @@ function jumpToShowcase(tab: ShowcaseTab) {
           >
             可溯源综述与导出
           </button>
+          <RouterLink
+            to="/demo"
+            data-test="landing-nav-demo"
+            class="transition-colors hover:text-[#0F4C3A] dark:hover:text-foreground"
+          >
+            完整示例
+          </RouterLink>
         </nav>
 
         <div class="flex shrink-0 items-center gap-1.5 sm:gap-2">
@@ -165,32 +173,10 @@ function jumpToShowcase(tab: ShowcaseTab) {
             class="inline-flex size-8 items-center justify-center rounded-md text-[#4B5563] transition-colors hover:bg-black/5 hover:text-[#111827] dark:text-muted-foreground dark:hover:bg-muted dark:hover:text-foreground"
             @click="toggleTheme"
           >
-            <AnimatePresence mode="wait" :initial="false">
-              <Motion
-                v-if="isDark"
-                key="sun"
-                as="span"
-                class="inline-flex items-center justify-center"
-                :initial="{ opacity: 0, scale: reduced ? 1 : 0.85 }"
-                :animate="{ opacity: 1, scale: 1 }"
-                :exit="{ opacity: 0, scale: reduced ? 1 : 0.85 }"
-                :transition="{ duration: DURATION.micro, ease: EASE_OUT }"
-              >
-                <Sun :size="15" aria-hidden="true" />
-              </Motion>
-              <Motion
-                v-else
-                key="moon"
-                as="span"
-                class="inline-flex items-center justify-center"
-                :initial="{ opacity: 0, scale: reduced ? 1 : 0.85 }"
-                :animate="{ opacity: 1, scale: 1 }"
-                :exit="{ opacity: 0, scale: reduced ? 1 : 0.85 }"
-                :transition="{ duration: DURATION.micro, ease: EASE_OUT }"
-              >
-                <Moon :size="15" aria-hidden="true" />
-              </Motion>
-            </AnimatePresence>
+            <Transition name="vp-fade-micro" mode="out-in">
+              <Sun v-if="isDark" key="sun" :size="15" aria-hidden="true" />
+              <Moon v-else key="moon" :size="15" aria-hidden="true" />
+            </Transition>
           </button>
 
           <!-- 三态主题模式选择：浅色 / 深色 / 跟随系统（与 TopBar 同构） -->
@@ -213,24 +199,12 @@ function jumpToShowcase(tab: ShowcaseTab) {
               <ChevronDown :size="11" aria-hidden="true" />
             </button>
 
-            <AnimatePresence :initial="false">
-              <Motion
+            <Transition name="vp-fade-micro">
+              <ul
                 v-if="themeMenuOpen"
                 key="landing-theme-menu"
-                as="ul"
                 role="listbox"
                 aria-label="选择主题模式"
-                :initial="{ opacity: 0, y: reduced ? 0 : -OFFSET.microY }"
-                :animate="{
-                  opacity: 1,
-                  y: 0,
-                  transition: { duration: reduced ? DURATION.micro : DURATION.fast, ease: EASE_OUT },
-                }"
-                :exit="{
-                  opacity: 0,
-                  y: reduced ? 0 : -OFFSET.microY,
-                  transition: { duration: DURATION.micro, ease: EASE_IN },
-                }"
                 class="absolute right-0 top-full z-40 mt-1.5 w-32 rounded-lg border border-[#E5E7EB] bg-white p-1 text-[#111827] shadow-raised dark:border-border-strong dark:bg-popover dark:text-popover-foreground"
               >
                 <li
@@ -254,8 +228,8 @@ function jumpToShowcase(tab: ShowcaseTab) {
                     <Check v-if="mode === option.value" :size="12" aria-hidden="true" />
                   </button>
                 </li>
-              </Motion>
-            </AnimatePresence>
+              </ul>
+            </Transition>
           </div>
 
           <RouterLink
@@ -331,10 +305,19 @@ function jumpToShowcase(tab: ShowcaseTab) {
             <BookOpenCheck :size="15" class="text-[#0F4C3A] dark:text-primary" aria-hidden="true" />
             <span>阅读示范报告</span>
           </button>
+
+          <RouterLink
+            to="/demo"
+            data-test="landing-cta-demo-page"
+            class="inline-flex h-10 items-center gap-1.5 rounded-lg border border-transparent px-3 text-sm font-medium text-[#0F4C3A] transition-colors hover:bg-[#0F4C3A]/6 dark:text-primary dark:hover:bg-primary/10"
+          >
+            <span>先看成品示例</span>
+            <ArrowRight :size="14" aria-hidden="true" />
+          </RouterLink>
         </div>
 
         <p class="mt-3.5 text-xs text-[#6B7280] dark:text-muted-foreground">
-          免费试用 · 支持自带 API Key · 全文引文防幻觉核验
+          新号每月赠 3 篇免费体验 · 支持自带 API Key · 全文引文防幻觉核验
         </p>
       </section>
 
@@ -358,13 +341,53 @@ function jumpToShowcase(tab: ShowcaseTab) {
           </li>
         </ul>
       </section>
+
+      <!-- ==================== 检索数据源与中文文献说明（Issue #61 P1-7） ==================== -->
+      <section
+        data-test="landing-sources-faq"
+        aria-label="支持的文献数据库与中文文献方案"
+        class="mt-10 grid gap-4 md:grid-cols-2"
+      >
+        <div class="rounded-xl border border-[#E5E7EB] bg-white p-5 dark:border-border dark:bg-card">
+          <p class="text-[11px] font-semibold tracking-wider text-[#0F4C3A] uppercase dark:text-primary">
+            ONLINE DATABASES
+          </p>
+          <h2 class="mt-1 text-base font-semibold text-[#111827] dark:text-foreground">
+            当前支持直连检索哪些学术库？
+          </h2>
+          <p class="mt-2 text-xs leading-6 text-[#4B5563] dark:text-muted-foreground">
+            系统当前直接对接 <strong class="text-[#111827] dark:text-foreground">arXiv</strong>（计算机/物理/交叉学科预印本）、<strong class="text-[#111827] dark:text-foreground">PubMed</strong>（生物医学核心库）、<strong class="text-[#111827] dark:text-foreground">OpenAlex</strong>（全球开放学术索引，收录部分中文期刊元数据）与 <strong class="text-[#111827] dark:text-foreground">Semantic Scholar</strong>，并由 Crossref + OpenAlex 自动完成 DOI 引文核验。
+          </p>
+        </div>
+
+        <div class="rounded-xl border border-[#E5E7EB] bg-white p-5 dark:border-border dark:bg-card">
+          <p class="text-[11px] font-semibold tracking-wider text-[#0F4C3A] uppercase dark:text-primary">
+            CNKI &amp; CHINESE LITERATURE
+          </p>
+          <h2 class="mt-1 text-base font-semibold text-[#111827] dark:text-foreground">
+            能否检索知网 / 万方等中文文献？
+          </h2>
+          <p class="mt-2 text-xs leading-6 text-[#4B5563] dark:text-muted-foreground">
+            目前<strong class="text-[#111827] dark:text-foreground">暂不支持直连在线检索知网（CNKI）/ 万方</strong>（中文库直连已列入路线图接入规划）。写中文学位/期刊综述时，您可以：① 通过 OpenAlex 检索部分中文期刊题录；② 从知网导出 <strong class="text-[#111827] dark:text-foreground">BibTeX / RIS / EndNote</strong> 题录导入个人引用库；③ 上传知网下载的 <strong class="text-[#111827] dark:text-foreground">中文 PDF 全文</strong>至知识库，同样支持句级溯源与 GB/T 7714-2025 导出。
+          </p>
+        </div>
+      </section>
     </main>
 
     <!-- 极简页脚 -->
     <footer class="border-t border-[#E5E7EB]/80 py-6 dark:border-border">
       <div class="mx-auto flex max-w-[1160px] flex-wrap items-center justify-between gap-3 px-4 text-xs text-[#6B7280] sm:px-6 dark:text-muted-foreground">
         <span>VeriPaper · 证据驱动的文献综述工作台</span>
-        <div class="flex items-center gap-4">
+        <div class="flex flex-wrap items-center gap-4">
+          <RouterLink to="/demo" data-test="landing-footer-demo" class="hover:text-[#111827] dark:hover:text-foreground">
+            示例报告
+          </RouterLink>
+          <RouterLink to="/privacy" data-test="landing-footer-privacy" class="hover:text-[#111827] dark:hover:text-foreground">
+            隐私政策
+          </RouterLink>
+          <RouterLink to="/terms" data-test="landing-footer-terms" class="hover:text-[#111827] dark:hover:text-foreground">
+            用户协议
+          </RouterLink>
           <a
             :href="GITHUB_REPO_URL"
             target="_blank"

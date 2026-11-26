@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { toastInfo, toastWarning } from "@/lib/toast";
+import { getBillingUsage } from "@/api/billing";
 import { listCitationStyles } from "@/api/citation-styles";
 import { listLLMCredentials } from "@/api/llm-credentials";
 import { getLibrarySummary } from "@/api/reference-library";
@@ -114,7 +115,18 @@ function goTo(path: string) {
     }
 }
 
-const MAX_DOC_PRESETS = [5, 10, 20] as const;
+// 套餐对平台模型单次文献篇数的上限（默认 50，免费版从 /billing/usage 读取为 15）
+const platformDocLimit = ref(DOC_MAX);
+const effectiveDocMax = computed(() =>
+    modelSource.value === "platform" ? platformDocLimit.value : DOC_MAX,
+);
+const maxDocPresets = computed(() => {
+    const cap = effectiveDocMax.value;
+    if (cap < 20) {
+        return [5, 10, cap].filter((n, idx, arr) => n <= cap && arr.indexOf(n) === idx);
+    }
+    return [5, 10, 20];
+});
 
 // BYOK（Issue #15）：显式二选一——「平台模型」还是「自带模型」。
 // 2026-11-17 用户要求：选择必须摆在明面上，不能藏在下拉第一项里。
@@ -137,14 +149,26 @@ const selectedCredentialInfo = computed(
 const canSubmit = computed(() => !props.pending);
 
 onMounted(async () => {
-    // 三个初始化接口彼此独立，改为并行加载并单独容错：
+    // 四个初始化接口彼此独立，改为并行加载并单独容错：
     // 避免引用样式列表慢或为空时阻塞/跳过引用库条数与自带模型列表（Issue #55）
-    const [stylesResult, summaryResult, credentialsResult] =
+    const [stylesResult, summaryResult, credentialsResult, usageResult] =
         await Promise.allSettled([
             listCitationStyles(),
             getLibrarySummary(),
             listLLMCredentials(),
+            getBillingUsage(),
         ]);
+
+    if (
+        usageResult.status === "fulfilled" &&
+        typeof usageResult.value?.max_documents_per_task === "number" &&
+        usageResult.value.max_documents_per_task >= DOC_MIN
+    ) {
+        platformDocLimit.value = Math.min(DOC_MAX, usageResult.value.max_documents_per_task);
+        if (modelSource.value === "platform" && maxDocuments.value > platformDocLimit.value) {
+            maxDocuments.value = platformDocLimit.value;
+        }
+    }
 
     if (
         stylesResult.status === "fulfilled" &&
@@ -214,18 +238,26 @@ watch([useReferenceLibrary, libraryCount], ([enabled, count]) => {
     }
 });
 
+// 切回平台模型时，若篇数超过平台套餐单次上限则自动对齐
+watch(modelSource, (source) => {
+    if (source === "platform" && Number(maxDocuments.value) > platformDocLimit.value) {
+        maxDocuments.value = platformDocLimit.value;
+    }
+});
+
 /** 失焦时对文献数做安全夹紧，避免打断正在输入或拦截测试边界断言 */
 function clampMaxDocuments() {
+    const cap = effectiveDocMax.value;
     const raw = Number(maxDocuments.value);
     if (!Number.isFinite(raw)) {
-        maxDocuments.value = activePreset.value.defaults.maxDocuments;
+        maxDocuments.value = Math.min(cap, activePreset.value.defaults.maxDocuments);
         toastInfo("文献数已恢复为预设值");
         return;
     }
-    const clamped = Math.min(DOC_MAX, Math.max(DOC_MIN, Math.round(raw)));
+    const clamped = Math.min(cap, Math.max(DOC_MIN, Math.round(raw)));
     if (clamped !== raw) {
         maxDocuments.value = clamped;
-        toastInfo(`文献数已调整至 ${DOC_MIN}–${DOC_MAX} 之间`);
+        toastInfo(`文献数已调整至 ${DOC_MIN}–${cap} 之间`);
     }
 }
 
@@ -421,12 +453,13 @@ function validate(): { messages: string[]; fields: Set<string>; firstField: stri
         mark("keyword", `关键词最多 ${KEYWORD_MAX} 个`);
     }
     const documents = Number(maxDocuments.value);
+    const maxAllowed = effectiveDocMax.value;
     if (
         !Number.isFinite(documents) ||
         documents < DOC_MIN ||
-        documents > DOC_MAX
+        documents > maxAllowed
     ) {
-        mark("maxDocuments", `文献数需在 ${DOC_MIN}–${DOC_MAX} 之间`);
+        mark("maxDocuments", `文献数需在 ${DOC_MIN}–${maxAllowed} 之间`);
     }
     if (dateFrom.value && dateTo.value && dateFrom.value > dateTo.value) {
         mark("dateRange", "起始日期不能晚于结束日期");
@@ -732,21 +765,21 @@ async function handleSubmit() {
         <div class="grid gap-3 rounded-lg border border-border/70 bg-muted/15 p-3">
             <div class="flex flex-wrap items-end gap-3">
                 <div class="grid gap-1.5">
-                    <Label for="task-documents">文献数（1–50）</Label>
+                    <Label for="task-documents">文献数（1–{{ effectiveDocMax }}）</Label>
                     <Input
                         id="task-documents"
                         v-model="maxDocuments"
                         data-test="max-documents"
                         type="number"
                         min="1"
-                        max="50"
+                        :max="effectiveDocMax"
                         :class="['w-28', validationErrorFields.has('maxDocuments') ? ERROR_RING_CLASS : '']"
                         @blur="clampMaxDocuments"
                     />
                 </div>
                 <div class="flex flex-wrap items-center gap-1.5" role="group" aria-label="常用文献数量预设">
                     <Button
-                        v-for="presetCount in MAX_DOC_PRESETS"
+                        v-for="presetCount in maxDocPresets"
                         :key="presetCount"
                         type="button"
                         size="sm"
@@ -758,6 +791,13 @@ async function handleSubmit() {
                     </Button>
                 </div>
             </div>
+            <p
+                v-if="effectiveDocMax < DOC_MAX"
+                data-test="platform-doc-limit-hint"
+                class="text-xs text-muted-foreground"
+            >
+                当前套餐使用平台模型单次最多支持 {{ effectiveDocMax }} 篇文献；切换「自带模型」或升级套餐可设至 {{ DOC_MAX }} 篇。
+            </p>
 
             <div class="grid gap-2">
                 <label

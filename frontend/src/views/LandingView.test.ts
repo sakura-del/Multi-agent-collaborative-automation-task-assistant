@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createMemoryHistory, createRouter } from "vue-router";
 
@@ -10,8 +10,11 @@ async function mountLanding() {
     history: createMemoryHistory(),
     routes: [
       { path: "/", name: "landing", component: LandingView },
+      { path: "/demo", name: "demo", component: stub },
       { path: "/login", name: "login", component: stub },
       { path: "/register", name: "register", component: stub },
+      { path: "/privacy", name: "privacy", component: stub },
+      { path: "/terms", name: "terms", component: stub },
     ],
   });
   await router.push("/");
@@ -103,6 +106,7 @@ describe("LandingView（Elicit 风格落地页）", () => {
 
     // 点击次按钮「阅读示范报告」打开右侧抽屉
     await wrapper.get('[data-test="landing-cta-demo"]').trigger("click");
+    await vi.dynamicImportSettled();
     await flushPromises();
     const drawer = document.body.querySelector('[data-test="landing-report-drawer"]');
     expect(drawer).not.toBeNull();
@@ -177,6 +181,23 @@ describe("LandingView（Elicit 风格落地页）", () => {
     const subClasses = (subtitle.attributes("class") ?? "").split(/\s+/);
     expect(subClasses).toContain("max-w-3xl");
     expect(subClasses).toContain("text-balance");
+    wrapper.unmount();
+  });
+
+  it("提供免登录完整示例入口、知网/中文文献正面说明与隐私协议页脚链接（Issue #61）", async () => {
+    const { wrapper } = await mountLanding();
+
+    expect(wrapper.get('[data-test="landing-cta-demo-page"]').attributes("href")).toBe("/demo");
+    expect(wrapper.get('[data-test="landing-footer-demo"]').attributes("href")).toBe("/demo");
+    expect(wrapper.get('[data-test="landing-footer-privacy"]').attributes("href")).toBe("/privacy");
+    expect(wrapper.get('[data-test="landing-footer-terms"]').attributes("href")).toBe("/terms");
+
+    const faq = wrapper.get('[data-test="landing-sources-faq"]').text();
+    expect(faq).toContain("arXiv");
+    expect(faq).toContain("PubMed");
+    expect(faq).toContain("OpenAlex");
+    expect(faq).toContain("知网");
+    expect(faq).toContain("BibTeX");
     wrapper.unmount();
   });
 });

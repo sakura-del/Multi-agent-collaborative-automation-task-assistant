@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import { authApi } from "@/api/auth";
+import { trackEvent } from "@/api/growth";
 import { useAuthStore } from "@/stores/auth";
 
 const auth = useAuthStore();
@@ -40,6 +41,8 @@ const magicChecking = ref(false);
 const errorMessage = ref("");
 const statusMessage = ref("");
 
+const isRegisterRoute = computed(() => route.name === "register");
+
 const heading = computed(() => {
   if (step.value === "code") {
     return {
@@ -53,9 +56,15 @@ const heading = computed(() => {
       hint: "使用已有用户名/邮箱与密码访问工作台",
     };
   }
+  if (isRegisterRoute.value) {
+    return {
+      title: "创建 VeriPaper 账号",
+      hint: "输入邮箱获取验证码或一键登录，新邮箱验证后即自动建号（每月赠 3 篇体验额度）",
+    };
+  }
   return {
     title: "登录或创建账号",
-    hint: "输入邮箱获取验证码或一键登录链接，新邮箱将自动建号",
+    hint: "输入邮箱获取验证码或一键登录链接，新邮箱首次登录即自动创建账号",
   };
 });
 
@@ -104,6 +113,7 @@ async function handleVerifyOtp() {
   errorMessage.value = "";
   try {
     await auth.loginWithEmailOtp(otpEmail.value, code);
+    trackEvent("auth_success", { method: "email_otp", is_new_user: auth.justRegistered });
     await redirectAfterAuth();
   } catch (error) {
     errorMessage.value = (error as Error).message || "验证码无效或已过期";
@@ -140,6 +150,9 @@ const googleAuthUrl = computed(() => authApi.getOAuthAuthorizeUrl("google"));
 const githubAuthUrl = computed(() => authApi.getOAuthAuthorizeUrl("github"));
 
 onMounted(async () => {
+  if (isRegisterRoute.value) {
+    trackEvent("register_view");
+  }
   const oauthErr = typeof route.query.oauth_error === "string" ? route.query.oauth_error.trim() : "";
   if (oauthErr) {
     errorMessage.value = oauthErr;
@@ -151,6 +164,7 @@ onMounted(async () => {
   errorMessage.value = "";
   try {
     await auth.loginWithMagicToken(magic);
+    trackEvent("auth_success", { method: "magic_link", is_new_user: auth.justRegistered });
     await redirectAfterAuth();
   } catch (error) {
     errorMessage.value = (error as Error).message || "一键登录链接无效或已过期，请重新获取验证码";
@@ -195,6 +209,35 @@ onBeforeUnmount(() => {
           <p data-test="auth-hint" class="mt-1 text-xs leading-relaxed text-muted-foreground">
             {{ heading.hint }}
           </p>
+          <div
+            v-if="step === 'email'"
+            data-test="auth-unified-callout"
+            class="mt-3 flex items-center justify-between gap-2 rounded-lg border border-[#0F4C3A]/15 bg-[#0F4C3A]/[0.04] px-3 py-2 text-[11px] text-[#374151] dark:border-primary/25 dark:bg-primary/10 dark:text-muted-foreground"
+          >
+            <span>
+              {{
+                isRegisterRoute
+                  ? "新邮箱验证后自动建号并获赠 3 篇额度"
+                  : "免填注册表：新邮箱首次验证即自动建号"
+              }}
+            </span>
+            <RouterLink
+              v-if="isRegisterRoute"
+              to="/login"
+              data-test="auth-switch-login"
+              class="shrink-0 font-semibold text-[#0F4C3A] underline-offset-4 hover:underline dark:text-primary"
+            >
+              已有账号登录
+            </RouterLink>
+            <RouterLink
+              v-else
+              to="/demo"
+              data-test="auth-try-demo"
+              class="shrink-0 font-semibold text-[#0F4C3A] underline-offset-4 hover:underline dark:text-primary"
+            >
+              先看示例
+            </RouterLink>
+          </div>
         </header>
 
         <div
@@ -427,7 +470,24 @@ onBeforeUnmount(() => {
           </button>
           <p class="mt-3 flex items-center justify-center gap-1.5 text-[11px] text-muted-foreground">
             <LockKeyhole :size="12" aria-hidden="true" />
-            你的研究数据仅对当前工作空间可见
+            你的研究数据仅对当前工作空间可见，绝不用于训练模型
+          </p>
+          <p class="mt-2 flex items-center justify-center gap-3 text-[11px] text-muted-foreground">
+            <RouterLink
+              to="/privacy"
+              data-test="login-privacy-link"
+              class="underline-offset-4 hover:text-foreground hover:underline"
+            >
+              隐私政策
+            </RouterLink>
+            <span aria-hidden="true">·</span>
+            <RouterLink
+              to="/terms"
+              data-test="login-terms-link"
+              class="underline-offset-4 hover:text-foreground hover:underline"
+            >
+              用户协议
+            </RouterLink>
           </p>
         </div>
       </div>

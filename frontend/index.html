@@ -6,10 +6,111 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="preconnect" href="https://api.veripaper.me" crossorigin />
     <link rel="dns-prefetch" href="https://api.veripaper.me" />
-    <title>VeriPaper</title>
+    <title>VeriPaper · 每一句综述皆有出处</title>
+    <meta
+      name="description"
+      content="面向严肃研究的证据驱动文献综述工作台。支持 arXiv、PubMed、OpenAlex、Semantic Scholar 多库检索、PRISMA 2020 初筛、引文核验与 GB/T 7714-2025 / Word 模板导出。"
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="VeriPaper" />
+    <meta property="og:title" content="VeriPaper · 每一句综述皆有出处" />
+    <meta
+      property="og:description"
+      content="面向严肃研究的文献综述工作台：多库检索、PRISMA 初筛、句级引文核验与 Word 模板一键导出。"
+    />
+    <meta property="og:url" content="https://veripaper.me/" />
+    <meta property="og:image" content="https://veripaper.me/og-cover.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="VeriPaper · 每一句综述皆有出处" />
+    <meta
+      name="twitter:description"
+      content="面向严肃研究的文献综述工作台：多库检索、PRISMA 初筛、句级引文核验与 Word 模板一键导出。"
+    />
+    <meta name="twitter:image" content="https://veripaper.me/og-cover.png" />
+    <style>
+      /* 首屏零 JS 骨架壳：Vue 挂载后自动替换 #app 内容，消除慢网冷加载白屏 */
+      html, body {
+        margin: 0;
+        background: #faf9f6;
+        color: #111827;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif;
+      }
+      @media (prefers-color-scheme: dark) {
+        html, body {
+          background: #141518;
+          color: #f3f4f6;
+        }
+        .vp-boot-bar {
+          background: rgba(255, 255, 255, 0.08) !important;
+        }
+        .vp-boot-sub {
+          color: #9ca3af !important;
+        }
+      }
+      .vp-boot {
+        min-height: 100dvh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 14px;
+        padding: 24px;
+        box-sizing: border-box;
+      }
+      .vp-boot-brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 16px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+      .vp-boot-bar {
+        width: 148px;
+        height: 3px;
+        border-radius: 999px;
+        background: rgba(15, 76, 58, 0.14);
+        overflow: hidden;
+        position: relative;
+      }
+      .vp-boot-bar::after {
+        content: "";
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 55%;
+        border-radius: 999px;
+        background: #0f4c3a;
+        animation: vp-boot-slide 1.1s ease-in-out infinite;
+      }
+      .vp-boot-sub {
+        font-size: 12px;
+        color: #6b7280;
+      }
+      @keyframes vp-boot-slide {
+        0% { transform: translateX(-100%); }
+        100% { transform: translateX(220%); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .vp-boot-bar::after {
+          animation: none;
+          width: 100%;
+        }
+      }
+    </style>
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <div class="vp-boot" role="status" aria-live="polite" aria-label="正在加载 VeriPaper">
+        <div class="vp-boot-brand">
+          <img src="/logo.svg" alt="" width="28" height="28" />
+          <span>VeriPaper</span>
+        </div>
+        <div class="vp-boot-bar" aria-hidden="true"></div>
+        <span class="vp-boot-sub">正在载入学术综述工作台…</span>
+      </div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

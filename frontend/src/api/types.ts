@@ -14,6 +14,7 @@ export interface TokenOut {
   refresh_token: string;
   token_type: string;
   expires_in: number;
+  is_new_user?: boolean;
 }
 
 export interface LoginInput {
@@ -110,6 +111,8 @@ export interface TaskCreate {
    * 不传 = 平台默认模型；传了则规划与写作都走该凭据。
    */
   llm_credential_id?: string | null;
+  /** 一键运行示例任务标记（仅首次体验且离线语料免扣免费额度） */
+  is_demo?: boolean;
 }
 
 export interface TaskCreateOut {
@@ -902,6 +905,7 @@ export interface BillingPlan {
   /** 月费（**分**）；0 = 免费。前端展示时除以 100 */
   price_cents: number;
   description: string | null;
+  max_documents_per_task?: number;
 }
 
 /**
@@ -984,6 +988,8 @@ export interface BillingUsage {
   max_seats_per_workspace?: number;
   /** 月费（分）；0 = 免费 */
   price_cents?: number;
+  /** 平台模型单次任务文献数上限 */
+  max_documents_per_task?: number;
 
   // ===== 订阅信息（与用量周期区分）=====
   /** 订阅到期时间；免费档为 null（不是假日期） */

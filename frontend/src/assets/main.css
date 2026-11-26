@@ -531,6 +531,38 @@
       display: none;
     }
   }
+
+  /* ============================================================
+     轻量化首屏路由与微交互 CSS 过渡（免引入 motion-v 进公共入口）
+     ============================================================ */
+  .vp-route-enter-active,
+  .vp-route-leave-active {
+    transition:
+      opacity 0.16s cubic-bezier(0.22, 1, 0.36, 1),
+      transform 0.16s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .vp-route-enter-from {
+    opacity: 0;
+    transform: translate3d(0, 4px, 0);
+  }
+  .vp-route-leave-to {
+    opacity: 0;
+  }
+
+  .vp-fade-micro-enter-active,
+  .vp-fade-micro-leave-active {
+    transition:
+      opacity 0.14s cubic-bezier(0.22, 1, 0.36, 1),
+      transform 0.14s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .vp-fade-micro-enter-from {
+    opacity: 0;
+    transform: translate3d(0, 3px, 0);
+  }
+  .vp-fade-micro-leave-to {
+    opacity: 0;
+    transform: translate3d(0, -3px, 0);
+  }
 }
 
 @keyframes funnel-drop {

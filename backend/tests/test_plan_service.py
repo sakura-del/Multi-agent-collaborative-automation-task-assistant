@@ -71,7 +71,7 @@ class TestDefaultFreePlan:
         plan = await service.get_active_plan(user.id)
 
         assert plan.id == "free"
-        assert plan.monthly_reviews == 1
+        assert plan.monthly_reviews == 3
 
     @pytest.mark.asyncio
     async def test_free_plan_does_not_create_subscription_row(self, factory) -> None:
@@ -92,8 +92,9 @@ class TestDefaultFreePlan:
         usage = await service.get_usage(user.id)
 
         assert usage["reviews_used"] == 0
-        assert usage["monthly_reviews"] == 1
-        assert usage["reviews_remaining"] == 1
+        assert usage["monthly_reviews"] == 3
+        assert usage["reviews_remaining"] == 3
+        assert usage["max_documents_per_task"] == 15
 
 
 class TestConsumeReview:
@@ -108,32 +109,34 @@ class TestConsumeReview:
         assert usage["reviews_used"] == 1
 
     @pytest.mark.asyncio
-    async def test_second_review_rejected_on_free(self, factory) -> None:
-        """免费档 1 篇/月：第 2 篇必须 429。"""
+    async def test_fourth_review_rejected_on_free(self, factory) -> None:
+        """免费档 3 篇/月：第 4 篇必须 429。"""
         user = await _user(factory, "c2")
         service = PlanService(factory)
-        await service.check_and_consume_review(user.id)
+        for _ in range(3):
+            await service.check_and_consume_review(user.id)
 
         with pytest.raises(PlanQuotaExceeded) as exc_info:
             await service.check_and_consume_review(user.id)
 
         assert exc_info.value.status_code == 429
         assert exc_info.value.error_code == "PLAN_QUOTA_EXCEEDED"
-        assert exc_info.value.used == 1
-        assert exc_info.value.limit == 1
+        assert exc_info.value.used == 3
+        assert exc_info.value.limit == 3
 
     @pytest.mark.asyncio
     async def test_rejected_request_does_not_consume(self, factory) -> None:
         """被拒绝的请求**不扣减**（否则用户白丢额度）。"""
         user = await _user(factory, "c3")
         service = PlanService(factory)
-        await service.check_and_consume_review(user.id)
+        for _ in range(3):
+            await service.check_and_consume_review(user.id)
 
         with pytest.raises(PlanQuotaExceeded):
             await service.check_and_consume_review(user.id)
 
         usage = await service.get_usage(user.id)
-        assert usage["reviews_used"] == 1, "拒绝后计数不应增加"
+        assert usage["reviews_used"] == 3, "拒绝后计数不应增加"
 
     @pytest.mark.asyncio
     async def test_student_plan_allows_ten(self, factory) -> None:

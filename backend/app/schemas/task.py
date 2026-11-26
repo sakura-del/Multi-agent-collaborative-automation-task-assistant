@@ -54,7 +54,7 @@ class TaskCreate(BaseModel):
     snowball_direction: SnowballDirection = "both"
     date_from: date | None = None
     date_to: date | None = None
-    max_documents: int = Field(default=20, ge=1, le=50)
+    max_documents: int = Field(default=15, ge=1, le=50)
     output_language: Literal["zh", "en"] = "zh"
     # Issue #4：样式在渲染期生效；ID 集合由 `app.tools.csl.styles.StyleRegistry` 管理
     # （预置：gbt7714-2025-numeric（默认，别名 "gbt7714"）/ gbt7714-2015-numeric / apa / ieee / nature）。
@@ -76,6 +76,11 @@ class TaskCreate(BaseModel):
     )
     """只影响本任务用哪把 key，不进入编排层合约（`to_contract` 会剔除）。"""
 
+    is_demo: bool = Field(
+        default=False,
+        description="是否为新用户一键示例任务（仅首次使用且离线演示语料免扣免费额度）",
+    )
+
     # ===== 实验画像开关（2026-10-22 实验矩阵）=====
     # 默认全开 = 与改造前行为一致。`to_contract()` 用 `model_dump()` 全量透传，
     # 所以这里加同名字段即可，无需改映射代码。
@@ -90,6 +95,13 @@ class TaskCreate(BaseModel):
 
     @model_validator(mode="after")
     def _validate_preset_inputs(self) -> TaskCreate:
+        if self.is_demo:
+            if not self.offline_dataset:
+                raise ValueError("示例演示任务必须使用离线演示语料（offline_dataset=true）")
+            if self.max_documents > 10:
+                raise ValueError("示例演示任务文献数量不得超过 10 篇")
+            if self.verify_references is True:
+                raise ValueError("示例演示任务不开启外部引用核验")
         if self.workflow_preset == "verify_citations":
             has_draft = bool((self.draft_text or "").strip())
             if not has_draft and not self.document_ids:
@@ -109,9 +121,10 @@ class TaskCreate(BaseModel):
     def to_contract(self) -> LiteratureReviewRequest:
         """映射为编排层契约（HTTP 层不向编排层传递自身模型）。"""
         data = self.model_dump()
-        # BYOK 凭据是「任务归属/计费」层面的信息，编排层合约不认它；
+        # BYOK 凭据与示例免扣标是「任务归属/计费」层面的信息，编排层合约不认它们；
         # 留着会触发 `extra="forbid"`，或诱使业务层误以为模型参数在请求体里。
         data.pop("llm_credential_id", None)
+        data.pop("is_demo", None)
         return LiteratureReviewRequest(**data)
 
 

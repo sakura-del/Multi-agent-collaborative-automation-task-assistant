@@ -11,6 +11,7 @@ import { AnimatePresence, Motion, useReducedMotion } from "motion-v";
 import {
   ChevronRight,
   LogOut,
+  MessageSquarePlus,
   PanelLeftClose,
   PanelLeftOpen,
   Search,
@@ -52,6 +53,7 @@ const emit = defineEmits<{
   (event: "update:collapsed", value: boolean): void;
   (event: "update:mobileOpen", value: boolean): void;
   (event: "openCommand"): void;
+  (event: "openFeedback"): void;
   (event: "logout"): void;
 }>();
 
@@ -393,6 +395,22 @@ const width = computed(() => (props.collapsed ? "3.75rem" : "14.5rem"));
       </div>
     </nav>
 
+    <!-- 意见反馈快捷入口 -->
+    <div class="px-2 pb-1.5">
+      <button
+        type="button"
+        data-test="nav-feedback"
+        :aria-label="props.collapsed ? '意见反馈' : undefined"
+        :title="props.collapsed ? '意见反馈' : undefined"
+        class="flex min-h-8 w-full items-center gap-2 overflow-hidden rounded-md px-2 text-left text-xs text-sidebar-foreground/85 transition-colors hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground"
+        :class="props.collapsed ? 'justify-center' : ''"
+        @click="emit('openFeedback')"
+      >
+        <MessageSquarePlus :size="14" aria-hidden="true" class="shrink-0" />
+        <span v-if="!props.collapsed" class="truncate">意见反馈</span>
+      </button>
+    </div>
+
     <!-- 用户尾 -->
     <div
       class="flex items-center gap-2 border-t border-sidebar-border py-2.5"
@@ -591,6 +609,19 @@ const width = computed(() => (props.collapsed ? "3.75rem" : "14.5rem"));
               <p class="truncate text-xs font-medium">{{ props.username }}</p>
               <p class="truncate text-[10px] text-muted-foreground">{{ props.email }}</p>
             </div>
+            <button
+              type="button"
+              data-test="nav-feedback-mobile"
+              aria-label="意见反馈"
+              title="意见反馈"
+              class="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted"
+              @click="
+                closeMobileIfOpen();
+                emit('openFeedback');
+              "
+            >
+              <MessageSquarePlus :size="14" aria-hidden="true" />
+            </button>
             <button
               type="button"
               aria-label="退出登录"
