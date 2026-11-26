@@ -16,3 +16,23 @@ export async function classifyIntent(text: string): Promise<IntentResult> {
   const response = await api.post<IntentResult>("/tasks/classify-intent", { text });
   return response.data;
 }
+
+export interface KeywordSuggestion {
+  term: string;
+  lang: "zh" | "en";
+}
+
+export interface KeywordSuggestResult {
+  suggestions: KeywordSuggestion[];
+  source: "llm" | "fallback";
+}
+
+export async function suggestKeywords(payload: {
+  topic: string;
+  output_language?: "zh" | "en";
+  existing_keywords?: string[];
+  max_keywords?: number;
+}): Promise<KeywordSuggestResult> {
+  const response = await api.post<KeywordSuggestResult>("/tasks/suggest-keywords", payload);
+  return response.data;
+}

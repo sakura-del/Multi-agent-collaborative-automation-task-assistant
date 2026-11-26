@@ -1340,3 +1340,118 @@ describe("TaskCreateForm · 检索文献源（万方 BYOK）", () => {
         expect(payload.literature_sources).toBeUndefined();
     });
 });
+
+describe("AI 智能拆分关键词（Issue #70）", () => {
+    beforeEach(() => {
+        vi.mocked(api.get).mockRejectedValue(new Error("样式列表不可用"));
+        vi.mocked(api.post).mockReset();
+    });
+
+    it("主题少于 5 字时禁用「AI 拆分关键词」按钮，达到 5 字后启用", async () => {
+        const wrapper = mountForm();
+        const btn = wrapper.get('[data-test="suggest-keywords-btn"]');
+        expect((btn.element as HTMLButtonElement).disabled).toBe(true);
+
+        await wrapper.get('[data-test="topic"]').setValue("RAG");
+        expect((btn.element as HTMLButtonElement).disabled).toBe(true);
+
+        await wrapper.get('[data-test="topic"]').setValue("检索增强生成综述");
+        expect((btn.element as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    it("点击拆词展示候选芯片，支持单选填入与再次取消", async () => {
+        vi.mocked(api.post).mockResolvedValueOnce({
+            data: {
+                suggestions: [
+                    { term: "检索增强生成", lang: "zh" },
+                    { term: "retrieval augmented generation", lang: "en" },
+                ],
+                source: "llm",
+            },
+        });
+
+        const wrapper = mountForm();
+        await wrapper.get('[data-test="topic"]').setValue("检索增强生成评估系统综述");
+        await wrapper.get('[data-test="suggest-keywords-btn"]').trigger("click");
+        await flushPromises();
+
+        expect(api.post).toHaveBeenCalledWith("/tasks/suggest-keywords", {
+            topic: "检索增强生成评估系统综述",
+            output_language: "zh",
+            existing_keywords: [],
+            max_keywords: 8,
+        });
+
+        const panel = wrapper.find('[data-test="suggested-keywords-panel"]');
+        expect(panel.exists()).toBe(true);
+
+        const chips = wrapper.findAll('[data-test="suggested-keyword-chip"]');
+        expect(chips).toHaveLength(2);
+        expect(chips[0].text()).toContain("检索增强生成");
+        expect(chips[1].text()).toContain("EN");
+
+        await chips[0].trigger("click");
+        expect(chips[0].attributes("aria-pressed")).toBe("true");
+
+        await wrapper.get('[data-test="submit"]').trigger("click");
+        const firstSubmit = wrapper.emitted("submit")?.[0]?.[0] as { keywords: string[] };
+        expect(firstSubmit.keywords).toEqual(["检索增强生成"]);
+
+        // 再次点击同一芯片取消选中
+        await chips[0].trigger("click");
+        expect(chips[0].attributes("aria-pressed")).toBe("false");
+    });
+
+    it("「全部填入」遵守 10 个关键词上限且「换一批」去重传参不超过 10 个", async () => {
+        const twelveTerms = Array.from({ length: 8 }, (_, idx) => ({
+            term: `候选词${idx + 1}`,
+            lang: idx % 2 === 0 ? ("zh" as const) : ("en" as const),
+        }));
+        vi.mocked(api.post)
+            .mockResolvedValueOnce({ data: { suggestions: twelveTerms, source: "llm" } })
+            .mockResolvedValueOnce({
+                data: {
+                    suggestions: [{ term: "新词A", lang: "zh" }],
+                    source: "llm",
+                },
+            });
+
+        const wrapper = mountForm();
+        await wrapper.get('[data-test="topic"]').setValue("多智能体协作文献综述与质量评价");
+
+        // 先手动填入 4 个关键词
+        for (let i = 1; i <= 4; i += 1) {
+            const input = wrapper.get('[data-test="keyword-input"]');
+            await input.setValue(`已有词${i}`);
+            await input.trigger("keydown.enter");
+        }
+
+        await wrapper.get('[data-test="suggest-keywords-btn"]').trigger("click");
+        await flushPromises();
+
+        // 再点「全部填入」：4 + 8 -> 截断至 10 个
+        await wrapper.get('[data-test="apply-all-suggestions"]').trigger("click");
+        await wrapper.get('[data-test="submit"]').trigger("click");
+        const submitted = wrapper.emitted("submit")?.[0]?.[0] as { keywords: string[] };
+        expect(submitted.keywords).toHaveLength(10);
+
+        // 点击「换一批」：existing_keywords 应去重且长度 <= 10
+        await wrapper.get('[data-test="refresh-suggestions"]').trigger("click");
+        await flushPromises();
+
+        expect(api.post).toHaveBeenLastCalledWith(
+            "/tasks/suggest-keywords",
+            expect.objectContaining({
+                topic: "多智能体协作文献综述与质量评价",
+                max_keywords: 8,
+            }),
+        );
+        const lastPayload = vi.mocked(api.post).mock.calls[1][1] as {
+            existing_keywords: string[];
+        };
+        expect(lastPayload.existing_keywords.length).toBeLessThanOrEqual(10);
+        expect(new Set(lastPayload.existing_keywords).size).toBe(
+            lastPayload.existing_keywords.length,
+        );
+    });
+});

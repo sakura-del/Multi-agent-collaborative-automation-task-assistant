@@ -20,8 +20,13 @@ from fastapi import APIRouter, Depends
 from app.api.deps import get_current_active_user
 from app.db.models.user import User
 from app.db.session import get_db
-from app.schemas.intent import IntentRequest, IntentResponse
-from app.services.intent_service import classify_text
+from app.schemas.intent import (
+    IntentRequest,
+    IntentResponse,
+    KeywordSuggestRequest,
+    KeywordSuggestResponse,
+)
+from app.services.intent_service import classify_text, suggest_keywords
 
 router = APIRouter(prefix="/tasks", tags=["intent"])
 
@@ -42,3 +47,23 @@ async def classify_intent(
     """平台模型一次轻量调用；失败 fail-open 放行综述主流程。"""
     del current_user, db  # 鉴权已完成；模型走全局 manager（平台 key）
     return await classify_text(payload.text)
+
+
+@router.post(
+    "/suggest-keywords",
+    response_model=KeywordSuggestResponse,
+    summary="根据研究主题 AI 拆分候选检索关键词",
+)
+async def suggest_task_keywords(
+    payload: KeywordSuggestRequest,
+    current_user: _CURRENT_USER,
+    db: _DB,
+) -> KeywordSuggestResponse:
+    """轻量拆词推荐；平台模型异常时自动回落本地规则切词。"""
+    del current_user, db
+    return await suggest_keywords(
+        payload.topic,
+        output_language=payload.output_language,
+        existing_keywords=payload.existing_keywords,
+        max_keywords=payload.max_keywords,
+    )

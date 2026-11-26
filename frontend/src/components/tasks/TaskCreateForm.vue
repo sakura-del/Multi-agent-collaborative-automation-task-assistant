@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onMounted, ref, watch } from "vue";
 import { routerKey } from "vue-router";
-import { ChevronDown, Plus, X } from "lucide-vue-next";
+import { Check, ChevronDown, Loader2, Plus, Sparkles, X } from "lucide-vue-next";
 import { useReducedMotion } from "motion-v";
 
 import AnimatedCollapse from "@/components/common/AnimatedCollapse.vue";
@@ -20,6 +20,7 @@ import {
 import { getBillingUsage } from "@/api/billing";
 import { listCitationStyles } from "@/api/citation-styles";
 import { listDataSourceCredentials } from "@/api/data-source-credentials";
+import { suggestKeywords, type KeywordSuggestion } from "@/api/intent";
 import { listLLMCredentials } from "@/api/llm-credentials";
 import { getLibrarySummary } from "@/api/reference-library";
 import {
@@ -598,6 +599,85 @@ function removeKeyword(keyword: string) {
     }
 }
 
+const suggestedKeywords = ref<KeywordSuggestion[]>([]);
+const suggestingKeywords = ref(false);
+const suggestError = ref<string | null>(null);
+
+const canSuggestKeywords = computed(
+    () => topic.value.trim().length >= TOPIC_MIN && !suggestingKeywords.value,
+);
+
+function isKeywordSelected(term: string): boolean {
+    const key = term.trim().toLowerCase();
+    return keywords.value.some((k) => k.trim().toLowerCase() === key);
+}
+
+/** 请求 AI 根据主题与语言拆分中英互补学术检索关键词（Issue #70）。 */
+async function handleSuggestKeywords(refresh = false) {
+    const trimmed = topic.value.trim();
+    if (trimmed.length < TOPIC_MIN || suggestingKeywords.value) return;
+    suggestingKeywords.value = true;
+    suggestError.value = null;
+    try {
+        const rawExisting = refresh
+            ? [...keywords.value, ...suggestedKeywords.value.map((s) => s.term)]
+            : [...keywords.value];
+        const dedupedExisting: string[] = [];
+        const seen = new Set<string>();
+        for (const item of rawExisting) {
+            const clean = item.trim();
+            const key = clean.toLowerCase();
+            if (!clean || seen.has(key)) continue;
+            seen.add(key);
+            dedupedExisting.push(clean);
+            if (dedupedExisting.length >= KEYWORD_MAX) break;
+        }
+        const res = await suggestKeywords({
+            topic: trimmed,
+            output_language: language.value,
+            existing_keywords: dedupedExisting,
+            max_keywords: 8,
+        });
+        suggestedKeywords.value = res.suggestions;
+    } catch (err) {
+        suggestError.value =
+            (err as Error).message || "AI 拆分失败，请手动输入关键词";
+    } finally {
+        suggestingKeywords.value = false;
+    }
+}
+
+function toggleSuggestedKeyword(term: string) {
+    if (isKeywordSelected(term)) {
+        keywords.value = keywords.value.filter(
+            (k) => k.trim().toLowerCase() !== term.trim().toLowerCase(),
+        );
+        return;
+    }
+    if (keywords.value.length >= KEYWORD_MAX) {
+        suggestError.value = `最多选择 ${KEYWORD_MAX} 个关键词`;
+        return;
+    }
+    suggestError.value = null;
+    keywords.value = [...keywords.value, term];
+    validationErrorFields.value.delete("keyword");
+}
+
+function applyAllSuggestions() {
+    const next = [...keywords.value];
+    for (const item of suggestedKeywords.value) {
+        if (next.length >= KEYWORD_MAX) break;
+        if (!next.some((k) => k.trim().toLowerCase() === item.term.toLowerCase())) {
+            next.push(item.term);
+        }
+    }
+    suggestError.value = null;
+    keywords.value = next;
+    if (next.length >= 1 && next.length <= KEYWORD_MAX) {
+        validationErrorFields.value.delete("keyword");
+    }
+}
+
 function addSeedDoi() {
     const parts = splitBatchInput(seedDraft.value);
     if (!parts.length) {
@@ -983,9 +1063,26 @@ async function handleSubmit() {
             </div>
         </div>
 
-        <div class="grid gap-1.5" @keydown.capture="onKeywordKeydown">
-            <Label for="task-keyword">关键词（回车或点击添加，支持逗号/分号批量拆分，1–10 个）</Label>
-            <div class="flex items-center gap-2">
+        <div class="grid gap-1.5">
+            <div class="flex items-center justify-between gap-2">
+                <Label for="task-keyword">关键词（回车或点击添加，支持逗号/分号批量拆分，1–10 个）</Label>
+                <button
+                    type="button"
+                    data-test="suggest-keywords-btn"
+                    :disabled="!canSuggestKeywords"
+                    class="inline-flex shrink-0 items-center gap-1 rounded-md border border-primary/30 bg-primary/5 px-2.5 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50"
+                    @click="handleSuggestKeywords(false)"
+                >
+                    <Loader2
+                        v-if="suggestingKeywords"
+                        class="size-3.5 animate-spin motion-reduce:animate-none"
+                        aria-hidden="true"
+                    />
+                    <Sparkles v-else class="size-3.5" aria-hidden="true" />
+                    <span>{{ suggestingKeywords ? "拆分中…" : "AI 拆分关键词" }}</span>
+                </button>
+            </div>
+            <div class="flex items-center gap-2" @keydown.capture="onKeywordKeydown">
                 <Input
                     id="task-keyword"
                     v-model="keywordDraft"
@@ -1024,6 +1121,58 @@ async function handleSubmit() {
                     </button>
                 </li>
             </ul>
+            <!-- AI 候选关键词芯片区（点击一键选中/取消，Issue #70） -->
+            <div
+                v-if="suggestedKeywords.length"
+                data-test="suggested-keywords-panel"
+                class="rounded-lg border border-border/70 bg-muted/30 p-2.5"
+            >
+                <div class="mb-2 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                    <span>点击候选词直接填入（含中英检索词，提升跨库召回）</span>
+                    <div class="flex items-center gap-2">
+                        <button
+                            type="button"
+                            data-test="apply-all-suggestions"
+                            class="font-medium text-primary hover:underline"
+                            @click="applyAllSuggestions"
+                        >
+                            全部填入
+                        </button>
+                        <button
+                            type="button"
+                            data-test="refresh-suggestions"
+                            class="hover:text-foreground disabled:opacity-50"
+                            :disabled="suggestingKeywords"
+                            @click="handleSuggestKeywords(true)"
+                        >
+                            换一批
+                        </button>
+                    </div>
+                </div>
+                <div class="flex flex-wrap gap-1.5">
+                    <button
+                        v-for="item in suggestedKeywords"
+                        :key="item.term"
+                        type="button"
+                        data-test="suggested-keyword-chip"
+                        :aria-pressed="isKeywordSelected(item.term)"
+                        class="inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs transition-colors"
+                        :class="
+                            isKeywordSelected(item.term)
+                                ? 'border-primary bg-primary/10 font-medium text-primary'
+                                : 'border-border bg-background text-foreground hover:bg-muted'
+                        "
+                        @click="toggleSuggestedKeyword(item.term)"
+                    >
+                        <Check v-if="isKeywordSelected(item.term)" class="size-3" aria-hidden="true" />
+                        <span>{{ item.term }}</span>
+                        <span class="text-[10px] opacity-60">{{ item.lang === "en" ? "EN" : "中" }}</span>
+                    </button>
+                </div>
+            </div>
+            <p v-if="suggestError" data-test="suggest-error" class="text-xs text-destructive">
+                {{ suggestError }}
+            </p>
         </div>
 
         <!-- 一级可见区：文献数量 + 来源 -->

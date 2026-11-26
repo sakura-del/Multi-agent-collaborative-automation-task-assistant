@@ -13,10 +13,11 @@ from __future__ import annotations
 
 import json
 import re
+from typing import Literal
 
 from app.llm.models import Message, MessageRole
 from app.orchestration.contracts import WorkflowPreset
-from app.schemas.intent import IntentResponse
+from app.schemas.intent import IntentResponse, KeywordSuggestion, KeywordSuggestResponse
 
 #: 意图分类可返回的预设白名单（Issue #32 Phase 1）
 _ALLOWED_INTENT_PRESETS: frozenset[str] = frozenset({"literature_review", "research_gaps"})
@@ -106,3 +107,129 @@ async def classify_text(text: str) -> IntentResponse:
 
     parsed = parse_llm_json(str(response.content or ""), normalized)
     return parsed if parsed is not None else fallback(normalized)
+
+
+_SUGGEST_KEYWORDS_SYSTEM = (
+    "你是学术文献检索词拆分助手。根据用户提供的研究主题，拆分出适合学术数据库"
+    "（万方、OpenAlex、arXiv、PubMed）的高命中率检索关键词。\n"
+    "要求：\n"
+    "1. 输出 6~8 个短语级检索词（不要整句），每个 ≤30 字；\n"
+    "2. 若主题含中文，同时给出核心中文术语（3~4 个）与对应英文学术检索词（3~4 个），"
+    "方便跨中英文数据库召回；若为纯英文主题则全输出英文；\n"
+    "3. 避开用户已有的关键词列表；\n"
+    '4. 只输出严格 JSON：{"suggestions":[{"term":"...","lang":"zh|en"}]}，不要输出其他文字。'
+)
+
+_FALLBACK_SPLIT_RE = re.compile(r"[，,、；;：:\s/（）()【】\[\]的与及和在中基于研究设计实现]+")
+
+
+def _detect_term_lang(term: str) -> Literal["zh", "en"]:
+    return "zh" if re.search(r"[\u4e00-\u9fff]", term) else "en"
+
+
+def _fallback_suggest_keywords(
+    topic: str,
+    existing: set[str],
+    max_keywords: int,
+) -> KeywordSuggestResponse:
+    """模型不可用时的确定性切词回落。"""
+    parts = [p.strip() for p in _FALLBACK_SPLIT_RE.split(topic) if len(p.strip()) >= 2]
+    suggestions: list[KeywordSuggestion] = []
+    seen = set(existing)
+    for part in parts:
+        key = part.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        suggestions.append(KeywordSuggestion(term=part[:40], lang=_detect_term_lang(part)))
+        if len(suggestions) >= max_keywords:
+            break
+    if not suggestions and topic.strip():
+        clean = topic.strip()[:40]
+        suggestions.append(KeywordSuggestion(term=clean, lang=_detect_term_lang(clean)))
+    return KeywordSuggestResponse(suggestions=suggestions, source="fallback")
+
+
+def _parse_keyword_suggestions(
+    content: str,
+    existing: set[str],
+    max_keywords: int,
+) -> KeywordSuggestResponse | None:
+    """容错解析 LLM 拆词 JSON，过滤重复与已有词并截断至上限。"""
+    cleaned = re.sub(r"```(?:json)?|```", "", content).strip()
+    match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+    if match is None:
+        return None
+    try:
+        data = json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return None
+    raw_list = data.get("suggestions")
+    if not isinstance(raw_list, list):
+        return None
+
+    suggestions: list[KeywordSuggestion] = []
+    seen = set(existing)
+    for item in raw_list:
+        term = ""
+        lang: Literal["zh", "en"] = "zh"
+        if isinstance(item, str):
+            term = item.strip()[:40]
+            lang = _detect_term_lang(term)
+        elif isinstance(item, dict):
+            term = str(item.get("term") or "").strip()[:40]
+            raw_lang = item.get("lang")
+            if raw_lang == "zh":
+                lang = "zh"
+            elif raw_lang == "en":
+                lang = "en"
+            else:
+                lang = _detect_term_lang(term)
+        else:
+            continue
+        if not term or term.casefold() in seen:
+            continue
+        seen.add(term.casefold())
+        suggestions.append(KeywordSuggestion(term=term, lang=lang))
+        if len(suggestions) >= max_keywords:
+            break
+
+    return KeywordSuggestResponse(suggestions=suggestions, source="llm") if suggestions else None
+
+
+async def suggest_keywords(
+    topic: str,
+    *,
+    output_language: Literal["zh", "en"] = "zh",
+    existing_keywords: list[str] | None = None,
+    max_keywords: int = 8,
+) -> KeywordSuggestResponse:
+    """基于主题智能拆分学术检索关键词；异常 fail-open 回落本地切词。"""
+    from app.llm.factory import get_llm_manager
+
+    normalized = topic.strip()
+    existing = {kw.strip().casefold() for kw in (existing_keywords or []) if kw.strip()}
+    user_prompt = (
+        f"研究主题：{normalized}\n"
+        f"目标输出语言：{output_language}\n"
+        f"已有关键词（请避开重复）：{', '.join(existing_keywords or []) or '无'}\n"
+        f"请输出不超过 {max_keywords} 个候选检索词。"
+    )
+    try:
+        response = await get_llm_manager().chat(
+            [
+                Message(role=MessageRole.SYSTEM, content=_SUGGEST_KEYWORDS_SYSTEM),
+                Message(role=MessageRole.USER, content=user_prompt),
+            ],
+            temperature=0.2,
+            max_tokens=240,
+        )
+    except Exception:
+        return _fallback_suggest_keywords(normalized, existing, max_keywords)
+
+    parsed = _parse_keyword_suggestions(str(response.content or ""), existing, max_keywords)
+    return (
+        parsed
+        if parsed is not None
+        else _fallback_suggest_keywords(normalized, existing, max_keywords)
+    )
