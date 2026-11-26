@@ -3025,10 +3025,10 @@ class TaskExecution:
         }
         if extra:
             payload.update(extra)
-        event: TaskEvent | None = None
-        try:
+
+        async def _persist() -> TaskEvent | None:
             async with session_factory() as session:
-                event = await self._append_event(
+                ev = await self._append_event(
                     session,
                     task_id,
                     event_type="stage_progress",
@@ -3037,6 +3037,20 @@ class TaskExecution:
                     payload=payload,
                 )
                 await session.commit()
+                return ev
+
+        event: TaskEvent | None = None
+        persist_task = asyncio.create_task(_persist())
+        try:
+            event = await asyncio.shield(persist_task)
+        except asyncio.CancelledError:
+            # 取消若恰好落在短事务提交中途，必须等底层连接完成提交并释放锁后再上抛，
+            # 否则 SQLite/连接池会遗留未结束的写事务导致后续 settle_quota 报 database is locked。
+            try:
+                await persist_task
+            except Exception:
+                pass
+            raise
         except Exception as exc:
             logger.debug(
                 "stage_progress_persist_skipped",
