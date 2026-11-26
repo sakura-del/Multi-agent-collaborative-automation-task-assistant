@@ -25,6 +25,7 @@ from uuid import UUID
 
 from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import OperationalError
 
 from app.core.config import get_settings
 from app.core.exceptions import (
@@ -348,37 +349,48 @@ class TaskExecution:
         """
         refund_tokens: int | None = None
         user_id: UUID | None = None
-        try:
-            async with self._session_factory() as session:
-                repo = TaskRepository(session)
-                task = await repo.lock_for_update(task_id)
-                if task.quota_settled:
-                    return  # 已结算：绝不重复退
-                fallback_base = task.fallback_token_base
-                if self._is_byok_task(task) and fallback_base is None:
-                    # BYOK 从未预扣平台 token：只置标记，绝不退款
+        max_lock_retries = 3
+        for attempt in range(max_lock_retries + 1):
+            try:
+                async with self._session_factory() as session:
+                    repo = TaskRepository(session)
+                    task = await repo.lock_for_update(task_id)
+                    if task.quota_settled:
+                        return  # 已结算：绝不重复退
+                    fallback_base = task.fallback_token_base
+                    if self._is_byok_task(task) and fallback_base is None:
+                        # BYOK 从未预扣平台 token：只置标记，绝不退款
+                        task.quota_settled = True
+                        await session.commit()
+                        logger.info("quota_settlement_skipped_byok", task_id=str(task_id))
+                        return
                     task.quota_settled = True
+                    used = int(task.used_tokens or 0)
+                    if fallback_base is not None:
+                        # 回退过平台（Issue #28）：预扣在回退时才发生，退款只退
+                        # **平台实际消耗**（总用量 − 回退前基线）。BYOK 阶段花的是
+                        # 用户自己的钱，算进退款等于凭空发额度。
+                        platform_used = max(0, used - int(fallback_base))
+                        refund_tokens = ESTIMATED_TOKENS_PER_TASK - platform_used
+                    else:
+                        refund_tokens = ESTIMATED_TOKENS_PER_TASK - used
+                    user_id = task.user_id
                     await session.commit()
-                    logger.info("quota_settlement_skipped_byok", task_id=str(task_id))
-                    return
-                task.quota_settled = True
-                used = int(task.used_tokens or 0)
-                if fallback_base is not None:
-                    # 回退过平台（Issue #28）：预扣在回退时才发生，退款只退
-                    # **平台实际消耗**（总用量 − 回退前基线）。BYOK 阶段花的是
-                    # 用户自己的钱，算进退款等于凭空发额度。
-                    platform_used = max(0, used - int(fallback_base))
-                    refund_tokens = ESTIMATED_TOKENS_PER_TASK - platform_used
-                else:
-                    refund_tokens = ESTIMATED_TOKENS_PER_TASK - used
-                user_id = task.user_id
-                await session.commit()
-        except LookupError:
-            # 任务不存在（已被清理）：无事可做，不当作错误
-            return
-        except Exception as exc:  # pragma: no cover - 防御性兜底
-            logger.warning("quota_settlement_failed", task_id=str(task_id), error=str(exc))
-            return
+                break
+            except LookupError:
+                # 任务不存在（已被清理）：无事可做，不当作错误
+                return
+            except OperationalError as exc:
+                msg = str(exc).lower()
+                is_transient_lock = any(k in msg for k in ("locked", "busy", "deadlock"))
+                if is_transient_lock and attempt < max_lock_retries:
+                    await asyncio.sleep(0.05 * (attempt + 1))
+                    continue
+                logger.warning("quota_settlement_failed", task_id=str(task_id), error=str(exc))
+                return
+            except Exception as exc:  # pragma: no cover - 防御性兜底
+                logger.warning("quota_settlement_failed", task_id=str(task_id), error=str(exc))
+                return
 
         if user_id is None or refund_tokens is None or refund_tokens <= 0:
             return

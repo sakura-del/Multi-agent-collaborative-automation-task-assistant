@@ -141,7 +141,7 @@ class TestSearchWritesScreening:
     async def test_different_query_creates_second_log(
         self, factory: async_sessionmaker[AsyncSession]
     ) -> None:
-        """不同检索式是新的「识别」批次，不能被幂等键误吞。"""
+        """不同检索式是新的「识别」批次，不能被幂等键误吞；同任务跨批次重复论文按 Issue #59 去重。"""
         task_id = uuid.uuid4()
         host = SimpleNamespace(_session_factory=factory)
 
@@ -163,7 +163,22 @@ class TestSearchWritesScreening:
         )
         await workflow._execute_search(task, other, None)
 
-        assert await _counts(factory) == (2, 2)
+        # 两次不同检索式生成 2 条 SearchLog；相同论文 arxiv:1 跨节点去重仅落 1 条 ScreeningRecord
+        assert await _counts(factory) == (2, 1)
+
+        # 第三次不同检索式命中新论文 arxiv:2，应新增第 3 条 SearchLog 与第 2 条 ScreeningRecord
+        workflow_new = LiteratureReviewWorkflow(
+            source=_FakeSource([_record("arxiv:1", "论文一"), _record("arxiv:2", "论文二")]),
+            screening_recorder=recorder,
+        )
+        third = PlanNode(
+            id="search3",
+            type="search",
+            title="检索三",
+            input={"query": "第三个检索式", "max_results": 5},
+        )
+        await workflow_new._execute_search(task, third, None)
+        assert await _counts(factory) == (3, 2)
 
 
 class TestFailureIsolation:
