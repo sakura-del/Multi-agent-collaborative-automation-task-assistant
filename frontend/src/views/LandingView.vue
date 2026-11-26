@@ -108,11 +108,11 @@ function jumpToShowcase(tab: ShowcaseTab) {
     <header
       class="sticky top-0 z-30 border-b border-[#E5E7EB]/90 bg-[#FAF9F6]/90 backdrop-blur-sm dark:border-border dark:bg-background/90"
     >
-      <div class="mx-auto flex h-14 max-w-[1160px] items-center justify-between gap-4 px-4 sm:px-6">
+      <div class="mx-auto flex h-14 max-w-[1160px] items-center justify-between gap-2 px-4 sm:gap-4 sm:px-6">
         <RouterLink
           to="/"
           data-test="landing-brand"
-          class="flex items-center gap-2.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-[#0F4C3A] dark:focus-visible:ring-ring"
+          class="flex shrink-0 items-center gap-2.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-[#0F4C3A] dark:focus-visible:ring-ring"
         >
           <img src="/logo.svg" alt="" aria-hidden="true" class="size-7" />
           <span class="text-sm font-semibold tracking-tight text-[#111827] dark:text-foreground">
@@ -144,7 +144,7 @@ function jumpToShowcase(tab: ShowcaseTab) {
           </button>
         </nav>
 
-        <div class="flex items-center gap-2">
+        <div class="flex shrink-0 items-center gap-1.5 sm:gap-2">
           <a
             :href="GITHUB_REPO_URL"
             target="_blank"
@@ -261,7 +261,7 @@ function jumpToShowcase(tab: ShowcaseTab) {
           <RouterLink
             :to="{ name: 'login' }"
             data-test="landing-login"
-            class="inline-flex h-8 items-center rounded-md px-3 text-xs font-medium text-[#374151] transition-colors hover:bg-black/5 hover:text-[#111827] dark:text-muted-foreground dark:hover:bg-muted dark:hover:text-foreground"
+            class="inline-flex h-8 shrink-0 items-center whitespace-nowrap rounded-md px-2.5 text-xs font-medium text-[#374151] transition-colors hover:bg-black/5 hover:text-[#111827] sm:px-3 dark:text-muted-foreground dark:hover:bg-muted dark:hover:text-foreground"
           >
             登录
           </RouterLink>
@@ -269,7 +269,7 @@ function jumpToShowcase(tab: ShowcaseTab) {
           <RouterLink
             :to="{ name: 'register' }"
             data-test="landing-register"
-            class="inline-flex h-8 items-center rounded-md bg-[#0F4C3A] px-3.5 text-xs font-medium text-white transition-colors hover:bg-[#135D47] dark:bg-primary dark:text-primary-foreground dark:hover:bg-primary/90"
+            class="inline-flex h-8 shrink-0 items-center whitespace-nowrap rounded-md bg-[#0F4C3A] px-3 text-xs font-medium text-white transition-colors hover:bg-[#135D47] sm:px-3.5 dark:bg-primary dark:text-primary-foreground dark:hover:bg-primary/90"
           >
             免费开始
           </RouterLink>
@@ -306,7 +306,7 @@ function jumpToShowcase(tab: ShowcaseTab) {
 
         <!-- 3. 副标题 -->
         <p
-          class="mx-auto mt-5 max-w-2xl text-sm leading-7 text-[#4B5563] sm:text-base sm:leading-7 dark:text-muted-foreground"
+          class="mx-auto mt-5 max-w-3xl text-balance text-sm leading-7 text-[#4B5563] sm:text-base sm:leading-7 dark:text-muted-foreground"
         >
           面向严肃研究的文献综述工作台。从多库检索、PRISMA 初筛到模板成稿，每一处引用均锚定原文。
         </p>

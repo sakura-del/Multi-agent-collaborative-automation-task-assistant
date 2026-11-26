@@ -55,4 +55,19 @@ describe("BeAgentPlan", () => {
     expect(wrapper.text()).not.toContain("No steps yet");
     expect(wrapper.find('[data-test="agent-plan-status"]').text()).toBe("草稿");
   });
+
+  it("pending=true 时禁用失败步骤的行内「重试节点」按钮且不触发 retry 事件（C2）", async () => {
+    const wrapper = mount(BeAgentPlan, {
+      props: { steps: STEPS, planStatus: "failed", pending: true },
+    });
+
+    const stepButton = wrapper.findAll("button").find((b) => b.text().includes("撰写综述正文"));
+    expect(stepButton).toBeDefined();
+    await stepButton!.trigger("click");
+
+    const retryBtn = wrapper.get('[data-test="agent-plan-retry"]');
+    expect(retryBtn.attributes("disabled")).toBeDefined();
+    await retryBtn.trigger("click");
+    expect(wrapper.emitted("retry")).toBeUndefined();
+  });
 });

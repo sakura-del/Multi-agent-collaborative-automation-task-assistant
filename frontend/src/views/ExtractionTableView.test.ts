@@ -407,4 +407,45 @@ describe("ExtractionTableView（Issue #36）", () => {
       hostEl.remove();
     }
   });
+
+  it("新增列落库成功但自动补抽失败时，立即更新表头、收起并清空表单且提示「重跑全部」（C3）", async () => {
+    const withNewCol: ExtractionTableOut = {
+      ...SAMPLE_TABLE,
+      columns: [
+        ...SAMPLE_TABLE.columns,
+        { key: "code_url", label: "开源代码", prompt: "提取代码仓库地址" },
+      ],
+    };
+    vi.mocked(addExtractionColumn).mockResolvedValue(withNewCol);
+    vi.mocked(runExtractionTable).mockRejectedValue(new Error("模型限流"));
+
+    const wrapper = mount(ExtractionTableView, {
+      props: { tableId: "tbl-1" },
+      global: { stubs: { Teleport: true } },
+    });
+    await flushPromises();
+
+    await wrapper.get('[data-test="extraction-add-col-toggle"]').trigger("click");
+    await wrapper.get('[data-test="new-col-label"]').setValue("开源代码");
+    await wrapper.get('[data-test="new-col-key"]').setValue("code_url");
+    await wrapper.get('[data-test="new-col-prompt"]').setValue("提取代码仓库地址");
+    await wrapper.get('[data-test="new-col-submit"]').trigger("click");
+    await flushPromises();
+
+    // 1. 新列表头已立即展示
+    expect(wrapper.get('[data-test="extraction-table"]').text()).toContain("开源代码");
+
+    // 2. 新增列表单已收起（AnimatedCollapse aria-hidden="true"），再次打开时输入值已被清空
+    expect(wrapper.get('[data-test="new-col-submit"]').element.closest('[aria-hidden="true"]')).not.toBeNull();
+    await wrapper.get('[data-test="extraction-add-col-toggle"]').trigger("click");
+    expect(wrapper.get('[data-test="new-col-submit"]').element.closest('[aria-hidden="true"]')).toBeNull();
+    expect((wrapper.get('[data-test="new-col-label"]').element as HTMLInputElement).value).toBe("");
+    expect((wrapper.get('[data-test="new-col-prompt"]').element as HTMLInputElement).value).toBe("");
+
+    // 3. 错误横幅保留并给出列已添加与「重跑全部」指引
+    const errText = wrapper.get('[data-test="extraction-error"]').text();
+    expect(errText).toContain("已添加");
+    expect(errText).toContain("重跑全部");
+    expect(errText).toContain("模型限流");
+  });
 });

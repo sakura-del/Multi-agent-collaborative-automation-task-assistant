@@ -157,4 +157,26 @@ describe("LandingView（Elicit 风格落地页）", () => {
     expect(wrapper.find('[data-test="demo-export-notice"]').exists()).toBe(false);
     wrapper.unmount();
   });
+
+  it("顶栏导航按钮单行不折行，Hero 副标题使用 max-w-3xl text-balance 防孤立折行（W6）", async () => {
+    const { wrapper } = await mountLanding();
+
+    const brandClasses = (wrapper.get('[data-test="landing-brand"]').attributes("class") ?? "").split(/\s+/);
+    expect(brandClasses).toContain("shrink-0");
+
+    const loginClasses = (wrapper.get('[data-test="landing-login"]').attributes("class") ?? "").split(/\s+/);
+    expect(loginClasses).toContain("whitespace-nowrap");
+    expect(loginClasses).toContain("shrink-0");
+
+    const registerClasses = (wrapper.get('[data-test="landing-register"]').attributes("class") ?? "").split(/\s+/);
+    expect(registerClasses).toContain("whitespace-nowrap");
+    expect(registerClasses).toContain("shrink-0");
+
+    const subtitle = wrapper.find("main section p.mx-auto.mt-5");
+    expect(subtitle.exists()).toBe(true);
+    const subClasses = (subtitle.attributes("class") ?? "").split(/\s+/);
+    expect(subClasses).toContain("max-w-3xl");
+    expect(subClasses).toContain("text-balance");
+    wrapper.unmount();
+  });
 });

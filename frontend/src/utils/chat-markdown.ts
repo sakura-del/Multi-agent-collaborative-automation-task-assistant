@@ -234,6 +234,8 @@ export async function renderMermaidBlocks(root: HTMLElement): Promise<void> {
     securityLevel: "strict",
     theme: "neutral",
     fontFamily: "inherit",
+    htmlLabels: false,
+    flowchart: { htmlLabels: false },
   });
 
   let index = 0;
@@ -244,7 +246,26 @@ export async function renderMermaidBlocks(root: HTMLElement): Promise<void> {
     target.className = "mermaid-figure";
     try {
       const { svg } = await mermaid.render(`chat-mermaid-${Date.now()}-${index}`, source);
-      target.innerHTML = svg;
+      const cleanSvg = DOMPurify.isSupported
+        ? DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true } })
+        : "";
+      if (!cleanSvg.trim()) {
+        throw new Error("Mermaid SVG 消毒失败");
+      }
+      target.innerHTML = cleanSvg;
+      // 纵深兜底：防止个别非标准 DOM（如 happy-dom）中 NodeIterator 提前中断导致残留
+      for (const dangerous of target.querySelectorAll(
+        "script, foreignObject, foreignobject, img, iframe, object, embed"
+      )) {
+        dangerous.remove();
+      }
+      for (const el of target.querySelectorAll("*")) {
+        for (const attr of Array.from(el.attributes)) {
+          if (attr.name.toLowerCase().startsWith("on")) {
+            el.removeAttribute(attr.name);
+          }
+        }
+      }
       block.parentElement?.replaceWith(target);
     } catch {
       // 语法错误：保留原代码块并标注（不静默吞掉用户内容）

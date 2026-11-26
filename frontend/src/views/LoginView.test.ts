@@ -232,4 +232,10 @@ describe("登录/注册一体流（Email OTP + Magic Link）", () => {
     expect(wrapper.find("#account").exists()).toBe(false);
     expect(wrapper.get('[data-test="auth-title"]').text()).toBe("登录或创建账号");
   });
+
+  it("页面仅存在 1 个主标题 <h1>（左侧品牌面板降级为 <p>，W7）", async () => {
+    const { wrapper } = await mountLogin("/login");
+    expect(wrapper.findAll("h1")).toHaveLength(1);
+    expect(wrapper.get("h1").attributes("data-test")).toBe("auth-title");
+  });
 });

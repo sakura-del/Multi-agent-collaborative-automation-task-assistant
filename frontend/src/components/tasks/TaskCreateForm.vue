@@ -315,11 +315,16 @@ function addKeyword() {
     keywordDraft.value = "";
     if (next.length > KEYWORD_MAX) {
         toastWarning(`关键词最多 ${KEYWORD_MAX} 个，请删减超出部分`);
+    } else {
+        validationErrorFields.value.delete("keyword");
     }
 }
 
 function removeKeyword(keyword: string) {
     keywords.value = keywords.value.filter((item) => item !== keyword);
+    if (keywords.value.length >= 1 && keywords.value.length <= KEYWORD_MAX) {
+        validationErrorFields.value.delete("keyword");
+    }
 }
 
 function addSeedDoi() {
@@ -453,6 +458,7 @@ function resolveVerifyTopic(): string {
 }
 
 async function handleSubmit() {
+    if (props.pending) return;
     const result = validate();
     validationMessages.value = result.messages;
     validationErrorFields.value = result.fields;

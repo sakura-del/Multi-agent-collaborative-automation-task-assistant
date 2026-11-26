@@ -899,7 +899,7 @@ function statusOf(credential: LLMCredentialInfo): {
                             <span class="text-xs leading-5">
                                 <span class="font-medium">凭据不可用时回退平台模型</span>
                                 <span class="block text-[10px] leading-4 text-muted-foreground">
-                                    仅在 key 被拒（401/402/403，欠费或失效）时改走平台模型并**按平台计费**；
+                                    仅在 key 被拒（401/402/403，欠费或失效）时改走平台模型并<strong>按平台计费</strong>；
                                     限流（429）与超时不会回退。默认关闭：任务失败并提示原因。
                                 </span>
                             </span>

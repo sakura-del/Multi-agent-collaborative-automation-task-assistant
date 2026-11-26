@@ -279,7 +279,8 @@ function stepDotClass(status: AgentStepStatus): string {
                 v-if="step.status === 'failed'"
                 type="button"
                 data-test="agent-plan-retry"
-                class="inline-flex h-7 shrink-0 items-center gap-1 rounded-lg border border-border px-2 text-[11px] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                :disabled="pending"
+                class="inline-flex h-7 shrink-0 items-center gap-1 rounded-lg border border-border px-2 text-[11px] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
                 @click.stop="emit('retry', step.id)"
               >
                 <RefreshCw class="size-3" />

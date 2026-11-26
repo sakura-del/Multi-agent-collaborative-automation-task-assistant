@@ -1,4 +1,4 @@
-import { AxiosError, AxiosHeaders, type AxiosResponse } from "axios";
+import axios, { AxiosError, AxiosHeaders, type AxiosResponse } from "axios";
 import { describe, expect, it } from "vitest";
 
 import { normalizeError } from "./client";
@@ -136,5 +136,17 @@ describe("api/client normalizeError 错误归一化", () => {
     const tooDeepMsg = normalizeError(tooDeep).message;
     expect(tooDeepMsg).not.toMatch(/Request failed with status code/i);
     expect(tooDeepMsg).toBe("请求参数有误");
+  });
+
+  it("保留请求取消信号 ERR_CANCELED 与 axios.isCancel 语义（C8）", () => {
+    const canceledErr = new axios.CanceledError("canceled by caller");
+    const normalizedCanceled = normalizeError(canceledErr);
+    expect(normalizedCanceled.code).toBe("ERR_CANCELED");
+    expect(axios.isCancel(normalizedCanceled)).toBe(true);
+
+    const axiosCanceled = new AxiosError("canceled", "ERR_CANCELED");
+    const normalizedAxios = normalizeError(axiosCanceled);
+    expect(normalizedAxios.code).toBe("ERR_CANCELED");
+    expect(axios.isCancel(normalizedAxios)).toBe(true);
   });
 });

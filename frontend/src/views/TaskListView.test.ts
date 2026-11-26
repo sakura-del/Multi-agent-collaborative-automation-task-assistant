@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
 import { nextTick } from "vue";
-import { mount } from "@vue/test-utils";
+import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { createRouter, createMemoryHistory } from "vue-router";
 
@@ -464,5 +464,27 @@ describe("M3 任务列表 UX 与动效收口", () => {
     expect(wrapper.find('[data-test="task-list-skeleton"]').exists()).toBe(true);
     expect(wrapper.find('[data-test="empty-state"]').exists()).toBe(false);
     vi.useRealTimers();
+  });
+
+  it("展开新建表单提交失败时仅在表单内展示 1 个错误横幅，不与列表页顶部重复（C5）", async () => {
+    const wrapper = await mountWith([task()], { realForm: true });
+    const { useTaskStore } = await import("@/stores/tasks");
+    const store = useTaskStore();
+    store.create = vi.fn().mockRejectedValue(new Error("配额已满，请升级套餐"));
+
+    await wrapper.get('[data-test="new-task"]').trigger("click");
+    await nextTick();
+
+    await wrapper.get('[data-test="topic"]').setValue("去重错误横幅验证主题");
+    await wrapper.get('[data-test="keyword-input"]').setValue("RAG");
+    await wrapper.get('[data-test="keyword-add-btn"]').trigger("click");
+    await wrapper.get('[data-test="submit"]').trigger("click");
+    await flushPromises();
+    await nextTick();
+
+    const alerts = wrapper.findAll('[role="alert"]');
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0].attributes("data-test")).toBe("form-error");
+    expect(alerts[0].text()).toContain("配额已满，请升级套餐");
   });
 });

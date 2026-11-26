@@ -669,4 +669,17 @@ describe("ModelSettingsView", () => {
         await flushPromises();
         expect(wrapper.get('[data-test="routing-error"]').text()).toContain("路由保存异常");
     });
+
+    it("回退说明文本使用 <strong> 渲染强调，不裸露 Markdown 星号（W4）", async () => {
+        vi.mocked(listLLMCredentials).mockResolvedValue([] as never);
+        const wrapper = mountView();
+        await flushPromises();
+        await openCreate(wrapper);
+
+        const fallbackLabel = wrapper.get('[data-test="model-allow-fallback"]').element.closest("label");
+        expect(fallbackLabel).not.toBeNull();
+        expect(fallbackLabel!.textContent).toContain("按平台计费");
+        expect(fallbackLabel!.innerHTML).toContain("<strong>按平台计费</strong>");
+        expect(fallbackLabel!.innerHTML).not.toContain("**");
+    });
 });

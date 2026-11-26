@@ -169,7 +169,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="grid min-h-dvh bg-background text-foreground lg:grid-cols-[1.05fr_1fr]">
-    <AuthBrandPanel />
+    <AuthBrandPanel heading-tag="p" />
 
     <!-- 右侧：极简邮箱验证码 / 一键链接登录注册一体流 -->
     <section class="flex items-center justify-center bg-background px-4 py-10 sm:px-8">

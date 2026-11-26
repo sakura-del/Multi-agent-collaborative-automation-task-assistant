@@ -229,4 +229,142 @@ describe("TaskDetailView 规划 Tab 状态一致性（Issue #55）", () => {
     expect(wrapper.find('[data-test="trace-waterfall"]').exists()).toBe(true);
     expect(wrapper.find('[data-test="tab-result"]').attributes("title")).toContain("复盘后可用");
   });
+
+  it("节点重试失败时不触发 refresh() 清空错误横幅，成功时刷新快照（C2）", async () => {
+    const failedSnapshot: TaskSnapshot = {
+      ...COMPLETED_SNAPSHOT,
+      status: "waiting_human",
+      review_report: null,
+      error: null,
+      subtasks: [
+        COMPLETED_SNAPSHOT.subtasks[0],
+        {
+          ...COMPLETED_SNAPSHOT.subtasks[1],
+          status: "failed",
+          error: "节点检索超时",
+        },
+      ],
+    };
+    vi.mocked(taskApi.get).mockResolvedValue(failedSnapshot);
+    vi.mocked(taskApi.control).mockRejectedValueOnce(new Error("当前状态不允许重试节点"));
+
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: "/tasks/:taskId", name: "task-detail", component: TaskDetailView, props: true },
+        { path: "/tasks/:taskId/screening", name: "task-screening", component: { template: "<div />" } },
+      ],
+    });
+    await router.push({
+      name: "task-detail",
+      params: { taskId: "task-done-1" },
+      query: { tab: "plan" },
+    });
+    await router.isReady();
+
+    const wrapper = mount(TaskDetailView, {
+      props: { taskId: "task-done-1" },
+      global: {
+        plugins: [router],
+        stubs: { TaskRefreshPanel: true, AnnotationPanel: true, BeTimeline: true },
+      },
+    });
+    await flushPromises();
+
+    // 展开失败节点行以展示行内「重试节点」按钮
+    const stepButton = wrapper.findAll('[data-test="agent-plan"] button').find((b) =>
+      b.text().includes("撰写综述正文"),
+    );
+    expect(stepButton).toBeDefined();
+    await stepButton!.trigger("click");
+    await flushPromises();
+
+    // 失败场景：只应调用过 1 次初始 load，不能再调 refresh() 把错讯清空
+    await wrapper.get('[data-test="agent-plan-retry"]').trigger("click");
+    await flushPromises();
+
+    expect(taskApi.get).toHaveBeenCalledTimes(1);
+    expect(wrapper.get('[data-test="plan-error"]').text()).toContain("当前状态不允许重试节点");
+
+    // 成功场景：调用 control 成功后应刷新快照
+    vi.mocked(taskApi.control).mockResolvedValueOnce({ ...failedSnapshot, status: "running" });
+    await wrapper.get('[data-test="agent-plan-retry"]').trigger("click");
+    await flushPromises();
+
+    expect(taskApi.get).toHaveBeenCalledTimes(2);
+    expect(wrapper.find('[data-test="plan-error"]').exists()).toBe(false);
+  });
+
+  it("pending 期间禁用行内重试按钮且 handleControl 防重入不发出重复请求（C2）", async () => {
+    const failedSnapshot: TaskSnapshot = {
+      ...COMPLETED_SNAPSHOT,
+      status: "waiting_human",
+      review_report: null,
+      error: null,
+      subtasks: [
+        COMPLETED_SNAPSHOT.subtasks[0],
+        {
+          ...COMPLETED_SNAPSHOT.subtasks[1],
+          status: "failed",
+          error: "节点检索超时",
+        },
+      ],
+    };
+    vi.mocked(taskApi.get).mockResolvedValue(failedSnapshot);
+
+    let resolveControl!: (value: TaskSnapshot) => void;
+    vi.mocked(taskApi.control).mockImplementationOnce(
+      () =>
+        new Promise<TaskSnapshot>((resolve) => {
+          resolveControl = resolve;
+        }),
+    );
+
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: "/tasks/:taskId", name: "task-detail", component: TaskDetailView, props: true },
+        { path: "/tasks/:taskId/screening", name: "task-screening", component: { template: "<div />" } },
+      ],
+    });
+    await router.push({
+      name: "task-detail",
+      params: { taskId: "task-done-1" },
+      query: { tab: "plan" },
+    });
+    await router.isReady();
+
+    const wrapper = mount(TaskDetailView, {
+      props: { taskId: "task-done-1" },
+      global: {
+        plugins: [router],
+        stubs: { TaskRefreshPanel: true, AnnotationPanel: true, BeTimeline: true },
+      },
+    });
+    await flushPromises();
+
+    const stepButton = wrapper.findAll('[data-test="agent-plan"] button').find((b) =>
+      b.text().includes("撰写综述正文"),
+    );
+    expect(stepButton).toBeDefined();
+    await stepButton!.trigger("click");
+    await flushPromises();
+
+    const retryBtn = wrapper.get('[data-test="agent-plan-retry"]');
+    await retryBtn.trigger("click");
+
+    // 1. 首次请求飞行中：按钮必须处于 disabled 状态
+    expect(retryBtn.attributes("disabled")).toBeDefined();
+    expect(taskApi.control).toHaveBeenCalledTimes(1);
+
+    // 2. 即使强行绕过按钮直接再触发 retry / command 事件，handleControl 也必须防重入拦截
+    const BeAgentPlanComp = wrapper.findComponent({ name: "BeAgentPlan" });
+    BeAgentPlanComp.vm.$emit("retry", "n2");
+    await flushPromises();
+    expect(taskApi.control).toHaveBeenCalledTimes(1);
+
+    resolveControl({ ...failedSnapshot, status: "running" });
+    await flushPromises();
+    expect(taskApi.get).toHaveBeenCalledTimes(2);
+  });
 });

@@ -483,7 +483,7 @@ const width = computed(() => (props.collapsed ? "3.75rem" : "14.5rem"));
             <img src="/logo.svg" alt="" aria-hidden="true" class="size-8" />
             <div class="min-w-0 flex-1">
               <p class="text-sm font-semibold tracking-tight">VeriPaper</p>
-              <p class="text-[8px] tracking-[0.16em] text-muted-foreground">EVIDENCE-LED WRITING</p>
+              <p class="text-[10px] tracking-wide text-muted-foreground">证据驱动的学术综述</p>
             </div>
             <button
               type="button"

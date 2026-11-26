@@ -156,11 +156,19 @@ describe("TaskCreateForm", () => {
         });
     });
 
-    it("disables submit while pending", () => {
+    it("disables submit while pending", async () => {
         const wrapper = mountForm({ pending: true });
-        expect(
-            wrapper.find('[data-test="submit"]').attributes("disabled"),
-        ).toBeDefined();
+        await flushPromises();
+        const submitBtn = wrapper.get('[data-test="submit"]');
+        expect(submitBtn.attributes("disabled")).toBeDefined();
+        await wrapper.find('[data-test="topic"]').setValue("检索增强生成重复提交守卫测试");
+        await wrapper.find('[data-test="keyword-input"]').setValue("RAG");
+        await wrapper.find('[data-test="keyword-add-btn"]').trigger("click");
+        // 即使移除按钮 disabled 属性直接触发点击，handleSubmit 仍必须因 props.pending 拦截重入
+        submitBtn.element.removeAttribute("disabled");
+        await submitBtn.trigger("click");
+        await flushPromises();
+        expect(wrapper.emitted("submit")).toBeUndefined();
     });
 
     it("shows the server error message near the form", () => {
@@ -1056,5 +1064,35 @@ describe("TaskCreateForm 默认模型", () => {
         await closeBtn.trigger("click");
 
         expect(wrapper.emitted("dismissError")).toEqual([[]]);
+    });
+
+    it("空提交使关键词输入框标红后，补添合法数量关键词立即清除红框；超限保留并在删减回上限内清除（W5）", async () => {
+        const wrapper = mountForm();
+        await flushPromises();
+        await wrapper.find('[data-test="topic"]').setValue("关键词校验红框清除测试");
+
+        // 1. 关键词为空直接提交 -> keyword-input 标红
+        await wrapper.find('[data-test="submit"]').trigger("click");
+        await flushPromises();
+        const kwInput = wrapper.find('[data-test="keyword-input"]');
+        expect(kwInput.classes()).toContain("border-destructive");
+
+        // 2. 点击添加补添 1 个关键词（<= 10）-> 立即清除红框
+        await kwInput.setValue("RAG");
+        await wrapper.find('[data-test="keyword-add-btn"]').trigger("click");
+        await flushPromises();
+        expect(kwInput.classes()).not.toContain("border-destructive");
+
+        // 3. 批量添加使关键词超过 10 个并提交触发超限标红 -> 保留红框；删减到 <=10 后清除
+        await kwInput.setValue("k1,k2,k3,k4,k5,k6,k7,k8,k9,k10");
+        await wrapper.find('[data-test="keyword-add-btn"]').trigger("click");
+        await wrapper.find('[data-test="submit"]').trigger("click");
+        await flushPromises();
+        expect(kwInput.classes()).toContain("border-destructive");
+
+        // 删除 1 个关键词回到 10 个（<= KEYWORD_MAX）-> 红框清除
+        await wrapper.find('button[aria-label="移除 RAG"]').trigger("click");
+        await flushPromises();
+        expect(kwInput.classes()).not.toContain("border-destructive");
     });
 });

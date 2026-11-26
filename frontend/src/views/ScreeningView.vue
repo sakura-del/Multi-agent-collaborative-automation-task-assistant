@@ -313,6 +313,8 @@ watch(
         securityLevel: "strict",
         theme: dark ? "dark" : "neutral",
         fontFamily: "inherit",
+        htmlLabels: false,
+        flowchart: { htmlLabels: false },
       });
       const { svg } = await mermaid.render(`prisma-mermaid-${Date.now()}-${seq}`, code);
       if (seq !== mermaidRenderSeq) return;

@@ -970,6 +970,10 @@ async def _seed_user_template(db: AsyncSession, *, user_id: UUID) -> None:
 
 
 async def seed_all() -> dict[str, str]:
+    env = get_settings().app.env.strip().lower()
+    if env == "production":
+        raise RuntimeError("禁止在生产环境 (app.env=production) 执行 E2E 种子注入脚本。")
+
     demo_account = os.environ.get("E2E_DEMO_ACCOUNT", "demo").strip() or "demo"
     secondary_account = os.environ.get("E2E_SECONDARY_ACCOUNT", "e2efull").strip() or "e2efull"
     review_account = os.environ.get("E2E_REVIEW_ACCOUNT", "e2ereview").strip() or "e2ereview"

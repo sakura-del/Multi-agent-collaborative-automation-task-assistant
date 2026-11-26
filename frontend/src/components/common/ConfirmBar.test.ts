@@ -458,6 +458,61 @@ describe("ConfirmBar 破坏性二次确认条原语", () => {
     expect(wrapper.vm.barCancelCount).toBe(1);
   });
 
+  it("ConfirmBar 开启期间叠加打开 MotionDialog 再依次关闭后，恢复延迟记录的外部焦点（C7）", async () => {
+    const Host = defineComponent({
+      components: { MotionDialog, ConfirmBar },
+      setup() {
+        const barOpen = ref(true);
+        const dialogOpen = ref(false);
+        return { barOpen, dialogOpen };
+      },
+      template: `
+        <div>
+          <button type="button" data-test="outside-trigger">外部按钮</button>
+          <ConfirmBar
+            :open="barOpen"
+            title="确认删除？"
+            cancel-testid="nested-bar-cancel"
+            @cancel="barOpen = false"
+          />
+          <MotionDialog
+            v-model:open="dialogOpen"
+            aria-label="叠加弹窗"
+            data-test="nested-overlay-dialog"
+          >
+            <button type="button">弹窗按钮</button>
+          </MotionDialog>
+        </div>
+      `,
+    });
+
+    const hostEl = document.createElement("div");
+    document.body.appendChild(hostEl);
+    const wrapper = mount(Host, { attachTo: hostEl });
+    mountedWrappers.push(wrapper);
+    await flushPromises();
+
+    const outsideBtn = wrapper.get('[data-test="outside-trigger"]').element as HTMLButtonElement;
+    outsideBtn.focus();
+    expect(document.activeElement).toBe(outsideBtn);
+
+    // ConfirmBar 开启中打开 MotionDialog -> MotionDialog 缓存 outsideBtn 到 deferredRestoreFocus
+    wrapper.vm.dialogOpen = true;
+    await flushPromises();
+
+    // 第 1 次 Esc 关闭 MotionDialog
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    await flushPromises();
+    expect(wrapper.vm.dialogOpen).toBe(false);
+
+    // 第 2 次 Esc 关闭 ConfirmBar -> 栈空后应恢复焦点至 outsideBtn
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    await flushPromises();
+    expect(wrapper.vm.barOpen).toBe(false);
+    expect(document.activeElement).toBe(outsideBtn);
+    hostEl.remove();
+  });
+
   it("MotionDialog 内嵌初始 open=true ConfirmBar 1 且同帧打开外部行内 ConfirmBar 2 时，连按 Esc 依次关闭 ConfirmBar 1 → ConfirmBar 2 → MotionDialog 不死锁（E5-a）", async () => {
     const Host = defineComponent({
       components: { MotionDialog, ConfirmBar },

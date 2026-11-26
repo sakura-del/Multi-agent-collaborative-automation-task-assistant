@@ -437,9 +437,9 @@ const panelClass = computed(() => {
   // floating/dock 靠 `fixed` 自身就建立了定位上下文，绝不追加 relative。
   if (variant.value === "full") return "relative flex min-h-0 h-full w-full flex-1 flex-col";
   if (variant.value === "dock") {
-    return "fixed right-0 top-0 z-[200] flex h-svh w-full md:w-[440px] flex-col border-l border-border bg-background shadow-xl";
+    return "fixed right-0 top-0 z-40 flex h-svh w-full md:w-[440px] flex-col border-l border-border-strong bg-background shadow-2xl";
   }
-  return "fixed bottom-4 right-4 z-[200] flex h-[min(580px,calc(100svh-2rem))] max-h-[min(580px,calc(100svh-2rem))] w-[min(380px,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl";
+  return "fixed bottom-4 right-4 z-40 flex h-[min(580px,calc(100svh-2rem))] max-h-[min(580px,calc(100svh-2rem))] w-[min(380px,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl";
 });
 
 const panelInitial = computed(() => {
@@ -485,7 +485,7 @@ const panelTransition = computed(() => {
         :animate="{ opacity: 1, scale: 1 }"
         :exit="{ opacity: 0, scale: reduced ? 1 : 0.9 }"
         :transition="{ duration: reduced ? DURATION.micro : DURATION.fast, ease: EASE_OUT }"
-        class="fixed bottom-5 right-5 z-[200] flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-transform hover:scale-105 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none motion-reduce:hover:scale-100 motion-reduce:active:scale-100"
+        class="fixed bottom-5 right-5 z-30 flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-transform hover:scale-105 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none motion-reduce:hover:scale-100 motion-reduce:active:scale-100"
         aria-label="打开会话"
         title="打开会话"
         @click="open = true"
@@ -551,8 +551,8 @@ const panelTransition = computed(() => {
             type="button"
             data-test="chat-variant-toggle"
             class="inline-flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            :aria-label="variant === 'dock' ? '切回小窗' : '切换到侧边栏'"
-            :title="variant === 'dock' ? '切回小窗' : '停靠到右侧'"
+            :aria-label="variant === 'dock' ? '切回浮窗' : '展开为右侧面板'"
+            :title="variant === 'dock' ? '切回浮窗' : '右侧面板模式'"
             @click="toDock"
           >
             <Minimize2 v-if="variant === 'dock'" class="size-3.5" />

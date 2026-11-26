@@ -326,7 +326,7 @@ const rows = computed(() =>
       </div>
     </header>
 
-    <ErrorBanner :message="errorMessage" @dismiss="errorMessage = null" />
+    <ErrorBanner v-if="!showForm" :message="errorMessage" @dismiss="errorMessage = null" />
 
     <AnimatedCollapse :open="showForm">
       <TaskCreateForm

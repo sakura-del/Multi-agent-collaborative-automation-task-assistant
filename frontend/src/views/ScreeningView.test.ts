@@ -810,14 +810,24 @@ describe("ScreeningView", () => {
       wrapper = mount(ScreeningView, { props: { taskId: "task-1" } });
       await vi.waitFor(() => expect(raceCall).toBe(1));
       expect(mermaidInitializeMock).toHaveBeenCalledWith(
-        expect.objectContaining({ securityLevel: "strict", theme: "neutral" }),
+        expect.objectContaining({
+          securityLevel: "strict",
+          theme: "neutral",
+          htmlLabels: false,
+          flowchart: { htmlLabels: false },
+        }),
       );
 
       // 在首次渲染尚未返回时切换为深色模式触发第二次渲染
       setTheme("dark");
       await vi.waitFor(() => expect(raceCall).toBe(2));
       expect(mermaidInitializeMock).toHaveBeenLastCalledWith(
-        expect.objectContaining({ securityLevel: "strict", theme: "dark" }),
+        expect.objectContaining({
+          securityLevel: "strict",
+          theme: "dark",
+          htmlLabels: false,
+          flowchart: { htmlLabels: false },
+        }),
       );
 
       // 第二次（较新）先返回
@@ -858,6 +868,40 @@ describe("ScreeningView", () => {
       }));
       sanitizeSpy.mockRestore();
       setTheme("light");
+    }
+  });
+
+  it("真实 DOMPurify 净化时完整保留 SVG <text><tspan> 节点文字并传参 htmlLabels: false（W1）", async () => {
+    const sanitizeSpy = vi.spyOn(DOMPurify, "sanitize");
+    mermaidRenderMock.mockResolvedValueOnce({
+      svg: [
+        '<svg viewBox="0 0 200 100">',
+        '<g><rect width="120" height="40"></rect><text x="10" y="20"><tspan>识别 n=50</tspan></text></g>',
+        "</svg>",
+      ].join(""),
+    });
+
+    const wrapper = mount(ScreeningView, { props: { taskId: "task-1" } });
+    try {
+      await flushPromises();
+
+      expect(mermaidInitializeMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          htmlLabels: false,
+          flowchart: { htmlLabels: false },
+        }),
+      );
+      expect(sanitizeSpy).toHaveBeenCalledWith(expect.stringContaining("<tspan>识别 n=50</tspan>"), {
+        USE_PROFILES: { svg: true, svgFilters: true },
+      });
+      const diagram = wrapper.get('[data-test="screening-mermaid-diagram"]');
+      const html = diagram.html();
+      expect(html).toContain("<text");
+      expect(html).toContain("<tspan>");
+      expect(diagram.text()).toContain("识别 n=50");
+    } finally {
+      sanitizeSpy.mockRestore();
+      wrapper.unmount();
     }
   });
 });

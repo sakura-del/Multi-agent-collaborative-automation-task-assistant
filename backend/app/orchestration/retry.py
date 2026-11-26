@@ -18,7 +18,7 @@ import asyncio
 import inspect
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from app.core.logging import get_logger
 from app.orchestration.task_state import SubtaskStatus, TaskStateMachine
@@ -115,25 +115,59 @@ class RetryExecutor:
         self.policy = policy or RetryPolicy()
 
     @staticmethod
-    def _accepts_metadata(callback: AsyncTransitionCallback) -> bool:
-        """探测回调是否支持传入第 3 参数或 metadata 关键字参数。"""
+    def _metadata_call_mode(
+        callback: AsyncTransitionCallback,
+    ) -> Literal["positional", "keyword"] | None:
+        """探测回调支持的 metadata 传递方式（positional / keyword / None）。"""
         try:
             params = inspect.signature(callback).parameters
         except (ValueError, TypeError):
-            return False
-        if "metadata" in params:
-            return True
-        if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
-            return True
+            return None
+
         positional = [
             p
             for p in params.values()
             if p.kind
             in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
         ]
-        return len(positional) >= 3 or any(
-            p.kind is inspect.Parameter.VAR_POSITIONAL for p in params.values()
-        )
+        # 前 2 个位置槽保留给 (old, new)，即使命名为 metadata 也绝不可走 keyword 避免重复传参
+        reserved_names = {p.name for p in positional[:2]}
+        has_var_kw = any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
+        has_var_pos = any(p.kind is inspect.Parameter.VAR_POSITIONAL for p in params.values())
+
+        meta_param = params.get("metadata")
+        if meta_param is not None:
+            if meta_param.name in reserved_names:
+                if len(positional) >= 3 and positional[2].default is inspect.Parameter.empty:
+                    return "positional"
+                return None
+            if meta_param.kind in (
+                inspect.Parameter.KEYWORD_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            ):
+                return "keyword"
+            if meta_param.kind is inspect.Parameter.POSITIONAL_ONLY:
+                if len(positional) >= 3 and positional[2] is meta_param:
+                    return "positional"
+                # metadata 位于第 4+ 仅限位置参数时，不可通过第 3 位置槽错位传递
+                return None
+
+        if len(positional) >= 3:
+            third = positional[2]
+            if third.kind is inspect.Parameter.POSITIONAL_ONLY:
+                return "positional"
+            if third.default is inspect.Parameter.empty or not has_var_kw:
+                return "positional"
+        if has_var_kw:
+            return "keyword"
+        if has_var_pos:
+            return "positional"
+        return None
+
+    @staticmethod
+    def _accepts_metadata(callback: AsyncTransitionCallback) -> bool:
+        """探测回调是否支持传入第 3 参数或 metadata 关键字参数。"""
+        return RetryExecutor._metadata_call_mode(callback) is not None
 
     async def _advance(
         self,
@@ -148,7 +182,10 @@ class RetryExecutor:
         old = state_machine.status
         state_machine.transition(target)
         if on_transition is not None:
-            if metadata and self._accepts_metadata(on_transition):
+            mode = self._metadata_call_mode(on_transition)
+            if mode == "keyword":
+                await on_transition(old, target, metadata=metadata)
+            elif mode == "positional":
                 await on_transition(old, target, metadata)
             else:
                 await on_transition(old, target)

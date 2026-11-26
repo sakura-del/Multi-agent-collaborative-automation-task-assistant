@@ -441,6 +441,24 @@ test.describe("多视口 × 双主题全站自动化走查 Matrix", () => {
             expect(dBox!.x).toBeGreaterThanOrEqual(-1);
             expect(dBox!.x + dBox!.width).toBeLessThanOrEqual(vp.width + 1);
             expect(dBox!.y + dBox!.height).toBeLessThanOrEqual(vp.height + 1);
+
+            // W2 回归：打开抽屉时 chat-fab 坐标点不得穿透置于抽屉/遮罩之上
+            const fabEl = page.locator('[data-test="chat-fab"]');
+            if ((await fabEl.count()) > 0) {
+              const fabBox = await fabEl.boundingBox();
+              if (fabBox && fabBox.width > 0 && fabBox.height > 0) {
+                const hitChatFab = await page.evaluate(
+                  ({ x, y }) => {
+                    const hit = document.elementFromPoint(x, y);
+                    const fab = document.querySelector('[data-test="chat-fab"]');
+                    return Boolean(hit && fab && (hit === fab || fab.contains(hit)));
+                  },
+                  { x: fabBox.x + fabBox.width / 2, y: fabBox.y + fabBox.height / 2 },
+                );
+                expect(hitChatFab).toBe(false);
+              }
+            }
+
             await page.keyboard.press("Escape");
             await expect(drawer).toHaveCount(0);
           }

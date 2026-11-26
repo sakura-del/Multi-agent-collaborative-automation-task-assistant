@@ -115,9 +115,18 @@ const displayContent = computed(() =>
 );
 const html = computed(() => renderChatMarkdown(displayContent.value));
 
+const MERMAID_FENCE_RE = /```[^\S\r\n]*mermaid\b/i;
+let mermaidGeneration = 0;
+
 async function hydrateMermaid() {
+  if (isStreaming.value || !MERMAID_FENCE_RE.test(displayContent.value)) {
+    return;
+  }
+  const gen = ++mermaidGeneration;
   await nextTick();
-  if (isUnmounted || !root.value) return;
+  if (isUnmounted || !root.value || gen !== mermaidGeneration || isStreaming.value) {
+    return;
+  }
   await renderMermaidBlocks(root.value);
 }
 
@@ -125,7 +134,7 @@ onMounted(() => {
   void hydrateMermaid();
 });
 
-watch(displayContent, () => {
+watch([displayContent, isStreaming], () => {
   void hydrateMermaid();
 });
 

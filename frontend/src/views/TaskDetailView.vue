@@ -237,9 +237,17 @@ const traceSpans = computed<TraceSpan[]>(() => {
 
 /** Agent Plan 行内「重试节点」：走 retry_node 命令（与执行页工具栏同路径） */
 async function handleRetryStep(stepId: string) {
+  if (pending.value) return;
   selectedNodeId.value = stepId;
-  await handleControl({ command: "retry_node", node_id: stepId });
-  void refresh();
+  const ok = await handleControl({ command: "retry_node", node_id: stepId });
+  if (ok) {
+    pending.value = true;
+    try {
+      await refresh();
+    } finally {
+      pending.value = false;
+    }
+  }
 }
 
 function selectTab(tab: TabKey) {
@@ -311,13 +319,16 @@ async function handleRegenerate() {
   }
 }
 
-async function handleControl(payload: TaskControl) {
+async function handleControl(payload: TaskControl): Promise<boolean> {
+  if (pending.value) return false;
   pending.value = true;
   errorMessage.value = null;
   try {
     await store.control(props.taskId, payload);
+    return true;
   } catch (error) {
     errorMessage.value = (error as Error).message;
+    return false;
   } finally {
     pending.value = false;
   }

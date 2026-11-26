@@ -138,8 +138,15 @@ test("PRISMA 筛选工作台：造数据 → 纳入/排除 → 计数变化与 P
   expect(prismaJson.title_abstract?.excluded).toBe(1);
   await shot(page, "after-exclude");
 
-  // Mermaid 源码存在
+  // Mermaid 源码与真实 SVG 节点文字存在（W1 回归：不得为空白框）
   await expect(page.locator('[data-test="screening-mermaid"]')).toContainText("flowchart TD");
+  const svgTexts = page.locator('[data-test="screening-mermaid-diagram"] svg text');
+  await expect
+    .poll(async () => await svgTexts.count(), { timeout: 15_000 })
+    .toBeGreaterThan(0);
+  const diagramText = await page.locator('[data-test="screening-mermaid-diagram"] svg').textContent();
+  expect(diagramText).toContain("识别");
+  expect(diagramText).toContain("纳入");
 
   // 阶段过滤：只剩「全文」阶段那一条（纳入的那条），且不再有标题/摘要的行
   await page.locator('[data-test="screening-stage-filter"]').selectOption("fulltext");

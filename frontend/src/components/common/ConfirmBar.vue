@@ -5,7 +5,13 @@ import { AlertTriangle, Loader2 } from "lucide-vue-next";
 
 import AnimatedCollapse from "@/components/common/AnimatedCollapse.vue";
 import { Button } from "@/components/ui/button";
-import { isTopOverlay, pushOverlay, removeOverlay } from "@/lib/overlay";
+import {
+  consumeDeferredFocusRestore,
+  hasActiveOverlays,
+  isTopOverlay,
+  pushOverlay,
+  removeOverlay,
+} from "@/lib/overlay";
 import { cn } from "@/lib/utils";
 
 /**
@@ -113,6 +119,9 @@ function syncKeyListener(active: boolean) {
     removeOverlay(barToken);
     window.removeEventListener("keydown", handleKeydown, { capture: true });
     keyListenerBound = false;
+    if (!hasActiveOverlays()) {
+      consumeDeferredFocusRestore()?.focus({ preventScroll: true });
+    }
   }
 }
 

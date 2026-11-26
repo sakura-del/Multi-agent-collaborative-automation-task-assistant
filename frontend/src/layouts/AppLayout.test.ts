@@ -345,11 +345,16 @@ describe("AppLayout M2 UX 与动效改造验证", () => {
     expect(wrapper.find('[data-test="chat-fab"]').exists()).toBe(false);
     const fabBtn = document.body.querySelector('[data-test="chat-fab"]') as HTMLButtonElement | null;
     expect(fabBtn).not.toBeNull();
+    // W2 层级守卫：chat-fab 处于 z-30（高于 TopBar z-20，低于弹层遮罩 z-50）
+    expect(fabBtn!.className.split(/\s+/)).toContain("z-30");
+    expect(fabBtn!.className).not.toContain("z-[200]");
     fabBtn!.click();
     await flushPromises();
 
     const loadingShell = wrapper.find('[data-test="chat-shell-loading"]');
     expect(loadingShell.exists()).toBe(true);
+    expect(loadingShell.classes()).toContain("z-40");
+    expect(loadingShell.classes()).not.toContain("z-[200]");
     expect(wrapper.find('[data-test="chat-shell"]').exists()).toBe(false);
 
     resolveShell({
@@ -374,6 +379,9 @@ describe("AppLayout M2 UX 与动效改造验证", () => {
 
     const dialog = document.body.querySelector('[role="dialog"][aria-label="导航"]') as HTMLElement;
     expect(dialog).not.toBeNull();
+    // W7：移动端抽屉副标题统一为中文，不出现英文 EVIDENCE-LED WRITING
+    expect(dialog.textContent).toContain("证据驱动的学术综述");
+    expect(dialog.textContent).not.toContain("EVIDENCE-LED WRITING");
 
     // 移动端抽屉内包含 GlobalPromptEntry 输入框
     const mobilePrompt = dialog.querySelector('[data-test="global-prompt"]') as HTMLTextAreaElement;

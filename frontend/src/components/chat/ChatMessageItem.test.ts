@@ -3,10 +3,22 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 
-const toastSuccessMock = vi.fn();
+const { toastSuccessMock, renderMermaidBlocksMock } = vi.hoisted(() => ({
+  toastSuccessMock: vi.fn(),
+  renderMermaidBlocksMock: vi.fn(async () => undefined),
+}));
 vi.mock("@/lib/toast", () => ({
   toastSuccess: (...args: unknown[]) => toastSuccessMock(...args),
 }));
+vi.mock("@/utils/chat-markdown", async () => {
+  const actual = await vi.importActual<typeof import("@/utils/chat-markdown")>(
+    "@/utils/chat-markdown",
+  );
+  return {
+    ...actual,
+    renderMermaidBlocks: renderMermaidBlocksMock,
+  };
+});
 
 import ChatMessageItem from "@/components/chat/ChatMessageItem.vue";
 import type { ChatMessage } from "@/api/conversations";
@@ -34,6 +46,7 @@ function makeMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
 describe("ChatMessageItem 单条消息", () => {
   afterEach(() => {
     toastSuccessMock.mockReset();
+    renderMermaidBlocksMock.mockClear();
     vi.restoreAllMocks();
   });
 
@@ -164,5 +177,50 @@ describe("ChatMessageItem 单条消息", () => {
     expect(toastSuccessMock).not.toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);
     vi.useRealTimers();
+  });
+
+  it("流式期间跳过 Mermaid 渲染，仅在流式结束且含围栏时触发一次并具备代次守卫（C6）", async () => {
+    const mermaidText = "请看图：\n```mermaid\nflowchart TD\n  A-->B\n```";
+
+    // 1. 普通非流式无 Mermaid 围栏：不触发 renderMermaidBlocks
+    const plainWrapper = mount(ChatMessageItem, {
+      props: { message: makeMessage({ content: "纯 Markdown 段落，没有图" }) },
+    });
+    await flushPromises();
+    expect(renderMermaidBlocksMock).toHaveBeenCalledTimes(0);
+    plainWrapper.unmount();
+
+    // 2. 流式期间即使包含 ```mermaid 围栏也不调用 renderMermaidBlocks
+    const streamWrapper = mount(ChatMessageItem, {
+      props: {
+        message: makeMessage({ status: "streaming", content: "" }),
+        streamingText: "请看图：\n```mermaid\nflowchart TD\n",
+      },
+    });
+    await flushPromises();
+    await streamWrapper.setProps({ streamingText: mermaidText });
+    await flushPromises();
+    expect(renderMermaidBlocksMock).toHaveBeenCalledTimes(0);
+
+    // 3. 流式结束（streamingText 置为 null，message.content 与末帧一致）必须触发 1 次
+    await streamWrapper.setProps({
+      message: makeMessage({ status: "completed", content: mermaidText }),
+      streamingText: null,
+    });
+    await flushPromises();
+    expect(renderMermaidBlocksMock).toHaveBeenCalledTimes(1);
+
+    // 4. 同轮连续两次非流式变更：旧代次在 nextTick 后被守卫丢弃，仅触发最后一次
+    renderMermaidBlocksMock.mockClear();
+    void streamWrapper.setProps({
+      message: makeMessage({ content: "```mermaid\ngraph LR\n  X-->Y\n```" }),
+    });
+    await streamWrapper.setProps({
+      message: makeMessage({ content: "```mermaid\ngraph LR\n  Y-->Z\n```" }),
+    });
+    await flushPromises();
+    expect(renderMermaidBlocksMock).toHaveBeenCalledTimes(1);
+    expect(streamWrapper.text()).toContain("Y-->Z");
+    streamWrapper.unmount();
   });
 });

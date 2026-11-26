@@ -52,10 +52,16 @@ export function createTaskEventSession(deps: TaskEventSessionDeps): TaskEventSes
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let failures = 0;
   let stopped = true;
+  // 会话代次守卫：每次 start/stop 单调递增，阻止过期异步请求污染新任务连接
+  let sessionGen = 0;
   let taskId: string | null = null;
   let lastEventId = 0;
   let onEvent: (event: TaskEvent) => void = () => undefined;
   let handlers: TaskEventHandlers = {};
+
+  function isStale(gen: number): boolean {
+    return stopped || gen !== sessionGen;
+  }
 
   function merge(event: TaskEvent): void {
     if (event.event_id <= lastEventId) {
@@ -65,22 +71,26 @@ export function createTaskEventSession(deps: TaskEventSessionDeps): TaskEventSes
     onEvent(event);
   }
 
-  async function replayMissed(): Promise<void> {
-    if (taskId === null) {
+  async function replayMissed(gen: number): Promise<void> {
+    if (isStale(gen) || taskId === null) {
       return;
     }
-    const page = await deps.replay(taskId, lastEventId);
+    const currentTaskId = taskId;
+    const page = await deps.replay(currentTaskId, lastEventId);
+    if (isStale(gen)) {
+      return;
+    }
     for (const event of page.events) {
       merge(event);
     }
   }
 
-  function socketUrl(ticket: string): string {
+  function socketUrl(currentTaskId: string, ticket: string): string {
     const query = new URLSearchParams({ ticket, after_event_id: String(lastEventId) });
     // 跨域部署时走 API 所在 origin；未配置时沿用「当前页面 origin」（改造前行为）
     const wsBase = resolveWsBase();
     const origin = wsBase || `${isSecure() ? "wss" : "ws"}://${window.location.host}`;
-    return `${origin}${API_PREFIX}/tasks/${taskId}/ws?${query.toString()}`;
+    return `${origin}${API_PREFIX}/tasks/${currentTaskId}/ws?${query.toString()}`;
   }
 
   function stopPolling(): void {
@@ -90,51 +100,81 @@ export function createTaskEventSession(deps: TaskEventSessionDeps): TaskEventSes
     }
   }
 
-  function startPolling(): void {
-    if (pollTimer !== null || stopped) {
+  function startPolling(gen: number): void {
+    if (pollTimer !== null || isStale(gen)) {
       return;
     }
     handlers.onConnectionChange?.("polling");
     pollTimer = setInterval(() => {
-      void replayMissed().catch(() => undefined);
+      if (isStale(gen)) {
+        stopPolling();
+        return;
+      }
+      void replayMissed(gen).catch(() => undefined);
     }, pollIntervalMs);
   }
 
-  function scheduleReconnect(): void {
-    if (stopped) {
+  function scheduleReconnect(gen: number): void {
+    if (isStale(gen)) {
       return;
     }
     failures += 1;
     if (failures > maxFailures) {
-      startPolling();
+      startPolling(gen);
       return;
     }
     handlers.onConnectionChange?.("reconnecting", failures);
     const delay = baseDelayMs * 3 ** (failures - 1);
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
-      void connect().catch(() => scheduleReconnect());
+      if (isStale(gen)) {
+        return;
+      }
+      void connect(gen).catch(() => scheduleReconnect(gen));
     }, delay);
   }
 
-  async function connect(): Promise<void> {
-    if (stopped || taskId === null) {
+  async function connect(gen: number): Promise<void> {
+    if (isStale(gen) || taskId === null) {
       return;
     }
-    await deps.loadSnapshot?.(taskId);
-    await replayMissed();
-    const ticket = await deps.wsTicket(taskId);
-    if (stopped) {
+    const currentTaskId = taskId;
+    await deps.loadSnapshot?.(currentTaskId);
+    if (isStale(gen)) {
+      return;
+    }
+    await replayMissed(gen);
+    if (isStale(gen)) {
+      return;
+    }
+    const ticket = await deps.wsTicket(currentTaskId);
+    if (isStale(gen)) {
       return;
     }
 
-    const current = new WebSocketImpl(socketUrl(ticket.ticket));
+    const current = new WebSocketImpl(socketUrl(currentTaskId, ticket.ticket));
+    if (isStale(gen)) {
+      current.onopen = null;
+      current.onclose = null;
+      current.onerror = null;
+      current.onmessage = null;
+      current.close();
+      return;
+    }
     socket = current;
     current.onopen = () => {
+      if (isStale(gen) || socket !== current) {
+        current.onclose = null;
+        current.close();
+        return;
+      }
       failures = 0;
       handlers.onConnectionChange?.("connected");
     };
     current.onmessage = (message: { data: string }) => {
+      if (isStale(gen) || socket !== current) {
+        return;
+      }
       try {
         const frame = JSON.parse(String(message.data)) as WsFrame;
         if (frame.type === "snapshot") {
@@ -147,7 +187,10 @@ export function createTaskEventSession(deps: TaskEventSessionDeps): TaskEventSes
       }
     };
     current.onclose = () => {
-      scheduleReconnect();
+      if (isStale(gen) || socket !== current) {
+        return;
+      }
+      scheduleReconnect(gen);
     };
     current.onerror = () => {
       current.close();
@@ -161,16 +204,24 @@ export function createTaskEventSession(deps: TaskEventSessionDeps): TaskEventSes
     sessionHandlers: TaskEventHandlers = {}
   ): Promise<void> {
     stop();
+    const gen = ++sessionGen;
     stopped = false;
     taskId = targetTaskId;
     lastEventId = after;
     onEvent = eventHandler;
     handlers = sessionHandlers;
     failures = 0;
-    await connect();
+    try {
+      await connect(gen);
+    } catch {
+      if (!isStale(gen)) {
+        scheduleReconnect(gen);
+      }
+    }
   }
 
   function stop(): void {
+    sessionGen += 1;
     stopped = true;
     stopPolling();
     if (reconnectTimer !== null) {
@@ -178,6 +229,7 @@ export function createTaskEventSession(deps: TaskEventSessionDeps): TaskEventSes
       reconnectTimer = null;
     }
     if (socket !== null) {
+      socket.onopen = null;
       socket.onclose = null;
       socket.onerror = null;
       socket.onmessage = null;
@@ -185,6 +237,7 @@ export function createTaskEventSession(deps: TaskEventSessionDeps): TaskEventSes
       socket = null;
     }
     taskId = null;
+    onEvent = () => undefined;
     handlers = {};
     failures = 0;
   }

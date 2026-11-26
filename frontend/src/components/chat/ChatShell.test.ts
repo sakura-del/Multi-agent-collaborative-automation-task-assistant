@@ -101,6 +101,8 @@ describe("ChatShell 会话内核", () => {
     expect(floatingShell).not.toBeNull();
     expect(floatingShell.className).toContain("w-[min(380px,calc(100vw-2rem))]");
     expect(floatingShell.className).toContain("max-h-[min(580px,calc(100svh-2rem))]");
+    expect(floatingShell.className.split(/\s+/)).toContain("z-40");
+    expect(floatingShell.className).not.toContain("z-[200]");
     expect(floatingShell.className.split(/\s+/)).not.toContain("relative");
     expect(floatingShell.className.split(/\s+/)).not.toContain("w-[380px]");
 
@@ -112,8 +114,21 @@ describe("ChatShell 会话内核", () => {
     expect(document.body.querySelectorAll('[data-test="chat-shell"]')).toHaveLength(1);
     expect(dockShell.className).toContain("w-full");
     expect(dockShell.className).toContain("md:w-[440px]");
+    expect(dockShell.className.split(/\s+/)).toContain("z-40");
+    expect(dockShell.className).not.toContain("z-[200]");
+    expect(dockShell.className).toContain("border-border-strong");
+    expect(dockShell.className).toContain("shadow-2xl");
     expect(dockShell.className.split(/\s+/)).not.toContain("relative");
     expect(dockShell.className.split(/\s+/)).not.toContain("w-[440px]");
+
+    // W2：收起后渲染的 chat-fab 必须位于 z-30（低于弹层遮罩 z-50）
+    const closeBtn = document.body.querySelector('[data-test="chat-close"]') as HTMLButtonElement;
+    closeBtn.click();
+    await flushPromises();
+    const fab = document.body.querySelector('[data-test="chat-fab"]') as HTMLElement | null;
+    expect(fab).not.toBeNull();
+    expect(fab!.className.split(/\s+/)).toContain("z-30");
+    expect(fab!.className).not.toContain("z-[200]");
   });
 
   it("不支持语音时不渲染「当前浏览器不支持语音」占位噪音，支持时显示「语音仅本机识别」", async () => {

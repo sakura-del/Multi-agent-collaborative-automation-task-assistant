@@ -341,9 +341,7 @@ async function handleAddColumnSubmit() {
       column: { key, label, prompt },
       auto_run: false,
     });
-    table.value = await runExtractionTable(updated.id, {
-      column_keys: [key],
-    });
+    table.value = updated;
     addColOpen.value = false;
     showAdvancedKey.value = false;
     keyDirty.value = false;
@@ -352,8 +350,19 @@ async function handleAddColumnSubmit() {
     newColKey.value = "";
     newColPrompt.value = "";
     syncingKey = false;
-    ensurePolling();
-    toastSuccess("已添加列并开始补抽");
+
+    try {
+      table.value = await runExtractionTable(updated.id, {
+        column_keys: [key],
+      });
+      ensurePolling();
+      toastSuccess("已添加列并开始补抽");
+    } catch (runErr) {
+      const detail = (runErr as Error).message;
+      error.value = detail
+        ? `列「${label}」已添加，但自动补抽启动失败（${detail}），请点击「重跑全部」重试`
+        : `列「${label}」已添加，但自动补抽启动失败，请点击「重跑全部」重试`;
+    }
   } catch (err) {
     error.value = (err as Error).message || "新增列失败";
   } finally {

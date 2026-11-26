@@ -145,6 +145,13 @@ function extractDetailMessage(detail: unknown, depth = 0): string | null {
  * 归一化 API 错误：兼容 `data.message`、FastAPI `data.detail`（含 422 校验数组）与超时提示。
  */
 export function normalizeError(error: unknown): ApiError {
+  if (axios.isCancel(error) || (error instanceof AxiosError && error.code === "ERR_CANCELED")) {
+    const canceled = new Error("请求已取消") as ApiError & { __CANCEL__?: boolean };
+    canceled.name = "CanceledError";
+    canceled.code = "ERR_CANCELED";
+    canceled.__CANCEL__ = true;
+    return canceled;
+  }
   if (error instanceof AxiosError) {
     if (error.code === "ECONNABORTED" || error.message.toLowerCase().includes("timeout")) {
       return new Error("请求超时，请稍后重试") as ApiError;

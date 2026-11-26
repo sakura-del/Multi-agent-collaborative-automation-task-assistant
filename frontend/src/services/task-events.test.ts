@@ -278,4 +278,155 @@ describe("task event session", () => {
     FakeWebSocket.instances[3].onclose?.();
     expect(onConnectionChange.mock.calls.length).toBe(callsBeforeStop);
   });
+
+  it("首连 connect() 失败时立刻进入重连调度并在连续失败后降级为 polling（C9）", async () => {
+    const wsTicket = vi.fn().mockRejectedValue(new Error("网络不可达"));
+    const replay = vi.fn(async () => page([]));
+    const { deps } = buildDeps({ wsTicket, replay });
+    const session = createTaskEventSession(deps);
+    const onConnectionChange = vi.fn();
+
+    await session.start("task-1", 0, vi.fn(), { onConnectionChange });
+    expect(onConnectionChange).toHaveBeenLastCalledWith("reconnecting", 1);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(onConnectionChange).toHaveBeenLastCalledWith("reconnecting", 2);
+
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(onConnectionChange).toHaveBeenLastCalledWith("reconnecting", 3);
+
+    await vi.advanceTimersByTimeAsync(9000);
+    expect(onConnectionChange).toHaveBeenLastCalledWith("polling");
+
+    const callsBeforePoll = replay.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(replay.mock.calls.length).toBeGreaterThan(callsBeforePoll);
+    session.stop();
+  });
+
+  it("首连 connect() 失败一次后重连成功并恢复 connected（C9）", async () => {
+    let attempts = 0;
+    const wsTicket = vi.fn(async (): Promise<WsTicket> => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw new Error("瞬时抖动");
+      }
+      return { ticket: "ticket-ok", expires_in: 60 };
+    });
+    const { deps } = buildDeps({ wsTicket });
+    const session = createTaskEventSession(deps);
+    const onConnectionChange = vi.fn();
+
+    await session.start("task-1", 0, vi.fn(), { onConnectionChange });
+    expect(onConnectionChange).toHaveBeenLastCalledWith("reconnecting", 1);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    FakeWebSocket.instances[0].onopen?.();
+    expect(onConnectionChange).toHaveBeenLastCalledWith("connected");
+    session.stop();
+  });
+
+  it("stop() 后切到新任务时，旧会话延迟 reject 不得触发重连或污染新任务状态（C9）", async () => {
+    let rejectTaskA!: (err: Error) => void;
+    const wsTicket = vi.fn((tid: string) => {
+      if (tid === "task-A") {
+        return new Promise<WsTicket>((_resolve, reject) => {
+          rejectTaskA = reject;
+        });
+      }
+      return Promise.resolve({ ticket: "tk-task-B", expires_in: 60 });
+    });
+
+    const { deps } = buildDeps({ wsTicket });
+    const session = createTaskEventSession(deps);
+    const onChangeA = vi.fn();
+    const onChangeB = vi.fn();
+
+    const startAPromise = session.start("task-A", 0, vi.fn(), { onConnectionChange: onChangeA });
+    await vi.waitFor(() => expect(wsTicket).toHaveBeenCalledWith("task-A"));
+
+    session.stop();
+    await session.start("task-B", 0, vi.fn(), { onConnectionChange: onChangeB });
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    FakeWebSocket.instances[0].onopen?.();
+    expect(onChangeB).toHaveBeenLastCalledWith("connected");
+
+    rejectTaskA(new Error("task-A 过期失败"));
+    await startAPromise;
+    await Promise.resolve();
+
+    expect(onChangeA).not.toHaveBeenCalled();
+    expect(onChangeB).toHaveBeenCalledTimes(1);
+    expect(onChangeB).toHaveBeenLastCalledWith("connected");
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    session.stop();
+  });
+
+  it("stop() 后切到新任务时，旧会话延迟 resolve 不得创建游离 WebSocket 或串入旧事件（C9）", async () => {
+    let resolveTicketA!: (ticket: WsTicket) => void;
+    let resolveReplayA!: (p: TaskEventPage) => void;
+    const replay = vi.fn((tid: string) => {
+      if (tid === "task-A") {
+        return new Promise<TaskEventPage>((resolve) => {
+          resolveReplayA = resolve;
+        });
+      }
+      return Promise.resolve(page([]));
+    });
+    const wsTicket = vi.fn((tid: string) => {
+      if (tid === "task-A") {
+        return new Promise<WsTicket>((resolve) => {
+          resolveTicketA = resolve;
+        });
+      }
+      return Promise.resolve({ ticket: "tk-task-B", expires_in: 60 });
+    });
+
+    const { deps } = buildDeps({ replay, wsTicket });
+    const session = createTaskEventSession(deps);
+    const onEventA = vi.fn();
+    const onEventB = vi.fn();
+    const onChangeB = vi.fn();
+
+    // 1. 旧会话在 replay 阶段挂起时切到 task-B，随后旧 replay 返回也不得串入 task-B
+    const startA1 = session.start("task-A", 0, onEventA);
+    await vi.waitFor(() => expect(replay).toHaveBeenCalledWith("task-A", 0));
+    session.stop();
+
+    await session.start("task-B", 0, onEventB, { onConnectionChange: onChangeB });
+    FakeWebSocket.instances[0].onopen?.();
+    resolveReplayA(page([99]));
+    await startA1;
+    expect(onEventA).not.toHaveBeenCalled();
+    expect(onEventB).not.toHaveBeenCalled();
+    expect(FakeWebSocket.instances).toHaveLength(1);
+
+    // 2. 旧会话在 wsTicket 阶段挂起时切到 task-B，随后旧 ticket 返回不得新建第 2 条 WebSocket
+    session.stop();
+    FakeWebSocket.instances = [];
+    const replayImmediate = vi.fn(async () => page([]));
+    const { deps: deps2 } = buildDeps({ replay: replayImmediate, wsTicket });
+    const session2 = createTaskEventSession(deps2);
+
+    const startA2 = session2.start("task-A", 0, vi.fn());
+    await vi.waitFor(() => expect(wsTicket).toHaveBeenLastCalledWith("task-A"));
+    session2.stop();
+
+    const onChangeB2 = vi.fn();
+    await session2.start("task-B", 0, vi.fn(), { onConnectionChange: onChangeB2 });
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    FakeWebSocket.instances[0].onopen?.();
+
+    resolveTicketA({ ticket: "tk-stale-A", expires_in: 60 });
+    await startA2;
+
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(FakeWebSocket.instances[0].url).toContain("/tasks/task-B/ws");
+    expect(FakeWebSocket.instances[0].url).not.toContain("tk-stale-A");
+    expect(onChangeB2).toHaveBeenCalledTimes(1);
+    session2.stop();
+  });
 });
