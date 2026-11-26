@@ -263,6 +263,11 @@ class LiteratureReviewWorkflow:
             # 节点级模型路由（混合处理）：规划按 "planner" 选路
             with node_type_scope("planner"):
                 plan = await self._request_plan(task, requirement, repair)
+            if on_progress is not None:
+                try:
+                    await on_progress("validating_contract", "正在校验研究问题数量与 DAG 依赖关系…")
+                except Exception:
+                    pass
             self.validate_plan_contract(plan)
         except (
             PlannerPlanInvalidError,
@@ -274,7 +279,10 @@ class LiteratureReviewWorkflow:
             logger.warning("literature_plan_repair", error=str(first_error))
             if on_progress is not None:
                 try:
-                    await on_progress("planning_repair", "规划格式校验未通过，正在自动修复...")
+                    await on_progress(
+                        "repairing_plan",
+                        "首次规划未通过格式契约校验，正在自动修复（第 1/1 次）…",
+                    )
                 except Exception:
                     pass
             repair_payload = {

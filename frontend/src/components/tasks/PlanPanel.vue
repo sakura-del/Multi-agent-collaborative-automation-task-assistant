@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { CheckCircle2, Circle, Loader2 } from "lucide-vue-next";
 import BeAgentPlan from "@/components/motion/BeAgentPlan.vue";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
@@ -20,6 +21,12 @@ const props = withDefaults(
   defineProps<{
     plan: TaskPlan | null;
     pending?: boolean;
+    /** 当前是否处于规划生成阶段（status === 'planning' 且尚未出图） */
+    planning?: boolean;
+    /** 后端推送的最新规划子阶段事件 */
+    planningProgress?: { stage: string; message: string } | null;
+    /** 规划开始时间戳（ISO 字符串），用于计算实时等待耗时 */
+    planningStartedAt?: string | null;
     error?: string | null;
     conflict?: string | null;
     /** 规划被阻断（转人工且没有 plan）：空态要说「没生成」，不是「还没开始」。 */
@@ -40,6 +47,9 @@ const props = withDefaults(
   }>(),
   {
     pending: false,
+    planning: false,
+    planningProgress: null,
+    planningStartedAt: null,
     error: null,
     conflict: null,
     blocked: false,
@@ -47,6 +57,56 @@ const props = withDefaults(
     canApprove: true,
   }
 );
+
+const PLANNING_STEPS = [
+  { key: "binding_model", label: "加载模型与任务配置" },
+  { key: "generating_plan", label: "拆解研究问题、检索式与 DAG" },
+  { key: "validating_contract", label: "校验契约与依赖无环性" },
+  { key: "persisting_plan", label: "保存规划并准备确认" },
+] as const;
+
+const STAGE_ORDER: Record<string, number> = {
+  binding_model: 0,
+  generating_plan: 1,
+  retrying_upstream: 1,
+  validating_contract: 2,
+  repairing_plan: 2,
+  persisting_plan: 3,
+};
+
+const activeStepIndex = computed(() => {
+  const stage = props.planningProgress?.stage ?? "generating_plan";
+  return STAGE_ORDER[stage] ?? 1;
+});
+
+const elapsedSeconds = ref(0);
+let timer: ReturnType<typeof setInterval> | null = null;
+
+function updateElapsed() {
+  const base = props.planningStartedAt ? new Date(props.planningStartedAt).getTime() : Date.now();
+  elapsedSeconds.value = Number.isFinite(base) ? Math.max(0, Math.floor((Date.now() - base) / 1000)) : 0;
+}
+
+function stopTimer() {
+  if (timer !== null) {
+    clearInterval(timer);
+    timer = null;
+  }
+}
+
+watch(
+  () => props.planning && !props.plan,
+  (active) => {
+    stopTimer();
+    if (active) {
+      updateElapsed();
+      timer = setInterval(updateElapsed, 1000);
+    }
+  },
+  { immediate: true },
+);
+
+onBeforeUnmount(stopTimer);
 
 const emit = defineEmits<{
   approve: [version: number];
@@ -170,6 +230,58 @@ const approveHint = computed(() => {
         </details>
       </section>
     </template>
+
+    <Card
+      v-else-if="props.planning"
+      class="flex flex-col gap-4 p-5"
+      data-test="plan-progress"
+      aria-live="polite"
+    >
+      <div class="flex items-center justify-between gap-3">
+        <div class="flex items-center gap-2.5">
+          <Loader2
+            class="size-4 animate-spin text-primary motion-reduce:animate-none"
+            aria-hidden="true"
+          />
+          <span class="text-sm font-medium text-foreground" data-test="plan-progress-message">
+            {{ props.planningProgress?.message ?? "正在规划研究问题、检索式与任务 DAG…" }}
+          </span>
+        </div>
+        <span class="text-xs tabular-nums text-muted-foreground" data-test="plan-progress-elapsed">
+          已等待 {{ elapsedSeconds }}s
+        </span>
+      </div>
+
+      <ol class="grid gap-2 sm:grid-cols-2">
+        <li
+          v-for="(step, idx) in PLANNING_STEPS"
+          :key="step.key"
+          :data-test="`plan-progress-step-${step.key}`"
+          :data-state="idx < activeStepIndex ? 'done' : idx === activeStepIndex ? 'active' : 'pending'"
+          class="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs"
+          :class="
+            idx < activeStepIndex
+              ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-700 dark:text-emerald-400'
+              : idx === activeStepIndex
+                ? 'border-primary/40 bg-primary/5 font-medium text-foreground'
+                : 'border-border bg-muted/20 text-muted-foreground'
+          "
+        >
+          <CheckCircle2 v-if="idx < activeStepIndex" class="size-3.5 shrink-0" aria-hidden="true" />
+          <Loader2
+            v-else-if="idx === activeStepIndex"
+            class="size-3.5 shrink-0 animate-spin text-primary motion-reduce:animate-none"
+            aria-hidden="true"
+          />
+          <Circle v-else class="size-3.5 shrink-0 opacity-40" aria-hidden="true" />
+          <span>{{ step.label }}</span>
+        </li>
+      </ol>
+
+      <p v-if="elapsedSeconds >= 30" class="text-xs text-muted-foreground">
+        复杂主题或模型高峰期规划耗时较长，可离开页面稍后回来，或在左侧继续发起其他任务。
+      </p>
+    </Card>
 
     <EmptyState
       v-else

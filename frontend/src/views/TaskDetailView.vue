@@ -257,6 +257,42 @@ function selectTab(tab: TabKey) {
   void router.replace({ query: { ...route.query, tab } });
 }
 
+const isPlanning = computed(() => store.snapshot?.status === "planning");
+
+const planningProgress = computed<{ stage: string; message: string } | null>(() => {
+  const events = store.events ?? [];
+  const legacyStageMap: Record<string, string> = {
+    planning_llm: "generating_plan",
+    planning_repair: "repairing_plan",
+    planning_retry: "retrying_upstream",
+  };
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const evt = events[i];
+    if (evt.event_type === "plan_progress") {
+      const payload = (evt.payload ?? {}) as Record<string, unknown>;
+      return {
+        stage: typeof payload.stage === "string" ? payload.stage : "generating_plan",
+        message: typeof payload.message === "string" ? payload.message : "正在生成规划…",
+      };
+    }
+    if (evt.event_type === "stage_progress") {
+      const payload = (evt.payload ?? {}) as Record<string, unknown>;
+      const rawStage = typeof payload.stage === "string" ? payload.stage : "";
+      if (rawStage in legacyStageMap) {
+        return {
+          stage: legacyStageMap[rawStage],
+          message: typeof payload.message === "string" ? payload.message : "正在生成规划…",
+        };
+      }
+    }
+  }
+  return null;
+});
+
+const planningStartedAt = computed(
+  () => store.snapshot?.updated_at ?? store.snapshot?.created_at ?? null,
+);
+
 const statuses = computed<Record<string, SubtaskStatus>>(() => {
   const map: Record<string, SubtaskStatus> = {};
   for (const subtask of store.snapshot?.subtasks ?? []) {
@@ -575,6 +611,9 @@ onBeforeUnmount(() => {
         <PlanPanel
           :plan="store.snapshot?.plan ?? null"
           :pending="pending"
+          :planning="isPlanning"
+          :planning-progress="planningProgress"
+          :planning-started-at="planningStartedAt"
           :blocked="store.snapshot?.status === 'waiting_human' && !store.snapshot?.plan"
           :can-replan="canReplan"
           :can-approve="canApprove"

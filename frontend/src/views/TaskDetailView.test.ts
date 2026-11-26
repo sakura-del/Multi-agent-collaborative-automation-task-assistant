@@ -367,4 +367,64 @@ describe("TaskDetailView 规划 Tab 状态一致性（Issue #55）", () => {
     await flushPromises();
     expect(taskApi.get).toHaveBeenCalledTimes(2);
   });
+
+  it("任务处于 planning 阶段时提取最新 plan_progress 事件并透传给 PlanPanel 展示（Issue #69）", async () => {
+    const planningSnapshot: TaskSnapshot = {
+      ...COMPLETED_SNAPSHOT,
+      task_id: "task-planning-1",
+      status: "planning",
+      plan: null,
+      subtasks: [],
+      review_report: null,
+      created_at: "2026-11-26T09:00:00Z",
+      updated_at: "2026-11-26T09:00:05Z",
+    };
+    vi.mocked(taskApi.get).mockResolvedValue(planningSnapshot);
+    sessionStartSpy.mockImplementationOnce(async (_taskId, _after, onEvent) => {
+      onEvent({
+        event_id: 1,
+        task_id: "task-planning-1",
+        event_type: "plan_progress",
+        status: "planning",
+        subtask_id: null,
+        payload: {
+          stage: "validating_contract",
+          message: "正在校验研究问题数量与 DAG 依赖关系…",
+        },
+        occurred_at: "2026-11-26T09:00:08Z",
+      });
+    });
+
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: "/tasks/:taskId", name: "task-detail", component: TaskDetailView, props: true },
+        { path: "/tasks/:taskId/screening", name: "task-screening", component: { template: "<div />" } },
+      ],
+    });
+    await router.push({
+      name: "task-detail",
+      params: { taskId: "task-planning-1" },
+      query: { tab: "plan" },
+    });
+    await router.isReady();
+
+    const wrapper = mount(TaskDetailView, {
+      props: { taskId: "task-planning-1" },
+      global: {
+        plugins: [router],
+        stubs: { TaskRefreshPanel: true, AnnotationPanel: true, BeTimeline: true },
+      },
+    });
+    await flushPromises();
+
+    const progress = wrapper.find('[data-test="plan-progress"]');
+    expect(progress.exists()).toBe(true);
+    expect(wrapper.find('[data-test="plan-progress-message"]').text()).toContain(
+      "正在校验研究问题数量与 DAG 依赖关系",
+    );
+    expect(
+      wrapper.get('[data-test="plan-progress-step-validating_contract"]').attributes("data-state"),
+    ).toBe("active");
+  });
 });

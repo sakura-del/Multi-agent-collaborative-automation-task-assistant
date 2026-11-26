@@ -838,3 +838,149 @@ class TestPlanningAndWaitingReasonPersistence:
         finally:
             await container.close()
             await engine.dispose()
+
+    async def test_planning_emits_plan_progress_sequence(self, tmp_path: Path) -> None:
+        """Issue #69：正常规划路径依次推送 binding_model → generating_plan → validating_contract → persisting_plan → plan_ready。"""
+        engine, factory = await _setup_engine(tmp_path)
+        planner = _DeterministicPlanner()
+        publisher = _RecordingPublisher()
+        execution, container = _make_execution(factory, planner, publisher=publisher)
+        user_id = uuid.uuid4()
+        try:
+            task_id = await execution.submit(user_id, _request())
+            await _wait_for_status(execution, user_id, task_id, {TaskStatus.WAITING_APPROVAL.value})
+
+            progress_stages = [
+                e.payload.get("stage") for e in publisher.events if e.event_type == "plan_progress"
+            ]
+            assert progress_stages == [
+                "binding_model",
+                "generating_plan",
+                "validating_contract",
+                "persisting_plan",
+            ]
+            ready_indices = [
+                idx for idx, e in enumerate(publisher.events) if e.event_type == "plan_ready"
+            ]
+            last_progress_idx = max(
+                idx for idx, e in enumerate(publisher.events) if e.event_type == "plan_progress"
+            )
+            assert ready_indices and ready_indices[-1] > last_progress_idx
+        finally:
+            await container.close()
+            await engine.dispose()
+
+    async def test_planning_repair_emits_repairing_plan_progress(self, tmp_path: Path) -> None:
+        """Issue #69：首次规划契约校验失败触发修复时，推送 repairing_plan 事件。"""
+
+        class _RepairablePlanner(BaseAgent):
+            def __init__(self) -> None:
+                super().__init__()
+                self.calls = 0
+
+            @property
+            def agent_type(self) -> str:
+                return "planner"
+
+            async def _run(self, input_data: dict[str, Any]) -> dict[str, Any]:
+                self.calls += 1
+                if self.calls == 1:
+                    # 首次缺文献契约核心节点（仅一个空 write），触发 validate_plan_contract 失败并进入修复
+                    return {
+                        "plan": {
+                            "version": 1,
+                            "topic": "非法空计划",
+                            "research_questions": ["q1"],
+                            "search_queries": ["k1"],
+                            "acceptance_criteria": ["c1"],
+                            "nodes": [
+                                {
+                                    "id": "n1",
+                                    "type": "write",
+                                    "title": "写",
+                                    "dependencies": [],
+                                    "input": {},
+                                    "required_evidence": 0,
+                                }
+                            ],
+                        },
+                        "dag": {"nodes": [], "edges": []},
+                    }
+                from app.orchestration.contracts import TaskPlan
+
+                plan = TaskPlan.model_validate(_plan_payload())
+                return {
+                    "plan": plan.model_dump(mode="json"),
+                    "dag": PlannerAgent.build_dag(plan).to_dict(),
+                }
+
+        engine, factory = await _setup_engine(tmp_path)
+        planner = _RepairablePlanner()
+        publisher = _RecordingPublisher()
+        execution, container = _make_execution(factory, planner, publisher=publisher)
+        user_id = uuid.uuid4()
+        try:
+            task_id = await execution.submit(user_id, _request())
+            await _wait_for_status(execution, user_id, task_id, {TaskStatus.WAITING_APPROVAL.value})
+
+            repair_events = [
+                e
+                for e in publisher.events
+                if e.event_type == "plan_progress" and e.payload.get("stage") == "repairing_plan"
+            ]
+            assert len(repair_events) == 1
+            assert "自动修复" in str(repair_events[0].payload.get("message"))
+        finally:
+            await container.close()
+            await engine.dispose()
+
+    async def test_retry_transient_planning_emits_retrying_upstream_plan_progress(
+        self, tmp_path: Path
+    ) -> None:
+        """Issue #69：planning 阶段上游瞬态重试时同步发出 plan_progress(retrying_upstream)。"""
+        engine, factory = await _setup_engine(tmp_path)
+        planner = _DeterministicPlanner()
+        publisher = _RecordingPublisher()
+        execution, container = _make_execution(factory, planner, publisher=publisher)
+        user_id = uuid.uuid4()
+        try:
+            async with factory() as session:
+                task = Task(
+                    user_id=user_id,
+                    title="规划瞬态重试事件测试",
+                    description="d",
+                    status=TaskStatus.PLANNING.value,
+                    config={},
+                )
+                session.add(task)
+                await session.commit()
+                await session.refresh(task)
+                task_id = task.id
+
+            calls = {"n": 0}
+
+            class _Boom(Exception):
+                status_code = 503
+
+            async def op() -> str:
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    raise _Boom("Service temporarily unavailable")
+                return "ok"
+
+            await execution._retry_transient(
+                op, task_id=task_id, stage="planning", attempts=3, base_delay=0.01
+            )
+
+            retry_events = [
+                e
+                for e in publisher.events
+                if e.event_type == "plan_progress" and e.payload.get("stage") == "retrying_upstream"
+            ]
+            assert len(retry_events) == 1
+            evt = retry_events[0]
+            assert evt.payload["attempt"] == 1
+            assert evt.payload["max_attempts"] == 2
+        finally:
+            await container.close()
+            await engine.dispose()

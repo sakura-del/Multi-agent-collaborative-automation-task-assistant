@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { mount } from "@vue/test-utils";
 
 import PlanPanel from "@/components/tasks/PlanPanel.vue";
@@ -126,5 +126,69 @@ describe("PlanPanel", () => {
       props: { plan: PLAN, canApprove: false, canReplan: true, planStatus: "failed" },
     });
     expect(failed.find('[data-test="plan-approve-hint"]').text()).toContain("重试失败的节点");
+  });
+
+  describe("规划中实时进度卡片（Issue #69）", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("planning=true 且无规划时展示进度卡片与实时计时器（30s 后出现温和提示），不显示暂无规划", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-11-26T10:00:00Z"));
+
+      const wrapper = mount(PlanPanel, {
+        props: {
+          plan: null,
+          planning: true,
+          planningStartedAt: "2026-11-26T10:00:00Z",
+        },
+      });
+
+      expect(wrapper.find('[data-test="plan-progress"]').exists()).toBe(true);
+      expect(wrapper.find('[data-test="plan-progress-elapsed"]').text()).toContain("已等待 0s");
+      expect(wrapper.text()).not.toContain("暂无规划");
+
+      await vi.advanceTimersByTimeAsync(31000);
+      expect(wrapper.find('[data-test="plan-progress-elapsed"]').text()).toContain("已等待 31s");
+      expect(wrapper.text()).toContain("可离开页面稍后回来");
+    });
+
+    it("传入 repairing_plan 阶段事件时展示对应提示并高亮第 3 步（契约校验与修复）", () => {
+      const wrapper = mount(PlanPanel, {
+        props: {
+          plan: null,
+          planning: true,
+          planningProgress: {
+            stage: "repairing_plan",
+            message: "首次规划未通过格式契约校验，正在自动修复（第 1/1 次）…",
+          },
+        },
+      });
+
+      expect(wrapper.find('[data-test="plan-progress-message"]').text()).toContain("自动修复");
+      const step3 = wrapper.find('[data-test="plan-progress-step-validating_contract"]');
+      expect(step3.exists()).toBe(true);
+      expect(step3.attributes("data-state")).toBe("active");
+    });
+
+    it("planning 退出或组件卸载时正确清理定时器", async () => {
+      vi.useFakeTimers();
+      const clearSpy = vi.spyOn(globalThis, "clearInterval");
+
+      const wrapper = mount(PlanPanel, {
+        props: {
+          plan: null,
+          planning: true,
+          planningStartedAt: new Date().toISOString(),
+        },
+      });
+
+      await wrapper.setProps({ planning: false, plan: PLAN });
+      expect(clearSpy).toHaveBeenCalled();
+
+      wrapper.unmount();
+      clearSpy.mockRestore();
+    });
   });
 });

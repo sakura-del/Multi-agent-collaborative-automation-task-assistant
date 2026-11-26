@@ -1765,6 +1765,7 @@ class TaskExecution:
                 task_type = task.task_type
 
             # 规划阶段就要用对模型：用户选了 BYOK，规划也必须走他的 key
+            await self._emit_plan_progress(task_id, "binding_model", "正在加载模型与任务配置…")
             await self._bind_task_llm(task)
             await self._emit_stage_progress(
                 task_id,
@@ -1772,15 +1773,22 @@ class TaskExecution:
                 stage="planning_llm",
                 message="正在生成研究规划与任务 DAG...",
             )
+            await self._emit_plan_progress(
+                task_id, "generating_plan", "正在拆解研究问题、检索式与任务流程…"
+            )
 
             async def _on_plan_progress(stage_name: str, msg: str) -> None:
-                await self._emit_stage_progress(
-                    task_id,
-                    status=TaskStatus.PLANNING.value,
-                    stage=stage_name,
-                    message=msg,
-                    level="warning",
-                )
+                if stage_name in {"repairing_plan", "planning_repair"}:
+                    await self._emit_stage_progress(
+                        task_id,
+                        status=TaskStatus.PLANNING.value,
+                        stage="planning_repair",
+                        message=msg,
+                        level="warning",
+                    )
+                    await self._emit_plan_progress(task_id, "repairing_plan", msg)
+                    return
+                await self._emit_plan_progress(task_id, stage_name, msg)
 
             if task_type == "literature_review":
                 # 文献场景：由工作流承担规划 + 一次契约修复；失败抛 HumanActionRequiredError
@@ -1814,6 +1822,9 @@ class TaskExecution:
             if base_version is not None and plan.version <= base_version:
                 plan = plan.model_copy(update={"version": base_version + 1})
 
+            await self._emit_plan_progress(
+                task_id, "persisting_plan", "规划校验通过，正在保存任务图…"
+            )
             async with self._session_factory() as session:
                 repo = TaskRepository(session)
                 task = await repo.lock_for_update(task_id)
@@ -1905,6 +1916,14 @@ class TaskExecution:
                         "max_attempts": attempts,
                     },
                 )
+                if stage == "planning":
+                    await self._emit_plan_progress(
+                        task_id,
+                        "retrying_upstream",
+                        f"上游模型响应较慢或临时拥堵，正在退避重试（第 {attempt}/{attempts - 1} 次）…",
+                        attempt=attempt,
+                        max_attempts=attempts - 1,
+                    )
                 await asyncio.sleep(delay)
         raise last_error if last_error else RuntimeError("重试未执行")
 
@@ -3116,6 +3135,59 @@ class TaskExecution:
             )
             return
         await self._publish(event)
+
+    async def _emit_plan_progress(
+        self,
+        task_id: UUID,
+        stage: str,
+        message: str,
+        *,
+        attempt: int | None = None,
+        max_attempts: int | None = None,
+    ) -> None:
+        """向事件流推送规划阶段细粒度进度（fail-open，失败只记 warning，绝不阻断规划）。"""
+        session_factory = getattr(self, "_session_factory", None)
+        container = getattr(self, "container", None)
+        if session_factory is None or container is None:
+            return
+        payload: dict[str, Any] = {"stage": stage, "message": message}
+        if attempt is not None:
+            payload["attempt"] = attempt
+        if max_attempts is not None:
+            payload["max_attempts"] = max_attempts
+
+        async def _persist() -> TaskEvent | None:
+            async with session_factory() as session:
+                ev = await self._append_event(
+                    session,
+                    task_id,
+                    event_type="plan_progress",
+                    status=TaskStatus.PLANNING.value,
+                    payload=payload,
+                )
+                await session.commit()
+                return ev
+
+        event: TaskEvent | None = None
+        persist_task = asyncio.create_task(_persist())
+        try:
+            event = await asyncio.shield(persist_task)
+        except asyncio.CancelledError:
+            try:
+                await persist_task
+            except Exception:
+                pass
+            raise
+        except Exception as exc:
+            logger.warning(
+                "plan_progress_emit_failed",
+                task_id=str(task_id),
+                stage=stage,
+                error=str(exc),
+            )
+            return
+        if event is not None:
+            await self._publish(event)
 
     async def _mark_waiting_human(self, task_id: UUID, reason: str) -> None:
         """把执行中任务标记为 WAITING_HUMAN 并记录失败原因。"""
