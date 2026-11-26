@@ -308,6 +308,29 @@ class TestCheckHelperDirectly:
         assert check.passed is True
         assert "已验证 0" in check.message
 
+    def test_helper_counts_cn_source_as_passing(self) -> None:
+        """中文源·未核验不是问题条目：不得判失败，也不进入「问题」列表。"""
+        verifications = [
+            _verification(
+                "10.13328/j.cnki.jos.007567",
+                ReferenceVerdict.CN_SOURCE_UNVERIFIED,
+                title="检索增强生成在软件工程中的应用综述",
+                reason="中文源·未核验：中文题录不在 CrossRef/OpenAlex 覆盖范围",
+            )
+        ]
+
+        check = CitationValidator.check_reference_authenticity(verifications, advisory=False)
+
+        assert check.passed is True
+        assert "中文源·未核验 1" in check.message
+        # 问题列表只收问题态（metadata_mismatch / not_found），中文源不出现
+        assert "问题" not in check.message
+
+    def test_helper_omits_cn_count_when_zero(self) -> None:
+        check = CitationValidator.check_reference_authenticity(VERIFIED, advisory=False)
+
+        assert "中文源·未核验" not in check.message
+
 
 class TestContractBackwardCompatibility:
     def test_validation_check_advisory_defaults_to_false(self) -> None:

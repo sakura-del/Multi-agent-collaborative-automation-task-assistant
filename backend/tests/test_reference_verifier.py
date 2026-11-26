@@ -1164,7 +1164,7 @@ async def test_doi_confirmed_title_mismatch_keeps_retraction_flag() -> None:
     record = make_record(source="openalex").model_copy(update={"is_retracted": True})
     verifier = ReferenceVerifier(openalex=FakeSource(doi_result=record))
 
-    result = await verifier.verify(make_candidate(title="完全不相关的标题"))
+    result = await verifier.verify(make_candidate(title="Completely Unrelated Title"))
 
     assert result.verdict is ReferenceVerdict.METADATA_MISMATCH
     assert result.is_retracted is True
@@ -1273,7 +1273,7 @@ class TestVerifyMany:
         crossref = FakeSource(title_echo=True)
         verifier = ReferenceVerifier(crossref=crossref)
         candidates = [
-            make_candidate(key=f"标题-{index}", doi=None, title=f"论文标题 {index}")
+            make_candidate(key=f"标题-{index}", doi=None, title=f"Paper Title {index}")
             for index in range(6)
         ]
 
@@ -1285,7 +1285,7 @@ class TestVerifyMany:
         crossref = FakeSource(title_echo=True, delay=0.02)
         verifier = ReferenceVerifier(crossref=crossref, max_concurrency=2)
         candidates = [
-            make_candidate(key=f"标题-{index}", doi=None, title=f"论文标题 {index}")
+            make_candidate(key=f"标题-{index}", doi=None, title=f"Paper Title {index}")
             for index in range(6)
         ]
 
@@ -1299,7 +1299,7 @@ class TestVerifyMany:
         crossref = FakeSource(title_echo=True, delay=0.01)
         verifier = ReferenceVerifier(crossref=crossref, max_concurrency=1)
         candidates = [
-            make_candidate(key=f"标题-{index}", doi=None, title=f"论文标题 {index}")
+            make_candidate(key=f"标题-{index}", doi=None, title=f"Paper Title {index}")
             for index in range(4)
         ]
 
@@ -1311,7 +1311,7 @@ class TestVerifyMany:
         crossref = FakeSource(title_echo=True)
         verifier = ReferenceVerifier(crossref=crossref, max_concurrency=0)
         candidates = [
-            make_candidate(key=f"标题-{index}", doi=None, title=f"论文标题 {index}")
+            make_candidate(key=f"标题-{index}", doi=None, title=f"Paper Title {index}")
             for index in range(3)
         ]
 
@@ -1358,7 +1358,7 @@ class TestVerifyManyTotalBudget:
         crossref = FakeSource(title_echo=True, delay=0.05)
         verifier = ReferenceVerifier(crossref=crossref, max_concurrency=2, total_timeout=None)
         candidates = [
-            make_candidate(key=f"标题-{index}", doi=None, title=f"论文标题 {index}")
+            make_candidate(key=f"标题-{index}", doi=None, title=f"Paper Title {index}")
             for index in range(3)
         ]
 
@@ -1368,15 +1368,15 @@ class TestVerifyManyTotalBudget:
 
     async def test_unfinished_candidates_become_unverified_in_input_order(self) -> None:
         """超预算：已完成项保留原 verdict，未完成项按入参顺序补 UNVERIFIED，全程不抛异常。"""
-        crossref = FakeSource(title_echo=True, delay_by_title={"慢 b": 5.0})
+        crossref = FakeSource(title_echo=True, delay_by_title={"Slow b": 5.0})
         cache = ReferenceVerificationCache()
         verifier = ReferenceVerifier(
             crossref=crossref, cache=cache, max_concurrency=4, total_timeout=0.2
         )
         candidates = [
-            make_candidate(key="快-a", doi=None, title="快 a"),
-            make_candidate(key="慢-b", doi=None, title="慢 b"),
-            make_candidate(key="快-c", doi=None, title="快 c"),
+            make_candidate(key="快-a", doi=None, title="Fast a"),
+            make_candidate(key="慢-b", doi=None, title="Slow b"),
+            make_candidate(key="快-c", doi=None, title="Fast c"),
         ]
 
         started = time.monotonic()
@@ -1388,7 +1388,7 @@ class TestVerifyManyTotalBudget:
         assert results[2].verdict is ReferenceVerdict.VERIFIED
         assert results[1].verdict is ReferenceVerdict.UNVERIFIED
         assert results[1].reason == "核验超预算（0.2s）"
-        assert results[1].title == "慢 b"  # 用候选自身的身份
+        assert results[1].title == "Slow b"  # 用候选自身的身份
         assert results[1].cached is False
         assert elapsed < 2.0  # 预算生效：不等慢源的 5s
         assert await cache.get("慢-b") is None  # 超时降级态不写缓存
@@ -1401,7 +1401,7 @@ class TestVerifyManyTotalBudget:
         crossref = FakeSource(title_echo=True, delay=5.0)
         verifier = ReferenceVerifier(crossref=crossref, total_timeout=0.0)
         candidates = [
-            make_candidate(key=f"标题-{index}", doi=None, title=f"论文标题 {index}")
+            make_candidate(key=f"标题-{index}", doi=None, title=f"Paper Title {index}")
             for index in range(2)
         ]
 
@@ -1419,7 +1419,7 @@ class TestVerifyManyTotalBudget:
         crossref = FakeSource(title_echo=True, delay=0.3)
         verifier = ReferenceVerifier(crossref=crossref, max_concurrency=1, total_timeout=0.5)
         candidates = [
-            make_candidate(key=f"标题-{index}", doi=None, title=f"论文标题 {index}")
+            make_candidate(key=f"标题-{index}", doi=None, title=f"Paper Title {index}")
             for index in range(3)
         ]
 
@@ -1436,7 +1436,7 @@ class TestVerifyManyTotalBudget:
         crossref = FakeSource(title_echo=True)
         verifier = ReferenceVerifier(crossref=crossref, cache=cache, total_timeout=1.0)
         candidates = [
-            make_candidate(key=f"标题-{index}", doi=None, title=f"论文标题 {index}")
+            make_candidate(key=f"标题-{index}", doi=None, title=f"Paper Title {index}")
             for index in range(3)
         ]
 
@@ -1451,9 +1451,9 @@ class TestVerifyManyTotalBudget:
         crossref = FakeSource(title_echo=True)
         verifier = ReferenceVerifier(crossref=crossref, max_concurrency=4, total_timeout=1.0)
         candidates = [
-            make_candidate(key="标题-a", doi=None, title="论文标题 a"),
-            make_candidate(key="标题-b", doi=None, title="论文标题 b"),
-            make_candidate(key="标题-a", doi=None, title="论文标题 a"),
+            make_candidate(key="标题-a", doi=None, title="Paper Title a"),
+            make_candidate(key="标题-b", doi=None, title="Paper Title b"),
+            make_candidate(key="标题-a", doi=None, title="Paper Title a"),
         ]
 
         results = await verifier.verify_many(candidates)
@@ -1490,3 +1490,95 @@ class TestVerifierOptionsAndProtocol:
         verifier = ReferenceVerifier(crossref=crossref)
         await verifier.verify(make_candidate())
         assert (await verifier.verify(make_candidate())).cached is True
+
+
+# ===== 中文源跳过外部核验（Issue #67）=====
+
+
+class TestChineseSourceSkip:
+    """万方详情页 / 中文题录跳过外部 DOI 核验，标为「中文源·未核验」。"""
+
+    async def test_cjk_title_skips_external_calls(self) -> None:
+        crossref = FakeSource(doi_result=make_record())
+        verifier = ReferenceVerifier(crossref=crossref)
+        candidate = make_candidate(
+            key="cn-journal", doi=None, title="检索增强生成在软件工程中的应用综述"
+        )
+
+        result = await verifier.verify(candidate)
+
+        assert result.verdict is ReferenceVerdict.CN_SOURCE_UNVERIFIED
+        assert "中文源" in result.reason
+        assert crossref.calls == 0
+
+    async def test_wanfang_detail_url_with_english_title_is_skipped(self) -> None:
+        crossref = FakeSource(doi_result=make_record())
+        verifier = ReferenceVerifier(crossref=crossref)
+        candidate = make_candidate(
+            key="wf-conf",
+            doi=None,
+            title="Retrieval Augmented Generation: A Survey",
+            source_url="https://d.wanfangdata.com.cn/conference/abc123",
+        )
+
+        result = await verifier.verify(candidate)
+
+        assert result.verdict is ReferenceVerdict.CN_SOURCE_UNVERIFIED
+        assert crossref.calls == 0
+
+    async def test_chinese_doi_never_leaves_the_building(self) -> None:
+        """中文万方 DOI（10.13328/…）不在 CrossRef/OpenAlex 覆盖范围，不发任何外呼。"""
+        crossref = FakeSource(doi_result=make_record())
+        verifier = ReferenceVerifier(crossref=crossref)
+        candidate = make_candidate(
+            key="10.13328/j.cnki.jos.007567",
+            doi="10.13328/j.cnki.jos.007567",
+            title="检索增强生成在软件工程中的应用综述",
+        )
+
+        result = await verifier.verify(candidate)
+
+        assert result.verdict is ReferenceVerdict.CN_SOURCE_UNVERIFIED
+        assert crossref.calls == 0
+
+    async def test_cn_verdict_is_not_cached(self) -> None:
+        cache = ReferenceVerificationCache()
+        verifier = ReferenceVerifier(crossref=FakeSource(), cache=cache)
+        candidate = make_candidate(
+            key="cn-memo", doi=None, title="大语言模型检索增强生成优化技术研究综述"
+        )
+
+        first = await verifier.verify(candidate)
+        second = await verifier.verify(candidate)
+
+        assert first.verdict is ReferenceVerdict.CN_SOURCE_UNVERIFIED
+        assert second.verdict is ReferenceVerdict.CN_SOURCE_UNVERIFIED
+        assert second.cached is False
+        assert await cache.get(candidate.key) is None
+
+    def test_summary_and_blocked_keys_treat_cn_as_safe(self) -> None:
+        cn = make_verification("cn-1", ReferenceVerdict.CN_SOURCE_UNVERIFIED)
+        verified = make_verification("10.1/a", ReferenceVerdict.VERIFIED)
+
+        summary = summarize_verifications([cn, verified])
+
+        assert summary.cn_source_unverified == 1
+        assert summary.unverified == 0  # 中文源是独立计数，不混进「未核验」
+        assert blocked_keys([cn]) == set()
+
+    async def test_verify_many_returns_cn_verdicts_in_order(self) -> None:
+        crossref = FakeSource(doi_result=make_record())
+        verifier = ReferenceVerifier(crossref=crossref)
+        candidates = [
+            make_candidate(key="cn-a", doi=None, title="中文题录一"),
+            make_candidate(key="10.1/a", doi="10.1/a", title="Deep Learning for Graphs"),
+        ]
+
+        results = await verifier.verify_many(candidates)
+
+        assert [item.verdict for item in results] == [
+            ReferenceVerdict.CN_SOURCE_UNVERIFIED,
+            ReferenceVerdict.VERIFIED,
+        ]
+        assert crossref.doi_calls == 1  # 只有英文候选触发外呼
+        assert crossref.title_calls == 0

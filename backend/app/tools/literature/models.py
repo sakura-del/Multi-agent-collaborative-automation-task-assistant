@@ -143,7 +143,12 @@ class ReferenceCandidate(BaseModel):
 
 
 class ReferenceVerdict(StrEnum):
-    """核验结论四态；前三态是判定，`UNVERIFIED` 是外部源不可用时的降级态。"""
+    """核验结论五态：四种判定态 + 一类「中文源」跳过态。
+
+    ``CN_SOURCE_UNVERIFIED`` 与 ``NOT_FOUND`` 有本质区别：中文题录/万方详情页
+    本就不在 CrossRef/OpenAlex 的覆盖范围内，查不到不代表文献不存在，因此
+    直接跳过外部核验、也不参与「拦截未核验引用」。
+    """
 
     VERIFIED = "verified"
     """DOI/标题可解析，且标题/作者/年份与外部元数据吻合。"""
@@ -156,6 +161,9 @@ class ReferenceVerdict(StrEnum):
 
     UNVERIFIED = "unverified"
     """外部源超时/限流/不可用导致无法判定：不得据此判失败或阻塞任务。"""
+
+    CN_SOURCE_UNVERIFIED = "cn_source_unverified"
+    """中文源（万方详情页 / 中文题录）：不属于外部 DOI 核验的适用范围，跳过核验。"""
 
 
 class ReferenceVerification(BaseModel):
@@ -193,6 +201,8 @@ class ReferenceVerificationSummary(BaseModel):
     metadata_mismatch: int = Field(default=0, ge=0)
     not_found: int = Field(default=0, ge=0)
     unverified: int = Field(default=0, ge=0)
+    cn_source_unverified: int = Field(default=0, ge=0)
+    """中文源（万方详情页 / 中文题录）跳过外部核验的条数（Issue #67）。"""
     cached_hits: int = Field(default=0, ge=0)
     dropped: int = Field(default=0, ge=0)
     """因「拦截未核验引用」开关被剔出参考文献列表的条数。"""

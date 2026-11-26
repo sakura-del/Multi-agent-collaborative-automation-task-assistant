@@ -252,6 +252,7 @@ class TestReviewerVerificationStats:
             "metadata_mismatch": 1,
             "not_found": 1,
             "unverified": 1,
+            "cn_source_unverified": 0,
             "cached_hits": 1,
             "dropped": 0,
             "intercepted": False,
@@ -552,3 +553,32 @@ class TestReviewerToExporterFlow:
         assert MISMATCH_TITLE not in text
         assert NOT_FOUND_TITLE not in text
         assert UNVERIFIED_TITLE in text
+
+
+class TestReviewerChineseSourceVerdict:
+    """中文源条目（Issue #67）：成稿标「中文源·未核验」，不写成「未找到」。"""
+
+    async def test_chinese_source_is_labeled_and_not_blocked(self) -> None:
+        cn_title = "检索增强生成在软件工程中的应用综述"
+        artifacts = [
+            {
+                "title": cn_title,
+                "source_url": "https://doi.org/10.13328/j.cnki.jos.007567",
+                "source_id": "10.13328/j.cnki.jos.007567",
+            }
+        ]
+        fake = FakeVerifier({cn_title: ReferenceVerdict.CN_SOURCE_UNVERIFIED})
+
+        report = await ReviewerAgent(reference_verifier=fake).execute(make_input(artifacts))
+
+        summary = report["stats"]["reference_verification"]
+        assert summary["cn_source_unverified"] == 1
+        assert summary["not_found"] == 0
+        assert summary["dropped"] == 0
+
+        markdown = report["final_markdown"]
+        assert "（核验：中文源·未核验；撤稿状态未知）" in markdown
+        assert "中文源·未核验 1 条" in markdown
+        # 关键：中文源不得被渲染成误导性的「未找到」
+        assert "（核验：未找到" not in markdown
+        assert "已拦截 0 条" in markdown

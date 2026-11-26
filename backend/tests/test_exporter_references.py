@@ -227,3 +227,57 @@ class TestDocxVerificationSection:
         joined = "\n".join(paragraph.text for paragraph in document.paragraphs)
         assert "引用核验" not in joined
         assert "（核验：" not in joined
+
+
+class TestChineseSourceVerificationLabels:
+    """中文源跳过态（Issue #67）：成稿标「中文源·未核验」，绝不写成「未找到」。"""
+
+    def test_cn_source_entry_is_marked_and_counted(self, tmp_path: Path) -> None:
+        summary = {
+            "total": 2,
+            "verified": 1,
+            "metadata_mismatch": 0,
+            "not_found": 0,
+            "unverified": 0,
+            "cn_source_unverified": 1,
+            "cached_hits": 0,
+            "dropped": 0,
+            "intercepted": False,
+        }
+        report = make_report(
+            stats={
+                "title": TITLE,
+                "abstract": "本文综述检索增强生成的评估方法 [E1]。",
+                "limitations": ["离线语料覆盖有限。"],
+                "reference_verification": summary,
+            },
+            bibliography=[
+                {
+                    "index": 1,
+                    "title": "RAG Evaluation Survey",
+                    "source_url": "https://doi.org/10.1234/verified",
+                    "source_id": "10.1234/verified",
+                    "verification_status": "verified",
+                },
+                {
+                    "index": 2,
+                    "title": "检索增强生成在软件工程中的应用综述",
+                    "source_url": "https://doi.org/10.13328/j.cnki.jos.007567",
+                    "source_id": "10.13328/j.cnki.jos.007567",
+                    "verification_status": "cn_source_unverified",
+                },
+            ],
+        )
+
+        text = exported_text(tmp_path, report)
+
+        assert "（核验：中文源·未核验；撤稿状态未知）" in text
+        assert "中文源·未核验 1 条" in text
+        # 中文源不得被误标成「未找到」（误导用户以为文献不存在）
+        assert "（核验：未找到" not in text
+
+    def test_cn_count_omitted_when_zero(self, tmp_path: Path) -> None:
+        """旧任务（summary 无 cn_source_unverified）不得凭空多出「中文源·未核验 0 条」。"""
+        text = exported_text(tmp_path, make_report())
+
+        assert "中文源·未核验" not in text

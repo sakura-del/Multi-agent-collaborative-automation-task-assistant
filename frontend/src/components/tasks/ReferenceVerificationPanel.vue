@@ -10,12 +10,13 @@ import type {
   VerificationStatus,
 } from "@/api/types";
 
-/** 四态标签必须与后端 `_VERDICT_LABELS` / 导出报告 `## 引用核验` 口径一致 */
+/** 五态标签必须与后端 `_VERDICT_LABELS` / 导出报告 `## 引用核验` 口径一致 */
 const VERDICT_LABELS: Record<VerificationStatus, string> = {
   verified: "已验证",
   metadata_mismatch: "元数据不符",
   not_found: "未找到",
   unverified: "未核验",
+  cn_source_unverified: "中文源·未核验",
 };
 
 /**
@@ -29,6 +30,7 @@ const VERDICT_TONE: Record<VerificationStatus, NonNullable<BadgeVariants["varian
   metadata_mismatch: "warning",
   not_found: "destructive",
   unverified: "muted",
+  cn_source_unverified: "muted",
 };
 
 const VERDICT_ORDER: VerificationStatus[] = [
@@ -86,6 +88,12 @@ const counts = computed(() =>
   })),
 );
 
+/**
+ * 中文源跳过态（Issue #67）：属于「未核验」的子类，只在确有中文源条目时显示，
+ * 避免旧任务（summary 无该键）凭空多出一枚「中文源·未核验 0」。
+ */
+const cnSourceCount = computed(() => props.summary?.cn_source_unverified ?? 0);
+
 /** 拦截开关状态：开启时显示被剔除条数，便于审计「哪些文献被拿掉了」 */
 const interceptedLabel = computed(() => {
   const summary = props.summary;
@@ -128,6 +136,13 @@ const qualityCounts = computed(() => {
           <Badge :variant="item.tone">
             {{ item.label }}
             <strong class="ml-1 tabular-nums">{{ item.count }}</strong>
+          </Badge>
+        </li>
+        <!-- 中文源跳过态只在 >0 时展示：旧任务/纯英文任务不应看到这枚徽标 -->
+        <li v-if="cnSourceCount > 0" data-test="verification-count-cn_source_unverified">
+          <Badge variant="muted" title="中文题录/万方详情页不在 CrossRef/OpenAlex 覆盖范围，已跳过外部核验">
+            {{ VERDICT_LABELS.cn_source_unverified }}
+            <strong class="ml-1 tabular-nums">{{ cnSourceCount }}</strong>
           </Badge>
         </li>
       </ul>
@@ -183,9 +198,10 @@ const qualityCounts = computed(() => {
           >
             {{ verdictLabel(entry.verification_status) }}
           </Badge>
-          <!-- 撤稿状态是独立徽标：只对已核验条目显示，且不覆盖四态结论 -->
+          <!-- 撤稿状态是独立徽标：只对已核验条目显示，且不覆盖核验结论。
+               中文源跳过外部核验，拿不到撤稿元数据，不显示「撤稿状态未知」以免误导。 -->
           <Badge
-            v-if="entry.verification_status"
+            v-if="entry.verification_status && entry.verification_status !== 'cn_source_unverified'"
             :variant="entry.is_retracted === true ? 'destructive' : 'muted'"
             :title="retractionTitle(entry.is_retracted)"
             :data-test="`bibliography-retraction-${entry.index}`"

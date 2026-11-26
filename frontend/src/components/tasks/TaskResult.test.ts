@@ -220,7 +220,8 @@ describe("TaskResult · 引用核验集成", () => {
 
     const panel = wrapper.findComponent(ReferenceVerificationPanel);
     expect(panel.exists()).toBe(true);
-    expect(panel.props("summary")).toEqual(summary);
+    // 解析侧总是补 cn_source_unverified（旧报告按 0），契约见 parseVerificationSummary
+    expect(panel.props("summary")).toEqual({ ...summary, cn_source_unverified: 0 });
     expect(panel.props("entries")).toEqual([
       {
         index: 1,
@@ -352,6 +353,7 @@ describe("TaskResult · 引用核验集成", () => {
           { index: 2, title: "b", verification_status: "metadata_mismatch" },
           { index: 3, title: "c", verification_status: "not_found" },
           { index: 4, title: "d", verification_status: "unverified" },
+          { index: 5, title: "e", verification_status: "cn_source_unverified" },
         ],
       }),
     });
@@ -364,7 +366,43 @@ describe("TaskResult · 引用核验集成", () => {
       "metadata_mismatch",
       "not_found",
       "unverified",
+      "cn_source_unverified",
     ]);
+  });
+
+  it("surfaces the Chinese-source count from the summary", () => {
+    const wrapper = mountResult({
+      report: report({
+        stats: {
+          reference_verification: verificationSummary({
+            total: 1,
+            verified: 0,
+            metadata_mismatch: 0,
+            not_found: 0,
+            unverified: 0,
+            cn_source_unverified: 1,
+          }),
+        },
+        bibliography: [
+          { index: 1, title: "检索增强生成在软件工程中的应用综述", verification_status: "cn_source_unverified" },
+        ],
+      }),
+    });
+
+    const panel = wrapper.findComponent(ReferenceVerificationPanel);
+    expect(panel.props("summary")).toEqual(
+      expect.objectContaining({ cn_source_unverified: 1 })
+    );
+    expect(
+      wrapper.find('[data-test="verification-count-cn_source_unverified"]').text()
+    ).toContain("中文源·未核验");
+    // 旧任务解析路径不受影响：缺该键时不渲染第 5 枚徽标
+    const legacy = mountResult({
+      report: report({ stats: { reference_verification: verificationSummary() } }),
+    });
+    expect(
+      legacy.find('[data-test="verification-count-cn_source_unverified"]').exists()
+    ).toBe(false);
   });
 
   it("renders the real panel badges while keeping the bibliography list intact", () => {

@@ -74,6 +74,10 @@ _VERDICT_LABELS: tuple[tuple[str, str], ...] = (
     ("not_found", "未找到"),
     ("unverified", "未核验"),
 )
+#: 中文源跳过态（Issue #67）：属于「未核验」的子类，不算问题条目。
+_CN_VERDICT_VALUE = "cn_source_unverified"
+_CN_VERDICT_LABEL = "中文源·未核验"
+_VERDICT_LABEL_MAP: dict[str, str] = {**dict(_VERDICT_LABELS), _CN_VERDICT_VALUE: _CN_VERDICT_LABEL}
 #: 会被计入「问题条目」的判定态
 _PROBLEM_VERDICTS = frozenset({"metadata_mismatch", "not_found"})
 _MAX_REPORTED_PROBLEMS = 3
@@ -282,12 +286,14 @@ class CitationValidator:
         *,
         advisory: bool,
     ) -> ValidationCheck:
-        """把 `ReferenceVerifier` 的四态结论归并为一条 `ValidationCheck`。
+        """把 `ReferenceVerifier` 的结论归并为一条 `ValidationCheck`。
 
-        - `verified` / `unverified` 都算通过：后者是外部源不可用的降级态，不得误伤；
+        - `verified` / `unverified` / `cn_source_unverified` 都算通过：后两者分别是
+          外部源不可用的降级态与中文源跳过态，不得误伤；
         - `metadata_mismatch` / `not_found` 判为不通过，并在 message 中最多列出 3 条问题条目。
         """
         counts: dict[str, int] = {verdict: 0 for verdict, _label in _VERDICT_LABELS}
+        counts[_CN_VERDICT_VALUE] = 0
         problems: list[ReferenceVerification] = []
         for verification in verifications:
             value = verification.verdict.value
@@ -295,14 +301,17 @@ class CitationValidator:
             if value in _PROBLEM_VERDICTS:
                 problems.append(verification)
 
-        labels = dict(_VERDICT_LABELS)
         head = "引用核验：" + " / ".join(
-            f"{labels[verdict]} {counts.get(verdict, 0)} 条" for verdict, _label in _VERDICT_LABELS
+            f"{_VERDICT_LABEL_MAP[verdict]} {counts.get(verdict, 0)} 条"
+            for verdict, _label in _VERDICT_LABELS
         )
+        # 中文源跳过态属于「未核验」的子类：有则显式展示，避免读者以为全部核验过。
+        if counts[_CN_VERDICT_VALUE] > 0:
+            head += f" / {_CN_VERDICT_LABEL} {counts[_CN_VERDICT_VALUE]} 条"
         message = head
         if problems:
             details = "; ".join(
-                f"{item.title}（{labels[item.verdict.value]}"
+                f"{item.title}（{_VERDICT_LABEL_MAP[item.verdict.value]}"
                 + (f"：{item.reason}" if item.reason else "")
                 + "）"
                 for item in problems[:_MAX_REPORTED_PROBLEMS]

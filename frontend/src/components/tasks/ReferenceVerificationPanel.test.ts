@@ -192,6 +192,38 @@ describe("ReferenceVerificationPanel", () => {
     expect(wrapper.find('[data-test="bibliography-retraction-2"]').exists()).toBe(false);
   });
 
+  it("renders the Chinese-source count only when the report contains it", () => {
+    // 旧任务（summary 无该键）不得凭空多出「中文源·未核验 0」
+    const legacy = mountPanel();
+    expect(legacy.find('[data-test="verification-count-cn_source_unverified"]').exists()).toBe(
+      false
+    );
+
+    const withCn = mountPanel({ summary: summary({ total: 5, cn_source_unverified: 2 }) });
+    const badge = withCn.find('[data-test="verification-count-cn_source_unverified"]');
+    expect(badge.exists()).toBe(true);
+    expect(badge.text()).toContain("中文源·未核验");
+    expect(badge.text()).toContain("2");
+  });
+
+  it("labels Chinese-source entries and hides their retraction badge", () => {
+    const wrapper = mountPanel({
+      summary: summary({
+        total: 1,
+        verified: 0,
+        metadata_mismatch: 0,
+        not_found: 1,
+        unverified: 0,
+        cn_source_unverified: 1,
+      }),
+      entries: [entry(1, "cn_source_unverified")],
+    });
+
+    expect(wrapper.find('[data-test="bibliography-verdict-1"]').text()).toBe("中文源·未核验");
+    // 中文源拿不到撤稿元数据：不显示「撤稿状态未知」，避免误导
+    expect(wrapper.find('[data-test="bibliography-retraction-1"]').exists()).toBe(false);
+  });
+
   it("survives an empty entries array and an omitted entries prop", () => {
     const empty = mountPanel({ entries: [] });
     expect(empty.find('[data-test="verification-panel"]').exists()).toBe(true);

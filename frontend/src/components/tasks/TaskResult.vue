@@ -118,6 +118,7 @@ const VERIFICATION_STATUSES: readonly VerificationStatus[] = [
   "metadata_mismatch",
   "not_found",
   "unverified",
+  "cn_source_unverified",
 ];
 
 const SUMMARY_COUNT_KEYS = [
@@ -166,12 +167,15 @@ function parseVerificationSummary(value: unknown): ReferenceVerificationSummary 
   const retracted = optionalCount("retracted");
   const preprint = optionalCount("preprint");
   const lowCitation = optionalCount("low_citation");
+  // 中文源跳过态（Issue #67）：旧报告没有该键，按 0 处理（只是徽标不出现）。
+  const cnSourceUnverified = optionalCount("cn_source_unverified") ?? 0;
   return {
     total: counts.total,
     verified: counts.verified,
     metadata_mismatch: counts.metadata_mismatch,
     not_found: counts.not_found,
     unverified: counts.unverified,
+    cn_source_unverified: cnSourceUnverified,
     cached_hits: counts.cached_hits,
     dropped: counts.dropped,
     intercepted: record.intercepted,

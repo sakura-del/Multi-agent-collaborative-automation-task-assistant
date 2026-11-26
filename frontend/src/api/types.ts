@@ -605,7 +605,13 @@ export interface LibrarySaveResponse {
 // ===== 引用真实性核验契约（Issue #3 前端展示；计划 2026-10-19-03b §1.2）=====
 
 /** 单条参考文献的核验结论（与后端 `ReferenceVerdict` 对齐）。 */
-export type VerificationStatus = "verified" | "metadata_mismatch" | "not_found" | "unverified";
+export type VerificationStatus =
+  | "verified"
+  | "metadata_mismatch"
+  | "not_found"
+  | "unverified"
+  /** 中文源（万方详情页/中文题录）跳过外部核验：查不到不代表文献不存在（Issue #67）。 */
+  | "cn_source_unverified";
 
 /** 来源质量标记（Issue #31）：三项可同时存在。 */
 export type QualityFlag = "retracted" | "preprint" | "low_citation";
@@ -624,6 +630,11 @@ export interface ReferenceVerificationSummary {
   metadata_mismatch: number;
   not_found: number;
   unverified: number;
+  /**
+   * 中文源跳过外部核验的条数（Issue #67）：旧报告没有该键，展示层按 0 处理
+   * （它只影响「中文源·未核验」徽标是否出现，不参与既有四态计数）。
+   */
+  cn_source_unverified?: number;
   cached_hits: number;
   dropped: number;
   /** 来源质量计数（Issue #31）：旧报告可能没有这三个键，展示层按「未知」处理。 */

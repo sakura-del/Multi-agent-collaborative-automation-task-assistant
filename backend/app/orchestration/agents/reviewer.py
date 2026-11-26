@@ -42,6 +42,11 @@ _VERDICT_LABELS: tuple[tuple[str, str], ...] = (
     ("unverified", "未核验"),
 )
 
+#: 中文源跳过态（Issue #67）：只在确有中文源条目时展示，避免旧任务凭空多出「0 条」。
+_CN_VERDICT_VALUE = "cn_source_unverified"
+_CN_VERDICT_LABEL = "中文源·未核验"
+_VERDICT_LABEL_MAP: dict[str, str] = {**dict(_VERDICT_LABELS), _CN_VERDICT_VALUE: _CN_VERDICT_LABEL}
+
 #: 核验统计章节标题：正文已有该章节时（复盘产物 → 导出）不得重复追加
 _REFERENCE_SECTION = "## 引用核验"
 
@@ -69,7 +74,7 @@ def _verification_mark(status: Any, is_retracted: Any = None) -> str:
     """参考文献行的核验标记；无核验信息（老数据 / 未注入核验器）时返回空串。"""
     if not isinstance(status, str) or not status:
         return ""
-    label = dict(_VERDICT_LABELS).get(status, status)
+    label = _VERDICT_LABEL_MAP.get(status, status)
     return f"（核验：{label}；{_retraction_label(is_retracted)}）"
 
 
@@ -86,6 +91,10 @@ def _verification_line(summary: Mapping[str, Any]) -> str:
     counts = " / ".join(
         f"{label} {_summary_count(summary, verdict)} 条" for verdict, label in _VERDICT_LABELS
     )
+    # 中文源跳过态（Issue #67）：有中文源时才追加，避免旧任务显示「中文源·未核验 0 条」。
+    cn_count = _summary_count(summary, _CN_VERDICT_VALUE)
+    if cn_count > 0:
+        counts += f" / {_CN_VERDICT_LABEL} {cn_count} 条"
     switch = "开启" if summary.get("intercepted") else "关闭"
     line = (
         f"引用核验：{counts} / 已拦截 {_summary_count(summary, 'dropped')} 条；拦截开关：{switch}"

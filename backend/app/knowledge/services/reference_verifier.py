@@ -8,6 +8,10 @@
 - ``NOT_FOUND``：DOI 无效（或不存在）且标题检索无命中；
 - ``UNVERIFIED``：外部源超时 / 限流 / 不可用导致无法判定（降级态，不得据此判失败）。
 
+另有一类 **中文源**（万方详情页 / 中文题录，Issue #67）不属于外部 DOI 核验的适用范围：
+直接返回 ``CN_SOURCE_UNVERIFIED``（显示「中文源·未核验」），既不外呼、也不判失败，
+避免在成稿里出现误导性的「未找到」。
+
 设计要点：
 - 外部源以 ``MetadataSource`` 协议注入：本模块不 import 具体 HTTP 客户端，
   测试可注入 fake 源并断言调用次数与并发峰值（不产生真实网络请求）；
@@ -28,6 +32,7 @@ from collections import Counter
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import date, datetime
 from typing import Any, Protocol
+from urllib.parse import urlparse
 
 from pydantic import ValidationError
 
@@ -81,6 +86,42 @@ _SOURCE_ERRORS = (UpstreamError, ValidationException, TimeoutError, OSError)
 
 # 会被「拦截未核验引用」开关剔除的结论
 _BLOCKED_VERDICTS = frozenset({ReferenceVerdict.METADATA_MISMATCH, ReferenceVerdict.NOT_FOUND})
+
+# ===== 中文源短路（Issue #67）=====
+#: 中文源详情页域名：万方详情页（http/https 均可）不提供 DOI，属外部核验范围之外。
+_WANFANG_HOST_SUFFIX = "wanfangdata.com.cn"
+#: CJK 统一表意文字区间（含扩展 A 与兼容区）：题名含汉字即按中文源处理。
+_CJK_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+#: 中文源跳过核验的统一理由（写入 verification_reason 与成稿标记）
+_CN_SOURCE_REASON = (
+    "中文源·未核验：中文题录/万方详情页不在 CrossRef/OpenAlex 覆盖范围，跳过外部 DOI 核验"
+)
+
+
+def _contains_cjk(text: str) -> bool:
+    """题名是否含汉字（中文题录 → 中文源，不做外部 DOI 核验）。"""
+    return bool(_CJK_RE.search(text))
+
+
+def _is_wanfang_detail_url(url: str | None) -> bool:
+    """URL 是否指向万方详情页（`d.wanfangdata.com.cn` 及其子域）。"""
+    if not url:
+        return False
+    try:
+        host = (urlparse(url).hostname or "").lower().rstrip(".")
+    except ValueError:  # 脏 URL：宁可当普通来源处理，也不让核验器抛错
+        return False
+    return host == _WANFANG_HOST_SUFFIX or host.endswith(f".{_WANFANG_HOST_SUFFIX}")
+
+
+def is_chinese_source_candidate(candidate: ReferenceCandidate) -> bool:
+    """候选是否属于「中文源」：题名含汉字，或来源是万方详情页（Issue #67）。
+
+    万方检索结果里的中文题录会同时命中两条规则；英文题名但来自万方详情页的
+    少数会议/期刊记录由域名兜底。中文 DOI（如 10.13328/…）也因题名含汉字被覆盖。
+    """
+    return _contains_cjk(candidate.title) or _is_wanfang_detail_url(candidate.source_url)
+
 
 # DOI 核验状态（决定「DOI 无效」能否作为判定依据）
 _DOI_ABSENT = "absent"
@@ -341,6 +382,7 @@ def summarize_verifications(
         metadata_mismatch=counts[ReferenceVerdict.METADATA_MISMATCH],
         not_found=counts[ReferenceVerdict.NOT_FOUND],
         unverified=counts[ReferenceVerdict.UNVERIFIED],
+        cn_source_unverified=counts[ReferenceVerdict.CN_SOURCE_UNVERIFIED],
         cached_hits=sum(1 for item in verifications if item.cached),
         dropped=dropped,
         retracted=flags["retracted"],
@@ -524,6 +566,11 @@ class ReferenceVerifier:
         if cached is not None:
             return cached.model_copy(update={"cached": True})
 
+        # 中文源（万方详情页 / 中文题录）：不在 CrossRef/OpenAlex 覆盖范围，直接跳过外部核验。
+        # 这不是「未找到」——查不到不代表文献不存在，判 NOT_FOUND 会误导成稿。
+        if is_chinese_source_candidate(candidate):
+            return self._cn_source_verification(candidate)
+
         sources = self._sources
         failures: list[str] = []
         answered = 0
@@ -660,9 +707,30 @@ class ReferenceVerifier:
 
     # ===== 内部：判定与写缓存 =====
 
+    def _cn_source_verification(self, candidate: ReferenceCandidate) -> ReferenceVerification:
+        """中文源（万方详情页/中文题录）直接返回「中文源·未核验」，不写缓存、不外呼。"""
+        logger.info(
+            "reference_verify_cn_source_skipped",
+            key=candidate.key,
+            title=candidate.title[:120],
+        )
+        return ReferenceVerification(
+            reference_key=candidate.key,
+            title=candidate.title,
+            verdict=ReferenceVerdict.CN_SOURCE_UNVERIFIED,
+            reason=_CN_SOURCE_REASON,
+        )
+
     async def _store(self, key: str, verification: ReferenceVerification) -> None:
-        """写缓存；``UNVERIFIED`` 属降级态，不写缓存以免把临时故障固化 7 天。"""
-        if verification.verdict is ReferenceVerdict.UNVERIFIED:
+        """写缓存；``UNVERIFIED`` 属降级态，不写缓存以免把临时故障固化 7 天。
+
+        中文源跳过态同样不写缓存：判定只依赖本地元数据，重算零成本，且避免
+        「先无 Key 后补 Key」时旧结论长期固化。
+        """
+        if verification.verdict in (
+            ReferenceVerdict.UNVERIFIED,
+            ReferenceVerdict.CN_SOURCE_UNVERIFIED,
+        ):
             return
         await self._cache.set(key, verification)
 
