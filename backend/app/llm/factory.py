@@ -56,6 +56,7 @@ def create_llm(
     max_retries: int = 3,
     default_temperature: float = 0.7,
     default_max_tokens: int | None = None,
+    default_headers: dict[str, str] | None = None,
     **extra: Any,
 ) -> BaseLLM:
     """工厂函数：按 provider 创建对应适配器实例。
@@ -65,6 +66,9 @@ def create_llm(
         model: 模型名（如 gpt-4o-mini / glm-4-flash / qwen-turbo）
         api_key: API 密钥，未提供时由适配器从配置读取
         base_url: 自定义 API 端点
+        default_headers: 附加到每个出站请求的请求头（平台网关要求时使用，
+            如 OpenCode Go 的 `x-opencode-session`）。BYOK 路径不传，避免把
+            平台会话标识发给用户自己的端点。
         extra: 透传给适配器的额外参数（如 embedding_model）
 
     异常：
@@ -92,6 +96,7 @@ def create_llm(
         max_retries=max_retries,
         default_temperature=default_temperature,
         default_max_tokens=default_max_tokens,
+        default_headers=default_headers,
         **extra,
     )
 
@@ -130,6 +135,8 @@ class LLMManager:
         # 全局超时与重试
         self._timeout: int = 30
         self._max_retries: int = 3
+        # 平台网关附加请求头（如 OpenCode Go 的 x-opencode-session）
+        self._default_headers: dict[str, str] = {}
         if llm_config is not None:
             self._apply_config(llm_config)
 
@@ -137,6 +144,8 @@ class LLMManager:
         """从 LLMConfig 读取默认参数。"""
         self._timeout = getattr(config, "request_timeout", 30)
         self._max_retries = getattr(config, "max_retries", 3)
+        # 平台网关要求的路由头（如 OpenCode Go 缺 `x-opencode-session` 直接 400）
+        self._default_headers = dict(getattr(config, "extra_headers", {}) or {})
         # 读取各厂商 API Key 与 base_url
         for provider in ("openai", "glm", "qwen", "deepseek"):
             self._api_keys[provider] = getattr(config, f"{provider}_api_key", None)
@@ -186,6 +195,7 @@ class LLMManager:
                 base_url=self._base_urls.get(provider) or None,
                 timeout=self._timeout,
                 max_retries=self._max_retries,
+                default_headers=self._default_headers or None,
             )
         return self._instances[key]
 

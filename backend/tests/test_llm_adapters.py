@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
 import pytest
 
 from app.llm.adapters import GLMAdapter, OpenAIAdapter, QwenAdapter
@@ -175,6 +176,100 @@ class TestAdapterFactory:
         """Qwen 适配器默认 base_url 为 DashScope 接口。"""
         llm = QwenAdapter(model="qwen-turbo", api_key="test")
         assert "dashscope" in llm.base_url
+
+    def test_create_openai_adapter_with_default_headers(self):
+        """工厂把 default_headers（平台网关要求的路由头）透传给适配器。"""
+        llm = create_llm(
+            "openai",
+            "deepseek-v4.1-flash",
+            api_key="oc_sk-test",
+            default_headers={"x-opencode-session": "ses-test"},
+        )
+        assert isinstance(llm, OpenAIAdapter)
+        assert llm.default_headers == {"x-opencode-session": "ses-test"}
+
+    def test_create_glm_adapter_with_default_headers(self):
+        """GLM/Qwen 子类构造也要接收 default_headers，否则 create_llm 会 TypeError。"""
+        llm = create_llm(
+            "glm", "glm-4-flash", api_key="glm-test", default_headers={"x-session": "s"}
+        )
+        assert llm.default_headers == {"x-session": "s"}
+
+        qwen = create_llm(
+            "qwen", "qwen-turbo", api_key="qwen-test", default_headers={"x-session": "s"}
+        )
+        assert qwen.default_headers == {"x-session": "s"}
+
+
+class TestDefaultHeadersOnWire:
+    """平台网关附加请求头必须真的出现在出站 HTTP 请求上。
+
+    背景（2026-11-26）：平台模型切到 OpenCode Go 后，网关要求带
+    `x-opencode-session`，缺头直接 400 MissingSessionID —— 只改 base_url/model
+    不够，所以这里用 httpx.MockTransport 抓真实出站请求做断言，而不是只断言
+    适配器属性。
+    """
+
+    @staticmethod
+    def _completion_payload() -> dict[str, Any]:
+        return {
+            "id": "chatcmpl-test",
+            "object": "chat.completion",
+            "created": 0,
+            "model": "deepseek-v4.1-flash",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "OK"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 3, "completion_tokens": 1, "total_tokens": 4},
+        }
+
+    def _make_adapter(
+        self,
+        captured: list[httpx.Request],
+        *,
+        default_headers: dict[str, str] | None = None,
+    ) -> OpenAIAdapter:
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured.append(request)
+            return httpx.Response(200, json=self._completion_payload())
+
+        return OpenAIAdapter(
+            model="deepseek-v4.1-flash",
+            api_key="oc_sk-test",
+            base_url="https://opencode.ai/inference/go/openai/v1",
+            default_headers=default_headers,
+            http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        )
+
+    async def test_configured_header_is_sent(self):
+        """配置了 default_headers 时，真实出站请求必须带上，且路径正确。"""
+        captured: list[httpx.Request] = []
+        adapter = self._make_adapter(
+            captured,
+            default_headers={"x-opencode-session": "ses_veripaper_platform"},
+        )
+
+        response = await adapter.chat([Message(role=MessageRole.USER, content="ping")])
+
+        assert response.content == "OK"
+        assert len(captured) == 1
+        assert captured[0].headers["x-opencode-session"] == "ses_veripaper_platform"
+        assert str(captured[0].url) == (
+            "https://opencode.ai/inference/go/openai/v1/chat/completions"
+        )
+
+    async def test_no_extra_header_by_default(self):
+        """未配置时不额外发平台头（默认路径行为不变，也不会泄露到别家网关）。"""
+        captured: list[httpx.Request] = []
+        adapter = self._make_adapter(captured)
+
+        await adapter.chat([Message(role=MessageRole.USER, content="ping")])
+
+        assert "x-opencode-session" not in captured[0].headers
 
 
 class TestParseToolArguments:

@@ -83,6 +83,7 @@ class OpenAIAdapter(BaseLLM):
         default_max_tokens: int | None = None,
         embedding_model: str = "text-embedding-3-small",
         http_client: Any | None = None,
+        default_headers: dict[str, str] | None = None,
     ) -> None:
         super().__init__(
             model,
@@ -93,6 +94,7 @@ class OpenAIAdapter(BaseLLM):
             max_retries=max_retries,
             default_temperature=default_temperature,
             default_max_tokens=default_max_tokens,
+            default_headers=default_headers,
         )
         # 嵌入模型独立配置，与聊天模型解耦
         self.embedding_model = embedding_model
@@ -107,6 +109,8 @@ class OpenAIAdapter(BaseLLM):
             timeout=self.timeout,
             max_retries=0,  # 重试由 BaseLLM.chat 统一管理，避免双层重试
             http_client=self._http_client,
+            # 空 dict 传 None：保持 SDK 默认头不变（不多发无意义的空 headers 容器）
+            default_headers=self.default_headers or None,
         )
 
     # ===== 消息/工具格式转换 =====

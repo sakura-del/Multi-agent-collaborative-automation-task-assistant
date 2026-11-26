@@ -23,6 +23,7 @@ class GLMAdapter(OpenAIAdapter):
         default_temperature: float = 0.7,
         default_max_tokens: int | None = None,
         embedding_model: str = "embedding-3",
+        default_headers: dict[str, str] | None = None,
     ) -> None:
         # 调用父类构造，但覆写 provider 标识，便于日志与降级链识别
         super().__init__(
@@ -34,5 +35,6 @@ class GLMAdapter(OpenAIAdapter):
             default_temperature=default_temperature,
             default_max_tokens=default_max_tokens,
             embedding_model=embedding_model,
+            default_headers=default_headers,
         )
         self.provider = "glm"

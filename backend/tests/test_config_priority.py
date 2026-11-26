@@ -113,6 +113,23 @@ class TestEnvOverridesYaml:
         assert len(settings.llm.fallback_chain) == 1
         assert settings.llm.fallback_chain[0].provider == "deepseek"
 
+    def test_env_overrides_yaml_nested_dict(self, yaml_config, monkeypatch) -> None:
+        """字典型嵌套字段（LLM__EXTRA_HEADERS，JSON）也要能从环境变量注入。
+
+        2026-11-26 平台模型切 OpenCode Go：网关要求 `x-opencode-session`，
+        这条通道必须能用 env 配置（不能只改 yaml / 代码）。
+        """
+        from app.core.config import get_settings
+
+        monkeypatch.setenv(
+            "LLM__EXTRA_HEADERS",
+            '{"x-opencode-session": "ses_veripaper_platform"}',
+        )
+
+        settings = get_settings()
+
+        assert settings.llm.extra_headers == {"x-opencode-session": "ses_veripaper_platform"}
+
 
 class TestYamlStillProvidesDefaults:
     def test_yaml_value_used_when_no_env(self, yaml_config, monkeypatch) -> None:

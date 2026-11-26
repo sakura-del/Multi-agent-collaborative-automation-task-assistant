@@ -54,6 +54,7 @@ class BaseLLM(ABC):
         max_retries: int = 3,
         default_temperature: float = 0.7,
         default_max_tokens: int | None = None,
+        default_headers: dict[str, str] | None = None,
     ) -> None:
         self.model = model
         self.provider = provider
@@ -63,6 +64,10 @@ class BaseLLM(ABC):
         self.max_retries = max_retries
         self.default_temperature = default_temperature
         self.default_max_tokens = default_max_tokens
+        # 网关附加请求头（如 OpenCode Go 的 x-opencode-session）。只有
+        # OpenAI 兼容适配器会真正发出去；放在基类是为了让工厂统一透传，
+        # 也便于其它厂商适配器按需复用。BYOK 路径不传 → 空 dict。
+        self.default_headers = dict(default_headers or {})
         # 并发组（Issue #22 路由感知并发）：路由目标是独立组，默认组为 "default"
         self.concurrency_group = "default"
         # 超时类错误的内部重试上限（Issue #18）：90s×3 的确定性等待毫无意义；

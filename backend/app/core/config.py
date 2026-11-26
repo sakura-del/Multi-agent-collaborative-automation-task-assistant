@@ -189,6 +189,14 @@ class LLMConfig(BaseModel):
     #   LLM__ROUTING_TARGETS={"local":{"provider":"custom","model":"...","base_url":"...","api_key":"..."}}
     node_routing: dict[str, str] = Field(default_factory=dict)
     routing_targets: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    # ===== 平台网关附加请求头（2026-11-26 平台模型切到 OpenCode Go）=====
+    # 有些 OpenAI 兼容网关要求额外请求头才能路由：OpenCode Go 缺少
+    # `x-opencode-session` 会直接 400 MissingSessionID，换成别的模型也会失败，
+    # 所以必须让**平台**模型实例统一带上。只挂在 LLMManager 创建的实例上；
+    # 用户 BYOK 端点不继承（不能把平台会话标识发给第三方端点）。
+    # .env 用 JSON 字符串配置（与 node_routing 同一套解析）：
+    #   LLM__EXTRA_HEADERS={"x-opencode-session": "ses_veripaper_platform"}
+    extra_headers: dict[str, str] = Field(default_factory=dict)
     cost_budget: LLMCostBudget = LLMCostBudget()
     fallback_chain: list[LLMFallbackItem] = Field(default_factory=list)
 

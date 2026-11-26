@@ -23,6 +23,7 @@ class QwenAdapter(OpenAIAdapter):
         default_temperature: float = 0.7,
         default_max_tokens: int | None = None,
         embedding_model: str = "text-embedding-v3",
+        default_headers: dict[str, str] | None = None,
     ) -> None:
         super().__init__(
             model=model,
@@ -33,5 +34,6 @@ class QwenAdapter(OpenAIAdapter):
             default_temperature=default_temperature,
             default_max_tokens=default_max_tokens,
             embedding_model=embedding_model,
+            default_headers=default_headers,
         )
         self.provider = "qwen"

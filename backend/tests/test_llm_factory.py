@@ -101,6 +101,27 @@ class TestLLMManagerConfig:
         # 主模型实例已创建
         assert ("openai", "gpt-4o-mini") in manager._instances
 
+    def test_apply_config_reads_extra_headers(self):
+        """平台网关附加头（LLM__EXTRA_HEADERS）必须挂到主模型实例上。
+
+        背景（2026-11-26）：OpenCode Go 缺 `x-opencode-session` 直接 400，
+        env 只配 base_url/model 不够，必须由 manager 传到适配器。
+        """
+
+        class _ExtraHeadersConfig:
+            default_provider = "openai"
+            default_model = "deepseek-v4.1-flash"
+            request_timeout = 30
+            max_retries = 3
+            extra_headers: ClassVar[dict[str, str]] = {
+                "x-opencode-session": "ses_veripaper_platform"
+            }
+
+        manager = LLMManager(_ExtraHeadersConfig())
+        llm = manager._get_or_create("openai", "deepseek-v4.1-flash")
+
+        assert llm.default_headers == {"x-opencode-session": "ses_veripaper_platform"}
+
 
 class TestLLMManagerSwitchPrimary:
     """运行时切换主模型测试。"""
