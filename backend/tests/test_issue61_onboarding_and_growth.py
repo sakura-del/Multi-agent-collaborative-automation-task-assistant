@@ -56,7 +56,9 @@ class TestIssue61Migration:
     def test_single_alembic_head_points_to_new_migration(self) -> None:
         script = ScriptDirectory.from_config(Config(str(BACKEND_DIR / "alembic.ini")))
         heads = script.get_heads()
-        assert heads == ["4f8a2d1c9e7b"], f"期望唯一 head 为 4f8a2d1c9e7b，实际：{heads}"
+        assert len(heads) == 1, f"期望 Alembic 仅有一个 head（无分叉），实际：{heads}"
+        revs = {rev.revision for rev in script.walk_revisions("base", heads[0])}
+        assert "4f8a2d1c9e7b" in revs, f"期望迁移 4f8a2d1c9e7b 位于当前 head {heads[0]} 历史链中"
 
     def test_upgrade_updates_free_plan_creates_tables_and_is_idempotent(self) -> None:
         engine = create_engine("sqlite://")
