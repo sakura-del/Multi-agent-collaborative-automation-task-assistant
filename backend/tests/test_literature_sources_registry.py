@@ -29,6 +29,7 @@ from app.tools.literature.source_registry import (
     MultiSourceLiteratureSource,
     build_sources,
 )
+from app.tools.literature.wanfang import WanfangSource
 
 ARXIV_ATOM = """<?xml version="1.0" encoding="utf-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
@@ -123,6 +124,24 @@ class TestBuildSources:
         with pytest.raises(ValidationException) as excinfo:
             build_sources(["crossref"])
         assert "crossref" in str(excinfo.value)
+
+    async def test_wanfang_aliases_build_one_source(self) -> None:
+        """`wanfang` / `wf` / `wfdata` 三个名字归一为同一个源，并透传 App Key。"""
+        client = _mock_client(lambda request: httpx.Response(200))
+        try:
+            sources = build_sources(
+                ["wanfang", "wf", "wfdata", "openalex"],
+                client=client,
+                wfdata_app_key="k-123",
+            )
+            assert len(sources) == 2
+            wanfang = sources[0]
+            assert isinstance(wanfang, WanfangSource)
+            assert wanfang._app_key == "k-123"
+            for source in sources:
+                await source.aclose()
+        finally:
+            await client.aclose()
 
     def test_empty_names_return_empty_list(self) -> None:
         assert build_sources([]) == []

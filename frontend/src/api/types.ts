@@ -104,6 +104,11 @@ export interface TaskCreate {
    * `true` 时检索节点从引用库取文献、完全不外呼。
    */
   reference_library?: boolean;
+  /**
+   * 检索文献源白名单（Issue #67），如 `["wanfang", "openalex"]`。
+   * 不传 = 由后端按输出语言与用户万方 Key 自动决定；引用库/离线语料模式下忽略。
+   */
+  literature_sources?: string[] | null;
   /** 本任务是否做外部引用核验：true 时即使离线语料也与 CrossRef/OpenAlex 比对（Issue #3 遗留项） */
   verify_references?: boolean;
   /**
@@ -1062,8 +1067,22 @@ export interface LLMCredentialInfo {
   updated_at: string;
 }
 
-/** 推理等级档位（label 展示 / value 下发给模型） */
-export interface ReasoningTier {
+/**
+ * 用户自带数据源凭据（Issue #67 万方 BYOK）。
+ * **后端永不返回明文**，只有脱敏后的 key_mask。
+ */
+export interface DataSourceCredentialInfo {
+  /** 数据源标识，如 "wanfang" */
+  provider: string;
+  /** 是否已配置可用 Key（未配置时 key_mask/status/updated_at 为 null） */
+  configured: boolean;
+  /** 如 `38704_****02cc` */
+  key_mask: string | null;
+  status: string | null;
+  updated_at: string | null;
+}
+
+/** 推理等级档位（label 展示 / value 下发给模型） */export interface ReasoningTier {
   label: string;
   value: string;
 }

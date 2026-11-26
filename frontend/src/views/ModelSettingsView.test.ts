@@ -13,6 +13,12 @@ vi.mock("@/api/llm-credentials", () => ({
     testLLMCredential: vi.fn(),
 }));
 
+vi.mock("@/api/data-source-credentials", () => ({
+    listDataSourceCredentials: vi.fn(),
+    saveDataSourceCredential: vi.fn(),
+    deleteDataSourceCredential: vi.fn(),
+}));
+
 const { updateNodeRouting } = vi.hoisted(() => ({
     updateNodeRouting: vi.fn(),
 }));
@@ -34,6 +40,11 @@ import {
     testLLMCredential,
     updateLLMCredential,
 } from "@/api/llm-credentials";
+import {
+    deleteDataSourceCredential,
+    listDataSourceCredentials,
+    saveDataSourceCredential,
+} from "@/api/data-source-credentials";
 
 const PROVIDERS = [
     {
@@ -102,7 +113,11 @@ beforeEach(() => {
     vi.mocked(deleteLLMCredential).mockReset();
     vi.mocked(probeLLMCredential).mockReset();
     vi.mocked(testLLMCredential).mockReset();
+    vi.mocked(listDataSourceCredentials).mockReset();
+    vi.mocked(saveDataSourceCredential).mockReset();
+    vi.mocked(deleteDataSourceCredential).mockReset();
     vi.mocked(listLLMProviders).mockResolvedValue(PROVIDERS as never);
+    vi.mocked(listDataSourceCredentials).mockResolvedValue([] as never);
 });
 
 describe("ModelSettingsView", () => {
@@ -681,5 +696,106 @@ describe("ModelSettingsView", () => {
         expect(fallbackLabel!.textContent).toContain("按平台计费");
         expect(fallbackLabel!.innerHTML).toContain("<strong>按平台计费</strong>");
         expect(fallbackLabel!.innerHTML).not.toContain("**");
+    });
+
+    // ===== 万方中文文献源（Issue #67 BYOK）=====
+    it("万方卡片展示获取 Key 指引与外链，未配置时提供输入框", async () => {
+        vi.mocked(listLLMCredentials).mockResolvedValue([] as never);
+
+        const wrapper = mountView();
+        await flushPromises();
+
+        const card = wrapper.get('[data-test="wanfang-byok-card"]');
+        expect(card.text()).toContain("万方中文文献源（BYOK）");
+        expect(card.text()).toContain("未配置");
+        expect(card.find('[data-test="wanfang-key"]').exists()).toBe(true);
+        expect(card.find('[data-test="wanfang-save"]').exists()).toBe(true);
+
+        const link = card.get('[data-test="wanfang-get-key-link"]');
+        expect(link.attributes("href")).toBe(
+            "https://www.wfdata.com/skill-api?tab=mine",
+        );
+        expect(link.attributes("target")).toBe("_blank");
+        expect(link.attributes("rel")).toContain("noopener");
+    });
+
+    it("保存万方 Key 后展示脱敏掩码，不再回显明文", async () => {
+        vi.mocked(listLLMCredentials).mockResolvedValue([] as never);
+        vi.mocked(saveDataSourceCredential).mockResolvedValue({
+            provider: "wanfang",
+            configured: true,
+            key_mask: "38704_****02cc",
+            status: "active",
+            updated_at: "2026-11-26T06:00:00Z",
+        } as never);
+
+        const wrapper = mountView();
+        await flushPromises();
+
+        await wrapper
+            .get('[data-test="wanfang-key"]')
+            .setValue("38704_abcdefgh02cc");
+        await wrapper.get('[data-test="wanfang-save"]').trigger("click");
+        await flushPromises();
+
+        expect(saveDataSourceCredential).toHaveBeenCalledWith(
+            "wanfang",
+            "38704_abcdefgh02cc",
+        );
+        const card = wrapper.get('[data-test="wanfang-byok-card"]');
+        expect(card.text()).toContain("已配置");
+        expect(card.text()).toContain("38704_****02cc");
+        expect(card.text()).not.toContain("38704_abcdefgh02cc");
+        expect(card.find('[data-test="wanfang-delete"]').exists()).toBe(true);
+    });
+
+    it("删除万方 Key 走二次确认，确认后调用接口并回到未配置", async () => {
+        vi.mocked(listLLMCredentials).mockResolvedValue([] as never);
+        vi.mocked(listDataSourceCredentials).mockResolvedValue([
+            {
+                provider: "wanfang",
+                configured: true,
+                key_mask: "38704_****02cc",
+                status: "active",
+                updated_at: "2026-11-26T06:00:00Z",
+            },
+        ] as never);
+        vi.mocked(deleteDataSourceCredential).mockResolvedValue(
+            undefined as never,
+        );
+
+        const wrapper = mountView();
+        await flushPromises();
+
+        await wrapper.get('[data-test="wanfang-delete"]').trigger("click");
+        await flushPromises();
+        expect(
+            wrapper.find('[data-test="wanfang-confirm-delete"]').exists(),
+        ).toBe(true);
+
+        await wrapper
+            .get('[data-test="wanfang-confirm-delete-confirm"]')
+            .trigger("click");
+        await flushPromises();
+
+        expect(deleteDataSourceCredential).toHaveBeenCalledWith("wanfang");
+        expect(wrapper.get('[data-test="wanfang-byok-card"]').text()).toContain(
+            "未配置",
+        );
+    });
+
+    it("数据源状态加载失败时按未配置展示，不影响模型列表", async () => {
+        vi.mocked(listLLMCredentials).mockResolvedValue([] as never);
+        vi.mocked(listDataSourceCredentials).mockRejectedValue(
+            new Error("datasource 500"),
+        );
+
+        const wrapper = mountView();
+        await flushPromises();
+
+        expect(wrapper.find('[data-test="models-error"]').exists()).toBe(false);
+        expect(wrapper.get('[data-test="wanfang-byok-card"]').text()).toContain(
+            "未配置",
+        );
     });
 });

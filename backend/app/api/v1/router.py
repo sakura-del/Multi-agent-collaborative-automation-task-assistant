@@ -19,6 +19,7 @@ from app.api.v1.endpoints import (
     billing,
     citation_styles,
     conversations,
+    data_source_credentials,
     extractions,
     growth,
     health,
@@ -75,6 +76,8 @@ api_router.include_router(annotation_endpoints.router)
 api_router.include_router(api_keys.router)
 # 用户自带模型凭据（Issue #15 BYOK）：密钥加密存储，明文只进不出
 api_router.include_router(llm_credentials.router)
+# 用户自带文献数据源凭据（Issue #67 BYOK）：万方 Key 按用户加密存储，明文只进不出
+api_router.include_router(data_source_credentials.router)
 # 计费套餐（Phase 2 最后一项）：用量/套餐列表/手工开通
 api_router.include_router(billing.router)
 # 管理员看板（Issue #15 P2）：BYOK 渗透率，admin only、不走 API Key

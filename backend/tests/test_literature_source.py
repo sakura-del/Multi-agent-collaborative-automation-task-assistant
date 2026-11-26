@@ -101,6 +101,96 @@ class TestResolveLiteratureSource:
 
         assert isinstance(source, ArxivLiteratureSource)
 
+    def test_chinese_task_with_wfdata_key_defaults_to_wanfang(self, tmp_path: Path) -> None:
+        """Issue #67 BYOK：中文任务 + 用户自带万方 Key → 默认「万方 + OpenAlex」。"""
+        from app.tools.literature.openalex_search import OpenAlexSearchSource
+        from app.tools.literature.source_registry import MultiSourceLiteratureSource
+        from app.tools.literature.wanfang import WanfangSource
+
+        task = _Task(offline_dataset=False, output_language="zh")
+
+        source = resolve_literature_source(
+            task,
+            manifest_path=tmp_path / "missing.json",
+            wfdata_app_key="k-123",
+        )
+
+        assert isinstance(source, MultiSourceLiteratureSource)
+        assert isinstance(source.sources[0], WanfangSource)
+        assert isinstance(source.sources[1], OpenAlexSearchSource)
+
+    def test_chinese_task_without_wfdata_key_keeps_arxiv_default(self, tmp_path: Path) -> None:
+        """用户没配置万方 Key 时不得凭空启用万方：默认组合保持接入前行为。"""
+        from app.tools.literature.openalex_search import OpenAlexSearchSource
+        from app.tools.literature.source_registry import MultiSourceLiteratureSource
+
+        task = _Task(offline_dataset=False, output_language="zh")
+
+        source = resolve_literature_source(task, manifest_path=tmp_path / "missing.json")
+
+        assert isinstance(source, MultiSourceLiteratureSource)
+        assert type(source.sources[0]).__name__ == "_ArxivSource"
+        assert isinstance(source.sources[1], OpenAlexSearchSource)
+
+    def test_english_task_with_wfdata_key_keeps_arxiv_default(self, tmp_path: Path) -> None:
+        """英文任务即使有万方 Key 也不改默认组合（万方是中文源）。"""
+        from app.tools.literature.source_registry import MultiSourceLiteratureSource
+
+        task = _Task(offline_dataset=False, output_language="en")
+
+        source = resolve_literature_source(
+            task,
+            manifest_path=tmp_path / "missing.json",
+            wfdata_app_key="k-123",
+        )
+
+        assert isinstance(source, MultiSourceLiteratureSource)
+        assert type(source.sources[0]).__name__ == "_ArxivSource"
+
+    def test_explicit_wanfang_with_key_builds_wanfang_source(self, tmp_path: Path) -> None:
+        """显式选万方且用户有 Key：按顺序构建万方 + OpenAlex。"""
+        from app.tools.literature.source_registry import MultiSourceLiteratureSource
+        from app.tools.literature.wanfang import WanfangSource
+
+        task = _Task(offline_dataset=False, literature_sources=["wanfang", "openalex"])
+
+        source = resolve_literature_source(
+            task,
+            manifest_path=tmp_path / "missing.json",
+            wfdata_app_key="k-123",
+        )
+
+        assert isinstance(source, MultiSourceLiteratureSource)
+        assert isinstance(source.sources[0], WanfangSource)
+        assert len(source.sources) == 2
+
+    def test_explicit_wanfang_without_key_is_stripped(self, tmp_path: Path) -> None:
+        """显式选万方但用户没 Key：剔除万方，其余源照常（不让任务开头就 401）。"""
+        from app.tools.literature.openalex_search import OpenAlexSearchSource
+        from app.tools.literature.source_registry import MultiSourceLiteratureSource
+        from app.tools.literature.wanfang import WanfangSource
+
+        task = _Task(offline_dataset=False, literature_sources=["wanfang", "openalex"])
+
+        source = resolve_literature_source(task, manifest_path=tmp_path / "missing.json")
+
+        assert isinstance(source, MultiSourceLiteratureSource)
+        assert not any(isinstance(item, WanfangSource) for item in source.sources)
+        assert any(isinstance(item, OpenAlexSearchSource) for item in source.sources)
+
+    def test_explicit_only_wanfang_without_key_falls_back_to_defaults(self, tmp_path: Path) -> None:
+        """显式只选万方但没 Key：每个源都被剔除 → 回落默认免费源，任务仍可跑。"""
+        from app.tools.literature.openalex_search import OpenAlexSearchSource
+        from app.tools.literature.source_registry import MultiSourceLiteratureSource
+
+        task = _Task(offline_dataset=False, literature_sources=["wanfang"])
+
+        source = resolve_literature_source(task, manifest_path=tmp_path / "missing.json")
+
+        assert isinstance(source, MultiSourceLiteratureSource)
+        assert type(source.sources[0]).__name__ == "_ArxivSource"
+        assert isinstance(source.sources[1], OpenAlexSearchSource)
+
 
 class TestIsOfflineLiteratureTask:
     """R6：核验接线用同一条件判定「离线清单任务」（必须与源解析口径一致）。"""

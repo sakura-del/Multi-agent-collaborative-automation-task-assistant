@@ -357,6 +357,13 @@ class LiteratureReviewRequest(BaseModel):
     引用库是**用户导入的**（BibTeX/RIS）。两者同时为真时以引用库为准
     （用户显式选择优先），并在日志里记 warning。
     """
+    literature_sources: list[str] | None = Field(default=None, max_length=6)
+    """本次任务使用的文献检索源（Issue #67）。
+
+    ``None`` / 空 = 平台默认（中文任务且配置 WFDATA_APP_KEY 时「万方 + OpenAlex」，
+    否则「arXiv + OpenAlex」）。允许值见
+    ``app.tools.literature.source_registry.SOURCE_ALIASES``。
+    """
     verify_references: bool | None = None
     """本任务是否做外部引用核验（Issue #3）。
 

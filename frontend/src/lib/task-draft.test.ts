@@ -36,6 +36,7 @@ function draftValues(
     modelSource: "platform",
     selectedCredential: "",
     selectedDocuments: ["doc-1"],
+    literatureSources: [],
     ...overrides,
   };
 }

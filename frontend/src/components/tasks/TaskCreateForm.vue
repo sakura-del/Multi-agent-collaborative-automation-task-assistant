@@ -19,6 +19,7 @@ import {
 } from "@/lib/task-draft";
 import { getBillingUsage } from "@/api/billing";
 import { listCitationStyles } from "@/api/citation-styles";
+import { listDataSourceCredentials } from "@/api/data-source-credentials";
 import { listLLMCredentials } from "@/api/llm-credentials";
 import { getLibrarySummary } from "@/api/reference-library";
 import {
@@ -54,6 +55,28 @@ const TOPIC_MAX = 200;
 const KEYWORD_MAX = 10;
 const DOC_MIN = 1;
 const DOC_MAX = 50;
+
+// 检索文献源（Issue #67）：万方中文源需用户自带 App Key（BYOK），
+// 其余免费源无 Key 也可用。不勾选 = 由后端按语言与万方 Key 自动决定。
+interface SourceOption {
+    value: string;
+    label: string;
+    hint: string;
+    requiresWanfangKey?: boolean;
+}
+
+const SOURCE_OPTIONS: SourceOption[] = [
+    {
+        value: "wanfang",
+        label: "万方中文",
+        hint: "中文期刊 / 学位论文 / 会议（需自带万方 Key；每次检索约 ¥0.01，单任务最多 5 次）",
+        requiresWanfangKey: true,
+    },
+    { value: "openalex", label: "OpenAlex", hint: "免费开放学术元数据" },
+    { value: "arxiv", label: "arXiv", hint: "预印本（免费）" },
+    { value: "pubmed", label: "PubMed", hint: "生物医学文献（免费）" },
+    { value: "semantic_scholar", label: "Semantic Scholar", hint: "免费开放学术元数据" },
+];
 
 interface StyleOption {
     style_id: string;
@@ -96,6 +119,9 @@ const offlineDataset = ref(false);
 // null 表示摘要请求仍在加载中，避免数据尚未返回前误报「0 篇 / 引用库为空」
 const useReferenceLibrary = ref(false);
 const libraryCount = ref<number | null>(null);
+// 检索源选择（Issue #67）：空数组 = 交给后端自动决定；万方芯片依赖用户已配置 App Key
+const selectedSources = ref<string[]>([]);
+const hasWanfangKey = ref(false);
 // 引用核验默认关闭：与全局默认一致，避免用户无感知地引入外呼延迟（Issue #3 遗留项）
 const verifyReferences = ref(activePreset.value.defaults.verifyReferences);
 
@@ -184,6 +210,7 @@ function draftValues(): TaskCreateDraftValues {
         modelSource: modelSource.value,
         selectedCredential: selectedCredential.value,
         selectedDocuments: [...selectedDocuments.value],
+        literatureSources: [...selectedSources.value],
     };
 }
 
@@ -226,6 +253,10 @@ function applyDraft(values: TaskCreateDraftValues) {
     }
     selectedCredential.value = values.selectedCredential;
     selectedDocuments.value = values.selectedDocuments;
+    const knownSourceValues = new Set(SOURCE_OPTIONS.map((option) => option.value));
+    selectedSources.value = values.literatureSources.filter((name) =>
+        knownSourceValues.has(name),
+    );
 }
 
 // 挂载即恢复：恢复过程本身不标记 dirty（onMounted 里的接口默认值调整也不会
@@ -255,6 +286,19 @@ function goToImport() {
     goTo("/references/import");
 }
 
+/** 切换检索源；万方无 Key 时不可选（按钮已禁用，这里兜底防程序化选中） */
+function toggleSource(value: string) {
+    const option = SOURCE_OPTIONS.find((item) => item.value === value);
+    if (!option) return;
+    if (option.requiresWanfangKey && !hasWanfangKey.value) {
+        toastInfo("万方中文源需要先在「我的模型」设置页填写万方 App Key");
+        return;
+    }
+    selectedSources.value = selectedSources.value.includes(value)
+        ? selectedSources.value.filter((name) => name !== value)
+        : [...selectedSources.value, value];
+}
+
 /** 回到表单初始状态（不含接口派生值：styleOptions/libraryCount 等） */
 function resetToDefaults() {
     workflowPreset.value = DEFAULT_WORKFLOW_PRESET;
@@ -274,6 +318,7 @@ function resetToDefaults() {
     useReferenceLibrary.value = false;
     verifyReferences.value = activePreset.value.defaults.verifyReferences;
     selectedDocuments.value = [];
+    selectedSources.value = [];
     modelSource.value = "platform";
     selectedCredential.value = "";
     validationMessages.value = [];
@@ -303,12 +348,13 @@ const canSubmit = computed(() => !props.pending);
 onMounted(async () => {
     // 四个初始化接口彼此独立，改为并行加载并单独容错：
     // 避免引用样式列表慢或为空时阻塞/跳过引用库条数与自带模型列表（Issue #55）
-    const [stylesResult, summaryResult, credentialsResult, usageResult] =
+    const [stylesResult, summaryResult, credentialsResult, usageResult, sourcesResult] =
         await Promise.allSettled([
             listCitationStyles(),
             getLibrarySummary(),
             listLLMCredentials(),
             getBillingUsage(),
+            listDataSourceCredentials(),
         ]);
 
     if (
@@ -396,6 +442,23 @@ onMounted(async () => {
         }
     } else {
         credentials.value = [];
+    }
+
+    // 万方 BYOK 状态：接口失败一律按「没有 Key」处理（只是少一个可选源，不阻塞建任务）
+    if (sourcesResult.status === "fulfilled") {
+        const sourceRows = Array.isArray(sourcesResult.value)
+            ? sourcesResult.value
+            : [];
+        const wanfang = sourceRows.find(
+            (item) => item.provider === "wanfang",
+        );
+        hasWanfangKey.value = Boolean(wanfang?.configured);
+    } else {
+        hasWanfangKey.value = false;
+    }
+    // 草稿里勾过万方但 Key 已被删除/失效 → 剔除，避免提交一个必然被后端剔除的源
+    if (!hasWanfangKey.value && selectedSources.value.includes("wanfang")) {
+        selectedSources.value = selectedSources.value.filter((name) => name !== "wanfang");
     }
 });
 
@@ -723,6 +786,12 @@ async function handleSubmit() {
         reference_library: useReferenceLibrary.value,
         document_ids: [...selectedDocuments.value],
         verify_references: verifyReferences.value,
+        // 引用库/离线语料模式不传检索源；不选 = 后端按语言与万方 Key 自动决定
+        ...(!useReferenceLibrary.value &&
+        !offlineDataset.value &&
+        selectedSources.value.length > 0
+            ? { literature_sources: [...selectedSources.value] }
+            : {}),
         ...(isCitationSnowballing.value
             ? {
                   seed_dois: effectiveSeeds,
@@ -1042,6 +1111,71 @@ async function handleSubmit() {
                     />
                     <span>使用离线演示语料（冻结 10 篇，不访问 arXiv）</span>
                 </label>
+            </div>
+
+            <!-- 检索文献源（Issue #67）：万方中文源走用户自带 Key（BYOK） -->
+            <div
+                v-if="!useReferenceLibrary && !offlineDataset"
+                class="grid gap-1.5 border-t border-border/70 pt-3"
+            >
+                <span class="text-sm font-medium leading-none">检索文献源（选填）</span>
+                <div class="flex flex-wrap gap-1.5" role="group" aria-label="检索文献源">
+                    <button
+                        v-for="option in SOURCE_OPTIONS"
+                        :key="option.value"
+                        type="button"
+                        :data-test="`source-option-${option.value}`"
+                        :disabled="Boolean(option.requiresWanfangKey) && !hasWanfangKey"
+                        :aria-pressed="selectedSources.includes(option.value)"
+                        :title="option.hint"
+                        :class="[
+                            'rounded-md border px-2.5 py-1 text-xs transition-colors',
+                            selectedSources.includes(option.value)
+                                ? 'border-primary bg-primary/10 text-foreground'
+                                : 'border-border bg-background text-muted-foreground hover:text-foreground',
+                            Boolean(option.requiresWanfangKey) && !hasWanfangKey
+                                ? 'cursor-not-allowed opacity-50'
+                                : '',
+                        ]"
+                        @click="toggleSource(option.value)"
+                    >
+                        {{ option.label }}
+                    </button>
+                </div>
+                <p
+                    v-if="hasWanfangKey"
+                    data-test="wanfang-key-hint"
+                    class="text-xs text-muted-foreground"
+                >
+                    已检测到你的万方 Key，中文综述将自动启用万方 + OpenAlex。
+                </p>
+                <p
+                    v-else
+                    data-test="wanfang-key-missing"
+                    class="text-xs leading-relaxed text-muted-foreground"
+                >
+                    万方中文源需要自带 App Key：
+                    <a
+                        href="/settings/models#literature-sources"
+                        class="text-primary underline underline-offset-2 hover:opacity-85"
+                        @click.prevent="goTo('/settings/models#literature-sources')"
+                    >
+                        去设置填写 Key
+                    </a>
+                    <span class="mx-1">·</span>
+                    <a
+                        href="https://www.wfdata.com/skill-api?tab=mine"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        data-test="wanfang-get-key-link"
+                        class="text-primary underline underline-offset-2 hover:opacity-85"
+                    >
+                        获取万方 Key ↗
+                    </a>
+                </p>
+                <p class="text-xs text-muted-foreground">
+                    不选 = 自动：中文主题且已配置万方 Key 时用万方 + OpenAlex，否则 arXiv + OpenAlex。
+                </p>
             </div>
         </div>
         </template>

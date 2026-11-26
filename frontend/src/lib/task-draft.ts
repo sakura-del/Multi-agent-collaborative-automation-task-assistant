@@ -40,6 +40,8 @@ export interface TaskCreateDraftValues {
   modelSource: string;
   selectedCredential: string;
   selectedDocuments: string[];
+  /** 检索文献源白名单（Issue #67 万方 BYOK 芯片），空数组 = 自动 */
+  literatureSources: string[];
 }
 
 export interface TaskCreateDraft {
@@ -125,6 +127,7 @@ function sanitizeValues(raw: unknown): TaskCreateDraftValues {
     modelSource: text(source.modelSource),
     selectedCredential: text(source.selectedCredential),
     selectedDocuments: stringList(source.selectedDocuments),
+    literatureSources: stringList(source.literatureSources),
   };
 }
 

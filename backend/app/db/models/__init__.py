@@ -20,6 +20,8 @@
   annotation.py:  TASK_ANNOTATION（Phase 2：导师批注，段落指纹锚点）
   api_key.py:     API_KEY（Phase 2：开放 API / MCP 凭证，只存哈希）
   llm_credential.py: LLM_CREDENTIAL（Issue #15：用户自带的模型密钥，加密存储）
+  data_source_credential.py: DATA_SOURCE_CREDENTIAL
+                  （Issue #67：用户自带的文献数据源密钥，加密存储；每用户每源一条）
   billing.py:     PLAN / SUBSCRIPTION / USAGE_COUNTER
                   （Phase 2：计费套餐——篇数为主、token 为辅）
   audit.py:       AUDIT_LOG（Issue #25：关键操作审计）
@@ -37,6 +39,7 @@ from app.db.models.audit import AuditLog
 from app.db.models.billing import Plan, Subscription, UsageCounter
 from app.db.models.citation_style import CitationStyle
 from app.db.models.conversation import Conversation, Message
+from app.db.models.data_source_credential import DataSourceCredential
 from app.db.models.email_token import EmailToken
 from app.db.models.extraction import ExtractionCell, ExtractionTable
 from app.db.models.feedback import HumanFeedback
@@ -65,6 +68,7 @@ __all__ = [
     "AuditLog",
     "CitationStyle",
     "Conversation",
+    "DataSourceCredential",
     "DocChunk",
     "EmailToken",
     "ExecutionLog",

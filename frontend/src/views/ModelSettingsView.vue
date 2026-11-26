@@ -20,6 +20,11 @@ import { Label } from "@/components/ui/label";
 import { useDelayedLoading } from "@/composables/useDelayedLoading";
 import { toastSuccess } from "@/lib/toast";
 import {
+    deleteDataSourceCredential,
+    listDataSourceCredentials,
+    saveDataSourceCredential,
+} from "@/api/data-source-credentials";
+import {
     createLLMCredential,
     deleteLLMCredential,
     listLLMCredentials,
@@ -30,6 +35,7 @@ import {
     updateLLMCredential,
 } from "@/api/llm-credentials";
 import type {
+    DataSourceCredentialInfo,
     LLMCredentialInfo,
     LLMProbeResult,
     LLMProviderKey,
@@ -208,6 +214,7 @@ const filteredCredentials = computed(() => {
 
 onMounted(() => {
     void refresh();
+    void loadWanfangCredential();
 });
 
 /** 下拉里「自定义」的哨兵值：不能与真实模型名冲突。 */
@@ -601,6 +608,65 @@ async function confirmRemoveCredential(credential: LLMCredentialInfo) {
         error.value = (err as Error).message || "删除失败";
     } finally {
         busyId.value = null;
+    }
+}
+
+// ===== 万方中文文献源（Issue #67 BYOK）=====
+// 万方按基础检索次数计费（约 ¥0.01/次），Key 由用户自带并加密存储；
+// 不配置也能用免费的 arXiv / OpenAlex，只是中文文献覆盖会差一些。
+const wanfangCredential = ref<DataSourceCredentialInfo | null>(null);
+const wanfangKeyInput = ref("");
+const wanfangSaving = ref(false);
+const wanfangError = ref<string | null>(null);
+const wanfangMessage = ref<string | null>(null);
+const confirmRemoveWanfang = ref(false);
+
+async function loadWanfangCredential() {
+    try {
+        const list = await listDataSourceCredentials();
+        wanfangCredential.value =
+            list.find((item) => item.provider === "wanfang") ?? null;
+    } catch {
+        // 数据源状态加载失败不阻塞模型凭据页：卡片按「未配置」展示
+        wanfangCredential.value = null;
+    }
+}
+
+async function saveWanfangKey() {
+    const apiKey = wanfangKeyInput.value.trim();
+    if (!apiKey) {
+        wanfangError.value = "请填写万方 App Key";
+        return;
+    }
+    wanfangSaving.value = true;
+    wanfangError.value = null;
+    wanfangMessage.value = null;
+    try {
+        wanfangCredential.value = await saveDataSourceCredential("wanfang", apiKey);
+        wanfangKeyInput.value = "";
+        wanfangMessage.value = "已保存，密钥加密存储（只显示脱敏掩码）";
+        toastSuccess("万方 Key 已保存");
+    } catch (err) {
+        wanfangError.value = (err as Error).message || "保存失败";
+    } finally {
+        wanfangSaving.value = false;
+    }
+}
+
+async function removeWanfangKey() {
+    wanfangSaving.value = true;
+    wanfangError.value = null;
+    wanfangMessage.value = null;
+    try {
+        await deleteDataSourceCredential("wanfang");
+        confirmRemoveWanfang.value = false;
+        wanfangCredential.value = null;
+        wanfangMessage.value = "已删除万方 Key，后续任务回落免费源";
+        toastSuccess("已删除万方 Key");
+    } catch (err) {
+        wanfangError.value = (err as Error).message || "删除失败";
+    } finally {
+        wanfangSaving.value = false;
     }
 }
 
@@ -1267,5 +1333,131 @@ function statusOf(credential: LLMCredentialInfo): {
                 </select>
             </label>
         </div>
+    </section>
+
+    <!-- ===== 万方中文文献源（Issue #67 BYOK）===== -->
+    <section
+        id="literature-sources"
+        data-test="wanfang-byok-card"
+        class="mt-6 rounded-xl border border-border bg-card p-5"
+    >
+        <div class="flex flex-wrap items-start justify-between gap-2">
+            <div>
+                <h2 class="text-base font-semibold tracking-tight">万方中文文献源（BYOK）</h2>
+                <p class="mt-1 text-xs leading-5 text-muted-foreground">
+                    中文综述默认只用免费源（arXiv / OpenAlex）。配置万方 App Key 后，中文主题会自动加入万方期刊、学位论文与会议论文；密钥加密存储，只显示脱敏掩码。
+                </p>
+            </div>
+            <Badge :variant="wanfangCredential?.configured ? 'success' : 'muted'">
+                {{ wanfangCredential?.configured ? "已配置" : "未配置" }}
+            </Badge>
+        </div>
+
+        <ol class="mt-3 list-decimal space-y-1 pl-5 text-xs leading-5 text-muted-foreground">
+            <li>打开万方 AI HUB「我的订阅」页，登录后查看 / 创建 App Key。</li>
+            <li>复制 App Key（形如 <code class="rounded bg-muted px-1">38704_xxxxxxxx</code>）。</li>
+            <li>粘贴到下方并保存；建任务时勾选「万方中文」（不勾选时中文主题也会自动启用万方 + OpenAlex）。</li>
+        </ol>
+        <a
+            href="https://www.wfdata.com/skill-api?tab=mine"
+            target="_blank"
+            rel="noopener noreferrer"
+            data-test="wanfang-get-key-link"
+            class="mt-2 inline-block text-xs text-primary underline underline-offset-2 hover:opacity-85"
+        >
+            前往万方 AI HUB 获取 App Key ↗
+        </a>
+
+        <ErrorBanner
+            :message="wanfangError"
+            testid="wanfang-error"
+            class="mt-3 mb-0"
+            @dismiss="wanfangError = null"
+        />
+        <p
+            v-if="wanfangMessage"
+            data-test="wanfang-message"
+            class="mt-2 text-xs text-muted-foreground"
+        >
+            {{ wanfangMessage }}
+        </p>
+
+        <div v-if="wanfangCredential?.configured" class="mt-3 grid gap-3">
+            <div class="flex flex-wrap items-center gap-3">
+                <p class="text-xs text-muted-foreground">
+                    当前 Key：
+                    <code class="rounded bg-muted px-1">{{ wanfangCredential.key_mask }}</code>
+                    <span v-if="wanfangCredential.updated_at">
+                        （更新于 {{ wanfangCredential.updated_at.slice(0, 10) }}）
+                    </span>
+                </p>
+                <Button
+                    v-if="!confirmRemoveWanfang"
+                    data-test="wanfang-delete"
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    :disabled="wanfangSaving"
+                    @click="confirmRemoveWanfang = true"
+                >
+                    <Trash2 />
+                    删除 Key
+                </Button>
+            </div>
+            <ConfirmBar
+                v-if="confirmRemoveWanfang"
+                data-test="wanfang-confirm-delete"
+                title="确认删除万方 Key？"
+                consequence="删除后任务不再调用万方，中文主题自动回落 arXiv + OpenAlex。"
+                confirm-label="确认删除"
+                :loading="wanfangSaving"
+                confirm-testid="wanfang-confirm-delete-confirm"
+                cancel-testid="wanfang-confirm-delete-cancel"
+                @cancel="confirmRemoveWanfang = false"
+                @confirm="removeWanfangKey"
+            />
+            <div class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <Label for="wanfang-key-replace">更换 Key</Label>
+                <Input
+                    id="wanfang-key-replace"
+                    v-model="wanfangKeyInput"
+                    data-test="wanfang-key"
+                    type="password"
+                    placeholder="粘贴新的万方 App Key"
+                    class="h-8 max-w-xs flex-1"
+                />
+                <Button
+                    data-test="wanfang-save"
+                    type="button"
+                    size="sm"
+                    :disabled="wanfangSaving"
+                    @click="saveWanfangKey"
+                >
+                    {{ wanfangSaving ? "保存中…" : "保存" }}
+                </Button>
+            </div>
+        </div>
+        <div v-else class="mt-3 flex flex-wrap items-center gap-2">
+            <Input
+                v-model="wanfangKeyInput"
+                data-test="wanfang-key"
+                type="password"
+                placeholder="粘贴万方 App Key（如 38704_xxxxxxxx）"
+                class="h-8 max-w-sm flex-1"
+            />
+            <Button
+                data-test="wanfang-save"
+                type="button"
+                size="sm"
+                :disabled="wanfangSaving"
+                @click="saveWanfangKey"
+            >
+                {{ wanfangSaving ? "保存中…" : "保存 Key" }}
+            </Button>
+        </div>
+
+        <p class="mt-3 text-xs text-muted-foreground">
+            计费：基础检索约 ¥0.01/次，单任务最多 5 次（封顶约 ¥0.05）；文献详情与全文向量检索不会自动调用。
+        </p>
     </section>
 </template>

@@ -1145,6 +1145,7 @@ describe("TaskCreateForm 草稿保留", () => {
             modelSource: "platform",
             selectedCredential: "",
             selectedDocuments: [],
+            literatureSources: [],
         });
 
         const wrapper = mountForm({ draftUserId: "user-draft-restore" });
@@ -1179,6 +1180,7 @@ describe("TaskCreateForm 草稿保留", () => {
             modelSource: "platform",
             selectedCredential: "",
             selectedDocuments: [],
+            literatureSources: [],
         });
 
         const wrapper = mountForm({ draftUserId: "user-draft-discard" });
@@ -1242,6 +1244,7 @@ describe("TaskCreateForm 草稿保留", () => {
             modelSource: "platform",
             selectedCredential: "",
             selectedDocuments: [],
+            literatureSources: [],
         });
 
         const wrapper = mountForm({ draftUserId: "user-draft-empty-library" });
@@ -1250,5 +1253,90 @@ describe("TaskCreateForm 草稿保留", () => {
         const checkbox = wrapper.find('[data-test="reference-library"]');
         // api.get 全部 reject → 摘要失败 → libraryCount = 0 → 禁用且取消勾选
         expect((checkbox.element as HTMLInputElement).checked).toBe(false);
+    });
+});
+
+// ===== 检索文献源（Issue #67 万方 BYOK）=====
+// 万方需要用户自带 App Key：没有 Key 时芯片禁用并给出设置入口，
+// 有 Key 时勾选要把 literature_sources 透传给后端。
+function mockDataSourceApi(options: { wanfangConfigured: boolean }) {
+    vi.mocked(api.get).mockImplementation((async (url: string) => {
+        if (url === "/data-source-credentials") {
+            return {
+                data: [
+                    {
+                        provider: "wanfang",
+                        configured: options.wanfangConfigured,
+                        key_mask: options.wanfangConfigured ? "38704_****02cc" : null,
+                        status: options.wanfangConfigured ? "active" : null,
+                        updated_at: null,
+                    },
+                ],
+            };
+        }
+        throw new Error("接口不可用");
+    }) as never);
+}
+
+describe("TaskCreateForm · 检索文献源（万方 BYOK）", () => {
+    beforeEach(() => {
+        vi.mocked(api.get).mockRejectedValue(new Error("样式列表不可用"));
+    });
+
+    it("未配置万方 Key 时芯片禁用，并给出「去设置」与「获取 Key」入口", async () => {
+        const wrapper = mountForm();
+        await flushPromises();
+
+        const wanfangChip = wrapper.find('[data-test="source-option-wanfang"]');
+        expect((wanfangChip.element as HTMLButtonElement).disabled).toBe(true);
+        // 免费源仍然可选
+        expect(
+            (wrapper.find('[data-test="source-option-openalex"]').element as HTMLButtonElement)
+                .disabled,
+        ).toBe(false);
+
+        const missing = wrapper.find('[data-test="wanfang-key-missing"]');
+        expect(missing.exists()).toBe(true);
+        expect(missing.text()).toContain("去设置填写 Key");
+
+        const getKeyLink = wrapper.find('[data-test="wanfang-get-key-link"]');
+        expect(getKeyLink.attributes("href")).toBe(
+            "https://www.wfdata.com/skill-api?tab=mine",
+        );
+        expect(getKeyLink.attributes("target")).toBe("_blank");
+        expect(getKeyLink.attributes("rel")).toContain("noopener");
+    });
+
+    it("已配置万方 Key 时芯片可选，提交时透传 literature_sources", async () => {
+        mockDataSourceApi({ wanfangConfigured: true });
+        const wrapper = mountForm();
+        await flushPromises();
+
+        expect(wrapper.find('[data-test="wanfang-key-hint"]').exists()).toBe(true);
+        const wanfangChip = wrapper.find('[data-test="source-option-wanfang"]');
+        expect((wanfangChip.element as HTMLButtonElement).disabled).toBe(false);
+
+        await wanfangChip.trigger("click");
+        expect(wanfangChip.attributes("aria-pressed")).toBe("true");
+
+        await fillValidForm(wrapper);
+        await wrapper.find('[data-test="submit"]').trigger("click");
+
+        const payload = wrapper.emitted("submit")?.[0]?.[0] as {
+            literature_sources?: string[];
+        };
+        expect(payload.literature_sources).toEqual(["wanfang"]);
+    });
+
+    it("没有勾选检索源时 payload 不携带 literature_sources（交给后端自动决定）", async () => {
+        mockDataSourceApi({ wanfangConfigured: true });
+        const wrapper = mountForm();
+        await flushPromises();
+
+        await fillValidForm(wrapper);
+        await wrapper.find('[data-test="submit"]').trigger("click");
+
+        const payload = wrapper.emitted("submit")?.[0]?.[0] as Record<string, unknown>;
+        expect(payload.literature_sources).toBeUndefined();
     });
 });

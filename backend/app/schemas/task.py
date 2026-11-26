@@ -67,6 +67,14 @@ class TaskCreate(BaseModel):
     `True` 时检索节点从引用库取文献、完全不外呼。引用库为空时任务会失败并给出
     可读原因（不是静默回退到外部检索 —— 那会让用户以为在用自己导入的文献）。
     """
+    literature_sources: list[str] | None = Field(default=None, max_length=6)
+    """指定本次任务使用的文献检索源（Issue #67）。
+
+    `None` / 空列表 = 平台默认（中文任务且配置了万方 Key 时为「万方 + OpenAlex」，
+    否则「arXiv + OpenAlex」）。取值见 `app.tools.literature.source_registry.SOURCE_ALIASES`
+    （如 "wanfang" / "openalex" / "pubmed" / "semantic_scholar"）。未知源名不会让任务
+    直接失败：多源构建失败时回退单 arXiv 源（可跑优先）。
+    """
     verify_references: bool | None = None
     """是否做外部引用核验（Issue #3）：None=沿用全局配置；True=强制核验（含离线任务）；False=跳过。"""
 

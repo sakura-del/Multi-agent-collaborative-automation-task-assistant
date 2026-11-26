@@ -33,7 +33,8 @@ DEFAULT_SOURCE_NAMES: tuple[str, ...] = ("arxiv", "openalex")
 ARXIV_MIN_INTERVAL_SECONDS = 3.0
 ARXIV_CACHE_TTL_SECONDS = 60.0
 
-#: 名字 / 别名 → 归一化源名（`s2` 与两种写法都指向 Semantic Scholar）
+#: 名字 / 别名 → 归一化源名（`s2` 与两种写法都指向 Semantic Scholar；
+#: `wf` / `wfdata` 是万方的短名，Issue #67）
 SOURCE_ALIASES: dict[str, str] = {
     "arxiv": "arxiv",
     "openalex": "openalex",
@@ -41,6 +42,9 @@ SOURCE_ALIASES: dict[str, str] = {
     "semantic-scholar": "semantic_scholar",
     "s2": "semantic_scholar",
     "pubmed": "pubmed",
+    "wanfang": "wanfang",
+    "wf": "wanfang",
+    "wfdata": "wanfang",
 }
 
 _DOI_URL_PATTERN = re.compile(r"^https?://(?:dx\.)?doi\.org/(?P<doi>.+)$", re.IGNORECASE)
@@ -243,6 +247,7 @@ def build_sources(
     client: httpx.AsyncClient | None = None,
     mailto: str = "",
     s2_api_key: str = "",
+    wfdata_app_key: str = "",
 ) -> list[LiteratureSource]:
     """按名字构造文献源（别名归一、重复名字去重）；未知名字 → `ValidationException`。"""
     sources: list[LiteratureSource] = []
@@ -262,6 +267,10 @@ def build_sources(
             from app.tools.literature.semantic_scholar import SemanticScholarSource
 
             sources.append(SemanticScholarSource(client=client, api_key=s2_api_key))
+        elif canonical == "wanfang":
+            from app.tools.literature.wanfang import WanfangSource
+
+            sources.append(WanfangSource(client=client, app_key=wfdata_app_key))
         else:  # pubmed
             from app.tools.literature.pubmed import PubMedSource
 
@@ -276,10 +285,17 @@ def build_multi_source(
     client: httpx.AsyncClient | None = None,
     mailto: str = "",
     s2_api_key: str = "",
+    wfdata_app_key: str = "",
 ) -> MultiSourceLiteratureSource:
     """便捷构造：`build_sources(names)` + `MultiSourceLiteratureSource`。"""
     return MultiSourceLiteratureSource(
-        build_sources(names, client=client, mailto=mailto, s2_api_key=s2_api_key),
+        build_sources(
+            names,
+            client=client,
+            mailto=mailto,
+            s2_api_key=s2_api_key,
+            wfdata_app_key=wfdata_app_key,
+        ),
         per_source_limit=per_source_limit,
     )
 

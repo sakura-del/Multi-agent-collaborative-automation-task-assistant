@@ -870,7 +870,11 @@ class TaskExecution:
         await self._bind_task_llm(task)
         source_session = self._session_factory()
         try:
-            source = resolve_literature_source(task, session=source_session)
+            # Issue #67 BYOK：补检索同样用用户自己配置的万方 Key
+            wfdata_app_key = await self._load_wfdata_app_key(source_session, task)
+            source = resolve_literature_source(
+                task, session=source_session, wfdata_app_key=wfdata_app_key
+            )
             if source is None:
                 raise ValidationException("任务没有可用的文献源，无法执行空白补检索")
             bound_source = SessionBoundSource(source, source_session)
@@ -963,7 +967,11 @@ class TaskExecution:
             async def source_factory(_context: Any) -> Any:
                 source_session = self._session_factory()
                 try:
-                    source = resolve_literature_source(task, session=source_session)
+                    # Issue #67 BYOK：刷新检索同样用用户自己配置的万方 Key
+                    wfdata_app_key = await self._load_wfdata_app_key(source_session, task)
+                    source = resolve_literature_source(
+                        task, session=source_session, wfdata_app_key=wfdata_app_key
+                    )
                 except Exception:
                     await source_session.close()
                     raise
@@ -2025,7 +2033,13 @@ class TaskExecution:
             # 不用 `async with` 包整个执行流程：执行可能持续数分钟，
             # 长事务会占住连接；这里只把它传下去，读取时由 source 自己发查询。
             async with self._session_factory() as source_session:
-                workflow = self._literature_execution_workflow(task, source_session=source_session)
+                # Issue #67 BYOK：万方 Key 属于当前用户，解密后只在内存里传递
+                wfdata_app_key = await self._load_wfdata_app_key(source_session, task)
+                workflow = self._literature_execution_workflow(
+                    task,
+                    source_session=source_session,
+                    wfdata_app_key=wfdata_app_key,
+                )
                 if workflow is not None:
                     scheduler = TaskScheduler(
                         agent_factory=self._literature_agent_factory(workflow, task),
@@ -2134,14 +2148,47 @@ class TaskExecution:
         """构造规划用工作流（Task 3 只接规划；执行接线见 `_literature_execution_workflow`）。"""
         return LiteratureReviewWorkflow(planner=self.container.create_planner())
 
+    async def _load_wfdata_app_key(self, session: Any, task: Any) -> str:
+        """读取并解密当前任务用户的万方 App Key（Issue #67 BYOK）。
+
+        - 未配置 / 已停用 → `""`（中文任务回落免费源，不报错）；
+        - 解密失败（主密钥轮换、密文损坏）→ 记 warning 后 `""`：
+          **数据源凭据坏了不该让整个综述任务失败**，跳过万方即可；
+        - 返回的明文只在单次执行的内存里存在，不写日志、不进 task.config。
+        """
+        user_id = getattr(task, "user_id", None)
+        if user_id is None:
+            return ""
+        try:
+            from app.security.data_source_credential_service import (
+                DataSourceCredentialService,
+            )
+
+            key = await DataSourceCredentialService().get_decrypted_key(session, user_id, "wanfang")
+        except Exception as exc:  # 解密失败 / 主密钥缺失 / 表未迁移
+            logger.warning(
+                "wanfang_credential_unavailable",
+                task_id=str(getattr(task, "id", "")),
+                error=str(exc),
+            )
+            return ""
+        return (key or "").strip()
+
     def _literature_execution_workflow(
-        self, task: Any | None, *, source_session: Any | None = None
+        self,
+        task: Any | None,
+        *,
+        source_session: Any | None = None,
+        wfdata_app_key: str = "",
     ) -> LiteratureReviewWorkflow | None:
         """文献任务且容器提供知识库时，返回证据约束执行工作流；否则 None（走通用 Agent）。
 
         `source_session` 用于引用库文献源（`reference_library=true` 时需要 DB 访问）。
         不传时引用库任务会抛 `ReferenceLibraryUnavailableError` —— 这是有意的：
         **绝不静默回退到外部检索**（否则用户以为在用自己导入的文献）。
+
+        `wfdata_app_key` 是当前用户自带的万方 Key（已解密，Issue #67 BYOK）。
+        只放在内存里传参，**不写进 task.config**：config 会随任务落库并被前端快照读取。
         """
         if task is None or getattr(task, "task_type", "") != "literature_review":
             return None
@@ -2167,6 +2214,7 @@ class TaskExecution:
                 task,
                 fallback=self.container.literature_source,
                 session=source_session,
+                wfdata_app_key=wfdata_app_key,
             ),
             # 引用真实性核验（Issue #3）：核验器未启用或离线任务（R6）时为 None
             reference_verifier=self._reference_verifier_for_task(task),
