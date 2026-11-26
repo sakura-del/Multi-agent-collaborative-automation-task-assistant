@@ -11,6 +11,19 @@ import { saveTaskDraft, taskDraftStorageKey } from "@/lib/task-draft";
 // 真实渲染 TaskCreateForm 时它会在 onMounted 拉「引用库可用篇数 / 引用样式 /
 // 模型凭据」。单测里不能让它发真请求（happy-dom 会报 AsyncTaskManager 中止的
 // 未处理拒绝）。
+const getDraftSpy = vi.fn(async () => null as unknown);
+vi.mock("@/api/tasks", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/api/tasks")>();
+  return {
+    ...actual,
+    taskApi: {
+      ...actual.taskApi,
+      getDraft: () => getDraftSpy(),
+      saveDraft: vi.fn(async () => ({ payload: {}, revision: 1, updated_at: "" })),
+      deleteDraft: vi.fn(async () => undefined),
+    },
+  };
+});
 vi.mock("@/api/reference-library", () => ({
   getLibrarySummary: vi.fn(async () => ({ total: 0, usable_as_source: 0 })),
 }));
@@ -19,6 +32,12 @@ vi.mock("@/api/citation-styles", () => ({
 }));
 vi.mock("@/api/llm-credentials", () => ({
   listLLMCredentials: vi.fn(async () => []),
+}));
+vi.mock("@/api/billing", () => ({
+  getBillingUsage: vi.fn(async () => null),
+}));
+vi.mock("@/api/data-source-credentials", () => ({
+  listDataSourceCredentials: vi.fn(async () => []),
 }));
 
 /**
@@ -556,6 +575,8 @@ describe("任务创建草稿保留", () => {
 
   beforeEach(() => {
     localStorage.clear();
+    getDraftSpy.mockReset();
+    getDraftSpy.mockResolvedValue(null);
   });
 
   it("存在未提交草稿时自动展开表单并回填内容", async () => {
@@ -592,5 +613,26 @@ describe("任务创建草稿保留", () => {
 
     expect(store.create).toHaveBeenCalledTimes(1);
     expect(localStorage.getItem(taskDraftStorageKey(draftUser.id))).toBeNull();
+  });
+
+  it("本地无草稿但云端存在非空草稿时自动展开表单并恢复内容（Issue #68）", async () => {
+    getDraftSpy.mockResolvedValue({
+      payload: {
+        workflow_preset: "literature_review",
+        topic: "另一台设备填写并保存到云端的主题",
+        keywords: ["CrossDevice"],
+      },
+      revision: 2,
+      updated_at: "2026-11-26T09:20:00Z",
+    });
+
+    const wrapper = await mountWith([task()], { realForm: true, user: draftUser });
+    await flushPromises();
+
+    expect(wrapper.find('[data-test="draft-restored"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="draft-restored"]').text()).toContain("已恢复云端草稿");
+    expect((wrapper.get('[data-test="topic"]').element as HTMLInputElement).value).toBe(
+      "另一台设备填写并保存到云端的主题",
+    );
   });
 });

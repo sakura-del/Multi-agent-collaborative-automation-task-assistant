@@ -4,10 +4,14 @@ import {
   TASK_DRAFT_TTL_MS,
   TASK_DRAFT_VERSION,
   clearTaskDraft,
+  draftFingerprint,
+  fromCloudDraftPayload,
   hasTaskDraft,
+  isDraftEmpty,
   loadTaskDraft,
   saveTaskDraft,
   taskDraftStorageKey,
+  toCloudDraftPayload,
   type TaskCreateDraftValues,
 } from "@/lib/task-draft";
 
@@ -154,5 +158,53 @@ describe("task-draft 草稿存取", () => {
     expect(() => loadTaskDraft("u-1")).not.toThrow();
     expect(loadTaskDraft("u-1")).toBeNull();
     getItem.mockRestore();
+  });
+
+  it("保存/读取云端同步元数据 syncedRevision 与 dirty，并向后兼容旧 localStorage", () => {
+    saveTaskDraft("u-meta", draftValues(), { syncedRevision: 4, dirty: false });
+    const loaded = loadTaskDraft("u-meta")!;
+    expect(loaded.syncedRevision).toBe(4);
+    expect(loaded.dirty).toBe(false);
+
+    // 模拟旧格式 localStorage（不含 syncedRevision / dirty）
+    localStorage.setItem(
+      taskDraftStorageKey("u-legacy"),
+      JSON.stringify({
+        version: TASK_DRAFT_VERSION,
+        savedAt: new Date().toISOString(),
+        values: draftValues(),
+      }),
+    );
+    const legacy = loadTaskDraft("u-legacy")!;
+    expect(legacy.syncedRevision).toBe(0);
+    expect(legacy.dirty).toBe(true);
+  });
+
+  it("toCloudDraftPayload / fromCloudDraftPayload 往返转换与内容指纹、空草稿判定", () => {
+    const base = draftValues();
+    const cloud = toCloudDraftPayload(base);
+    expect(cloud.topic).toBe(base.topic);
+    expect(cloud.keywords).toEqual(base.keywords);
+    expect(cloud.document_ids).toEqual(["doc-1"]);
+    expect(cloud.output_language).toBe("zh");
+
+    const restored = fromCloudDraftPayload(cloud as Record<string, unknown>);
+    expect(restored.topic).toBe(base.topic);
+    expect(restored.keywords).toEqual(base.keywords);
+    expect(restored.selectedDocuments).toEqual(["doc-1"]);
+
+    expect(draftFingerprint(base)).toBe(draftFingerprint({ ...base }));
+    expect(isDraftEmpty(base)).toBe(false);
+
+    const empty = draftValues({
+      topic: "   ",
+      keywords: [],
+      keywordDraft: "",
+      draftText: "",
+      seedDois: [],
+      seedDraft: "",
+      selectedDocuments: [],
+    });
+    expect(isDraftEmpty(empty)).toBe(true);
   });
 });

@@ -15,11 +15,11 @@ import { Input } from "@/components/ui/input";
 import { Pagination } from "@/components/ui/pagination";
 import { useDelayedLoading } from "@/composables/useDelayedLoading";
 import { trackEvent } from "@/api/growth";
-import { hasTaskDraft } from "@/lib/task-draft";
+import { taskApi, type TaskStatusGroup } from "@/api/tasks";
+import { fromCloudDraftPayload, hasTaskDraft, isDraftEmpty } from "@/lib/task-draft";
 import { useAuthStore } from "@/stores/auth";
 import { useKnowledgeStore } from "@/stores/knowledge";
 import { useTaskStore } from "@/stores/tasks";
-import type { TaskStatusGroup } from "@/api/tasks";
 import type { TaskCreate, TaskStatus, TaskSummary } from "@/api/types";
 import {
   formatDateTime,
@@ -63,11 +63,22 @@ const showSkeleton = useDelayedLoading(() => store.listLoading && !store.items.l
 const formRef = ref<InstanceType<typeof TaskCreateForm> | null>(null);
 const draftUserId = computed(() => auth.user?.id ?? null);
 
-/** 有未提交草稿时自动展开表单：用户从导入文献页回来应当看到原来的内容 */
-function revealDraftIfAny() {
+/** 有未提交草稿（本地或云端）时自动展开表单：跨页面或跨设备回来都应看到原内容 */
+async function revealDraftIfAny() {
   if (showForm.value) return;
-  if (hasTaskDraft(auth.user?.id)) {
+  const userId = auth.user?.id ?? null;
+  if (hasTaskDraft(userId)) {
     showForm.value = true;
+    return;
+  }
+  if (!userId) return;
+  try {
+    const cloud = await taskApi.getDraft();
+    if (cloud && !showForm.value && !isDraftEmpty(fromCloudDraftPayload(cloud.payload ?? {}))) {
+      showForm.value = true;
+    }
+  } catch {
+    /* 云端草稿拉取失败不阻塞任务列表 */
   }
 }
 
@@ -88,13 +99,13 @@ function toggleCreateForm() {
 
 onMounted(() => {
   void refresh(1);
-  revealDraftIfAny();
+  void revealDraftIfAny();
 });
 
 // 登录态可能晚于首屏就绪（缓存用户/会话校验）：用户就绪后再检查一次草稿
 watch(
   () => auth.user?.id ?? null,
-  () => revealDraftIfAny(),
+  () => void revealDraftIfAny(),
 );
 
 /** 视图筛选值 → 后端状态分组（写法不同：needs-me vs needs_me）。 */

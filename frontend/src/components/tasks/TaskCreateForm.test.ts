@@ -9,6 +9,7 @@ vi.mock("@/api/client", () => ({
     default: {
         get: vi.fn(),
         post: vi.fn(),
+        put: vi.fn(),
         delete: vi.fn(),
     },
 }));
@@ -1453,5 +1454,259 @@ describe("AI 智能拆分关键词（Issue #70）", () => {
         expect(new Set(lastPayload.existing_keywords).size).toBe(
             lastPayload.existing_keywords.length,
         );
+    });
+});
+
+describe("任务创建草稿跨设备云端同步（Issue #68）", () => {
+    beforeEach(() => {
+        localStorage.clear();
+        vi.useRealTimers();
+        vi.mocked(api.get).mockRejectedValue(new Error("样式列表不可用"));
+        vi.mocked(api.post).mockReset();
+        vi.mocked(api.put).mockReset();
+        vi.mocked(api.delete).mockReset();
+    });
+
+    it("本地无草稿时拉取云端草稿恢复，展示「已恢复云端草稿」提示并回填内容", async () => {
+        vi.mocked(api.get).mockImplementation(async (url: string) => {
+            if (url === "/tasks/draft") {
+                return {
+                    data: {
+                        payload: {
+                            workflow_preset: "literature_review",
+                            topic: "云端同步过来的综述主题",
+                            keywords: ["CloudDraft", "RAG"],
+                            output_language: "en",
+                            max_documents: 25,
+                        },
+                        revision: 3,
+                        updated_at: "2026-11-26T09:00:00Z",
+                    },
+                };
+            }
+            throw new Error("other endpoint unavailable");
+        });
+
+        const wrapper = mountForm({ draftUserId: "user-cloud-restore" });
+        await flushPromises();
+
+        const banner = wrapper.find('[data-test="draft-restored"]');
+        expect(banner.exists()).toBe(true);
+        expect(banner.text()).toContain("已恢复云端草稿");
+        expect((wrapper.get('[data-test="topic"]').element as HTMLInputElement).value).toBe(
+            "云端同步过来的综述主题",
+        );
+
+        const local = JSON.parse(
+            localStorage.getItem(taskDraftStorageKey("user-cloud-restore"))!,
+        ) as { syncedRevision: number; dirty: boolean };
+        expect(local.syncedRevision).toBe(3);
+        expect(local.dirty).toBe(false);
+    });
+
+    it("离线本地修改后联网挂载时自动补发 PUT 同步云端并记录版本号", async () => {
+        saveTaskDraft("user-offline-sync", {
+            workflowPreset: "literature_review",
+            topic: "离线期间修改的本地主题",
+            draftText: "",
+            seedDois: [],
+            seedDraft: "",
+            snowballDirection: "both",
+            keywords: ["Offline"],
+            keywordDraft: "",
+            maxDocuments: 15,
+            dateFrom: "",
+            dateTo: "",
+            language: "zh",
+            citationStyle: "gbt7714",
+            offlineDataset: false,
+            useReferenceLibrary: false,
+            verifyReferences: false,
+            modelSource: "platform",
+            selectedCredential: "",
+            selectedDocuments: [],
+            literatureSources: [],
+        }, { syncedRevision: 1, dirty: true });
+
+        vi.mocked(api.get).mockImplementation(async (url: string) => {
+            if (url === "/tasks/draft") {
+                return {
+                    data: {
+                        payload: { topic: "旧云端主题", keywords: ["Old"] },
+                        revision: 1,
+                        updated_at: "2026-11-26T08:00:00Z",
+                    },
+                };
+            }
+            throw new Error("unavailable");
+        });
+        vi.mocked(api.put).mockResolvedValueOnce({
+            data: {
+                payload: { topic: "离线期间修改的本地主题", keywords: ["Offline"] },
+                revision: 2,
+                updated_at: "2026-11-26T09:05:00Z",
+            },
+        });
+
+        mountForm({ draftUserId: "user-offline-sync" });
+        await flushPromises();
+
+        expect(api.put).toHaveBeenCalledWith(
+            "/tasks/draft",
+            expect.objectContaining({ base_revision: 1 }),
+        );
+        const local = JSON.parse(
+            localStorage.getItem(taskDraftStorageKey("user-offline-sync"))!,
+        ) as { syncedRevision: number; dirty: boolean };
+        expect(local.syncedRevision).toBe(2);
+        expect(local.dirty).toBe(false);
+    });
+
+    it("云端版本超前且本地有未同步改动时展示冲突提示，支持「载入云端」与「覆盖云端」", async () => {
+        saveTaskDraft(
+            "user-conflict",
+            {
+                workflowPreset: "literature_review",
+                topic: "本地设备改过的主题",
+                draftText: "",
+                seedDois: [],
+                seedDraft: "",
+                snowballDirection: "both",
+                keywords: ["LocalKey"],
+                keywordDraft: "",
+                maxDocuments: 15,
+                dateFrom: "",
+                dateTo: "",
+                language: "zh",
+                citationStyle: "gbt7714",
+                offlineDataset: false,
+                useReferenceLibrary: false,
+                verifyReferences: false,
+                modelSource: "platform",
+                selectedCredential: "",
+                selectedDocuments: [],
+                literatureSources: [],
+            },
+            { syncedRevision: 1, dirty: true },
+        );
+
+        vi.mocked(api.get).mockImplementation(async (url: string) => {
+            if (url === "/tasks/draft") {
+                return {
+                    data: {
+                        payload: {
+                            workflow_preset: "literature_review",
+                            topic: "另一台设备保存的最新主题",
+                            keywords: ["CloudKey"],
+                        },
+                        revision: 2,
+                        updated_at: "2026-11-26T09:10:00Z",
+                    },
+                };
+            }
+            throw new Error("unavailable");
+        });
+
+        const wrapper = mountForm({ draftUserId: "user-conflict" });
+        await flushPromises();
+
+        // 展示冲突横幅且保留当前本地输入
+        const banner = wrapper.find('[data-test="draft-conflict-banner"]');
+        expect(banner.exists()).toBe(true);
+        expect((wrapper.get('[data-test="topic"]').element as HTMLInputElement).value).toBe(
+            "本地设备改过的主题",
+        );
+
+        // 点击「载入云端版本」
+        await wrapper.get('[data-test="draft-conflict-use-cloud"]').trigger("click");
+        await flushPromises();
+        expect(wrapper.find('[data-test="draft-conflict-banner"]').exists()).toBe(false);
+        expect((wrapper.get('[data-test="topic"]').element as HTMLInputElement).value).toBe(
+            "另一台设备保存的最新主题",
+        );
+
+        // 模拟本地再次改动并触发 PUT 409 DRAFT_CONFLICT → 点击「用当前覆盖云端」
+        vi.useFakeTimers();
+        vi.mocked(api.put)
+            .mockRejectedValueOnce({
+                code: "DRAFT_CONFLICT",
+                details: {
+                    cloud: {
+                        payload: { topic: "云端 v3 主题", keywords: ["V3"] },
+                        revision: 3,
+                        updated_at: "2026-11-26T09:12:00Z",
+                    },
+                },
+            })
+            .mockResolvedValueOnce({
+                data: {
+                    payload: { topic: "我最终决定覆盖的主题" },
+                    revision: 4,
+                    updated_at: "2026-11-26T09:15:00Z",
+                },
+            });
+
+        await wrapper.get('[data-test="topic"]').setValue("我最终决定覆盖的主题");
+        await vi.advanceTimersByTimeAsync(1600);
+        await flushPromises();
+
+        expect(wrapper.find('[data-test="draft-conflict-banner"]').exists()).toBe(true);
+
+        await wrapper.get('[data-test="draft-conflict-use-local"]').trigger("click");
+        await flushPromises();
+        expect(api.put).toHaveBeenLastCalledWith(
+            "/tasks/draft",
+            expect.objectContaining({ base_revision: null }),
+        );
+        expect(wrapper.find('[data-test="draft-conflict-banner"]').exists()).toBe(false);
+    });
+
+    it("挂载时自动清洗已失效的 document_ids，清空内容防抖后发 DELETE /tasks/draft", async () => {
+        saveTaskDraft(
+            "user-prune-delete",
+            {
+                workflowPreset: "literature_review",
+                topic: "清洗失效文档并清空测试",
+                draftText: "",
+                seedDois: [],
+                seedDraft: "",
+                snowballDirection: "both",
+                keywords: ["Cleanup"],
+                keywordDraft: "",
+                maxDocuments: 15,
+                dateFrom: "",
+                dateTo: "",
+                language: "zh",
+                citationStyle: "gbt7714",
+                offlineDataset: false,
+                useReferenceLibrary: false,
+                verifyReferences: false,
+                modelSource: "platform",
+                selectedCredential: "",
+                selectedDocuments: ["doc-valid", "doc-deleted"],
+                literatureSources: [],
+            },
+            { syncedRevision: 2, dirty: false },
+        );
+
+        vi.useFakeTimers();
+        vi.mocked(api.get).mockRejectedValue(new Error("unavailable"));
+        vi.mocked(api.delete).mockResolvedValueOnce({});
+
+        const wrapper = mountForm({
+            draftUserId: "user-prune-delete",
+            documents: [{ id: "doc-valid", title: "有效文档" }],
+        });
+        await flushPromises();
+
+        // 验证已失效文档 doc-deleted 已被清洗：提交时只剩 doc-valid
+        await wrapper.get('[data-test="submit"]').trigger("click");
+        const submitted = wrapper.emitted("submit")?.[0]?.[0] as { document_ids?: string[] };
+        expect(submitted.document_ids).toEqual(["doc-valid"]);
+
+        // 主动清除草稿或清空全部核心内容后触发 DELETE /tasks/draft
+        await wrapper.get('[data-test="draft-discard"]').trigger("click");
+        await flushPromises();
+        expect(api.delete).toHaveBeenCalledWith("/tasks/draft");
     });
 });

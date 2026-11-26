@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, nextTick, onMounted, ref, watch } from "vue";
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { routerKey } from "vue-router";
 import { Check, ChevronDown, Loader2, Plus, Sparkles, X } from "lucide-vue-next";
 import { useReducedMotion } from "motion-v";
@@ -13,8 +13,13 @@ import { Label } from "@/components/ui/label";
 import { toastInfo, toastWarning } from "@/lib/toast";
 import {
     clearTaskDraft,
+    draftFingerprint,
+    fromCloudDraftPayload,
+    isDraftEmpty,
     loadTaskDraft,
     saveTaskDraft,
+    taskDraftStorageKey,
+    toCloudDraftPayload,
     type TaskCreateDraftValues,
 } from "@/lib/task-draft";
 import { getBillingUsage } from "@/api/billing";
@@ -23,6 +28,7 @@ import { listDataSourceCredentials } from "@/api/data-source-credentials";
 import { suggestKeywords, type KeywordSuggestion } from "@/api/intent";
 import { listLLMCredentials } from "@/api/llm-credentials";
 import { getLibrarySummary } from "@/api/reference-library";
+import { taskApi, type TaskDraftOut } from "@/api/tasks";
 import {
     DEFAULT_WORKFLOW_PRESET,
     WORKFLOW_PRESETS,
@@ -262,10 +268,143 @@ function applyDraft(values: TaskCreateDraftValues) {
 
 // 挂载即恢复：恢复过程本身不标记 dirty（onMounted 里的接口默认值调整也不会
 // 把草稿改成「用户没写过」的内容）。
+const CLOUD_SYNC_DEBOUNCE_MS = 1500;
+const restoredSource = ref<"local" | "cloud">("local");
+const syncedRevision = ref<number>(0);
+const lastSyncedFingerprint = ref<string>("");
+const draftConflict = ref<TaskDraftOut | null>(null);
+let cloudSyncTimer: ReturnType<typeof setTimeout> | null = null;
+let formUnmounted = false;
+let cloudSyncInFlight = false;
+let draftEpoch = 0;
+
 const initialDraft = loadTaskDraft(props.draftUserId);
 if (initialDraft) {
     applyDraft(initialDraft.values);
     restoredFromDraft.value = true;
+    restoredSource.value = "local";
+    syncedRevision.value = initialDraft.syncedRevision;
+    if (!initialDraft.dirty) {
+        lastSyncedFingerprint.value = draftFingerprint(initialDraft.values);
+    }
+}
+
+function stopCloudSyncTimer() {
+    if (cloudSyncTimer !== null) {
+        clearTimeout(cloudSyncTimer);
+        cloudSyncTimer = null;
+    }
+}
+
+function extractDraftConflict(err: unknown): TaskDraftOut | null {
+    if (!err || typeof err !== "object") return null;
+    const apiErr = err as {
+        code?: string;
+        details?: { cloud?: TaskDraftOut };
+        response?: { status?: number; data?: { detail?: { code?: string; cloud?: TaskDraftOut } } };
+    };
+    if (apiErr.code === "DRAFT_CONFLICT" && apiErr.details?.cloud) {
+        return apiErr.details.cloud;
+    }
+    const detail = apiErr.response?.data?.detail;
+    if (detail?.code === "DRAFT_CONFLICT" && detail.cloud) {
+        return detail.cloud;
+    }
+    return null;
+}
+
+async function safeGetCloudDraft(): Promise<TaskDraftOut | null> {
+    if (!props.draftUserId) return null;
+    try {
+        return (await taskApi.getDraft()) ?? null;
+    } catch {
+        return null;
+    }
+}
+
+async function safeDeleteCloudDraft(): Promise<void> {
+    if (!props.draftUserId) return;
+    try {
+        await taskApi.deleteDraft();
+    } catch {
+        /* 断网或无后端草稿接口时不阻断前端表单 */
+    }
+}
+
+/** 根据当前传入的知识库文档列表，静默移除已失效（被删除）的文档 ID。 */
+function pruneStaleDocuments(docs: Array<{ id: string }>) {
+    if (!docs.length || !selectedDocuments.value.length) return;
+    const validIds = new Set(docs.map((item) => item.id));
+    const filtered = selectedDocuments.value.filter((id) => validIds.has(id));
+    if (filtered.length !== selectedDocuments.value.length) {
+        selectedDocuments.value = filtered;
+    }
+}
+
+watch(
+    () => props.documents,
+    (docs) => pruneStaleDocuments(docs),
+    { immediate: true },
+);
+
+/** 将表单现状异步推送至云端（指纹去重 + 乐观锁 + 空草稿即删）。 */
+async function flushCloudSync(options: { force?: boolean; expectedEpoch?: number } = {}) {
+    const epoch = options.expectedEpoch ?? draftEpoch;
+    if (!props.draftUserId || formUnmounted || cloudSyncInFlight || epoch !== draftEpoch) return;
+    const currentValues = draftValues();
+    if (isDraftEmpty(currentValues)) {
+        if (syncedRevision.value > 0) {
+            clearTaskDraft(props.draftUserId);
+            await safeDeleteCloudDraft();
+            if (formUnmounted || epoch !== draftEpoch) return;
+            syncedRevision.value = 0;
+            draftDirty.value = false;
+            restoredFromDraft.value = false;
+            lastSyncedFingerprint.value = "";
+        }
+        return;
+    }
+
+    const fp = draftFingerprint(currentValues);
+    if (!options.force && fp === lastSyncedFingerprint.value && !draftDirty.value) {
+        return;
+    }
+
+    cloudSyncInFlight = true;
+    try {
+        const baseRev = options.force
+            ? null
+            : syncedRevision.value > 0
+              ? syncedRevision.value
+              : null;
+        const saved = await taskApi.saveDraft(toCloudDraftPayload(currentValues), baseRev);
+        if (formUnmounted || !saved || epoch !== draftEpoch) return;
+        syncedRevision.value = saved.revision;
+        draftDirty.value = false;
+        draftConflict.value = null;
+        lastSyncedFingerprint.value = fp;
+        saveTaskDraft(props.draftUserId, currentValues, {
+            syncedRevision: saved.revision,
+            dirty: false,
+        });
+    } catch (err) {
+        if (epoch !== draftEpoch) return;
+        const conflict = extractDraftConflict(err);
+        if (conflict) {
+            draftConflict.value = conflict;
+        }
+    } finally {
+        cloudSyncInFlight = false;
+    }
+}
+
+function scheduleCloudSync() {
+    if (!props.draftUserId || draftConflict.value) return;
+    stopCloudSyncTimer();
+    cloudSyncTimer = setTimeout(() => {
+        cloudSyncTimer = null;
+        void flushCloudSync();
+    }, CLOUD_SYNC_DEBOUNCE_MS);
 }
 
 /** 只有真实交互才算「有草稿」：避免打开表单就被保存一份空草稿 */
@@ -275,10 +414,97 @@ function markDraftDirty() {
 
 function persistDraft() {
     if (!draftDirty.value) return;
-    saveTaskDraft(props.draftUserId, draftValues());
+    const current = draftValues();
+    saveTaskDraft(props.draftUserId, current, {
+        syncedRevision: syncedRevision.value,
+        dirty: true,
+    });
+    scheduleCloudSync();
 }
 
 watch(() => draftValues(), persistDraft);
+
+/** 若参考元数据已先返回，对恢复后的草稿执行失效引用与源清洗。 */
+function reconcileRestoredReferences() {
+    pruneStaleDocuments(props.documents);
+    if (libraryCount.value === 0 && useReferenceLibrary.value) {
+        useReferenceLibrary.value = false;
+    }
+    if (credentials.value.length > 0 && modelSource.value === "byok") {
+        const activeIds = new Set(
+            credentials.value
+                .filter((item) => item.status === "active")
+                .map((item) => item.credential_id),
+        );
+        if (!activeIds.has(selectedCredential.value)) {
+            modelSource.value = "platform";
+            selectedCredential.value = "";
+        }
+    }
+    if (!hasWanfangKey.value && selectedSources.value.includes("wanfang")) {
+        selectedSources.value = selectedSources.value.filter((name) => name !== "wanfang");
+    }
+}
+
+/** 冲突或云端更新时，将云端草稿落回表单并对齐 syncedRevision。 */
+function applyCloudSnapshot(cloud: TaskDraftOut, showRestoredBanner = true) {
+    stopCloudSyncTimer();
+    draftDirty.value = false;
+    const nextValues = fromCloudDraftPayload(cloud.payload ?? {});
+    applyDraft(nextValues);
+    reconcileRestoredReferences();
+    syncedRevision.value = cloud.revision;
+    draftConflict.value = null;
+    restoredSource.value = "cloud";
+    restoredFromDraft.value = showRestoredBanner;
+    const applied = draftValues();
+    lastSyncedFingerprint.value = draftFingerprint(applied);
+    saveTaskDraft(props.draftUserId, applied, {
+        syncedRevision: cloud.revision,
+        dirty: false,
+    });
+}
+
+function resolveConflictUseCloud() {
+    if (!draftConflict.value) return;
+    applyCloudSnapshot(draftConflict.value, true);
+    toastInfo("已载入云端草稿版本");
+}
+
+async function resolveConflictUseLocal() {
+    draftConflict.value = null;
+    draftDirty.value = true;
+    await flushCloudSync({ force: true });
+}
+
+function handleVisibilityChange() {
+    if (document.visibilityState === "hidden" && draftDirty.value && props.draftUserId) {
+        stopCloudSyncTimer();
+        void flushCloudSync();
+    }
+}
+
+function handleWindowStorage(event: StorageEvent) {
+    if (!props.draftUserId || event.key !== taskDraftStorageKey(props.draftUserId)) return;
+    if (event.newValue === null) {
+        stopCloudSyncTimer();
+        draftDirty.value = false;
+        restoredFromDraft.value = false;
+        draftConflict.value = null;
+        syncedRevision.value = 0;
+        lastSyncedFingerprint.value = "";
+        resetToDefaults();
+        return;
+    }
+    const latest = loadTaskDraft(props.draftUserId);
+    if (latest && !draftDirty.value) {
+        applyDraft(latest.values);
+        syncedRevision.value = latest.syncedRevision;
+        if (!latest.dirty) {
+            lastSyncedFingerprint.value = draftFingerprint(latest.values);
+        }
+    }
+}
 
 /** 去导入文献前先落盘：导入页没有返回入口时用户至少不会丢内容 */
 function goToImport() {
@@ -326,19 +552,32 @@ function resetToDefaults() {
     validationErrorFields.value = new Set();
 }
 
-/** 放弃草稿：清存储并回到默认表单（提示由这里负责） */
+/** 放弃草稿：清存储与云端并回到默认表单（提示由这里负责） */
 function discardDraft() {
+    draftEpoch += 1;
+    stopCloudSyncTimer();
     draftDirty.value = false;
     restoredFromDraft.value = false;
+    restoredSource.value = "local";
+    draftConflict.value = null;
+    syncedRevision.value = 0;
+    lastSyncedFingerprint.value = "";
     clearTaskDraft(props.draftUserId);
     resetToDefaults();
+    void safeDeleteCloudDraft();
     toastInfo("草稿已清除");
 }
 
 /** 提交成功后由父组件调用：清掉已提交的草稿，避免下次进来回填旧内容 */
 function clearDraft() {
+    draftEpoch += 1;
+    stopCloudSyncTimer();
     draftDirty.value = false;
     restoredFromDraft.value = false;
+    restoredSource.value = "local";
+    draftConflict.value = null;
+    syncedRevision.value = 0;
+    lastSyncedFingerprint.value = "";
     clearTaskDraft(props.draftUserId);
 }
 
@@ -346,8 +585,54 @@ defineExpose({ clearDraft });
 
 const canSubmit = computed(() => !props.pending);
 
+/** 挂载时独立与云端草稿合并，不被其他选项接口阻塞，且通过 epoch 防止清除后复活。 */
+async function syncCloudDraftOnMount(mountEpoch: number) {
+    if (!props.draftUserId) return;
+    const cloud = await safeGetCloudDraft();
+    if (formUnmounted || mountEpoch !== draftEpoch) return;
+
+    if (cloud) {
+        const cloudValues = fromCloudDraftPayload(cloud.payload ?? {});
+        if (!isDraftEmpty(cloudValues)) {
+            const localNow = loadTaskDraft(props.draftUserId);
+            if (!localNow) {
+                applyCloudSnapshot(cloud, true);
+                return;
+            }
+            if (!localNow.dirty && cloud.revision > localNow.syncedRevision) {
+                applyCloudSnapshot(cloud, true);
+                return;
+            }
+            if (localNow.dirty && cloud.revision <= localNow.syncedRevision) {
+                syncedRevision.value = cloud.revision;
+                await flushCloudSync({ expectedEpoch: mountEpoch });
+                return;
+            }
+            if (
+                localNow.dirty &&
+                cloud.revision > localNow.syncedRevision &&
+                draftFingerprint(localNow.values) !== draftFingerprint(cloudValues)
+            ) {
+                draftConflict.value = cloud;
+            }
+            return;
+        }
+    }
+
+    if (initialDraft?.dirty && !isDraftEmpty(initialDraft.values)) {
+        await flushCloudSync({ expectedEpoch: mountEpoch });
+    }
+}
+
 onMounted(async () => {
-    // 四个初始化接口彼此独立，改为并行加载并单独容错：
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("storage", handleWindowStorage);
+
+    // 云端草稿合并独立并行执行，避免等待样式/额度等较慢接口
+    const mountEpoch = draftEpoch;
+    void syncCloudDraftOnMount(mountEpoch);
+
+    // 四个初始化接口彼此独立，并行加载并单独容错：
     // 避免引用样式列表慢或为空时阻塞/跳过引用库条数与自带模型列表（Issue #55）
     const [stylesResult, summaryResult, credentialsResult, usageResult, sourcesResult] =
         await Promise.allSettled([
@@ -461,6 +746,13 @@ onMounted(async () => {
     if (!hasWanfangKey.value && selectedSources.value.includes("wanfang")) {
         selectedSources.value = selectedSources.value.filter((name) => name !== "wanfang");
     }
+});
+
+onBeforeUnmount(() => {
+    formUnmounted = true;
+    stopCloudSyncTimer();
+    document.removeEventListener("visibilitychange", handleVisibilityChange);
+    window.removeEventListener("storage", handleWindowStorage);
 });
 
 // 勾选「使用我的引用库」时，互斥清空离线演示语料，并同步可用条数（Issue #58 / UX-P1-03）
@@ -896,14 +1188,47 @@ async function handleSubmit() {
         @change.capture="markDraftDirty"
         @click.capture="markDraftDirty"
     >
-        <!-- 草稿恢复提示：从导入文献页回来 / 刷新页面后自动回填，页面零解释容易像 bug -->
+        <!-- 跨设备草稿冲突提示条（Issue #68） -->
+        <div
+            v-if="draftConflict"
+            data-test="draft-conflict-banner"
+            role="alert"
+            class="flex flex-wrap items-center justify-between gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-foreground"
+        >
+            <span>云端存在更新的草稿版本（v{{ draftConflict.revision }}），请选择保留哪一份：</span>
+            <div class="flex items-center gap-2">
+                <button
+                    type="button"
+                    data-test="draft-conflict-use-cloud"
+                    class="font-medium text-primary underline underline-offset-2 hover:opacity-85"
+                    @click="resolveConflictUseCloud"
+                >
+                    载入云端版本
+                </button>
+                <button
+                    type="button"
+                    data-test="draft-conflict-use-local"
+                    class="font-medium text-foreground underline underline-offset-2 hover:opacity-85"
+                    @click="resolveConflictUseLocal"
+                >
+                    用当前覆盖云端
+                </button>
+            </div>
+        </div>
+        <!-- 草稿恢复提示：从导入文献页回来 / 刷新页面 / 跨设备云端恢复后自动回填 -->
         <div
             v-if="restoredFromDraft"
             data-test="draft-restored"
             role="status"
             class="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
         >
-            <span>已恢复上次未提交的草稿（离开本页或收起表单都不会丢失）</span>
+            <span>
+                {{
+                    restoredSource === "cloud"
+                        ? "已恢复云端草稿（跨设备同步，随时可修改或清除）"
+                        : "已恢复上次未提交的草稿（离开本页或收起表单都不会丢失）"
+                }}
+            </span>
             <button
                 type="button"
                 data-test="draft-discard"

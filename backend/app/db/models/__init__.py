@@ -56,6 +56,7 @@ from app.db.models.screening import (
     SearchLog,
 )
 from app.db.models.task import Subtask, Task, TaskDag
+from app.db.models.task_draft import TaskDraft
 from app.db.models.user import User
 from app.db.models.user_template import UserTemplate
 from app.db.models.workspace import Workspace, WorkspaceInvite, WorkspaceMember
@@ -92,6 +93,7 @@ __all__ = [
     "Task",
     "TaskAnnotation",
     "TaskDag",
+    "TaskDraft",
     "TaskRefresh",
     "TaskRoutine",
     "UsageCounter",

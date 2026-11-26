@@ -21,8 +21,9 @@ from typing import Annotated, Any, Literal
 from urllib.parse import quote
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import FileResponse, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import FileResponse, JSONResponse, Response
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
     get_current_active_user,
@@ -32,6 +33,7 @@ from app.api.deps import (
 from app.billing.services.plan_service import PlanService
 from app.core.config import get_settings
 from app.core.exceptions import ValidationException
+from app.core.logging import get_logger
 from app.core.quota import QuotaService
 from app.db.models.user import User
 from app.db.session import get_db
@@ -50,6 +52,10 @@ from app.schemas.task import (
     TaskEventPage,
     TaskSummaryOut,
 )
+from app.schemas.task_draft import TaskDraftOut, TaskDraftPut
+from app.services.task_draft_service import DraftConflictError, TaskDraftService
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -236,6 +242,10 @@ async def create_task(
         plan_service=plan_service,
         quota=quota,
     )
+    try:
+        await TaskDraftService().delete(db, current_user.id)
+    except Exception:
+        logger.warning("task_draft_cleanup_failed", user_id=str(current_user.id))
     return TaskCreateOut(task_id=task_id, status=TaskStatus.PLANNING.value)
 
 
@@ -325,6 +335,49 @@ async def list_tasks(
         )
         for snapshot in snapshots
     ]
+
+
+@router.get("/draft", response_model=TaskDraftOut | None, summary="获取当前用户的建任务云端草稿")
+async def get_task_draft(
+    current_user: CurrentUserDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> TaskDraftOut | None:
+    return await TaskDraftService().get(db, current_user.id)
+
+
+@router.put("/draft", response_model=TaskDraftOut, summary="保存/更新当前用户的建任务云端草稿")
+async def put_task_draft(
+    payload: TaskDraftPut,
+    current_user: CurrentUserDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> TaskDraftOut | JSONResponse:
+    try:
+        return await TaskDraftService().upsert(db, current_user.id, payload)
+    except DraftConflictError as exc:
+        conflict_detail = {
+            "code": "DRAFT_CONFLICT",
+            "message": "云端草稿已在其他设备更新",
+            "cloud": exc.current.model_dump(mode="json"),
+        }
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={
+                "error_code": "DRAFT_CONFLICT",
+                "message": "云端草稿已在其他设备更新",
+                "details": {"cloud": conflict_detail["cloud"]},
+                "detail": conflict_detail,
+            },
+        )
+
+
+@router.delete(
+    "/draft", status_code=status.HTTP_204_NO_CONTENT, summary="清除当前用户的建任务云端草稿"
+)
+async def delete_task_draft(
+    current_user: CurrentUserDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> None:
+    await TaskDraftService().delete(db, current_user.id)
 
 
 @router.get("/{task_id}", response_model=TaskSnapshot, summary="查询任务快照")
