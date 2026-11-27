@@ -2072,23 +2072,34 @@ class TaskExecution:
             async with self._session_factory() as source_session:
                 # Issue #67 BYOK：万方 Key 属于当前用户，解密后只在内存里传递
                 wfdata_app_key = await self._load_wfdata_app_key(source_session, task)
+                # 全文获取 Phase A · Task 7：装配 OA 全文抓取。离线 / 引用库 / 显式关闭
+                # 时返回 (None, None)，检索节点保持零外呼。
+                fulltext_service, fulltext_resolver = self._create_fulltext_service(
+                    task, source_session
+                )
                 workflow = self._literature_execution_workflow(
                     task,
                     source_session=source_session,
                     wfdata_app_key=wfdata_app_key,
+                    fulltext_service=fulltext_service,
                 )
                 if workflow is not None:
                     scheduler = TaskScheduler(
                         agent_factory=self._literature_agent_factory(workflow, task),
                         observer=observer,
                     )
-                result = await scheduler.run(
-                    dag,
-                    task_id=str(task_id),
-                    pre_completed=completed,
-                    trace_id=trace_id,
-                    subtask_ids=subtask_ids,
-                )
+                try:
+                    result = await scheduler.run(
+                        dag,
+                        task_id=str(task_id),
+                        pre_completed=completed,
+                        trace_id=trace_id,
+                        subtask_ids=subtask_ids,
+                    )
+                finally:
+                    # resolver 可能自带 httpx.AsyncClient：执行结束（含异常/取消）必须关闭
+                    if fulltext_resolver is not None:
+                        await fulltext_resolver.aclose()
 
             # 先记账再判断成败：转人工 / 失败路径同样要按已用额度结算，
             # 若放在成功分支里就会漏记（「跑了 30k 然后转人工」被当成 0 用量全额退款）。
@@ -2211,12 +2222,95 @@ class TaskExecution:
             return ""
         return (key or "").strip()
 
+    def _create_fulltext_service(
+        self,
+        task: Any | None,
+        session: Any,
+    ) -> tuple[Any | None, Any | None]:
+        """按任务配置装配 OA 全文抓取（全文获取 Phase A · Task 7）。
+
+        返回 ``(FulltextService | None, FullTextResolver | None)``；``(None, None)``
+        表示不抓取，检索节点保持零外呼。不装配的三种情况：
+
+        - 非文献任务 / 容器没有知识库（走通用 Agent 路径）；
+        - 任务显式 ``full_text=false``、离线数据集（``offline_dataset``）或
+          引用库模式（``reference_library``）—— 这些场景的证据必须来自本地；
+        - 全局 ``fulltext.enabled=false``，或知识库组件不可用（直接 DB 调用场景）。
+
+        本方法是全文抓取的**唯一**开关点：``FulltextService`` 在 enabled=false 时
+        只会把记录记为 fallback（不访问网络，但统计无意义），零外呼必须在这里决掉。
+        """
+        if task is None or getattr(task, "task_type", "") != "literature_review":
+            return None, None
+        if self.container.knowledge_query is None:
+            return None, None
+        config = getattr(task, "config", None) or {}
+        if not self._config_flag(config, "full_text", default=True):
+            return None, None
+        if self._config_flag(config, "offline_dataset", default=False):
+            return None, None
+        if self._config_flag(config, "reference_library", default=False):
+            return None, None
+        if not bool(getattr(get_settings().fulltext, "enabled", True)):
+            return None, None
+        return self._build_fulltext_service(session)
+
+    @staticmethod
+    def _config_flag(config: Any, name: str, *, default: bool) -> bool:
+        """读任务 config 里的布尔开关（兼容 dict 与 Pydantic 对象）。"""
+        if isinstance(config, dict):
+            value = config.get(name)
+        else:
+            value = getattr(config, name, None)
+        return default if value is None else bool(value)
+
+    @staticmethod
+    def _build_fulltext_service(session: Any) -> tuple[Any | None, Any | None]:
+        """构造 FulltextService + resolver；知识库未初始化等异常时降级为不抓取。
+
+        延迟导入：知识库服务只在文献执行路径用到，顶部导入会把 knowledge 包
+        拖进通用 Agent 路径（且可能触发循环导入）。
+        """
+        try:
+            from app.knowledge.services.document_service import KnowledgeDocumentService
+            from app.knowledge.services.factory import (
+                get_index_manager,
+                get_kb,
+                get_storage,
+            )
+            from app.knowledge.services.fulltext_parser import CleanFullTextParser
+            from app.knowledge.services.fulltext_service import FulltextService
+            from app.knowledge.services.paper_card_service import PaperCardService
+            from app.tools.literature.fulltext_resolver import FullTextResolver
+
+            storage = get_storage()
+            resolver = FullTextResolver()
+            documents = KnowledgeDocumentService(
+                session,
+                storage=storage,
+                index_manager=get_index_manager(),
+                kb=get_kb(),
+            )
+            service = FulltextService(
+                session,
+                resolver=resolver,
+                parser=CleanFullTextParser(),
+                documents=documents,
+                storage=storage,
+                paper_cards=PaperCardService(),
+            )
+        except Exception as exc:  # 知识库未初始化 / 依赖缺失：降级为不抓取（零外呼）
+            logger.warning("fulltext_service_unavailable", error=str(exc))
+            return None, None
+        return service, resolver
+
     def _literature_execution_workflow(
         self,
         task: Any | None,
         *,
         source_session: Any | None = None,
         wfdata_app_key: str = "",
+        fulltext_service: Any | None = None,
     ) -> LiteratureReviewWorkflow | None:
         """文献任务且容器提供知识库时，返回证据约束执行工作流；否则 None（走通用 Agent）。
 
@@ -2226,6 +2320,9 @@ class TaskExecution:
 
         `wfdata_app_key` 是当前用户自带的万方 Key（已解密，Issue #67 BYOK）。
         只放在内存里传参，**不写进 task.config**：config 会随任务落库并被前端快照读取。
+
+        `fulltext_service` 是检索节点的 OA 全文抓取服务（全文获取 Phase A · Task 7）；
+        None 表示不抓取（离线数据集 / 引用库 / 显式关闭 / 全局关闭）。
         """
         if task is None or getattr(task, "task_type", "") != "literature_review":
             return None
@@ -2257,6 +2354,8 @@ class TaskExecution:
             reference_verifier=self._reference_verifier_for_task(task),
             # 检索结果落筛选表：不接这条线，筛选页永远是空的（PRISMA 全 0）
             screening_recorder=self._record_screening,
+            # OA 全文抓取（全文获取 Phase A · Task 7）：None 表示零外呼（离线/引用库/关闭）
+            fulltext_service=fulltext_service,
         )
         return workflow.use_plan(plan)
 

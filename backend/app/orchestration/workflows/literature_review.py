@@ -142,6 +142,15 @@ EVIDENCE_NODE_TYPES = frozenset({"extract", "write"})
 #: 输出为机械汇总/检索结果的节点类型（Issue #6）：其 content 不是作者文本
 AGGREGATE_NODE_TYPES = frozenset({"search", "validate", "review"})
 
+#: 检索节点的 OA 全文抓取统计键（全文获取 Phase A · Task 7），随节点 output 落库。
+FULLTEXT_SUMMARY_KEY = "fulltext_summary"
+#: 全文抓取整体不可用（服务缺失/异常/全部降级）时的 warning；节点仍按元数据证据继续。
+FULLTEXT_WARNING_FAILED = "fulltext_failed"
+#: 部分文献抓到全文、其余回退元数据证据时的 warning。
+FULLTEXT_WARNING_PARTIAL = "fulltext_partial"
+#: 全部文献都回退元数据证据时的 warning（计划 Task 7 Step 1 场景 2）。
+FULLTEXT_WARNING_ALL_FAILED = "fulltext_all_failed"
+
 
 def content_role_for_node(node_type: str) -> ContentRole:
     """节点类型 → 内容角色（Issue #6）。
@@ -180,6 +189,7 @@ class LiteratureReviewWorkflow:
         reference_verifier: Any | None = None,
         knowledge_query: Any | None = None,
         screening_recorder: Any | None = None,
+        fulltext_service: Any | None = None,
         top_k: int = 8,
     ) -> None:
         self._planner = planner
@@ -196,6 +206,9 @@ class LiteratureReviewWorkflow:
         self._knowledge_query = knowledge_query
         # 检索结果 -> 筛选表（PRISMA「识别」阶段）。None 表示不落（测试/实验可关）。
         self._screening_recorder = screening_recorder
+        # OA 全文抓取（全文获取 Phase A · Task 7）：None 表示不抓取
+        # （离线数据集 / 引用库 / 显式关闭 / 未注入），检索节点只产出元数据证据。
+        self._fulltext_service = fulltext_service
         self._top_k = top_k
         self._plan: TaskPlan | None = None
         # 节点证据缓存：重生成时复用同一证据集（Plan 3 Task 4）
@@ -558,6 +571,66 @@ class LiteratureReviewWorkflow:
             return default
         return bool(value)
 
+    @staticmethod
+    def _user_id(task: Any) -> UUID | None:
+        """任务所属用户；缺失或非 UUID 时返回 None（全文抓取要按用户挂载知识库）。"""
+        user_id = getattr(task, "user_id", None)
+        return user_id if isinstance(user_id, UUID) else None
+
+    def _fulltext_requested(self, task: Any) -> bool:
+        """是否需要在检索后抓取 OA 全文（全文获取 Phase A · Task 7）。
+
+        零外呼约束：显式 ``full_text=false``、离线数据集（``offline_dataset``）、
+        引用库模式（``reference_library``）一律不触发 —— 这些场景的证据必须
+        完全来自本地/既有来源（规范 §5.6 / §7）。
+        """
+        if self._fulltext_service is None:
+            return False
+        if not self._flag(task, "full_text", default=True):
+            return False
+        if self._flag(task, "offline_dataset", default=False):
+            return False
+        return not self._flag(task, "reference_library", default=False)
+
+    async def _enrich_search_records(
+        self,
+        task: Any,
+        result: ExecutionResult,
+    ) -> ExecutionResult:
+        """检索结果 → OA 全文抓取，并把统计与降级 warning 合入节点结果。
+
+        抓取/解析/入库/Paper Card/知识库挂载全部由 ``FulltextService.enrich``
+        完成（Task 5，逐篇隔离异常）；本方法只负责「是否抓」以及把统计写进
+        ``ExecutionResult.stats``，让节点 output 落库后能被复盘/前端读到。
+
+        证据升级**不**在这里做：全文入库后，后续证据节点的既有
+        ``LiteratureContextBuilder.build`` 会自然检索到该用户新增的 chunk
+        （kind="excerpt" 带 doc_id/chunk_id），无需改写证据装配逻辑。
+        """
+        service = self._fulltext_service
+        if service is None:
+            return result
+        user_id = self._user_id(task)
+        if user_id is None:
+            return result
+        records = [LiteratureRecord.model_validate(item) for item in result.artifacts or []]
+        if not records:
+            return result
+        stats = await service.enrich(user_id, records)
+        summary = stats.as_dict()
+        result.stats[FULLTEXT_SUMMARY_KEY] = summary
+        succeeded = int(summary.get("succeeded", 0))
+        degraded = (
+            int(summary.get("failed", 0))
+            + int(summary.get("fallback_metadata", 0))
+            + int(summary.get("scanned_skipped", 0))
+        )
+        if degraded > 0:
+            result.warnings.append(
+                FULLTEXT_WARNING_ALL_FAILED if succeeded <= 0 else FULLTEXT_WARNING_PARTIAL
+            )
+        return result
+
     def prepared_for(self, node_id: str) -> dict[str, Any] | None:
         """返回节点上次准备的上下文（重生成时复用同一证据集）。"""
         return self._prepared.get(node_id)
@@ -660,7 +733,7 @@ class LiteratureReviewWorkflow:
         content = "\n".join(
             f"- {record.title} ({record.source_id}) {record.source_url}" for record in records
         )
-        return ExecutionResult(
+        result = ExecutionResult(
             node_id=node.id,
             content=content,
             artifacts=[record.model_dump(mode="json") for record in records],
@@ -668,6 +741,18 @@ class LiteratureReviewWorkflow:
             duration_ms=0,
             node_type=node.type,
         )
+        if not self._fulltext_requested(task):
+            return result
+        try:
+            return await self._enrich_search_records(task, result)
+        except Exception as exc:  # 抓取失败绝不拖垮检索节点：降级为纯元数据证据
+            logger.warning(
+                "fulltext_enrich_failed",
+                task_id=str(getattr(task, "id", "")),
+                error=str(exc),
+            )
+            result.warnings.append(FULLTEXT_WARNING_FAILED)
+            return result
 
     async def _execute_snowball_search(
         self,

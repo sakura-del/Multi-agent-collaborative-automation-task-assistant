@@ -176,6 +176,14 @@ class ExecutionResult(BaseModel):
     缺省空串表示未标注，由复盘按 `node_type` 判定。
     """
 
+    stats: dict[str, Any] = Field(default_factory=dict)
+    """节点级附加统计（全文获取 Phase A · Task 7）。
+
+    检索节点写 ``{"fulltext_summary": {...}}``：全文抓取的 attempted / succeeded /
+    fallback_metadata / scanned_skipped / failed 五个计数。缺省空字典保证历史
+    持久化负载（无该键）仍可反序列化。
+    """
+
 
 class ValidationCheck(BaseModel):
     """单条校验项。"""
