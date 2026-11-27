@@ -33,6 +33,7 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.exceptions import HumanActionRequiredError
 from app.db.models.knowledge import DocChunk, KnowledgeDoc
 from app.orchestration.contracts import Evidence, EvidenceContext, EvidenceLocator
 from app.orchestration.services.user_fulltext_evidence import UserFulltextEvidenceService
@@ -511,8 +512,8 @@ async def test_prepare_node_skips_fulltext_when_retrieval_disabled() -> None:
     assert "retrieval_disabled" in prepared["warnings"]
 
 
-async def test_prepare_node_skips_fulltext_when_user_id_missing() -> None:
-    """任务没有 UUID user_id（离线/实验夹具）时不查知识库。"""
+async def test_prepare_node_requires_user_id_before_fulltext_lookup() -> None:
+    """任务没有 UUID user_id 时，既有证据上下文构建器先拒绝，不进入全文查询。"""
     fulltext = _StubFulltextService(
         [Evidence(doc_id=uuid4(), chunk_id=uuid4(), excerpt="不应出现")]
     )
@@ -522,11 +523,11 @@ async def test_prepare_node_skips_fulltext_when_user_id_missing() -> None:
         def __init__(self) -> None:
             self.config: dict[str, Any] = {"retrieval_mode": "hybrid_rerank"}
 
-    prepared = await workflow.prepare_node(
-        _NoUserTask(),
-        {"id": "n1", "type": "extract", "title": "提取证据"},
-        dependency_outputs={"n0": _search_output(_record_payload())},
-    )
+    with pytest.raises(HumanActionRequiredError):
+        await workflow.prepare_node(
+            _NoUserTask(),
+            {"id": "n1", "type": "extract", "title": "提取证据"},
+            dependency_outputs={"n0": _search_output(_record_payload())},
+        )
 
     assert fulltext.calls == []
-    assert [item["kind"] for item in prepared["evidence"]] == ["metadata"]
