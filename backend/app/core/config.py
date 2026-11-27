@@ -601,6 +601,33 @@ class ReferenceVerificationConfig(BaseModel):
     max_retries: int = Field(default=1, ge=0)
 
 
+class FulltextConfig(BaseModel):
+    """OA 自动正文抓取（Issue #73 Phase A）。"""
+
+    enabled: bool = True
+    max_documents_per_task: int = Field(default=8, ge=1, le=20)
+    per_document_timeout_seconds: float = Field(default=20.0, gt=0.0)
+    total_timeout_seconds: float = Field(default=60.0, gt=0.0)
+    max_concurrency: int = Field(default=4, ge=1, le=8)
+    unpaywall_email: str = ""
+    """Unpaywall 要求带 email；为空时 resolver 跳过 Unpaywall（不匿名调用）。"""
+    core_api_key: str = ""
+    license_whitelist: list[str] = Field(
+        default_factory=lambda: [
+            "cc-by",
+            "cc-by-4.0",
+            "cc-by-3.0",
+            "cc-by-sa",
+            "cc-by-nc",
+            "cc0",
+            "public-domain",
+            "arxiv",
+            "pmc-oa",
+            "elsevier-oa",
+        ]
+    )
+
+
 class CORSConfig(BaseModel):
     """CORS 跨域配置"""
 
@@ -727,6 +754,7 @@ class Settings(BaseSettings):
     orchestration: OrchestrationConfig = OrchestrationConfig()
     routine: RoutineConfig = RoutineConfig()
     reference_verification: ReferenceVerificationConfig = ReferenceVerificationConfig()
+    fulltext: FulltextConfig = FulltextConfig()
     email: EmailConfig = EmailConfig()
     oauth: OAuthConfig = OAuthConfig()
     captcha: CaptchaConfig = CaptchaConfig()

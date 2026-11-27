@@ -380,6 +380,8 @@ class LiteratureReviewRequest(BaseModel):
       用于让「引用可核验」在离线演示中可见；
     - ``False``：本任务强制跳过核验。
     """
+    full_text: bool = True
+    """是否自动抓取 OA 正文（Issue #73）。离线任务 / reference_library 模式自动跳过。"""
 
     # ===== 实验画像开关（2026-10-22 实验矩阵）=====
     #

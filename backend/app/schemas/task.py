@@ -83,6 +83,8 @@ class TaskCreate(BaseModel):
     """
     verify_references: bool | None = None
     """是否做外部引用核验（Issue #3）：None=沿用全局配置；True=强制核验（含离线任务）；False=跳过。"""
+    full_text: bool = True
+    """是否自动抓取 OA 正文（Issue #73）。离线任务 / reference_library 模式自动跳过。"""
 
     llm_credential_id: UUID | None = Field(
         default=None,
