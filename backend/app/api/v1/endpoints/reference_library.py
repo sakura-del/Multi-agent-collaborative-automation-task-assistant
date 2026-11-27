@@ -3,6 +3,7 @@
     GET    /api/v1/reference-library            列出（limit/offset）
     GET    /api/v1/reference-library/summary    摘要（总条数 / 可作文献源条数）
     POST   /api/v1/reference-library            保存（body: items[]，来自导入预览）
+    POST   /api/v1/reference-library/sync-zotero 同步 Zotero 条目与 PDF 附件（Phase B）
     DELETE /api/v1/reference-library/{item_id}  删除单条
     DELETE /api/v1/reference-library            清空
 
@@ -24,7 +25,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -39,10 +40,16 @@ from app.knowledge.services.reference_library_service import (
     ReferenceLibraryService,
 )
 from app.tools.csl.models import CslItem, CslName
+from app.tools.literature.zotero_sync import ZoteroSyncService
 
 router = APIRouter(prefix="/reference-library", tags=["reference-library"])
 
-__all__ = ["MAX_SAVE_ITEMS", "get_reference_library_service", "router"]
+__all__ = [
+    "MAX_SAVE_ITEMS",
+    "get_reference_library_service",
+    "get_zotero_sync_service",
+    "router",
+]
 
 #: 单次保存条数上限（一份 Zotero 整库导出可能有数千条，分批提交更可控）
 MAX_SAVE_ITEMS = 500
@@ -153,6 +160,31 @@ class SaveResponse(BaseModel):
     rejected: list[RejectedItemOut] = Field(default_factory=list)
 
 
+class ZoteroSyncRequest(BaseModel):
+    """Zotero 同步请求（Phase B Task B3）。
+
+    - `library_type="group"` 时，用户凭据里的 `zotero_user_id` 位置填 **group ID**；
+    - `limit` 上限 100：一次同步别把整库拉下来（Zotero 分页 100 条/页）。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    collection_key: str | None = None
+    library_type: Literal["user", "group"] = "user"
+    limit: int = Field(default=50, ge=1, le=100)
+
+
+class ZoteroSyncOut(BaseModel):
+    """同步结果：四个数字都必须给，前端才能如实展示部分成功。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    imported: int
+    skipped: int
+    attachments: int
+    failed: int
+
+
 # ===== 依赖 =====
 
 
@@ -162,8 +194,15 @@ def get_reference_library_service(
     return ReferenceLibraryService(db)
 
 
+def get_zotero_sync_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> ZoteroSyncService:
+    return ZoteroSyncService(db)
+
+
 CurrentUserDep = Annotated[User, Depends(get_current_active_user)]
 ServiceDep = Annotated[ReferenceLibraryService, Depends(get_reference_library_service)]
+ZoteroServiceDep = Annotated[ZoteroSyncService, Depends(get_zotero_sync_service)]
 ApiUserDep = Annotated[User, Depends(get_current_user_or_api_key)]
 """双通道鉴权：Bearer JWT（网页）或 ``X-API-Key``（浏览器剪藏扩展，Issue #67 Step 2）。"""
 
@@ -316,6 +355,38 @@ async def save_items(
             RejectedItemOut(ref_id=item.ref_id, title=item.title, reason=item.reason)
             for item in result.rejected
         ],
+    )
+
+
+@router.post(
+    "/sync-zotero",
+    response_model=ZoteroSyncOut,
+    summary="同步 Zotero 条目与 PDF 附件",
+)
+async def sync_zotero(
+    payload: ZoteroSyncRequest,
+    current_user: ApiUserDep,
+    service: ZoteroServiceDep,
+) -> ZoteroSyncOut:
+    """从用户自己的 Zotero 库同步条目与 PDF 附件（Phase B Task B3）。
+
+    - 条目归一化后进引用库（按 DOI / 题名幂等，重复同步不会重复入库）；
+    - PDF 附件（≤30MB）走知识库统一入库，并绑定父条目的 `ref_id`；
+    - 部分成功如实报告：单条 / 单附件失败只计入 `failed` 或 `skipped`，不整批失败。
+
+    凭据错误语义：未配置 404、解密失败 401、Zotero 拒绝 Key 401、内容不合法 422。
+    """
+    result = await service.sync(
+        current_user.id,
+        library_type=payload.library_type,
+        collection_key=payload.collection_key,
+        limit=payload.limit,
+    )
+    return ZoteroSyncOut(
+        imported=result.imported,
+        skipped=result.skipped,
+        attachments=result.attachments,
+        failed=result.failed,
     )
 
 

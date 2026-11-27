@@ -15,6 +15,13 @@
 
 与 `llm_credentials` 同因：数据源 Key 能花用户自己的钱（万方按次计费）。
 不接受开放 API Key 鉴权，避免「只读 Key 泄露配置、可写 Key 接管账号」。
+
+## Zotero 凭据（Phase B Task B3）
+
+`provider="zotero"` 存的是紧凑 JSON `{"zotero_user_id": "...", "zotero_api_key": "..."}`
+（前端拼好整串提交，仍走同一套 AES-256-GCM 加密与掩码，明文只进不出）。
+它不是检索数据源，因此**不在** `DATA_SOURCE_PROVIDERS` 共享白名单里；
+本适配层单独放行，且列表只在用户配置过后追加 `zotero`，不改既有数据源列表契约。
 """
 
 from __future__ import annotations
@@ -44,9 +51,24 @@ router = APIRouter(prefix="/data-source-credentials", tags=["data-source-credent
 CurrentUserDep = Annotated[User, Depends(get_current_active_user)]
 DbDep = Annotated[AsyncSession, Depends(get_db)]
 
+#: Zotero 凭据不是「检索数据源」也要存，但默认列表保持既有数据源顺序，
+#: 只在用户配置过后追加（避免影响原有「支持的数据源」契约）。
+ZOTERO_PROVIDER = "zotero"
+
+
+class _ZoteroAwareCredentialService(DataSourceCredentialService):
+    """在 HTTP 适配层放行 Zotero provider，不改共享白名单 / 数据模型。"""
+
+    @staticmethod
+    def require_provider(provider: str) -> str:
+        canonical = str(provider or "").strip().lower()
+        if canonical == ZOTERO_PROVIDER:
+            return canonical
+        return DataSourceCredentialService.require_provider(provider)
+
 
 def _service() -> DataSourceCredentialService:
-    return DataSourceCredentialService()
+    return _ZoteroAwareCredentialService()
 
 
 def _to_out(status: dict) -> DataSourceCredentialOut:
@@ -61,10 +83,11 @@ async def list_data_source_credentials(
     """返回所有支持的数据源；未配置的也会出现（`configured=false`），前端好渲染。"""
     records = await _service().list(db, current_user.id)
     by_provider: dict[str, DataSourceCredential] = {record.provider: record for record in records}
-    return [
-        _to_out(provider_status(provider, by_provider.get(provider)))
-        for provider in SUPPORTED_PROVIDERS
-    ]
+    providers = list(SUPPORTED_PROVIDERS)
+    if by_provider.get(ZOTERO_PROVIDER) is not None:
+        # Zotero 默认不在白名单里，配置过后才出现在列表（保持既有契约顺序）
+        providers.append(ZOTERO_PROVIDER)
+    return [_to_out(provider_status(provider, by_provider.get(provider))) for provider in providers]
 
 
 @router.put(
