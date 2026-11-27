@@ -1,10 +1,12 @@
 # VeriPaper Clipper（浏览器剪藏扩展）
 
 把知网（CNKI）/ 维普（CQVIP）/ 万方（Wanfang）**文献详情页**的题录（含摘要）一键保存到
-[VeriPaper](https://veripaper.me) 引用库。
+[VeriPaper](https://veripaper.me) 引用库；**可选附带你刚在官网下载的 PDF**，一次保存完成
+「题录 + 全文关联」。
 
 > Issue #67 Step 2：**零爬虫、100% 合规** —— 只读用户自己打开的页面 DOM 与 `<meta>`，
 > 不站内翻页、不批量抓取、不请求第三方接口。保存走用户自己的 API Key（BYOK）。
+> 附带的 PDF 是用户**自己下载**的文件，扩展只上传、不代下。
 
 ## 支持的页面
 
@@ -16,8 +18,8 @@
 
 不需要克隆仓库、不需要找目录，下载打包好的 zip 即可：
 
-1. 下载 [`release/veripaper-clipper-1.0.0.zip`](release/veripaper-clipper-1.0.0.zip)（本仓库内直接下载）
-2. 解压到任意固定位置（解压后应看到 `veripaper-clipper-1.0.0/` 目录，里面有 `manifest.json`）
+1. 下载 [`release/veripaper-clipper-1.1.0.zip`](release/veripaper-clipper-1.1.0.zip)（本仓库内直接下载）
+2. 解压到任意固定位置（解压后应看到 `veripaper-clipper-1.1.0/` 目录，里面有 `manifest.json`）
 3. Chrome 打开 `chrome://extensions`（Edge 为 `edge://extensions`）
 4. 打开右上角「开发者模式」→「加载已解压的扩展程序」→ 选择**解压后的目录**（选到含 `manifest.json` 的那一层）
 5. 点扩展图标 →「连接设置」配置 VeriPaper 地址与 API Key（见下）
@@ -35,9 +37,32 @@
 ## 使用
 
 1. 在知网 / 维普 / 万方的文献详情页打开扩展
-2. 点「提取当前页题录」→ 预览题名 / 期刊 / 年份，并显示「含摘要」「DOI」标记
-3. 点「保存到引用库」→ 结果提示「新增 N 条 / 已存在 N 条」
-4. 回到 VeriPaper「导入文献」页或「引用库」页即可看到条目；创建任务时勾选「我的引用库」
+2. 点「提取当前页题录」→ 预览题名 / 期刊 / 年份，并显示「含摘要」「DOI」「含正文」标记
+3. （可选）在官网点「PDF 下载」，再回到扩展的「附带刚下载的 PDF（可选）」处选择该 PDF
+4. 点「保存到引用库」→
+   - 未选 PDF：提示旧版文案「新增 N 条 / 已存在 N 条」；
+   - 选了 PDF：提示「新增题录 N 条 / 已存在 N 条；全文已关联（ref_id）」。
+5. 回到 VeriPaper「导入文献」页或「引用库」页即可看到条目；全文关联后可在「知识库」页看到对应文档，
+   创建任务时勾选「我的引用库」即可让综述引用全文分片
+
+## 附带 PDF 上传（一次提交）
+
+一个扩展弹窗完成两步，顺序固定：
+
+1. `POST /api/v1/reference-library`（JSON，`X-API-Key`）保存题录；
+2. 选了 PDF 时，`POST /api/v1/knowledge/documents`（`multipart/form-data`，`X-API-Key`）上传
+   `file` + `title` + `ref_id`，后端按 `ref_id`（DOI 优先，否则题名派生）自动关联到刚保存的题录。
+
+实现要点：
+
+- PDF 由弹窗读成 data URL 后交给 Service Worker，再由 SW 还原成文件上传 —— 弹窗关闭/popup 失焦
+  不会打断上传；`Content-Type: multipart/form-data; boundary=...` 由浏览器生成，不手写；
+- 文件大小上限 **30 MB**（与后端 `/knowledge/documents` 一致），超限在弹窗内直接提示；
+- **`.caj` 不支持**：请先在知网/维普官网把 CAJ 转成 PDF 再选择，弹窗会明确提示；
+- 题录保存成功但 PDF 上传失败时，提示「题录已保存，PDF 上传失败：…」，可稍后到 VeriPaper
+  知识库页手动上传；
+- 未新增任何权限：仍是 `activeTab` + 既有 `host_permissions`（VeriPaper 地址）；
+- 不写日志、不持久化 API Key；PDF 只发送到用户自己填的 VeriPaper 地址。
 
 ## 抓取哪些字段
 
@@ -51,16 +76,24 @@
 | 年份 | `citation_publication_date` / `citation_year` |
 | DOI | `citation_doi` / 页面文本正则 |
 | 摘要 | `citation_abstract` → 摘要容器选择器（截断 4000 字） |
+| 正文（开放 HTML 页） | 页面无 `citation_*` 时，`<article>` / `<main>` 内 `<p>` 文本拼接（截断 20000 字） |
 | URL | 当前页面地址（不伪造） |
 
 - **拿不到年份或 URL/DOI 的条目**由后端准入逻辑拒绝（不会编造数据）；
 - 摘要只作为**题录摘要证据**（`abstract_only`）入库，不会被当成全文分片；
-- 抓取不到摘要时不填，避免把页面导航文本当摘要。
+- 抓取不到摘要时不填，避免把页面导航文本当摘要；
+- 开放 HTML 正文单独放在 `source.extracted_text`（≥200 字才认为有全文，`abstract_only=false`），
+  不冒充摘要；当前版本用于弹窗预览并随保存消息透传，全文入库走用户附带 PDF 的链路。
 
 ## 鉴权
 
-扩展使用 VeriPaper 的**开放 API 通道**：`POST /api/v1/reference-library`，
-请求头 **`X-API-Key: maa_...`**（不是 `Authorization: Bearer`）。
+扩展使用 VeriPaper 的**开放 API 通道**，请求头统一是 **`X-API-Key: maa_...`**
+（不是 `Authorization: Bearer`）：
+
+- `POST /api/v1/reference-library`（题录，JSON）；
+- `POST /api/v1/knowledge/documents`（附带 PDF，multipart，带 `ref_id` 关联）。
+
+其他说明：
 
 - Key 由用户自己生成、可随时在设置页吊销；
 - 保存结果按 `ref_id`（DOI 优先，否则题名派生）幂等 —— 重复剪藏不会产生重复条目；
@@ -68,7 +101,8 @@
 
 ## 隐私
 
-- 扩展只把**当前页题录 + 你配置的 API Key**发送到你自己填的 VeriPaper 地址；
+- 扩展只把**当前页题录 / 你选择的 PDF / 你配置的 API Key**发送到你自己填的 VeriPaper 地址；
+- 没有选 PDF 时不会读取或上传任何本地文件；`.caj` 与超过 30 MB 的文件不会被上传；
 - 无遥测、无第三方请求、无远程代码；
 - 卸载扩展即清除本机 Key（`chrome.storage.local`）。
 
@@ -90,22 +124,27 @@ PLAYWRIGHT_ROOT=$HOME/vp-test/frontend \
 ```
 
 冒烟做法：用 Playwright 加载真实 Chromium + 已解压的扩展，`context.route` 把
-`kns.cnki.net` / `qikan.cqvip.com` 的请求替换成本地 fixture 页面（分别覆盖
-`citation_*` meta 路径与 DOM 兜底路径），再用本地 mock 服务接收
-`POST /api/v1/reference-library`，校验 `X-API-Key` 与 `{created,skipped,merged,rejected}`
-响应链路。真实站点冒烟需要用户自己的知网/维普账号，未在此自动化内跑。
+`kns.cnki.net` / `qikan.cqvip.com` / `med.wanfangdata.com.cn` 的请求替换成本地 fixture 页面
+（分别覆盖 `citation_*` meta 路径、DOM 兜底路径、无 `citation_*` 的开放 HTML 正文页
+`test/fixture-open-access.html`），再用本地 mock 服务同时接收
+`POST /api/v1/reference-library`（题录 JSON）与 `POST /api/v1/knowledge/documents`
+（PDF multipart），校验 `X-API-Key`、`{created,skipped,merged,rejected}` 响应链路、
+`ref_id` + `file` 表单字段、`X-API-Key` 与浏览器生成的 multipart boundary；并回归
+「不选 PDF 只存题录」「选 `.caj` 提示转 PDF」两条弹窗路径。真实站点冒烟需要用户自己的
+知网/维普账号，未在此自动化内跑。
 
 ## 文件结构
 
 ```
 extensions/veripaper-clipper/
-├── manifest.json                  Manifest V3
-├── content.js                     页面题录提取（只读 DOM/meta）
-├── background.js                  Service Worker：POST /api/v1/reference-library（X-API-Key）
-├── popup.html                     弹窗 UI
-├── popup.js                       设置 + 提取 + 保存流程
+├── manifest.json                  Manifest V3（v1.1.0）
+├── content.js                     页面题录提取 + 开放 HTML 页正文提取（只读 DOM/meta）
+├── background.js                  Service Worker：题录 POST + PDF multipart 上传（X-API-Key）
+├── popup.html                     弹窗 UI（含「附带刚下载的 PDF（可选）」选择区）
+├── popup.js                       设置 + 提取 + 附带 PDF 保存流程
 ├── README.md
 ├── scripts/package.mjs            打包脚本（生成 release/*.zip）
 ├── test/verify-extension.mjs      自动化冒烟（Playwright + fixture 站点 + mock 后端）
+├── test/fixture-open-access.html  开放 HTML 正文页 fixture（无 citation_*）
 └── release/                       打包产物（*.zip，可一键加载）
 ```

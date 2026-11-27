@@ -7,12 +7,19 @@
  *    不发起任何站内请求、不翻页、不批量抓取。
  * 2. **不造假**：拿不到 URL / 年份就留空（后端会拒绝入库，绝不编造）。
  * 3. **摘要只是题录摘要**：标记 `abstract_only` 语义，后端不会把它当全文分片。
+ * 4. **开放 HTML 正文单独存放**：页面没有 `citation_*` 时，只读 `<article>` / `<main>`
+ *    内 `<p>` 文本作为 `source.extracted_text`（≤20000 字），**不冒充摘要**；
+ *    正文只用于 popup 预览与随保存消息透传，不写回题录字段。
  *
  * 提取顺序：`citation_*` 标准 meta 优先（Google Scholar 等通用方案），
- * 缺失字段再用知网/维普/万方的 DOM 选择器补。
+ * 缺失字段再用知网/维普/万方的 DOM 选择器补；都没有时题名退回 `document.title` / `<h1>`。
  */
 
 const MAX_ABSTRACT_LENGTH = 4000;
+/** 开放 HTML 页正文上限，避免把超长页面整个塞进扩展消息体。 */
+const MAX_EXTRACTED_TEXT_LENGTH = 20000;
+/** 正文达到这个长度才认为页面确实有全文；否则仍按 `abstract_only` 处理。 */
+const MIN_OPEN_ACCESS_TEXT_LENGTH = 200;
 
 function metaContents(name) {
   return Array.from(document.querySelectorAll(`meta[name="${name}"], meta[property="${name}"]`))
@@ -39,6 +46,29 @@ function textOf(selectors) {
     }
   }
   return "";
+}
+
+/** 页面是否带标准 `citation_*` 题录 meta（开放 HTML 正文页通常没有）。 */
+function hasCitationMeta() {
+  return document.querySelector('meta[name^="citation_"]') !== null;
+}
+
+/**
+ * 开放 HTML 页正文提取：`<article>` / `<main>` 内 `<p>` 文本按段落拼接。
+ *
+ * 只读当前页 DOM（不请求站内接口、不翻页），与题录提取同一条零爬虫红线；
+ * 只用于 `source.extracted_text`，不写进 `item.abstract`（摘要与正文语义分开）。
+ */
+function extractOpenAccessBody() {
+  const container = document.querySelector("article, main");
+  if (!container) {
+    return "";
+  }
+  return Array.from(container.querySelectorAll("p"))
+    .map((node) => (node.textContent || "").replace(/\s+/g, " ").trim())
+    .filter((text) => text.length >= 10)
+    .join("\n\n")
+    .slice(0, MAX_EXTRACTED_TEXT_LENGTH);
 }
 
 function normalizeDoi(raw) {
@@ -146,6 +176,11 @@ function extractItem() {
   const url = location.href;
   const type = inferType(sourceHost);
 
+  // 开放 HTML 正文页（无 citation_*）：只读 DOM 拼正文，达到阈值才算「有全文」。
+  // 有 citation_* 的详情页保持旧语义（abstract_only=true），不把页面其他段落当正文。
+  const extractedText = hasCitationMeta() ? "" : extractOpenAccessBody();
+  const hasExtractedText = extractedText.length >= MIN_OPEN_ACCESS_TEXT_LENGTH;
+
   const id = doi ? `doi:${doi}` : `title:${slugify(title)}`;
 
   /** CslItem 形态；字段名必须与后端 `CslItem` 完全一致（`extra=forbid`）。 */
@@ -170,16 +205,18 @@ function extractItem() {
     item.doi = doi;
   }
 
-  return {
-    item,
-    source: {
-      host: sourceHost,
-      url,
-      has_doi: Boolean(doi),
-      has_abstract: Boolean(abstract),
-      abstract_only: true,
-    },
+  const source = {
+    host: sourceHost,
+    url,
+    has_doi: Boolean(doi),
+    has_abstract: Boolean(abstract),
+    abstract_only: !hasExtractedText,
   };
+  if (hasExtractedText) {
+    source.extracted_text = extractedText;
+  }
+
+  return { item, source };
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {

@@ -64,6 +64,12 @@
       .status { margin-top: 10px; font-size: 12px; min-height: 18px; }
       .status.ok { color: var(--ok); }
       .status.error { color: var(--error); }
+      .attach { margin-top: 12px; }
+      .attach label { margin-top: 0; }
+      .attach input[type="file"] { padding: 6px 7px; font-size: 12px; }
+      .attach-info { margin-top: 4px; font-size: 12px; color: var(--muted); }
+      .attach-info.error { color: var(--error); }
+      p.hint.small { margin: 4px 0 0; font-size: 11px; }
       .preview {
         margin-top: 10px;
         padding: 10px;
@@ -89,7 +95,8 @@
   <body>
     <h1>VeriPaper Clipper</h1>
     <p class="hint">
-      在知网 / 维普 / 万方详情页点「提取题录」，确认后一键保存到引用库（仅题录+摘要，不抓全文）。
+      在知网 / 维普 / 万方详情页点「提取题录」，确认后一键保存到引用库；可附带你刚下载的 PDF，
+      一次完成「题录 + 全文关联」（开放 HTML 页会顺带提取正文用于预览）。
     </p>
 
     <details id="settings">
@@ -110,6 +117,16 @@
       <button id="save" type="button" disabled>保存到引用库</button>
     </div>
 
+    <div class="attach">
+      <label for="attach-pdf">附带刚下载的 PDF（可选）</label>
+      <input id="attach-pdf" type="file" accept=".pdf" />
+      <div id="attach-info" class="attach-info" role="status"></div>
+      <p class="hint small">
+        先在官网点「PDF 下载」，再把该文件选到这里；扩展会先保存题录，再上传 PDF 并自动关联到这条题录。
+        .caj 请先在官网转成 PDF（扩展只接收 PDF）。
+      </p>
+    </div>
+
     <div id="status" class="status" role="status"></div>
 
     <div id="preview" class="preview">
@@ -118,13 +135,14 @@
       <div class="badges">
         <span class="badge" id="badge-doi">DOI</span>
         <span class="badge" id="badge-abstract">含摘要</span>
+        <span class="badge" id="badge-fulltext">含正文</span>
         <span class="badge">中文源</span>
       </div>
     </div>
 
     <footer>
       Key 在 <a href="https://veripaper.me/settings/api-keys" target="_blank" rel="noopener noreferrer">VeriPaper 设置 · 开放 API</a> 生成。
-      本扩展不向第三方发送任何数据。
+      题录与附带的 PDF 只发送到你上面填的 VeriPaper 地址，不向任何第三方发送数据。
     </footer>
 
     <script src="popup.js"></script>

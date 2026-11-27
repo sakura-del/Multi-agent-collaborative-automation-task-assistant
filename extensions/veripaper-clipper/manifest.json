@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "VeriPaper Clipper",
-  "version": "1.0.0",
-  "description": "把知网 / 维普 / 万方的题录（含摘要）一键保存到 VeriPaper 引用库（BYOK，零爬虫）。",
+  "version": "1.1.0",
+  "description": "把知网 / 维普 / 万方的题录（含摘要）保存到 VeriPaper 引用库，可选附带刚下载的 PDF 一次完成全文关联（BYOK，零爬虫）。",
   "permissions": ["activeTab", "storage", "scripting"],
   "host_permissions": [
     "https://veripaper.me/*",
