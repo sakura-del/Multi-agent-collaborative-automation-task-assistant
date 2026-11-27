@@ -5,7 +5,7 @@
 2. `base_revision` 乐观锁：匹配递增、落后返回 `409 DRAFT_CONFLICT` 带最新云端草稿、`None` 强制覆盖；
 3. Schema 校验：超过 `64 KB` 返回 422、未知字段被 `extra="forbid"` 拒绝；
 4. `POST /api/v1/tasks` 创建任务成功后自动清除当前用户的云端草稿；
-5. Alembic 迁移单 head（`d8b2f5c3a1e9`）以及 SQLite 幂等 `upgrade()` / `downgrade()`。
+5. Alembic 迁移单 head，且 `d8b2f5c3a1e9` 位于 head 历史链中；SQLite 幂等 `upgrade()` / `downgrade()`。
 """
 
 from __future__ import annotations
@@ -286,7 +286,9 @@ class TestTaskDraftMigration:
     def test_single_alembic_head_points_to_task_draft_migration(self) -> None:
         script = ScriptDirectory.from_config(Config(str(BACKEND_DIR / "alembic.ini")))
         heads = script.get_heads()
-        assert heads == ["d8b2f5c3a1e9"], f"期望唯一 head 为 d8b2f5c3a1e9，实际：{heads}"
+        assert len(heads) == 1, f"期望 Alembic 仅有一个 head（无分叉），实际：{heads}"
+        revs = {rev.revision for rev in script.walk_revisions("base", heads[0])}
+        assert "d8b2f5c3a1e9" in revs, f"期望迁移 d8b2f5c3a1e9 位于当前 head {heads[0]} 历史链中"
 
     def test_upgrade_and_downgrade_are_idempotent(self) -> None:
         engine = create_engine("sqlite://")
