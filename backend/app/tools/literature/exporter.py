@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
@@ -26,11 +26,24 @@ from docx import Document as DocxDocument
 
 from app.core.exceptions import NotFoundException, ValidationException
 from app.orchestration.contracts import ReviewReport
+from app.tools.csl.models import clean_csl_title, strip_html_tags
 from app.tools.literature.models import Artifact
 
 _ARTIFACT_ID = re.compile(r"^[0-9a-f]{32}$")
 _UNSAFE_SCHEME = re.compile(r"(?i)\b(?:javascript|data|file|vbscript)\s*:")
 _HTML_ESCAPES = (("&", "&amp;"), ("<", "&lt;"), (">", "&gt;"))
+_INLINE_E_GROUP_RE = re.compile(r"(?:\[E\d+\](?:\s*[,、;；]?\s*(?=\[E\d+\]))?)+")
+_SINGLE_E_RE = re.compile(r"\[E(\d+)\]")
+_ABSTRACT_CITE_RE = re.compile(
+    r"\s*(?:\[\[cite:[^\]]+\]\]|\[E\d+\]|\[\d+(?:(?:\s*,\s*|\s*[-–]\s*)\d+)*\])"
+)
+_MODEL_INFER_RE = re.compile(r"(?:模型推断[：:]\s*|（模型推断）|\(模型推断\))")
+_EXTRACT_NOISE_HEADING_RE = re.compile(r"^#{1,3}\s+.*(?:证据提取|证据局限性说明)\s*$")
+_EXISTING_HEADING_PREFIX_RE = re.compile(
+    r"^(?:\d+(?:\.\d+)*\.?\s+|[一二三四五六七八九十]+[、.．]\s*|（[一二三四五六七八九十]+）\s*)"
+)
+_RESIDUAL_HTML_TAG_RE = re.compile(r"</?(?:p|sup|sub|span|div|strong|em|b|i|br)\b[^>]*>", re.I)
+_HTML_SUP_BLOCK_RE = re.compile(r"<sup\b[^>]*>.*?</sup>", re.I | re.DOTALL)
 
 #: 判定态 → 中文标签（与复盘 Agent / 校验报告的展示口径保持一致）
 _VERDICT_LABELS: tuple[tuple[str, str], ...] = (
@@ -130,9 +143,10 @@ class LiteratureExporter:
         *,
         citation_style: str | None = None,
     ) -> Artifact:
-        """按同一标题层级写出 DOCX（python-docx）；`citation_style` 语义同 Markdown。"""
+        """按同一标题层级写出 DOCX（python-docx）；出口自动清洗内部标记与重复章节。"""
         raw = self._compose_document(report, citation_style=citation_style)
-        payload = self._build_docx_bytes(raw)
+        cleaned = _clean_docx_export_document(raw, report=report)
+        payload = self._build_docx_bytes(cleaned)
         return self._write(user_id, task_id, kind="docx", suffix=".docx", payload=payload)
 
     # ===== 查找 =====
@@ -350,3 +364,419 @@ class LiteratureExporter:
         buffer = BytesIO()
         docx.save(buffer)
         return buffer.getvalue()
+
+
+# ===== P0-2 / P0-3 / P0-4 / P0-5 / P1-2 / P1-4 导出归一化管道 =====
+
+
+def _compress_numeric_group(numbers: Sequence[int]) -> str:
+    """将数字列表排序去重并压缩为规范引文：连续 >=3 个压缩为 a-b，否则逗号分隔。"""
+    unique = sorted({n for n in numbers if n > 0})
+    if not unique:
+        return ""
+    ranges: list[str] = []
+    start = unique[0]
+    end = unique[0]
+    for val in unique[1:]:
+        if val == end + 1:
+            end = val
+        else:
+            ranges.append(_format_range(start, end))
+            start = end = val
+    ranges.append(_format_range(start, end))
+    return f"[{', '.join(ranges)}]"
+
+
+def _format_range(start: int, end: int) -> str:
+    if end - start >= 2:
+        return f"{start}-{end}"
+    if end > start:
+        return f"{start}, {end}"
+    return str(start)
+
+
+def normalize_bibliography_entries(
+    entries: Sequence[Mapping[str, Any]],
+    *,
+    doc_titles_by_id: Mapping[str, str] | None = None,
+) -> tuple[list[dict[str, Any]], dict[int, int]]:
+    """按 `doc_id` 聚合知识库分块为单条文献，剥离 HTML 标签与题名末尾双句号（P0-5 / P1-4）。
+
+    返回 `(清洗归并后的条目列表, 旧序号 -> 新序号 映射)`。
+    """
+    titles_map = doc_titles_by_id or {}
+    merged: list[dict[str, Any]] = []
+    key_to_pos: dict[str, int] = {}
+    index_remap: dict[int, int] = {}
+
+    for pos, raw_entry in enumerate(entries, start=1):
+        entry = dict(raw_entry)
+        old_index_raw = entry.get("index", pos)
+        old_index = int(old_index_raw) if isinstance(old_index_raw, int) else pos
+
+        doc_id = str(entry.get("doc_id") or "").strip()
+        url = str(entry.get("source_url") or entry.get("url") or "").strip()
+        doi = str(entry.get("doi") or entry.get("DOI") or "").strip()
+
+        if doc_id and not url and not doi:
+            dedup_key = f"doc:{doc_id}"
+        elif url:
+            dedup_key = f"url:{url}"
+        else:
+            dedup_key = f"row:{pos}"
+
+        clean_title = ""
+        if doc_id and doc_id in titles_map:
+            clean_title = clean_csl_title(titles_map[doc_id])
+        if not clean_title:
+            clean_title = clean_csl_title(entry.get("title") or entry.get("source_id"))
+
+        if isinstance(entry.get("authors"), list):
+            entry["authors"] = [strip_html_tags(a) for a in entry["authors"] if strip_html_tags(a)]
+        elif isinstance(entry.get("authors"), str):
+            entry["authors"] = strip_html_tags(entry["authors"])
+
+        if clean_title:
+            entry["title"] = clean_title
+
+        if dedup_key in key_to_pos:
+            target_pos = key_to_pos[dedup_key]
+            index_remap[old_index] = target_pos + 1
+            # 补充缺失元数据
+            target = merged[target_pos]
+            if doc_id and doc_id in titles_map and clean_title:
+                target["title"] = clean_title
+            if not target.get("authors") and entry.get("authors"):
+                target["authors"] = entry["authors"]
+            if target.get("year") is None and entry.get("year") is not None:
+                target["year"] = entry["year"]
+            continue
+
+        new_idx = len(merged) + 1
+        entry["index"] = new_idx
+        key_to_pos[dedup_key] = len(merged)
+        index_remap[old_index] = new_idx
+        merged.append(entry)
+
+    return merged, index_remap
+
+
+def render_clean_bibliography(
+    entries: Sequence[Mapping[str, Any]],
+    *,
+    citation_style: str | None = None,
+    style_resolver: Any | None = None,
+) -> tuple[list[str], dict[int, str], dict[str, str], bool]:
+    """用 CSL 渲染干净参考文献列表，并产出旧新编号到正文标记的映射。
+
+    返回 `(格式化参考文献行列表, new_index->正文marker, item_id->正文marker, 是否顺序编码制)`。
+    """
+    from app.tools.csl.models import DEFAULT_STYLE_ID, csl_item_from_bibliography_entry
+    from app.tools.csl.renderer import CitationRenderer
+
+    if not entries:
+        return [], {}, {}, True
+
+    style_id = (citation_style or "").strip() or DEFAULT_STYLE_ID
+    renderer = CitationRenderer(resolver=style_resolver)
+    resolved_id = renderer.resolver.resolve(style_id)
+    meta = renderer.resolver.meta(resolved_id)
+    is_numeric = meta.numbering == "citation-number"
+
+    items = []
+    idx_by_item_id: dict[str, list[int]] = {}
+    fallback_entries: list[tuple[int, Mapping[str, Any]]] = []
+
+    for pos, entry in enumerate(entries, start=1):
+        idx = int(entry.get("index", pos))
+        item = csl_item_from_bibliography_entry(entry)
+        if item is not None:
+            if item.id not in idx_by_item_id:
+                items.append(item)
+                idx_by_item_id[item.id] = []
+            idx_by_item_id[item.id].append(idx)
+        else:
+            fallback_entries.append((idx, entry))
+
+    lines: list[str] = []
+    marker_by_index: dict[int, str] = {}
+    marker_by_item_id: dict[str, str] = {}
+
+    if items:
+        rendered = renderer.render(items, style_id=resolved_id)
+        lines.extend(rendered.entries)
+        marker_by_item_id.update(rendered.marker_by_item_id)
+        for order_pos, item_id in enumerate(rendered.item_order, start=1):
+            marker = rendered.marker_by_item_id.get(item_id, f"[{order_pos}]")
+            for idx in idx_by_item_id.get(item_id, ()):
+                marker_by_index[idx] = f"[{order_pos}]" if is_numeric else marker
+
+    for fb_idx, entry in fallback_entries:
+        next_no = len(lines) + 1
+        title = clean_csl_title(entry.get("title") or entry.get("source_id") or f"文献 {fb_idx}")
+        lines.append(f"[{next_no}] {title}." if is_numeric else f"{title}.")
+        marker_by_index[fb_idx] = f"[{next_no}]" if is_numeric else f"({title})"
+
+    return lines, marker_by_index, marker_by_item_id, is_numeric
+
+
+def _strip_leading_doc_title_and_managed_sections(text: str) -> str:
+    """剥离文档首行 `# 题目`、`## 参考文献`、`## 引用核验` 及内部推理噪声。"""
+    lines = text.replace("\r\n", "\n").splitlines()
+    # 剥离首个顶级 `# 题目`（模板封面已单独渲染论文题目）
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    if lines and lines[0].lstrip().startswith("# ") and not lines[0].lstrip().startswith("## "):
+        lines.pop(0)
+
+    cleaned_blocks: list[str] = []
+    raw_body = "\n".join(lines)
+    # 识别是否已经包含 write 产出的综合章节，若包含则剔除历史残存的证据提取草稿章节（P0-4）
+    has_extract_heading = bool(re.search(r"^#{1,3}\s+.*证据提取\s*$", raw_body, re.MULTILINE))
+    has_non_extract_body = any(
+        line.lstrip().startswith(("## ", "### "))
+        and "摘要" not in line
+        and "局限" not in line
+        and "参考文献" not in line
+        and "引用核验" not in line
+        and "证据提取" not in line
+        and "证据局限性" not in line
+        for line in lines
+    )
+
+    skipping = False
+    filtered_lines: list[str] = []
+    for line in lines:
+        cleaned_line = _MODEL_INFER_RE.sub("", line)
+        heading_match = re.match(r"^(#{1,3})\s+(.+?)\s*$", cleaned_line.strip())
+        if heading_match:
+            level = len(heading_match.group(1))
+            heading_text = heading_match.group(2).strip()
+            if heading_text in {"参考文献", "引用核验"} or heading_text.startswith(
+                ("参考文献：", "参考文献:", "引用核验：", "引用核验:")
+            ):
+                skipping = True
+                continue
+            if (
+                has_extract_heading
+                and has_non_extract_body
+                and (heading_text.endswith("证据提取") or "证据局限性说明" in heading_text)
+            ):
+                skipping = True
+                continue
+            if level <= 2:
+                skipping = False
+            elif skipping:
+                continue
+        elif skipping:
+            continue
+        filtered_lines.append(cleaned_line)
+
+    seen_fingerprints: set[str] = set()
+    for block in "\n".join(filtered_lines).split("\n\n"):
+        stripped = block.strip()
+        if not stripped:
+            continue
+
+        # 剥离段落内部多余的 HTML 标签（如 <p>/<sup>）
+        stripped = _HTML_SUP_BLOCK_RE.sub("", stripped)
+        stripped = _RESIDUAL_HTML_TAG_RE.sub("", stripped).strip()
+        if not stripped:
+            continue
+
+        # 忽略引用标记做跨节点重复段落去重（P0-4）
+        fp_src = re.sub(r"\[E\d+\]|\[\d+(?:[,\-–]\d+)*\]", "", stripped)
+        fingerprint = re.sub(r"\s+", " ", fp_src).strip()
+        if fingerprint and not stripped.startswith("#"):
+            if fingerprint in seen_fingerprints:
+                continue
+            seen_fingerprints.add(fingerprint)
+        cleaned_blocks.append(stripped)
+
+    return "\n\n".join(cleaned_blocks)
+
+
+def _strip_citations_from_abstract(body: str) -> str:
+    """清理 `## 摘要` 段落正文中的所有引文角标（P0-3）。"""
+    lines = body.splitlines()
+    in_abstract = False
+    out: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if re.match(r"^#{1,6}\s+", stripped):
+            in_abstract = bool(re.match(r"^#{1,6}\s+摘要\b", stripped))
+            out.append(line)
+            continue
+        if in_abstract:
+            cleaned = _ABSTRACT_CITE_RE.sub("", line)
+            cleaned = re.sub(r"\s+([，。；、,.])", r"\1", cleaned)
+            out.append(cleaned)
+        else:
+            out.append(line)
+    return "\n".join(out)
+
+
+def normalize_export_citations(
+    body: str,
+    *,
+    index_remap: Mapping[int, int] | None = None,
+    marker_map: Mapping[int, str] | None = None,
+    item_id_map: Mapping[str, str] | None = None,
+    is_numeric: bool = True,
+) -> str:
+    """替换 `[[cite:...]]` 与 `[E#]` 为规范学术引文，合并相邻编号并清理摘要角标（P0-3）。"""
+    remap = index_remap or {}
+    markers = marker_map or {}
+    text = _strip_citations_from_abstract(body)
+
+    if item_id_map:
+        text = re.sub(
+            r"\[\[cite:([^\s\]]+)\]\]",
+            lambda m: item_id_map.get(m.group(1), m.group(0)),
+            text,
+        )
+
+    def _replace_e_group(match: re.Match[str]) -> str:
+        raw_nums = [int(n) for n in _SINGLE_E_RE.findall(match.group(0))]
+        if not raw_nums:
+            return match.group(0)
+        if is_numeric:
+            mapped_nums: list[int] = []
+            for raw_n in raw_nums:
+                merged_n = remap.get(raw_n, raw_n)
+                target_marker = markers.get(merged_n)
+                if target_marker:
+                    m_num = re.search(r"\d+", target_marker)
+                    mapped_nums.append(int(m_num.group(0)) if m_num else merged_n)
+                else:
+                    mapped_nums.append(merged_n)
+            return _compress_numeric_group(mapped_nums)
+        # 著者-出版年制合并多个作者标记
+        labels: list[str] = []
+        seen_labels: set[str] = set()
+        for raw_n in raw_nums:
+            merged_n = remap.get(raw_n, raw_n)
+            label = markers.get(merged_n, f"[{merged_n}]").strip()
+            if label.startswith("(") and label.endswith(")"):
+                label = label[1:-1]
+            if label not in seen_labels:
+                seen_labels.add(label)
+                labels.append(label)
+        return f"({'; '.join(labels)})"
+
+    return _INLINE_E_GROUP_RE.sub(_replace_e_group, text)
+
+
+def number_markdown_headings(body: str) -> str:
+    """为正文二级及以下标题自动补全 `1.` / `1.1` / `1.1.1` 标准序号（保留摘要，P1-2）。"""
+    h1 = 0
+    h2 = 0
+    h3 = 0
+    out: list[str] = []
+    for line in body.splitlines():
+        stripped = line.strip()
+        m = re.match(r"^(#{2,4})\s+(.+?)\s*$", stripped)
+        if not m:
+            out.append(line)
+            continue
+        hashes, title = m.group(1), m.group(2).strip()
+        if title in {"摘要", "参考文献", "引用核验"} or _EXISTING_HEADING_PREFIX_RE.match(title):
+            out.append(line)
+            continue
+        level = len(hashes)
+        if level == 2:
+            h1 += 1
+            h2 = 0
+            h3 = 0
+            out.append(f"## {h1}. {title}")
+        elif level == 3:
+            if h1 == 0:
+                h1 = 1
+            h2 += 1
+            h3 = 0
+            out.append(f"### {h1}.{h2} {title}")
+        else:
+            if h1 == 0:
+                h1 = 1
+            if h2 == 0:
+                h2 = 1
+            h3 += 1
+            out.append(f"#### {h1}.{h2}.{h3} {title}")
+    return "\n".join(out)
+
+
+def prepare_template_export(
+    body: str,
+    bibliography_entries: Sequence[Mapping[str, Any]] | None,
+    *,
+    fallback_bibliography: Sequence[str] = (),
+    citation_style: str | None = None,
+    doc_titles_by_id: Mapping[str, str] | None = None,
+    style_resolver: Any | None = None,
+    add_heading_numbers: bool = True,
+) -> tuple[str, list[str], list[dict[str, Any]]]:
+    """统一准备模板导出所需正文、规范 CSL 参考文献与去重后的条目元数据。"""
+    cleaned_entries: list[dict[str, Any]] = []
+    index_remap: dict[int, int] = {}
+    marker_map: dict[int, str] = {}
+    item_id_map: dict[str, str] = {}
+    is_numeric = True
+    rendered_bib: list[str] = []
+
+    if bibliography_entries:
+        cleaned_entries, index_remap = normalize_bibliography_entries(
+            bibliography_entries, doc_titles_by_id=doc_titles_by_id
+        )
+        rendered_bib, marker_map, item_id_map, is_numeric = render_clean_bibliography(
+            cleaned_entries, citation_style=citation_style, style_resolver=style_resolver
+        )
+    else:
+        rendered_bib = [
+            re.sub(r"[.。]+$", ".", strip_html_tags(line))
+            for line in fallback_bibliography
+            if strip_html_tags(line)
+        ]
+
+    stripped_body = _strip_leading_doc_title_and_managed_sections(body)
+    normalized_body = normalize_export_citations(
+        stripped_body,
+        index_remap=index_remap,
+        marker_map=marker_map,
+        item_id_map=item_id_map,
+        is_numeric=is_numeric,
+    )
+    if add_heading_numbers:
+        normalized_body = number_markdown_headings(normalized_body)
+
+    return normalized_body, rendered_bib, cleaned_entries
+
+
+def _clean_docx_export_document(document: str, *, report: ReviewReport) -> str:
+    """用于 `LiteratureExporter.export_docx` 的最终出口清洗：零 `[E#]` / `模型推断：` / 重复章 / HTML。"""
+    cleaned_entries, index_remap = normalize_bibliography_entries(report.bibliography)
+    marker_map = {
+        int(e.get("index", i)): f"[{int(e.get('index', i))}]"
+        for i, e in enumerate(cleaned_entries, start=1)
+    }
+    text = _MODEL_INFER_RE.sub("", document)
+    text = _HTML_SUP_BLOCK_RE.sub("", text)
+    text = _RESIDUAL_HTML_TAG_RE.sub("", text)
+    # 摘要去角标 & [E#] -> [n]
+    text = normalize_export_citations(
+        text,
+        index_remap=index_remap,
+        marker_map=marker_map,
+        is_numeric=True,
+    )
+    # 若上游遗留多份 ## 参考文献，仅保留最后一个权威参考文献段
+    matches = list(re.finditer(r"^## 参考文献[ \t]*$", text, re.MULTILINE))
+    if len(matches) > 1:
+        for earlier in reversed(matches[:-1]):
+            start = earlier.start()
+            rest = text[earlier.end() :]
+            following = re.search(r"^## ", rest, re.MULTILINE)
+            end = earlier.end() + following.start() if following else len(text)
+            text = text[:start].rstrip() + (
+                "\n\n" + text[end:].lstrip() if text[end:].strip() else ""
+            )
+    return text

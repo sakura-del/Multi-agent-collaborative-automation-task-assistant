@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import html
 import re
 import unicodedata
 from collections.abc import Mapping, Sequence
@@ -54,6 +55,8 @@ _DOI_PREFIX_PATTERN = re.compile(r"^(?:https?://(?:dx\.)?doi\.org/|doi:\s*)", re
 _DOI_URL_PATTERN = re.compile(r"^https?://(?:dx\.)?doi\.org/", re.IGNORECASE)
 _LANGUAGE_SPLIT_PATTERN = re.compile(r"[-_]")
 _YEAR_PATTERN = re.compile(r"\d{4}")
+_HTML_SUP_PATTERN = re.compile(r"<sup\b[^>]*>.*?</sup>", re.IGNORECASE | re.DOTALL)
+_HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
 
 Numbering = Literal["citation-number", "none"]
 Ordering = Literal["citation-order", "author-date"]
@@ -413,7 +416,7 @@ def parse_csl_name(text: Any) -> CslName:
     ⚠️ 罗马化中文姓名（如 ``"Niu Gengtian"``）会被按西文惯例拆成 family=Gengtian，
     这是无姓名库时的已知限制；调用方应优先传 ``literal`` / 已归一的名字。
     """
-    raw = _text(text)
+    raw = strip_html_tags(text)
     if not raw:
         return CslName()
     if CJK_PATTERN.search(raw):
@@ -484,8 +487,8 @@ def csl_item_from_literature_record(record: Any, *, ref_id: str | None = None) -
     若来源对象带 ``type`` 字段则优先采用。``ref_id`` 显式给出时覆盖自动规则。
     """
     source_id = _text(_field(record, "source_id"))
-    title = _text(_field(record, "title"))
-    authors = [_name_from_any(entry) for entry in _as_sequence(_field(record, "authors"))]
+    title = clean_csl_title(_text(_field(record, "title")))
+    authors = [_name_from_any(entry) for entry in _expand_authors(_field(record, "authors"))]
     authors = [name for name in authors if name.family or name.given or name.literal]
     author_texts = [author_sort_text(name) for name in authors]
     # §1.5「DOI 优先」：显式 doi 字段，缺失时尝试 doi.org 形式的 URL
@@ -526,7 +529,7 @@ def csl_item_from_bibliography_entry(entry: Mapping[str, Any]) -> CslItem | None
     if not isinstance(entry, Mapping):
         raise ValidationException("bibliography 条目必须是 mapping")
 
-    title = _text(entry.get("title"))
+    title = clean_csl_title(_text(entry.get("title")))
     explicit_id = _text(entry.get("ref_id")) or None
     # §1.5「DOI 优先」：reviewer 条目可能只带 doi.org 形式的 source_url（与核验器同规则）
     doi = _first_present(entry, "doi", "DOI") or doi_from_url(
@@ -538,7 +541,7 @@ def csl_item_from_bibliography_entry(entry: Mapping[str, Any]) -> CslItem | None
     if isinstance(csl_json, Mapping) and csl_json:
         payload = dict(csl_json)
         # csl_json 是唯一真源：它自己的 title 优先，条目扁平 title 只在 csl_json 缺失时兜底
-        payload_title = _text(payload.get("title")) or title
+        payload_title = clean_csl_title(_text(payload.get("title"))) or title
         if not payload_title:
             return None
         payload["title"] = payload_title
@@ -566,7 +569,7 @@ def csl_item_from_bibliography_entry(entry: Mapping[str, Any]) -> CslItem | None
     if not title:
         return None
 
-    authors = [_name_from_any(item) for item in _as_sequence(entry.get("authors"))]
+    authors = [_name_from_any(item) for item in _expand_authors(entry.get("authors"))]
     authors = [name for name in authors if name.family or name.given or name.literal]
     author_texts = [author_sort_text(name) for name in authors]
 
@@ -597,6 +600,38 @@ def csl_item_from_bibliography_entry(entry: Mapping[str, Any]) -> CslItem | None
 
 
 # ===== 内部工具 =====
+
+
+def strip_html_tags(value: Any) -> str:
+    """移除上游元数据里的 HTML 标签与上标脚注（如 ``<p>Luo<sup>1</sup></p>`` → ``Luo``）。"""
+    if value is None:
+        return ""
+    raw = html.unescape(str(value))
+    without_sup = _HTML_SUP_PATTERN.sub("", raw)
+    cleaned = _HTML_TAG_PATTERN.sub(" ", without_sup)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def clean_csl_title(value: Any) -> str:
+    """清洗文献题名：剥离 HTML 标签并去除末尾多余句点（防止 ``.. 2025.`` 双句号，P1-4）。"""
+    cleaned = strip_html_tags(value)
+    return re.sub(r"[.。]+$", "", cleaned).strip()
+
+
+def _expand_authors(value: Any) -> list[Any]:
+    """展开作者列表：若单条字符串含 2 个及以上逗号（多人合并串），先按逗号拆开。"""
+    items: list[Any] = []
+    for entry in _as_sequence(value):
+        if isinstance(entry, str):
+            text = strip_html_tags(entry)
+            if text.count(",") >= 2 or text.count("，") >= 1:
+                parts = [part.strip() for part in re.split(r"[,，]", text) if part.strip()]
+                items.extend(parts)
+            elif text:
+                items.append(text)
+        else:
+            items.append(entry)
+    return items
 
 
 def _text(value: Any) -> str:
@@ -665,9 +700,9 @@ def _csl_name_from_json(value: Any) -> CslName:
     if isinstance(value, Mapping):
         return normalize_csl_name(
             CslName(
-                family=_text(value.get("family")),
-                given=_text(value.get("given")),
-                literal=_text(value.get("literal")),
+                family=strip_html_tags(value.get("family")),
+                given=strip_html_tags(value.get("given")),
+                literal=strip_html_tags(value.get("literal")),
             )
         )
     if isinstance(value, str):

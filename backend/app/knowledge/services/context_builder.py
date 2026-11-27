@@ -87,6 +87,7 @@ class LiteratureContextBuilder:
                         doc_id=doc_id,
                         chunk_id=chunk_id,
                         source_url=source_url,
+                        doc_title=str(meta.get("doc_title") or "").strip() or None,
                         excerpt=excerpt[:MAX_EXCERPT_CHARS],
                         locator=_locator_from_metadata(meta),
                     )

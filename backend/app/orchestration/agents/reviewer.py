@@ -150,59 +150,70 @@ def _renumber_citations(
     return re.sub(r"(?<!\[)\[E(\d+)\](?!\]|\()", _replace, content)
 
 
-def _contributes_to_body(result: Any) -> bool:
-    """该节点内容是否应进入复盘正文（Issue #7）。
+def _contributes_to_body(result: Any, *, has_write_nodes: bool = False) -> bool:
+    """该节点内容是否应进入复盘正文（Issue #7 + P0-4）。
 
-    `extract` / `write` 是作者正文，进正文；
-    `search`（检索结果列表）、`validate` / `review`（依赖输出的机械汇总，
-    而汇总里又已包含上游节点全文）不进正文——否则正文大面积重复
-    （生产实测：57 段里 26 段重复，`## 参考文献` 出现 3 次）。
-
-    `node_type` 缺失（历史持久化负载）时返回 True：无法判定角色就不擅自丢内容，
-    保持既有行为。显式 `content_role` 优先于类型推断。
+    - 有正式撰稿节点（`write`）时：**只保留 `write` 节点**成稿正文，严禁将上游
+      `extract` 节点的证据提取草稿与 `write` 同时混拼，避免大面积正文重复与
+      局部引用编号错位（P0-4）；
+    - 无 `write` 节点（仅含 `extract` 的小图或未标 `node_type` 的历史负载）时：
+      向后兼容保留 `extract` 节点；
+    - `search` / `validate` / `review` 与 `content_role="aggregated"` 一律不进正文。
     """
     role = str(getattr(result, "content_role", "") or "")
     if role == "aggregated":
         return False
-    if role == "authored":
-        return True
     node_type = str(getattr(result, "node_type", "") or "")
+    if role == "authored":
+        return not (has_write_nodes and node_type == "extract")
     if not node_type:
         return True
+    if has_write_nodes:
+        return node_type == "write"
     return node_type in {"extract", "write"}
 
 
+_INLINE_MODEL_INFER_PREFIX = re.compile(r"(?:模型推断[：:]\s*|（模型推断）|\(模型推断\))")
+_EXTRACT_HEADING_RE = re.compile(r"^#{1,3}\s+.*证据局限性说明\s*$")
+_CITE_TAG_RE = re.compile(r"\s*\[E\d+\]")
+
+
+def _strip_internal_noise(text: str) -> str:
+    """剥离节点生成内容中的内部推理提示词标记（如「模型推断：」）。"""
+    return _INLINE_MODEL_INFER_PREFIX.sub("", text).strip()
+
+
 def _assemble_body(body_parts: list[str]) -> str:
-    """拼接正文并去除**完全重复的段落**（Issue #7）。
+    """拼接正文并去除重复段落（含忽略 [E#] 差异的跨节点重复段，P0-4）。
 
-    多个作者节点之间仍可能复述同一段内容（如 extract 与 write 都写了同一段背景），
-    按「首次出现顺序」保留一次即可。只去重完全相同的段落（按空白归一后比较），
-    不做模糊合并，避免把不同内容误删。
-
-    同时剔除作者正文里**自带的** `## 参考文献` / `## 局限性` / `## 引用核验` 章节：
-    这些章节由复盘统一生成，节点自带的版本会造成同一章节出现多次
-    （生产实测：`## 参考文献` 出现 3 次）。只删这三个受管章节，其余内容原样保留。
+    同时剔除受管章节（`## 参考文献` / `## 局限性` / `## 引用核验`）及仅属于
+    内部过程的证据小节标题（如 `### 证据局限性说明`）。
     """
     paragraphs: list[str] = []
     seen: set[str] = set()
     skipping = False
     for part in body_parts:
-        for block in part.split("\n\n"):
-            stripped = block.strip()
-            if not stripped:
-                continue
-            heading = _managed_section_heading(stripped)
-            if heading is not None:
-                # 进入受管章节：其内容由复盘统一生成，正文里整体丢弃
+        filtered_lines: list[str] = []
+        for raw_line in part.splitlines():
+            line = _strip_internal_noise(raw_line)
+            line_stripped = line.strip()
+            heading = _managed_section_heading(line_stripped)
+            if heading is not None or _EXTRACT_HEADING_RE.match(line_stripped):
                 skipping = True
                 continue
-            if stripped.startswith("#"):
-                # 任何其他标题都结束受管章节的跳过状态
+            if line_stripped.startswith("#"):
                 skipping = False
             if skipping:
                 continue
-            key = re.sub(r"\s+", " ", stripped)
-            if key in seen:
+            filtered_lines.append(line)
+        for block in "\n".join(filtered_lines).split("\n\n"):
+            stripped = block.strip()
+            if not stripped:
+                continue
+            # 忽略 [E#] 编号后对比指纹：避免同一论据仅因局部编号不同（[E7] vs [E14]）躲过去重
+            dedup_target = _CITE_TAG_RE.sub("", stripped)
+            key = re.sub(r"\s+", " ", dedup_target).strip()
+            if not key or key in seen:
                 continue
             seen.add(key)
             paragraphs.append(stripped)
@@ -235,12 +246,19 @@ def _enrich_reference_entry(entry: dict[str, Any], artifact: Mapping[str, Any]) 
     - `language` 必须落库：缺失会让逐条 locale 退化（英文条目被渲染成「等」）。
     仅依赖 `app.tools.csl.models` 的纯函数，不触发任何网络。
     """
-    from app.tools.csl.models import detect_language, parse_year
+    from app.tools.csl.models import (
+        clean_csl_title,
+        detect_language,
+        parse_year,
+        strip_html_tags,
+    )
 
-    title = str(artifact.get("title") or "").strip()
-    authors = [str(item).strip() for item in (artifact.get("authors") or []) if str(item).strip()]
+    title = clean_csl_title(artifact.get("title"))
+    authors = [
+        strip_html_tags(item) for item in (artifact.get("authors") or []) if strip_html_tags(item)
+    ]
 
-    if title and not entry.get("authors") and entry.get("title") != title:
+    if title and not entry.get("authors") and clean_csl_title(entry.get("title")) != title:
         entry["title"] = title
     if authors and not entry.get("authors"):
         entry["authors"] = authors
@@ -428,11 +446,26 @@ class ReviewerAgent(BaseAgent):
                 citations[url] = entry
                 url_to_global[url] = len(citations)
 
-        for result in results:
+        has_write_nodes = any(getattr(r, "node_type", None) == "write" for r in results)
+
+        # 优先按「进入正文」的作者节点排序，保证正文中 [E#] 与参考文献前序一致
+        ordered_results = [
+            *(r for r in results if _contributes_to_body(r, has_write_nodes=has_write_nodes)),
+            *(r for r in results if not _contributes_to_body(r, has_write_nodes=has_write_nodes)),
+        ]
+
+        from app.tools.csl.models import clean_csl_title
+
+        for result in ordered_results:
             content = (result.content or "").strip()
             node_id = str(result.node_id)
+            in_body = bool(
+                content and _contributes_to_body(result, has_write_nodes=has_write_nodes)
+            )
 
             # ① 先登记本节点证据 → 建立局部编号 → 全局编号映射
+            # 有 write 节点时，非作者节点（如 extract）只作已有条目补充，不再凭空新增未引参考文献
+            allow_new_from_evidence = in_body or not has_write_nodes
             evidence_items = list(result.evidence)
             cited_numbers = [int(n) for n in (result.cited_indices or [])]
             pairs = (
@@ -442,43 +475,54 @@ class ReviewerAgent(BaseAgent):
             )
             for local_no, item in pairs:
                 url = str(item.source_url) if getattr(item, "source_url", None) else ""
-                # 登记键不能只认 URL：知识库 chunk 证据往往没有 URL（离线任务尤其如此），
-                # 用 doc_id:chunk_id 兜底——否则这些证据的局部编号拿不到全局映射，
-                # 正文 [E#] 重写不生效（Issue #17 三次实测：[E1]~[E16] vs 8 条）。
-                key = (
-                    url or f"doc:{item.doc_id}:chunk:{item.chunk_id}" or f"text:{item.excerpt[:40]}"
-                )
-                if key and key not in citations:
-                    # 首次出现：登记并分配全局编号
+                # P0-5：知识库 PDF 的多个 chunk 共享同一 doc_id，必须按 doc_id 聚合成 1 条文献！
+                key = url or (f"doc:{item.doc_id}" if item.doc_id else f"text:{item.excerpt[:40]}")
+                if key and key not in citations and allow_new_from_evidence:
+                    doc_title = clean_csl_title(getattr(item, "doc_title", None))
                     citations[key] = {
-                        "title": item.excerpt[:60],
+                        "title": doc_title or item.excerpt[:60],
                         "source_url": url or None,
                         "doc_id": str(item.doc_id) if item.doc_id else None,
                         "chunk_id": str(item.chunk_id) if item.chunk_id else None,
                     }
                     url_to_global[key] = len(citations)
-                # 同一文献的多个 chunk 共享 URL——**每个**局部编号都要映射到
-                # 全局号，否则这些 chunk 的 [E#] 重写不生效
-                if key:
+                elif key and key in citations:
+                    # 已有条目补充更完整的文档真实标题（覆盖早期截断分块片段）
+                    doc_title = clean_csl_title(getattr(item, "doc_title", None))
+                    if doc_title and citations[key].get("title") != doc_title:
+                        citations[key]["title"] = doc_title
+                if key and key in url_to_global:
                     local_to_global[(node_id, local_no)] = url_to_global[key]
             # search 节点的 artifacts 带完整文献元数据（title/authors/DOI）
             for artifact in result.artifacts:
                 url = str(artifact.get("source_url") or "")
-                if url and url not in citations:
+                if (
+                    url
+                    and url not in citations
+                    and (
+                        not has_write_nodes
+                        or not any(
+                            _contributes_to_body(r, has_write_nodes=has_write_nodes) and r.evidence
+                            for r in results
+                        )
+                    )
+                ):
                     _register_evidence(
                         url,
                         {
-                            "title": str(artifact.get("title") or artifact.get("source_id") or ""),
+                            "title": clean_csl_title(
+                                artifact.get("title") or artifact.get("source_id")
+                            ),
                             "source_url": url,
                             "source_id": artifact.get("source_id"),
                         },
                     )
-                if url:
+                if url and url in citations:
                     # Issue #4：补齐 CSL 渲染所需的元数据（作者/年份/语言/DOI/类型）
                     _enrich_reference_entry(citations[url], artifact)
 
             # ② 再重写正文：局部 [E#] → 全局 [E#]（映射缺号保留原编号，诚实优于篡改）
-            if content and _contributes_to_body(result):
+            if in_body:
                 body_parts.append(_renumber_citations(content, node_id, local_to_global))
 
         bibliography = [

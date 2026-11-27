@@ -23,7 +23,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundException, ValidationException
 from app.core.logging import get_logger
+from app.db.models.knowledge import KnowledgeDoc
 from app.db.models.user_template import UserTemplate
+from app.tools.literature.exporter import prepare_template_export
 from app.tools.templates.charts import build_year_distribution_figure
 from app.tools.templates.inspector import inspect_template, validate_template_bytes
 from app.tools.templates.models import StyleRole, TemplateMeta, TemplateSecurityError
@@ -108,22 +110,40 @@ def _user_to_record(row: UserTemplate) -> TemplateRecord:
 
 
 def _append_figure_to_review_body(body_text: str, *, caption: str, asset_id: str) -> str:
-    """若正文尚未引用该图且存在「研究现状」章节，将插图标记插在该节末尾，否则附在文末。"""
+    """若正文尚未引用该图，优先插入「研究现状」章节末尾，否则插在首个主章节末尾（P0-2）。"""
     marker = f"![{caption}](fig://{asset_id})"
     if f"fig://{asset_id}" in body_text:
         return body_text
     lines = body_text.splitlines()
     target_idx: int | None = None
     target_level = 0
+    first_section_idx: int | None = None
+    first_section_level = 0
     for idx, line in enumerate(lines):
         m = re.match(r"^(#{1,6})\s+(.+)$", line.strip())
-        if m and "研究现状" in m.group(2):
+        if not m:
+            continue
+        level = len(m.group(1))
+        heading_title = m.group(2).strip()
+        if "研究现状" in heading_title:
             target_idx = idx
-            target_level = len(m.group(1))
+            target_level = level
             break
+        if (
+            first_section_idx is None
+            and level <= 2
+            and heading_title not in {"摘要", "参考文献", "引用核验"}
+        ):
+            first_section_idx = idx
+            first_section_level = level
+
     if target_idx is None:
-        sep = "\n\n" if body_text.strip() else ""
-        return f"{body_text.rstrip()}{sep}{marker}"
+        if first_section_idx is not None:
+            target_idx = first_section_idx
+            target_level = first_section_level
+        else:
+            sep = "\n\n" if body_text.strip() else ""
+            return f"{body_text.rstrip()}{sep}{marker}"
 
     insert_at = len(lines)
     for idx in range(target_idx + 1, len(lines)):
@@ -281,6 +301,33 @@ class TemplateService:
 
     # ===== 渲染 =====
 
+    async def _load_doc_titles(
+        self, user_id: uuid.UUID, entries: Sequence[dict[str, Any]] | None
+    ) -> dict[str, str]:
+        """批量加载知识库文档真实标题（owner-scoped），用于修正分块碎片标题（P0-5）。"""
+        if not entries or self._db is None:
+            return {}
+        doc_ids: list[uuid.UUID] = []
+        seen: set[uuid.UUID] = set()
+        for entry in entries:
+            if not isinstance(entry, dict) or not entry.get("doc_id"):
+                continue
+            try:
+                did = uuid.UUID(str(entry["doc_id"]))
+            except (TypeError, ValueError):
+                continue
+            if did not in seen:
+                seen.add(did)
+                doc_ids.append(did)
+        if not doc_ids:
+            return {}
+        stmt = select(KnowledgeDoc.id, KnowledgeDoc.title).where(
+            KnowledgeDoc.user_id == user_id,
+            KnowledgeDoc.id.in_(doc_ids),
+        )
+        rows = (await self._db.execute(stmt)).all()
+        return {str(doc_id): str(title).strip() for doc_id, title in rows if str(title or "").strip()}
+
     async def render(
         self,
         user_id: uuid.UUID,
@@ -289,8 +336,9 @@ class TemplateService:
         sections: dict[str, str],
         bibliography: list[str],
         bibliography_entries: Sequence[dict[str, Any]] | None = None,
+        citation_style: str | None = None,
     ) -> bytes:
-        """用模板渲染成稿（支持内置只读母版与用户模板，及真实参考文献插图生成）。"""
+        """用模板渲染成稿（支持内置只读母版与用户模板，及真实参考文献清洗+插图生成）。"""
         spec = BUILTIN_TEMPLATES.get(template_id)
         if spec is not None:
             record = _load_builtin_record(spec)
@@ -303,9 +351,28 @@ class TemplateService:
                 raise NotFoundException("模板文件已丢失，请重新上传")
 
         render_sections = dict(sections)
+        effective_bib = list(bibliography)
+        clean_entries: Sequence[dict[str, Any]] = list(bibliography_entries or [])
+
+        if "body" in render_sections:
+            doc_titles = await self._load_doc_titles(user_id, bibliography_entries)
+            normalized_body, normalized_bib, merged_entries = prepare_template_export(
+                render_sections["body"],
+                bibliography_entries,
+                fallback_bibliography=effective_bib,
+                citation_style=citation_style,
+                doc_titles_by_id=doc_titles,
+                add_heading_numbers=(spec is not None),
+            )
+            render_sections["body"] = normalized_body
+            if normalized_bib:
+                effective_bib = normalized_bib
+            if merged_entries:
+                clean_entries = merged_entries
+
         figures: dict[str, FigureAsset] | None = None
-        if bibliography_entries:
-            year_fig = build_year_distribution_figure(bibliography_entries)
+        if clean_entries:
+            year_fig = build_year_distribution_figure(clean_entries)
             if year_fig is not None:
                 figures = {year_fig.asset_id: year_fig}
                 if "body" in render_sections:
@@ -320,7 +387,7 @@ class TemplateService:
             return render_document(
                 template=source,
                 sections=render_sections,
-                bibliography=bibliography,
+                bibliography=effective_bib,
                 style_map=style_map,
                 figures=figures,
             )

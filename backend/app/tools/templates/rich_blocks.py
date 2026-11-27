@@ -13,7 +13,12 @@ import re
 from dataclasses import dataclass
 
 from docx.enum.table import WD_TABLE_ALIGNMENT
-from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT, WD_TAB_LEADER
+from docx.enum.text import (
+    WD_ALIGN_PARAGRAPH,
+    WD_LINE_SPACING,
+    WD_TAB_ALIGNMENT,
+    WD_TAB_LEADER,
+)
 from docx.oxml import OxmlElement, parse_xml
 from docx.oxml.ns import nsdecls, qn
 from docx.shared import Cm, Pt
@@ -159,6 +164,8 @@ def insert_three_line_table(
     # 1. 表题（五号居中，段前 6 磅段后 6 磅，表序加粗空一字，keep_with_next=True）
     cap_p = document.add_paragraph()  # type: ignore[attr-defined]
     cap_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    cap_p.paragraph_format.line_spacing_rule = WD_LINE_SPACING.SINGLE
+    cap_p.paragraph_format.first_line_indent = Pt(0)
     cap_p.paragraph_format.space_before = Pt(6)
     cap_p.paragraph_format.space_after = Pt(6)
     cap_p.paragraph_format.keep_with_next = True
@@ -232,9 +239,12 @@ def insert_figure_block(
     figure_no: int,
     caption_override: str = "",
 ) -> list[object]:
-    """插入居中高清插图 + 下方五号图题（图片段 keep_with_next=True 保证同页）。"""
+    """插入居中高清插图 + 下方五号图题（图片段强制单倍行距防裁切，keep_with_next=True 保证同页）。"""
     img_p = document.add_paragraph()  # type: ignore[attr-defined]
     img_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    # 绝不继承正文的固定 20pt 行距与首行缩进，否则 Word 会把整张插图裁成 20pt 细条（P0-2）
+    img_p.paragraph_format.line_spacing_rule = WD_LINE_SPACING.SINGLE
+    img_p.paragraph_format.first_line_indent = Pt(0)
     img_p.paragraph_format.space_before = Pt(6)
     img_p.paragraph_format.space_after = Pt(4)
     img_p.paragraph_format.keep_with_next = True
@@ -245,6 +255,8 @@ def insert_figure_block(
 
     cap_p = document.add_paragraph()  # type: ignore[attr-defined]
     cap_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    cap_p.paragraph_format.line_spacing_rule = WD_LINE_SPACING.SINGLE
+    cap_p.paragraph_format.first_line_indent = Pt(0)
     cap_p.paragraph_format.space_before = Pt(4)
     cap_p.paragraph_format.space_after = Pt(12)
     cap_text = (caption_override or asset.caption_zh).strip() or "文献统计分析图"

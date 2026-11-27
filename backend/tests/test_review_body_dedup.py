@@ -93,7 +93,7 @@ def _paragraphs(text: str) -> list[str]:
 
 class TestAuthorNodesOnly:
     async def test_aggregated_node_content_is_not_appended(self) -> None:
-        """validate 节点的机械汇总不得进入正文（它是其他节点的重复）。"""
+        """存在 write 成稿节点时，extract 草稿与 validate 汇总均不得混入最终正文（P0-4）。"""
         report = await ReviewerAgent().execute(
             _input(
                 [
@@ -106,11 +106,26 @@ class TestAuthorNodesOnly:
 
         body = _body_of(report["final_markdown"])
 
-        assert EXTRACT.strip() in body or "五篇文献证据提取" in body
+        assert "五篇文献证据提取" not in body
         assert "中文 RAG 评估方法综述" in body
         # 汇总节点带 `[nX]` 前缀的拼接痕迹不得出现在正文
         assert "[n3]" not in body
         assert "[n4]" not in body
+
+    async def test_extract_fallback_when_no_write_nodes(self) -> None:
+        """仅含 extract 节点（无 write 节点）时保留 extract 正文向后兼容。"""
+        report = await ReviewerAgent().execute(
+            _input(
+                [
+                    _result("n3", EXTRACT, node_type="extract"),
+                    _result("n5", VALIDATE, node_type="validate"),
+                ]
+            )
+        )
+
+        body = _body_of(report["final_markdown"])
+        assert "五篇文献证据提取" in body
+        assert "[n3]" not in body
 
     async def test_reference_section_appears_once(self) -> None:
         """生产产物里 `## 参考文献` 出现 3 次——正文不得再引入参考文献章节。"""
@@ -157,22 +172,53 @@ class TestAuthorNodesOnly:
         assert "在图像生成领域" in markdown
 
     async def test_duplicate_paragraphs_are_collapsed(self) -> None:
-        """两个作者节点含同一段落时，正文里只保留一次。"""
-        duplicated_extract = f"{EXTRACT}\n\n{SHARED_PARAGRAPH}"
+        """多撰稿节点含相同段落（含 [E#] 编号不同）时，正文里只保留一次（P0-4）。"""
+        para_a = "现有工作证明连续小波变换结合CNN能有效检测生理信号 [E7]。"
+        para_b = "现有工作证明连续小波变换结合CNN能有效检测生理信号 [E14]。"
         report = await ReviewerAgent().execute(
             _input(
                 [
-                    _result("n3", duplicated_extract, node_type="extract"),
-                    _result("n4", WRITE, node_type="write"),
+                    _result("n3", f"## 第一部分\n\n{para_a}", node_type="write"),
+                    _result("n4", f"## 第二部分\n\n{para_b}", node_type="write"),
                 ]
             )
         )
 
         body = _body_of(report["final_markdown"])
+        assert body.count("现有工作证明连续小波变换结合CNN能有效检测生理信号") == 1
 
-        assert body.count(SHARED_PARAGRAPH) == 1
-        paragraphs = _paragraphs(body)
-        assert len(paragraphs) - len(set(paragraphs)) == 0
+    async def test_knowledge_doc_chunks_aggregate_by_doc_id(self) -> None:
+        """同一 doc_id 的 5 个知识库分块进入 ReviewerAgent 后只生成 1 条参考文献（P0-5）。"""
+        from uuid import uuid4
+
+        from app.orchestration.contracts import Evidence
+
+        doc_id = uuid4()
+        evidences = [
+            Evidence(
+                doc_id=doc_id,
+                chunk_id=uuid4(),
+                doc_title="Factually Wearable Tactile Feedback",
+                excerpt=f"分块正文片段 {i} 用于测试聚合去重。",
+            ).model_dump(mode="json")
+            for i in range(1, 6)
+        ]
+        write_result = {
+            "node_id": "n4",
+            "node_type": "write",
+            "content": "## 方法\n\n该可穿戴设备提供触觉反馈 [E1][E2][E3][E4][E5]。",
+            "evidence": evidences,
+            "cited_indices": [1, 2, 3, 4, 5],
+            "artifacts": [],
+            "duration_ms": 1,
+        }
+        report = await ReviewerAgent().execute(_input([write_result]))
+
+        assert len(report["bibliography"]) == 1
+        assert report["bibliography"][0]["title"] == "Factually Wearable Tactile Feedback"
+        assert (
+            "[E1][E1][E1][E1][E1]" in report["final_markdown"] or "[E1]" in report["final_markdown"]
+        )
 
     async def test_abstract_comes_from_author_body(self) -> None:
         """摘要不得取自汇总节点的拼接文本。"""

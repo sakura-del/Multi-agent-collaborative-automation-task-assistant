@@ -80,6 +80,15 @@ _HEADING_ROLES: dict[int, StyleRole] = {
 _FONT_ATTRIBUTES = ("ascii", "hAnsi", "eastAsia", "cs")
 #: 块级哨兵前缀（渲染后仍出现 = 内容丢失，必须报错）
 _SENTINEL_MARKER = "__MAATPLBLOCK_"
+#: 标量元数据占位符白名单：即使在封面表格或页眉中独占一段，也始终由 docxtpl 直接行内替换，
+#: 绝不转成块级哨兵（P0-1）。
+_INLINE_ONLY_KEYS: frozenset[str] = frozenset(
+    {"title", "author", "advisor", "major", "college", "date", "translation_title"}
+)
+#: 行内数字引文上标匹配（如 [1]、[1, 5]、[1, 5-6]、[1–3]）
+_SUPERSCRIPT_CITE_RE = re.compile(r"(\[\d+(?:(?:\s*,\s*|\s*[-–]\s*)\d+)*\])")
+#: Markdown 无序列表行前缀
+_BULLET_LINE_RE = re.compile(r"^[-*]\s+(.+)$")
 
 #: 反查角色 → styleId 时的优先候选（多个 styleId 映射同一角色时按此挑选）
 _PREFERRED_STYLE_IDS: dict[StyleRole, tuple[str, ...]] = {
@@ -121,7 +130,7 @@ def render_document(
         bibliography_key=bibliography_key,
     )
 
-    block_keys = _block_placeholder_keys(sanitized, template_keys)
+    block_keys = _block_placeholder_keys(sanitized, template_keys) - _INLINE_ONLY_KEYS
     sentinels = {
         key: _sentinel(key) for key in template_keys if key in block_keys or key == bibliography_key
     }
@@ -360,11 +369,28 @@ def _replace_block(
             )
             cursor = inserted[-1]
         elif isinstance(block, LineBlock):
-            role, content = _line_role_and_text(block.line, base_role)
-            style_id = role_to_style.get(role) or placeholder_style_id
-            new_paragraph = _build_paragraph(
-                content, style_id, paragraph_properties, run_properties
-            )
+            bullet_match = _BULLET_LINE_RE.match(block.line)
+            if bullet_match:
+                content = f"• {bullet_match.group(1).strip()}"
+                style_id = role_to_style.get(base_role) or placeholder_style_id
+                new_paragraph = _build_paragraph(
+                    content,
+                    style_id,
+                    paragraph_properties,
+                    run_properties,
+                    superscript_citations=True,
+                    bullet=True,
+                )
+            else:
+                role, content = _line_role_and_text(block.line, base_role)
+                style_id = role_to_style.get(role) or placeholder_style_id
+                new_paragraph = _build_paragraph(
+                    content,
+                    style_id,
+                    paragraph_properties,
+                    run_properties,
+                    superscript_citations=(role == base_role),
+                )
             cursor.addnext(new_paragraph)
             cursor = new_paragraph
 
@@ -404,6 +430,9 @@ def _build_paragraph(
     style_id: str | None,
     paragraph_properties: Any,
     run_properties: Any,
+    *,
+    superscript_citations: bool = False,
+    bullet: bool = False,
 ) -> Any:
     new_paragraph = OxmlElement("w:p")
     if paragraph_properties is not None:
@@ -414,22 +443,50 @@ def _build_paragraph(
             paragraph_props = OxmlElement("w:pPr")
             new_paragraph.insert(0, paragraph_props)
         _apply_paragraph_style(new_paragraph, style_id)
+    if bullet:
+        if paragraph_props is None:
+            paragraph_props = OxmlElement("w:pPr")
+            new_paragraph.insert(0, paragraph_props)
+        ind = paragraph_props.find(qn("w:ind"))
+        if ind is None:
+            ind = OxmlElement("w:ind")
+            paragraph_props.append(ind)
+        ind.set(qn("w:left"), "480")
+        ind.set(qn("w:hanging"), "240")
+        if ind.get(qn("w:firstLine")) is not None:
+            del ind.attrib[qn("w:firstLine")]
     if paragraph_props is not None:
         _complete_paragraph_mark_fonts(paragraph_props)
 
-    run = OxmlElement("w:r")
-    if run_properties is not None:
-        run.append(copy.deepcopy(run_properties))
-    run_props = run.find(qn("w:rPr"))
-    if run_props is not None:
-        # 坑 #1：中文字体需同时给 eastAsia/cs，否则只设 ascii 会回退宋体
-        _complete_run_fonts(run_props)
+    parts = _SUPERSCRIPT_CITE_RE.split(text) if superscript_citations else [text]
+    if not any(parts):
+        parts = [""]
+    for part in parts:
+        if not part and len(parts) > 1:
+            continue
+        is_cite = superscript_citations and bool(_SUPERSCRIPT_CITE_RE.fullmatch(part))
+        run = OxmlElement("w:r")
+        if run_properties is not None:
+            run.append(copy.deepcopy(run_properties))
+        run_props = run.find(qn("w:rPr"))
+        if run_props is not None:
+            # 坑 #1：中文字体需同时给 eastAsia/cs，否则只设 ascii 会回退宋体
+            _complete_run_fonts(run_props)
+        if is_cite:
+            if run_props is None:
+                run_props = OxmlElement("w:rPr")
+                run.insert(0, run_props)
+            vert = run_props.find(qn("w:vertAlign"))
+            if vert is None:
+                vert = OxmlElement("w:vertAlign")
+                run_props.append(vert)
+            vert.set(qn("w:val"), "superscript")
 
-    text_element = OxmlElement("w:t")
-    text_element.set(qn("xml:space"), "preserve")
-    text_element.text = text
-    run.append(text_element)
-    new_paragraph.append(run)
+        text_element = OxmlElement("w:t")
+        text_element.set(qn("xml:space"), "preserve")
+        text_element.text = part
+        run.append(text_element)
+        new_paragraph.append(run)
     return new_paragraph
 
 

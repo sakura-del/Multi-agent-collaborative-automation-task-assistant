@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -25,7 +26,7 @@ from app.orchestration.contracts import (
     ValidationCheck,
     ValidationReport,
 )
-from app.tools.literature.exporter import LiteratureExporter
+from app.tools.literature.exporter import LiteratureExporter, prepare_template_export
 from app.tools.literature.models import Artifact
 
 USER_A = UUID("44444444-4444-4444-4444-444444444444")
@@ -266,3 +267,142 @@ class TestReviewerAssembly:
         agent = ReviewerAgent()
         with pytest.raises(ValueError):
             await agent.execute({"trace_id": "t", "results": [], "topic": "x"})
+
+
+class TestExportNormalizationAndDocxSafety:
+    """9 项质量缺陷回归拦截：P0-2/3/4/5 与 P1-2/4。"""
+
+    def test_docx_export_strips_internal_markers_html_and_model_infer(self, tmp_path: Path) -> None:
+        dirty_md = """# 边缘计算综述
+
+## 摘要
+摘要不应该带任何引用角标 [E1][E2]。
+
+## 方法与结果
+现有架构显著降低延迟 [E1][E2][E3]。模型推断：仍需协处理器辅助。
+
+## 参考文献
+- [1] Dirty Title. — https://example.org/1
+"""
+        report = _report(
+            final_markdown=dirty_md,
+            bibliography=[
+                {
+                    "index": 1,
+                    "title": "Clean Study Title.",
+                    "authors": ["<p>Luo Shunan<sup>1</sup>, Deng Yun<sup>1</sup></p>"],
+                    "year": 2025,
+                    "source_url": "https://doi.org/10.1000/1",
+                },
+                {
+                    "index": 2,
+                    "title": "Second Paper",
+                    "authors": ["Alice"],
+                    "year": 2024,
+                    "source_url": "https://doi.org/10.1000/2",
+                },
+                {
+                    "index": 3,
+                    "title": "Third Paper",
+                    "authors": ["Bob"],
+                    "year": 2023,
+                    "source_url": "https://doi.org/10.1000/3",
+                },
+            ],
+        )
+        exporter = LiteratureExporter(tmp_path / "artifacts")
+        artifact = exporter.export_docx(USER_A, TASK_ID, report)
+        target = exporter.resolve_for_user(USER_A, TASK_ID, artifact.artifact_id)
+        doc = Document(str(target))
+        joined = "\n".join(p.text for p in doc.paragraphs)
+
+        assert not re.search(r"\[E\d+\]", joined)
+        assert "模型推断：" not in joined
+        assert "<p>" not in joined and "<sup>" not in joined
+        assert "[1-3]" in joined
+        # 摘要不含数字角标
+        abstract_line = next(p.text for p in doc.paragraphs if "摘要不应该带任何引用角标" in p.text)
+        assert "[1" not in abstract_line
+        assert joined.count("参考文献") == 1
+
+    def test_prepare_template_export_dedups_doc_id_html_double_period_and_numbers_headings(
+        self,
+    ) -> None:
+        raw_body = """# 基于STM32的手环研究
+
+## 摘要
+基于STM32平台实现了可穿戴健康监测 [E1][E2][E3]。
+
+## STM32选型依据
+多项研究采用了该系列MCU [E1][E2][E3]，并结合知识库文档展开分析 [E4][E5]。
+
+### 传感器硬件架构
+采用低功耗传感器与DMA采样 [E4]。
+
+## 参考文献
+- [1] 旧的自写参考文献列表
+
+## 引用核验
+引用核验：已验证 3 条
+"""
+        shared_doc_id = str(uuid4())
+        entries = [
+            {
+                "index": 1,
+                "title": "First Paper.",
+                "authors": [
+                    "<p>Luo Shunan<sup>1</sup>, Deng Yun<sup>1</sup>, Li Ming<sup>2</sup></p>"
+                ],
+                "year": 2025,
+                "source_url": "https://doi.org/10.1000/a",
+            },
+            {
+                "index": 2,
+                "title": "Second Paper。",
+                "authors": ["Bob"],
+                "year": 2024,
+                "source_url": "https://doi.org/10.1000/b",
+            },
+            {
+                "index": 3,
+                "title": "Third Paper",
+                "authors": ["Carol"],
+                "year": 2023,
+                "source_url": "https://doi.org/10.1000/c",
+            },
+            {
+                "index": 4,
+                "title": "chunk fragment one that should be replaced",
+                "doc_id": shared_doc_id,
+            },
+            {
+                "index": 5,
+                "title": "chunk fragment two from same pdf",
+                "doc_id": shared_doc_id,
+            },
+        ]
+        cleaned_body, clean_bib, clean_entries = prepare_template_export(
+            raw_body,
+            entries,
+            doc_titles_by_id={shared_doc_id: "Factually Tactile Wearable Survey."},
+        )
+        # 首行 # 题目与 ## 参考文献 / ## 引用核验 被剥离
+        assert not cleaned_body.startswith("# 基于STM32")
+        assert "## 参考文献" not in cleaned_body
+        assert "## 引用核验" not in cleaned_body
+        # 摘要无引文角标
+        assert "可穿戴健康监测。" in cleaned_body
+        # [E1][E2][E3] 合并压缩为 [1-3]；[E4][E5] 因同 doc_id 归并重映射为 [4]
+        assert "[1-3]" in cleaned_body
+        assert "[4]" in cleaned_body
+        assert not re.search(r"\[E\d+\]", cleaned_body)
+        # 标题补全分级序号
+        assert "## 1. STM32选型依据" in cleaned_body
+        assert "### 1.1 传感器硬件架构" in cleaned_body
+        # 同 doc_id 仅保留 1 条文献，共 4 条参考文献；无 HTML 与末尾双句号
+        assert len(clean_entries) == 4
+        assert len(clean_bib) == 4
+        bib_joined = "\n".join(clean_bib)
+        assert "<p>" not in bib_joined and "<sup>" not in bib_joined
+        assert ".." not in bib_joined
+        assert "Factually Tactile Wearable Survey" in bib_joined

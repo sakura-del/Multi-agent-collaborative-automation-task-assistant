@@ -379,11 +379,18 @@ class KnowledgeDocumentService:
         self,
         results: list[RetrievalResult],
     ) -> list[RetrievalResult]:
-        """若检索结果缺少定位字段（旧向量索引或未同步的 BM25），从 `DocChunk` 批量回填。"""
+        """若检索结果缺少定位或文档标题，从 `DocChunk` 与 `KnowledgeDoc` 批量回填。"""
         pending_ids: list[UUID] = []
         seen: set[UUID] = set()
+        pending_doc_ids: list[UUID] = []
+        seen_docs: set[UUID] = set()
         for item in results:
             meta = item.metadata or {}
+            if not meta.get("doc_title") and _UUID_RE.match(str(item.doc_id)):
+                did = UUID(str(item.doc_id))
+                if did not in seen_docs:
+                    seen_docs.add(did)
+                    pending_doc_ids.append(did)
             if any(k in meta for k in ("page_start", "section_title", "table_ref")):
                 continue
             if not _UUID_RE.match(str(item.chunk_id)):
@@ -392,31 +399,50 @@ class KnowledgeDocumentService:
             if cid not in seen:
                 seen.add(cid)
                 pending_ids.append(cid)
-        if self._db is None or not pending_ids:
+        if self._db is None or (not pending_ids and not pending_doc_ids):
             return results
 
-        rows = (
-            await self._db.execute(
-                select(DocChunk.id, DocChunk.position, DocChunk.chunk_meta).where(
-                    DocChunk.id.in_(pending_ids)
-                )
-            )
-        ).all()
         by_id: dict[str, dict[str, Any]] = {}
-        for chunk_id, position, chunk_meta in rows:
-            loc = extract_locator_metadata(position, chunk_meta)
-            if loc:
-                by_id[str(chunk_id)] = loc
-        if not by_id:
+        if pending_ids:
+            rows = (
+                await self._db.execute(
+                    select(DocChunk.id, DocChunk.position, DocChunk.chunk_meta).where(
+                        DocChunk.id.in_(pending_ids)
+                    )
+                )
+            ).all()
+            for chunk_id, position, chunk_meta in rows:
+                loc = extract_locator_metadata(position, chunk_meta)
+                if loc:
+                    by_id[str(chunk_id)] = loc
+
+        doc_titles: dict[str, str] = {}
+        if pending_doc_ids:
+            doc_rows = (
+                await self._db.execute(
+                    select(KnowledgeDoc.id, KnowledgeDoc.title).where(
+                        KnowledgeDoc.id.in_(pending_doc_ids)
+                    )
+                )
+            ).all()
+            for doc_id, title in doc_rows:
+                clean = str(title or "").strip()
+                if clean:
+                    doc_titles[str(doc_id)] = clean
+
+        if not by_id and not doc_titles:
             return results
 
         enriched: list[RetrievalResult] = []
         for item in results:
-            item_loc = by_id.get(str(item.chunk_id))
-            if not item_loc:
+            extra: dict[str, Any] = dict(by_id.get(str(item.chunk_id)) or {})
+            doc_title = doc_titles.get(str(item.doc_id))
+            if doc_title:
+                extra["doc_title"] = doc_title
+            if not extra:
                 enriched.append(item)
                 continue
-            merged = {**item_loc, **(item.metadata or {})}
+            merged = {**extra, **(item.metadata or {})}
             enriched.append(replace(item, metadata=merged))
         return enriched
 

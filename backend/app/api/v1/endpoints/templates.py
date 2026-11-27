@@ -86,6 +86,7 @@ class RenderRequest(BaseModel):
     sections: dict[str, str] = Field(default_factory=dict)
     bibliography: list[str] = Field(default_factory=list)
     bibliography_entries: list[dict[str, Any]] = Field(default_factory=list)
+    citation_style: str | None = None
     filename: str = "review.docx"
 
 
@@ -220,6 +221,7 @@ async def render_template(
             sections=payload.sections,
             bibliography=payload.bibliography,
             bibliography_entries=payload.bibliography_entries,
+            citation_style=payload.citation_style,
         )
     except ValidationException as exc:
         raise _bad_request(exc) from exc

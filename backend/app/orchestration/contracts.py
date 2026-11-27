@@ -97,6 +97,8 @@ class Evidence(BaseModel):
     doc_id: UUID | None = None
     chunk_id: UUID | None = None
     source_url: HttpUrl | None = None
+    doc_title: str | None = None
+    """来源文档标题（知识库 `KnowledgeDoc.title` 或检索题名，用于去重归并参考文献，P0-5）。"""
     excerpt: str = Field(min_length=1, max_length=2000)
     kind: Literal["excerpt", "metadata"] = "excerpt"
     """证据类型；默认 ``excerpt`` 以保持既有知识库证据 100% 向后兼容。"""
@@ -311,11 +313,13 @@ class TaskEvent(BaseModel):
 
 
 #: 预设工作流标识（Issue #32）：文献综述 / 研究空白分析 / 验证引用 / 引文滚雪球。
+#: Phase 2（2026-11-27）新增开题报告：可独立创建，也可从已完成的文献综述一键衍生。
 WorkflowPreset = Literal[
     "literature_review",
     "research_gaps",
     "verify_citations",
     "citation_snowballing",
+    "thesis_proposal",
 ]
 #: 引文滚雪球扩展方向：双向 / 向后查参考文献 / 向前查施引文献
 SnowballDirection = Literal["both", "backward", "forward"]
@@ -332,6 +336,10 @@ class LiteratureReviewRequest(BaseModel):
     topic: str = Field(min_length=5, max_length=200)
     keywords: list[str] = Field(default_factory=list, max_length=10)
     workflow_preset: WorkflowPreset = "literature_review"
+    #: 开题报告（thesis_proposal）的衍生来源：已完成的文献综述任务 ID（Phase 2）。
+    #: 提交时校验归属与完成态；非空时把源综述的研究空白与基线摘要写入
+    #: `task.config["inherited_context"]`，规划期作为继承上下文注入。
+    source_task_id: UUID | None = None
     #: 验证引用模式（verify_citations）下的待核验草稿正文（含 [E#] 或参考文献列表）
     draft_text: str | None = Field(default=None, max_length=30000)
     #: 引文滚雪球模式（citation_snowballing）下的种子论文 DOI 或标题（选填，最多 5 篇）
@@ -424,6 +432,12 @@ class LiteratureReviewRequest(BaseModel):
                 self.keywords = list(self.seed_dois[:5])
             if len(self.keywords) < 1:
                 raise ValueError("keywords 或 seed_dois 至少需要提供 1 项")
+        elif self.workflow_preset == "thesis_proposal":
+            # 开题报告：全新选题需关键词；从已完成综述衍生时关键词可省略（由继承上下文补足）
+            if len(self.keywords) < 1 and self.source_task_id is None:
+                raise ValueError(
+                    "开题报告需提供 keywords，或从已完成的文献综述衍生（source_task_id）"
+                )
         elif len(self.keywords) < 1:
             raise ValueError("keywords 至少需要 1 个关键词")
         return self

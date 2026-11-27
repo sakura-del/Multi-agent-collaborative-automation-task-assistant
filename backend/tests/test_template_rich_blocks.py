@@ -12,10 +12,13 @@ from __future__ import annotations
 
 import io
 import pathlib
+import re
 import zipfile
 
 from docx import Document
+from docx.enum.text import WD_LINE_SPACING
 from docx.oxml.ns import qn
+from docx.shared import RGBColor
 
 from app.tools.templates.charts import build_year_distribution_figure
 from app.tools.templates.inspector import inspect_template
@@ -188,3 +191,64 @@ $$
 
         # 验证 render_document 原有 style_map 参数类型无破坏
         assert any(role is StyleRole.BODY for role in meta.style_map.values())
+
+        # P0-2：图片所在段落必须使用单倍行距（不得继承正文固定 20pt 行距导致裁切）
+        w_ns = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+        drawing_paras = [p for p in doc.paragraphs if p._p.findall(f".//{w_ns}drawing")]
+        assert len(drawing_paras) >= 1
+        for dp in drawing_paras:
+            assert dp.paragraph_format.line_spacing_rule != WD_LINE_SPACING.EXACTLY
+
+        # P1-1 / P1-2：内置母版封面主标题单倍行距分两行；Heading1/2/3 纯黑；含「一、文献综述」
+        assert doc.paragraphs[1].paragraph_format.line_spacing_rule == WD_LINE_SPACING.SINGLE
+        assert "\n文献综述" in doc.paragraphs[1].text
+        assert any("一、文献综述" in p.text for p in doc.paragraphs)
+        for style_name in ("Heading 1", "Heading 2", "Heading 3"):
+            assert doc.styles[style_name].font.color.rgb == RGBColor(0x00, 0x00, 0x00)
+
+    def test_superscript_citations_and_bullet_cleaning(self) -> None:
+        """P0-3 行内数字引文上标 & P1-3 无序列表转为规范项目符号段；参考文献号不上标。"""
+        meta = inspect_template(BUILTIN_DOCX)
+        body_md = """## 1. 研究进展
+
+已有工作提出了轻量化模型 [1] 与多模态融合方案 [1, 5-6]。
+
+- 语料覆盖时间跨度有限。
+* 缺少真机功耗基准对比。
+"""
+        out_bytes = render_document(
+            template=BUILTIN_DOCX,
+            sections={
+                "title": "轻量级边缘模型综述",
+                "author": "王五",
+                "advisor": "赵六",
+                "major": "软件工程",
+                "college": "软件学院",
+                "body": body_md,
+            },
+            bibliography=["[1] Lewis P. Retrieval-Augmented Generation. 2020."],
+            style_map=meta.style_map,
+        )
+        doc = Document(io.BytesIO(out_bytes))
+        body_para = next(p for p in doc.paragraphs if "已有工作提出了" in p.text)
+        sup_runs = [r.text for r in body_para.runs if r.font.superscript]
+        assert sup_runs == ["[1]", "[1, 5-6]"]
+
+        # 参考文献行首 [1] 严禁变成上标
+        bib_para = next(p for p in doc.paragraphs if "Retrieval-Augmented Generation" in p.text)
+        assert not any(r.font.superscript for r in bib_para.runs)
+
+        # 无序列表前缀 `- ` / `* ` 不得原样印出
+        joined = "\n".join(p.text for p in doc.paragraphs)
+        assert "• 语料覆盖时间跨度有限。" in joined
+        assert "• 缺少真机功耗基准对比。" in joined
+        assert "- 语料覆盖时间跨度有限" not in joined
+        assert "* 缺少真机功耗基准对比" not in joined
+
+        # 出口全 XML 零内部哨兵 / [E#] / HTML / 模型推断
+        with zipfile.ZipFile(io.BytesIO(out_bytes)) as zf:
+            for name in zf.namelist():
+                if name.endswith(".xml") and name.startswith("word/"):
+                    xml_txt = zf.read(name).decode("utf-8", "ignore")
+                    assert "__MAATPLBLOCK_" not in xml_txt
+                    assert not re.search(r"\[E\d+\]", xml_txt)
