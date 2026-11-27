@@ -29,6 +29,34 @@ _MAX_ROADMAP_STEPS = 6
 _MIN_ROADMAP_STEPS = 2
 
 
+def _wrap_detail(detail: str, *, max_units: int = 82, max_lines: int = 2) -> list[str]:
+    """按显示宽度折行（CJK 记 2 个单位），最多 max_lines 行，超出部分用省略号。"""
+    lines: list[str] = []
+    current: list[str] = []
+    width = 0
+    consumed = 0
+    for index, char in enumerate(detail):
+        char_width = 2 if ord(char) > 127 else 1
+        if width + char_width > max_units and current:
+            lines.append("".join(current))
+            current = []
+            width = 0
+            if len(lines) == max_lines:
+                consumed = index
+                break
+        current.append(char)
+        width += char_width
+        consumed = index + 1
+    if current and len(lines) < max_lines:
+        lines.append("".join(current))
+    if consumed < len(detail) and lines:
+        stripped = lines[-1].rstrip("，。；、,.;:： ")
+        while stripped and sum(2 if ord(ch) > 127 else 1 for ch in stripped) > max_units - 2:
+            stripped = stripped[:-1].rstrip("，。；、,.;:： ")
+        lines[-1] = f"{stripped}…" if stripped else "…"
+    return lines or [detail[: max_units // 2]]
+
+
 def extract_roadmap_steps(markdown: str) -> list[tuple[str, str]]:
     """从开题报告「2.2 技术路线」章节抽取编号阶段（返回 [(阶段名, 要点)]）。
 
@@ -122,21 +150,23 @@ def build_tech_roadmap_figure(
         ax.add_patch(box)
         ax.text(
             1.25,
-            y + box_h * 0.66,
+            y + box_h * 0.72,
             f"阶段 {idx + 1}｜{name[:34]}",
             fontsize=9.5,
             fontweight="bold",
             color="#163A59",
             va="center",
         )
-        ax.text(
-            1.25,
-            y + box_h * 0.28,
-            detail[:64] + ("…" if len(detail) > 64 else ""),
-            fontsize=8,
-            color="#33475B",
-            va="center",
-        )
+        detail_lines = _wrap_detail(detail)
+        for line_index, line_text in enumerate(detail_lines):
+            ax.text(
+                1.25,
+                y + box_h * (0.42 - 0.18 * line_index),
+                line_text,
+                fontsize=8,
+                color="#33475B",
+                va="center",
+            )
         if idx < count - 1:
             arrow = FancyArrowPatch(
                 (5.0, y),

@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from app.tools.templates.charts import build_tech_roadmap_figure, extract_roadmap_steps
+from app.tools.templates.charts import (
+    _wrap_detail,
+    build_tech_roadmap_figure,
+    extract_roadmap_steps,
+)
 
 _ROADMAP_MARKDOWN = """## 2.2 技术路线
 
@@ -109,6 +113,20 @@ class TestExtractRoadmapSteps:
 
     def test_returns_empty_without_roadmap_section(self) -> None:
         assert extract_roadmap_steps("# 文献综述\n\n1. 正文条目") == []
+
+
+class TestWrapDetail:
+    def test_wraps_long_cjk_detail_into_two_lines(self) -> None:
+        detail = "硬件平台搭建。" + "确定 STM32 主控芯片型号并设计低功耗电路。" * 6
+
+        lines = _wrap_detail(detail)
+
+        assert 1 <= len(lines) <= 2
+        assert all(sum(2 if ord(ch) > 127 else 1 for ch in line) <= 82 for line in lines)
+        assert lines[-1].endswith("…")
+
+    def test_short_detail_stays_single_line(self) -> None:
+        assert _wrap_detail("需求分析") == ["需求分析"]
 
 
 class TestBuildTechRoadmapFigure:

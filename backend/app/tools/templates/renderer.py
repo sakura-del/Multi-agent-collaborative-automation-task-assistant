@@ -425,6 +425,29 @@ def _append_bibliography(
             _apply_paragraph_style(paragraph._p, style_id)
 
 
+_BOLD_SPAN_RE = re.compile(r"\*\*(?P<text>.+?)\*\*", re.DOTALL)
+
+
+def _split_bold_runs(text: str) -> list[tuple[str, bool]]:
+    """把 `**加粗**` 行内标记拆成 (文本, 是否加粗) 片段；未成对的 `**` 直接剥除。"""
+    if not text or "**" not in text:
+        return [(text, False)]
+    segments: list[tuple[str, bool]] = []
+    cursor = 0
+    for match in _BOLD_SPAN_RE.finditer(text):
+        if match.start() > cursor:
+            segments.append((text[cursor : match.start()], False))
+        inner = match.group("text")
+        if inner:
+            segments.append((inner, True))
+        cursor = match.end()
+    if cursor < len(text):
+        segments.append((text[cursor:], False))
+    cleaned = [(part.replace("**", ""), bold) for part, bold in segments]
+    filtered = [(part, bold) for part, bold in cleaned if part]
+    return filtered or [("", False)]
+
+
 def _build_paragraph(
     text: str,
     style_id: str | None,
@@ -458,29 +481,42 @@ def _build_paragraph(
     if paragraph_props is not None:
         _complete_paragraph_mark_fonts(paragraph_props)
 
-    parts = _SUPERSCRIPT_CITE_RE.split(text) if superscript_citations else [text]
-    if not any(parts):
-        parts = [""]
-    for part in parts:
-        if not part and len(parts) > 1:
-            continue
-        is_cite = superscript_citations and bool(_SUPERSCRIPT_CITE_RE.fullmatch(part))
-        run = OxmlElement("w:r")
-        if run_properties is not None:
-            run.append(copy.deepcopy(run_properties))
-        run_props = run.find(qn("w:rPr"))
-        if run_props is not None:
-            # 坑 #1：中文字体需同时给 eastAsia/cs，否则只设 ascii 会回退宋体
-            _complete_run_fonts(run_props)
-        if is_cite:
-            if run_props is None:
-                run_props = OxmlElement("w:rPr")
-                run.insert(0, run_props)
-            vert = run_props.find(qn("w:vertAlign"))
-            if vert is None:
-                vert = OxmlElement("w:vertAlign")
-                run_props.append(vert)
-            vert.set(qn("w:val"), "superscript")
+    segments = _split_bold_runs(text)
+    for segment_text, bold in segments:
+        parts = (
+            _SUPERSCRIPT_CITE_RE.split(segment_text) if superscript_citations else [segment_text]
+        )
+        if not any(parts):
+            parts = [""]
+        for part in parts:
+            if not part and len(parts) > 1:
+                continue
+            is_cite = superscript_citations and bool(_SUPERSCRIPT_CITE_RE.fullmatch(part))
+            run = OxmlElement("w:r")
+            if run_properties is not None:
+                run.append(copy.deepcopy(run_properties))
+            run_props = run.find(qn("w:rPr"))
+            if run_props is not None:
+                # 坑 #1：中文字体需同时给 eastAsia/cs，否则只设 ascii 会回退宋体
+                _complete_run_fonts(run_props)
+            if bold:
+                if run_props is None:
+                    run_props = OxmlElement("w:rPr")
+                    run.insert(0, run_props)
+                for tag in ("w:b", "w:bCs"):
+                    element = run_props.find(qn(tag))
+                    if element is None:
+                        element = OxmlElement(tag)
+                        run_props.append(element)
+            if is_cite:
+                if run_props is None:
+                    run_props = OxmlElement("w:rPr")
+                    run.insert(0, run_props)
+                vert = run_props.find(qn("w:vertAlign"))
+                if vert is None:
+                    vert = OxmlElement("w:vertAlign")
+                    run_props.append(vert)
+                vert.set(qn("w:val"), "superscript")
 
         text_element = OxmlElement("w:t")
         text_element.set(qn("xml:space"), "preserve")

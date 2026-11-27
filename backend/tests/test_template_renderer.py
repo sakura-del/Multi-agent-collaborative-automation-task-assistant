@@ -197,6 +197,19 @@ class TestRenderDocument:
         assert _style_of(paragraphs, SECTIONS["title"]) == "Title"
         assert _style_of(paragraphs, SECTIONS["body_main"].splitlines()[0]) == "BodyText"
 
+    def test_markdown_bold_is_rendered_as_bold_run(self) -> None:
+        sections = dict(SECTIONS)
+        sections["body_main"] = "**加粗小标题**\n普通段落。"
+
+        payload = _render(sections=sections)
+
+        paragraphs = _paragraphs(payload)
+        _style_of(paragraphs, "加粗小标题")
+        _style_of(paragraphs, "普通段落。")
+        assert all("**" not in text for _style_id, text in paragraphs)
+        xml = _xml(payload, "word/document.xml")
+        assert "<w:b/>" in xml or "<w:b " in xml
+
     def test_render_is_deterministic(self) -> None:
         first = _paragraphs(_render())
         second = _paragraphs(_render())
