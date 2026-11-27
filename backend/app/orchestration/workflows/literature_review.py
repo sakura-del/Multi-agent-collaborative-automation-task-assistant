@@ -41,6 +41,7 @@ from app.orchestration.contracts import (
 )
 from app.orchestration.dag_engine import DAGCycleError, TaskDAG
 from app.orchestration.services.literature_evidence import metadata_evidence
+from app.orchestration.services.user_fulltext_evidence import UserFulltextEvidenceService
 from app.orchestration.workflows.prompts import (
     render_executor_prompt,
     render_planner_prompt,
@@ -190,6 +191,7 @@ class LiteratureReviewWorkflow:
         knowledge_query: Any | None = None,
         screening_recorder: Any | None = None,
         fulltext_service: Any | None = None,
+        user_fulltext_evidence: Any | None = None,
         top_k: int = 8,
     ) -> None:
         self._planner = planner
@@ -209,6 +211,9 @@ class LiteratureReviewWorkflow:
         # OA 全文抓取（全文获取 Phase A · Task 7）：None 表示不抓取
         # （离线数据集 / 引用库 / 显式关闭 / 未注入），检索节点只产出元数据证据。
         self._fulltext_service = fulltext_service
+        # 用户已关联全文 → excerpt 证据（全文获取 Phase B · Task B2）：None 表示
+        # 未显式注入，此时从检索后端的 DB 会话工厂懒建服务；两者都没有则跳过。
+        self._user_fulltext_evidence = user_fulltext_evidence
         self._top_k = top_k
         self._plan: TaskPlan | None = None
         # 节点证据缓存：重生成时复用同一证据集（Plan 3 Task 4）
@@ -422,31 +427,40 @@ class LiteratureReviewWorkflow:
             prepared["dependency_outputs"] = dependency_outputs
 
         if plan_node.type in EVIDENCE_NODE_TYPES:
-            # ① 先收文献元数据证据（用户显式选择的文献，写作必须覆盖它们）
-            metadata_items, bad_artifacts = self._metadata_evidence_from(dependency_outputs or {})
-            if metadata_items:
-                prepared["evidence"].extend(item.model_dump(mode="json") for item in metadata_items)
+            # ① 先收检索记录：全文证据与元数据证据都从同一批记录派生
+            records, bad_artifacts = self._literature_records_from(dependency_outputs or {})
             if bad_artifacts:
                 # 形状不对的 artifact 不能静默丢弃 —— 留一条可观测痕迹，
                 # 否则「检索到了但没进证据池」会变成查不出的问题
                 prepared["warnings"].append("invalid_search_artifact")
 
-            # ② 再叠加知识库原文证据（补充材料：用户自己的笔记/PDF）
-            if self._retrieval_mode(task) == "none":
-                # 实验画像 `no_rag`：**不检索知识库**。
-                # 注意这关的是知识库检索，不是「用户明确选的文献」——
-                # 元数据证据在 ① 已经收好了，不受这个开关影响。
+            retrieval_disabled = self._retrieval_mode(task) == "none"
+            seen_keys: set[tuple[str, str]] = set()
+
+            # ② 用户已关联全文 → 带页码 locator 的 excerpt 证据（全文获取 Phase B ·
+            # Task B2）。排在元数据之前：有原文时它比书目信息更能支撑「作者指出……」。
+            # `retrieval_mode=none`（实验画像 no_rag）不读知识库，这里同样跳过 ——
+            # 全文证据与检索证据来自同一个 DB，开关语义必须一致。
+            if retrieval_disabled:
                 prepared["warnings"].append("retrieval_disabled")
             else:
+                for item in await self._user_fulltext_evidence_for(task, records):
+                    self._append_evidence(prepared, item, seen_keys=seen_keys)
+
+            # ③ 文献元数据证据（用户显式选择的文献，写作必须覆盖它们）
+            for record in records:
+                self._append_evidence(prepared, metadata_evidence(record), seen_keys=seen_keys)
+
+            # ④ 知识库原文证据（补充材料：用户自己的笔记/PDF）
+            if not retrieval_disabled:
                 context = await self._build_context(task, prepared["query"])
-                prepared["evidence"].extend(
-                    item.model_dump(mode="json") for item in context.evidence
-                )
+                for item in context.evidence:
+                    self._append_evidence(prepared, item, seen_keys=seen_keys)
                 prepared["insufficient_evidence"] = context.insufficient
                 if context.insufficient:
                     prepared["warnings"].append("insufficient_evidence")
 
-            # ③ 证据足够就不再报「不足」：有 ≥2 条（含元数据）即视为够用
+            # ⑤ 证据足够就不再报「不足」：有 ≥2 条（含元数据）即视为够用
             if len(prepared["evidence"]) >= 2:
                 prepared["insufficient_evidence"] = False
                 if "insufficient_evidence" in prepared["warnings"]:
@@ -505,8 +519,25 @@ class LiteratureReviewWorkflow:
         返回 `(证据列表, 坏 artifact 数)`。形状不对的 artifact 跳过而不抛异常
         （一个坏 artifact 不该炸掉整个节点），但**必须计数**，
         否则「检索到了却没进证据池」会变成查不出的问题。
+
+        保留原签名（2 元组）：全文证据（Task B2）复用 `_literature_records_from`
+        抽出的记录，这里只是它的薄封装，既有调用方/测试不用改。
         """
-        items: list[Evidence] = []
+        records, bad = cls._literature_records_from(dependency_outputs)
+        return [metadata_evidence(record) for record in records], bad
+
+    @classmethod
+    def _literature_records_from(
+        cls,
+        dependency_outputs: dict[str, Any],
+    ) -> tuple[list[LiteratureRecord], int]:
+        """从依赖节点的 search artifacts 提取**可追溯的文献记录**。
+
+        与 `_metadata_evidence_from` 的差别只是「先出记录、再出证据」：同一批
+        记录既用来生成 metadata 证据，也用来反查用户已关联全文（Task B2）。
+        解析失败的 artifact 计入坏数（调用方记 warning），不抛异常。
+        """
+        records: list[LiteratureRecord] = []
         bad = 0
         for output in dependency_outputs.values():
             artifacts = cls._artifacts_of(output)
@@ -517,13 +548,78 @@ class LiteratureReviewWorkflow:
                     bad += 1
                     continue
                 try:
-                    record = LiteratureRecord.model_validate(artifact)
+                    records.append(LiteratureRecord.model_validate(artifact))
                 except PydanticValidationError:
                     # 不是文献记录（可能是别的节点产出的 artifact）
                     bad += 1
-                    continue
-                items.append(metadata_evidence(record))
-        return items, bad
+        return records, bad
+
+    @staticmethod
+    def _append_evidence(
+        prepared: dict[str, Any],
+        item: Evidence,
+        *,
+        seen_keys: set[tuple[str, str]] | None = None,
+    ) -> None:
+        """追加证据（JSON 形态），并按 `(doc_id, chunk_id)` 去重。
+
+        全文证据与知识库检索证据可能命中同一分块（同一篇 PDF 既可能来自用户
+        已关联全文、也可能被检索命中），重复进证据池既浪费 token 又让 `[E{n}]`
+        编号虚高。元数据证据没有 doc/chunk 标识，不做去重（同一篇文献出现两次
+        说明调用方传了两条记录，保持原行为）。
+        """
+        if seen_keys is not None and (item.doc_id is not None or item.chunk_id is not None):
+            key = (str(item.doc_id), str(item.chunk_id))
+            if key in seen_keys:
+                return
+            seen_keys.add(key)
+        prepared["evidence"].append(item.model_dump(mode="json"))
+
+    def _knowledge_session_factory(self) -> Callable[[], Any] | None:
+        """取检索后端持有的 DB 会话工厂；没有则返回 None。
+
+        生产链路（`task_execution._literature_execution_workflow`）把
+        `container.knowledge_query` 包进 `LiteratureContextBuilder(knowledge)`，
+        而 `KnowledgeSearchProvider` 持有 `_session_factory` —— 这是工作流内部
+        唯一能打开 DB 的入口，本任务不改构造参数，故从这里取。测试替身没有
+        `knowledge` 属性（或没有工厂），返回 None 即跳过全文查询、保持离线。
+        """
+        candidates = (getattr(self._context_builder, "knowledge", None), self._knowledge_query)
+        for owner in candidates:
+            factory = getattr(owner, "_session_factory", None)
+            if callable(factory):
+                return factory
+        return None
+
+    async def _user_fulltext_evidence_for(
+        self,
+        task: Any,
+        records: list[LiteratureRecord],
+    ) -> list[Evidence]:
+        """用户已关联全文 → excerpt 证据；无用户 / 无记录 / 未接 DB 时返回空列表。
+
+        全文证据是**增强项**：任何失败都退化为「没有全文证据」，不能阻塞写作
+        节点（元数据证据与知识库检索证据仍照常可用）。
+        """
+        user_id = self._user_id(task)
+        if user_id is None or not records:
+            return []
+        try:
+            if self._user_fulltext_evidence is not None:
+                return list(await self._user_fulltext_evidence.evidence_for(user_id, records))
+            session_factory = self._knowledge_session_factory()
+            if session_factory is None:
+                return []
+            async with session_factory() as session:
+                service = UserFulltextEvidenceService(session)
+                return list(await service.evidence_for(user_id, records))
+        except Exception as exc:  # 增强项失败不得让证据节点失败
+            logger.warning(
+                "user_fulltext_evidence_failed",
+                node_id=str(getattr(task, "id", "")),
+                error=str(exc),
+            )
+            return []
 
     @staticmethod
     def _evidence_text(items: list[dict[str, Any]]) -> str:
