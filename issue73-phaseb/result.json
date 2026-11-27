@@ -1,0 +1,49 @@
+{
+  "result": "PASS",
+  "checks": [
+    {
+      "name": "login",
+      "ok": true,
+      "detail": "https://veripaper.me/tasks"
+    },
+    {
+      "name": "fulltext_summary_visible",
+      "ok": true,
+      "detail": "全文证据 1 篇 / 仅题录摘要 7 篇"
+    },
+    {
+      "name": "fulltext_summary_counts",
+      "ok": true,
+      "detail": "全文证据 1 篇 / 仅题录摘要 7 篇"
+    },
+    {
+      "name": "upload_pdf_entry_visible",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "upload_pdf_skipped",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "fulltext_toggle_visible",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "api_keys_page",
+      "ok": true,
+      "detail": "https://veripaper.me/settings/api-keys"
+    },
+    {
+      "name": "no_page_errors",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "uploaded_doc_id": null,
+  "page_errors": [],
+  "out_dir": "/tmp/vp-b6-ui",
+  "task_id": "d6c812d2-64a5-442b-9a3b-97d2b17393f2"
+}
