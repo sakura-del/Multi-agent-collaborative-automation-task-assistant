@@ -13,13 +13,15 @@ from app.tools.templates.rich_blocks import FigureAsset
 #: 「2.2 技术路线」章节标题（允许 "## 2.2 技术路线" / "## 技术路线" 等写法）
 _ROADMAP_HEADING_RE = re.compile(r"^(?P<hashes>#{2,4})\s*(?:2\.2[\s、.．]*)?技术路线\s*$")
 _HEADING_RE = re.compile(r"^(?P<hashes>#{1,6})\s+")
-#: 阶段条目：1. / 1、/ （1） / (1) / 阶段一： / 第一步： 等编号写法
+#: 阶段条目：1. / 1、/ （1） / (1) / 阶段一： / 第一步： 等编号写法，
+#: 也兼容真实模型常见的「第一阶段为……」「**第二阶段：……**」等叙述式写法（Phase 2 生产实测）
 _ROADMAP_STEP_RE = re.compile(
-    r"^\s*(?:"
+    r"^\s*(?:\*\*)?(?:"
     r"(?P<num>\d{1,2})\s*[.、)．]"
     r"|（(?P<cn_num>\d{1,2})）"
     r"|\((?P<en_num>\d{1,2})\)"
-    r"|阶段(?P<stage>[一二三四五六七八九十\d]{1,3})\s*[:：]"
+    r"|第(?P<ord_stage>[一二三四五六七八九十\d]{1,3})阶段\s*[为是]?\s*[:：]?"
+    r"|阶段(?P<stage>[一二三四五六七八九十\d]{1,3})\s*[为是]?\s*[:：]?"
     r"|第(?P<ord>[一二三四五六七八九十\d]{1,3})步\s*[:：]"
     r")\s*(?P<body>.+)$"
 )
@@ -55,11 +57,11 @@ def extract_roadmap_steps(markdown: str) -> list[tuple[str, str]]:
         match = _ROADMAP_STEP_RE.match(stripped)
         if not match:
             continue
-        body = match.group("body").strip()
+        body = match.group("body").strip().strip("*").strip()
         if not body:
             continue
-        # 阶段名：取冒号 / 破折号 / 逗号前的短标题；要点保留全文
-        label = re.split(r"[:：,，。;；—–-]", body, maxsplit=1)[0].strip()
+        # 阶段名：取冒号 / 破折号 / 逗号 / 括号前的短标题；要点保留全文
+        label = re.split(r"[:：,，。;；—–\-（(]", body, maxsplit=1)[0].strip()
         stages = [label or body[:24], body[:180]]
         if len(stages[0]) < 4:
             stages[0] = body[:24]
