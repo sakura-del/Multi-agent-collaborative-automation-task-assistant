@@ -784,7 +784,7 @@ describe("TaskResult · 开题报告入口（Phase 2）", () => {
     wrapper.unmount();
   });
 
-  it("开题报告导出调用 thesis_proposal 母版且不传 bibliography_entries", async () => {
+  it("开题报告导出调用 thesis_proposal 母版并透传参考文献条目", async () => {
     localStorage.clear();
     renderTemplateMock.mockResolvedValueOnce(
       new Blob(["docx"], {
@@ -813,7 +813,9 @@ describe("TaskResult · 开题报告入口（Phase 2）", () => {
     expect(renderTemplateMock).toHaveBeenCalledWith(
       "builtin:thesis_proposal_cn_standard",
       expect.objectContaining({
-        bibliography_entries: [],
+        bibliography_entries: expect.arrayContaining([
+          expect.objectContaining({ index: 1 }),
+        ]),
         sections: expect.objectContaining({ title: "大语言模型综述" }),
       }),
     );

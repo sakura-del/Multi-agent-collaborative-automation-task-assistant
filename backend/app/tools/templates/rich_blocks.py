@@ -27,6 +27,43 @@ _FIGURE_RE = re.compile(r"^!\[(?P<caption>[^\]]*)\]\(fig://(?P<asset_id>[A-Za-z0
 _TABLE_SEP_RE = re.compile(r"^\|?[\s:-]+\|[\s|:-]*$")
 _MAX_FIGURE_WIDTH_CM = 14.5  # A4 宽度 21cm - 左右页边距 3.17cm×2 ≈ 14.66cm
 
+#: 行首 Markdown/中文编号标题（用于识别「研究计划进度安排」等章节边界）
+_HEADING_LINE_RE = re.compile(
+    r"^(?:#{1,6}\s|[一二三四五六七八九十]+、|第[一二三四五六七八九十]+[章节]|"
+    r"\d+(?:\.\d+)*[、.]\s?)"
+)
+#: 研究进度章节中「第一阶段：需求分析与架构设计（第 1-3 个月）」式段落标题（Fix 5）
+_STAGE_SCHEDULE_RE = re.compile(
+    r"^\*{0,2}(第[一二三四五六1-6]阶段)[：:]\s*([^（(]+?)(?:[（(]([^）)]+)[）)])?\*{0,2}$"
+)
+_SCHEDULE_HEADERS = ["起止时间", "研究阶段", "主要工作内容", "阶段性成果"]
+_SCHEDULE_CAPTION = "表 2.1 研究计划进度安排表"
+#: 交付语义标记：优先于「完成/实现」这类过程词，避免成果列抽到过程描述
+_DELIVERABLE_MARKERS = ("交付", "输出", "产出", "提交", "形成", "发表", "评审", "出具")
+_DELIVERABLE_KEYWORDS = (
+    "输出",
+    "产出",
+    "形成",
+    "完成",
+    "交付",
+    "搭建",
+    "实现",
+    "验证",
+    "报告",
+    "文档",
+    "原型",
+    "数据集",
+    "发表",
+    "提交",
+    "评审",
+    "方案",
+    "架构",
+    "设计",
+    "测试",
+    "优化",
+    "策略",
+)
+
 
 @dataclass(frozen=True)
 class FigureAsset:
@@ -124,7 +161,114 @@ def parse_rich_blocks(text: str) -> list[RichBlock]:
 
         blocks.append(LineBlock(line=stripped))
         i += 1
-    return blocks
+    return _aggregate_schedule_blocks(blocks)
+
+
+def _aggregate_schedule_blocks(blocks: list[RichBlock]) -> list[RichBlock]:
+    """Fix 5：把「研究计划进度安排」章节的叙述式阶段段落确定性聚合为四列三线表。
+
+    识别 `第一阶段：需求分析与架构设计（第 1-3 个月）` 形式的段落标题，把它与随后的
+    说明段合并成一行；章节内已有 Markdown 表时整节保持原样。少于 2 个阶段不聚合。
+    """
+    result: list[RichBlock] = []
+    i = 0
+    n = len(blocks)
+    while i < n:
+        block = blocks[i]
+        if isinstance(block, LineBlock) and _HEADING_LINE_RE.match(block.line):
+            section_end = i + 1
+            while section_end < n:
+                candidate = blocks[section_end]
+                if isinstance(candidate, LineBlock) and _HEADING_LINE_RE.match(candidate.line):
+                    break
+                section_end += 1
+            section = blocks[i + 1 : section_end]
+            is_schedule_heading = "进度安排" in block.line or "研究计划" in block.line
+            has_markdown_table = any(isinstance(item, TableBlock) for item in section)
+            if is_schedule_heading and not has_markdown_table:
+                rows = _schedule_rows(section)
+                if len(rows) >= 2:
+                    result.append(block)
+                    result.append(
+                        TableBlock(
+                            headers=list(_SCHEDULE_HEADERS),
+                            rows=rows,
+                            caption=_SCHEDULE_CAPTION,
+                        )
+                    )
+                    i = section_end
+                    continue
+            result.append(block)
+            result.extend(section)
+            i = section_end
+            continue
+        result.append(block)
+        i += 1
+    return result
+
+
+def _schedule_rows(section: list[RichBlock]) -> list[list[str]]:
+    """把章节内的「阶段标题 + 说明段」序列转换为四列表格行。"""
+    rows: list[list[str]] = []
+    index = 0
+    while index < len(section):
+        block = section[index]
+        if not isinstance(block, LineBlock):
+            index += 1
+            continue
+        stage_match = _STAGE_SCHEDULE_RE.match(block.line)
+        if stage_match is None:
+            index += 1
+            continue
+        months = (stage_match.group(3) or "").strip() or "—"
+        stage_name = stage_match.group(2).strip()
+        details: list[str] = []
+        cursor = index + 1
+        while cursor < len(section):
+            following = section[cursor]
+            if not isinstance(following, LineBlock):
+                break
+            if _STAGE_SCHEDULE_RE.match(following.line):
+                break
+            if _HEADING_LINE_RE.match(following.line):
+                break
+            details.append(following.line)
+            cursor += 1
+        content = _clean_schedule_content(" ".join(details))
+        rows.append(
+            [
+                months,
+                stage_name,
+                content[:120] or stage_name,
+                _extract_completion(content) or "阶段成果评审通过",
+            ]
+        )
+        index = cursor
+    return rows
+
+
+def _clean_schedule_content(text: str) -> str:
+    """去掉列表符号并压缩空白，得到表格单元格文本。"""
+    cleaned = re.sub(r"^[-*•]\s*", "", text.strip())
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def _extract_completion(content: str) -> str:
+    """从阶段说明里抽取「阶段性成果」关键词句（≤40 字）。
+
+    优先取带交付语义的句子（交付/输出/产出/提交/形成…），避免把「完成…」这类
+    过程描述当成成果；没有交付语义句时再回落到普通关键词句与末句。
+    """
+    sentences = [sentence.strip() for sentence in re.split(r"[。；;]", content) if sentence.strip()]
+    if not sentences:
+        return ""
+    for sentence in sentences:
+        if any(marker in sentence for marker in _DELIVERABLE_MARKERS):
+            return sentence[:40]
+    for sentence in sentences:
+        if any(keyword in sentence for keyword in _DELIVERABLE_KEYWORDS):
+            return sentence[:40]
+    return sentences[-1][:40]
 
 
 def _split_md_row(line: str) -> list[str]:

@@ -160,6 +160,23 @@ def _clear_table_borders(table: Any) -> None:
     table._tbl.tblPr.append(tbl_borders)
 
 
+def _add_cover_title(document: Any, second_line: str) -> None:
+    """Fix 7：封面主标题拆成两行独立段落（单倍行距），去掉「本科生/研究生」斜杠。"""
+    for offset, text in enumerate(("毕业论文（设计）", second_line)):
+        paragraph = document.add_paragraph()
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        paragraph.paragraph_format.line_spacing_rule = WD_LINE_SPACING.SINGLE
+        paragraph.paragraph_format.first_line_indent = Pt(0)
+        paragraph.paragraph_format.space_before = Pt(12 if offset == 0 else 0)
+        paragraph.paragraph_format.space_after = Pt(6 if offset == 0 else 36)
+        run = paragraph.add_run(text)
+        run.bold = True
+        run.font.size = Pt(26)  # 一号 26pt
+        run.font.name = "Times New Roman"
+        run.font.color.rgb = RGBColor(0x00, 0x00, 0x00)
+        _set_fonts(run, east_asia="黑体")
+
+
 def build_literature_review_cn_standard(output_path: pathlib.Path = OUTPUT_PATH) -> pathlib.Path:
     """生成高校标准「文献综述」母版并用 inspect_template 校验。"""
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -179,19 +196,7 @@ def build_literature_review_cn_standard(output_path: pathlib.Path = OUTPUT_PATH)
     spacer_top.paragraph_format.space_before = Pt(36)
     spacer_top.paragraph_format.space_after = Pt(12)
 
-    title_p = document.add_paragraph()
-    title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    # 一号 26pt 字严禁继承 Normal 的固定 20pt 行距，改为单倍行距且显式分两行居中（P1-1）
-    title_p.paragraph_format.line_spacing_rule = WD_LINE_SPACING.SINGLE
-    title_p.paragraph_format.first_line_indent = Pt(0)
-    title_p.paragraph_format.space_before = Pt(12)
-    title_p.paragraph_format.space_after = Pt(48)
-    title_run = title_p.add_run("本科生/研究生毕业论文（设计）\n文献综述")
-    title_run.bold = True
-    title_run.font.size = Pt(26)  # 一号 26pt
-    title_run.font.name = "Times New Roman"
-    title_run.font.color.rgb = RGBColor(0x00, 0x00, 0x00)
-    _set_fonts(title_run, east_asia="黑体")
+    _add_cover_title(document, "文献综述")
 
     fields = [
         ("论文题目", "{{ title }}"),
@@ -352,15 +357,7 @@ def build_thesis_proposal_cn_standard(
     spacer_top.paragraph_format.space_before = Pt(36)
     spacer_top.paragraph_format.space_after = Pt(12)
 
-    title_p = document.add_paragraph()
-    title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    title_p.paragraph_format.space_before = Pt(12)
-    title_p.paragraph_format.space_after = Pt(48)
-    title_run = title_p.add_run("本科生/研究生毕业论文（设计）开题报告")
-    title_run.bold = True
-    title_run.font.size = Pt(26)  # 一号 26pt
-    title_run.font.name = "Times New Roman"
-    _set_fonts(title_run, east_asia="黑体")
+    _add_cover_title(document, "开题报告")
 
     fields = [
         ("论文题目", "{{ title }}"),

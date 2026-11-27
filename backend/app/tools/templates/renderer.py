@@ -383,13 +383,21 @@ def _replace_block(
                 )
             else:
                 role, content = _line_role_and_text(block.line, base_role)
+                bold_heading = _WHOLE_LINE_BOLD_RE.match(block.line.strip())
+                text_for_build = content
+                if bold_heading:
+                    # Fix 3：整行 `**小标题**` 去星号、加粗且禁止页尾孤行。
+                    # 构建文本仍保留原始 `**...**`，交给 _split_bold_runs 生成加粗 run。
+                    role, _ = _line_role_and_text(bold_heading.group("title").strip(), role)
+                    text_for_build = block.line.strip()
                 style_id = role_to_style.get(role) or placeholder_style_id
                 new_paragraph = _build_paragraph(
-                    content,
+                    text_for_build,
                     style_id,
                     paragraph_properties,
                     run_properties,
                     superscript_citations=(role == base_role),
+                    keep_with_next=bold_heading is not None,
                 )
             cursor.addnext(new_paragraph)
             cursor = new_paragraph
@@ -426,6 +434,7 @@ def _append_bibliography(
 
 
 _BOLD_SPAN_RE = re.compile(r"\*\*(?P<text>.+?)\*\*", re.DOTALL)
+_WHOLE_LINE_BOLD_RE = re.compile(r"^\*\*(?P<title>[^*]+?)\*\*$")
 
 
 def _split_bold_runs(text: str) -> list[tuple[str, bool]]:
@@ -456,6 +465,7 @@ def _build_paragraph(
     *,
     superscript_citations: bool = False,
     bullet: bool = False,
+    keep_with_next: bool = False,
 ) -> Any:
     new_paragraph = OxmlElement("w:p")
     if paragraph_properties is not None:
@@ -466,6 +476,13 @@ def _build_paragraph(
             paragraph_props = OxmlElement("w:pPr")
             new_paragraph.insert(0, paragraph_props)
         _apply_paragraph_style(new_paragraph, style_id)
+    if keep_with_next:
+        # Fix 3：整行加粗小标题不能孤零零留在页尾，必须与后文同页
+        if paragraph_props is None:
+            paragraph_props = OxmlElement("w:pPr")
+            new_paragraph.insert(0, paragraph_props)
+        if paragraph_props.find(qn("w:keepNext")) is None:
+            paragraph_props.append(OxmlElement("w:keepNext"))
     if bullet:
         if paragraph_props is None:
             paragraph_props = OxmlElement("w:pPr")

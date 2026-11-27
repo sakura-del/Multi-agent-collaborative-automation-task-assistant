@@ -514,7 +514,9 @@ async function confirmThesisTemplateExport() {
         body: props.report.final_markdown ?? "",
       },
       bibliography: formatBibliographyLines(),
-      bibliography_entries: isProposalTask.value ? [] : (props.report.bibliography ?? []),
+      // Fix 1（issue #72）：始终传条目，让后端 CSL 清洗参考文献；
+      // 开题报告分支不会生成年份分布图，传条目不会引入多余插图。
+      bibliography_entries: props.report.bibliography ?? [],
       filename,
     });
     objectUrl = URL.createObjectURL(blob);

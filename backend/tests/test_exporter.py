@@ -406,3 +406,73 @@ class TestExportNormalizationAndDocxSafety:
         assert "<p>" not in bib_joined and "<sup>" not in bib_joined
         assert ".." not in bib_joined
         assert "Factually Tactile Wearable Survey" in bib_joined
+
+
+class TestIssue72ExportPolish:
+    """Issue #72 Fix 1/2/6：摘要不重复、空局限性剔除、参考文献兜底补齐。"""
+
+    def test_abstract_is_not_copied_from_body_when_stats_missing(self, tmp_path: Path) -> None:
+        body = "## 问题提出的背景\n\n本文研究面向运动手环的低功耗心率监测系统 [1]。"
+        report = _report(
+            final_markdown=body,
+            stats={"title": "低功耗心率监测系统研究"},
+            bibliography=[{"index": 1, "title": "Wearable HR Survey", "year": 2024}],
+        )
+        exporter = LiteratureExporter(tmp_path / "artifacts")
+        artifact = exporter.export_markdown(USER_A, TASK_ID, report)
+        text = exporter.resolve_for_user(USER_A, TASK_ID, artifact.artifact_id).read_text(
+            encoding="utf-8"
+        )
+
+        assert "## 摘要" not in text
+        assert text.count("本文研究面向运动手环的低功耗心率监测系统") == 1
+
+    def test_empty_limitations_section_is_removed(self, tmp_path: Path) -> None:
+        report = _report(
+            final_markdown="## 方法\n\n正文 [1]。",
+            stats={"title": "方法研究", "abstract": "摘要正文。", "limitations": ["（无）"]},
+            bibliography=[{"index": 1, "title": "Methods", "year": 2024}],
+        )
+        exporter = LiteratureExporter(tmp_path / "artifacts")
+        artifact = exporter.export_markdown(USER_A, TASK_ID, report)
+        text = exporter.resolve_for_user(USER_A, TASK_ID, artifact.artifact_id).read_text(
+            encoding="utf-8"
+        )
+
+        assert "局限性" not in text
+        assert "（无）" not in text
+
+    def test_bibliography_is_backfilled_when_section_missing(self, tmp_path: Path) -> None:
+        body = "## 方法\n\n我们比较了检索质量 [1] 与证据可追溯性 [2]。"
+        report = _report(
+            final_markdown=body,
+            stats={"title": "方法研究", "abstract": "摘要正文。"},
+            bibliography=[
+                {"index": 1, "title": "RAG Evaluation Survey", "year": 2024},
+                {"index": 2, "title": "Evidence Tracing", "year": 2023},
+            ],
+        )
+        exporter = LiteratureExporter(tmp_path / "artifacts")
+        artifact = exporter.export_markdown(USER_A, TASK_ID, report)
+        text = exporter.resolve_for_user(USER_A, TASK_ID, artifact.artifact_id).read_text(
+            encoding="utf-8"
+        )
+
+        assert "## 参考文献" in text
+        assert "RAG Evaluation Survey" in text
+        assert "Evidence Tracing" in text
+
+    def test_adjacent_duplicate_paragraphs_are_deduped(self, tmp_path: Path) -> None:
+        duplicated = "## 方法\n\n同一段重复文字。\n\n同一段重复文字。\n"
+        report = _report(
+            final_markdown=duplicated,
+            stats={"title": "方法研究", "abstract": "摘要正文。"},
+            bibliography=[{"index": 1, "title": "Methods", "year": 2024}],
+        )
+        exporter = LiteratureExporter(tmp_path / "artifacts")
+        artifact = exporter.export_markdown(USER_A, TASK_ID, report)
+        text = exporter.resolve_for_user(USER_A, TASK_ID, artifact.artifact_id).read_text(
+            encoding="utf-8"
+        )
+
+        assert text.count("同一段重复文字") == 1

@@ -29,32 +29,41 @@ _MAX_ROADMAP_STEPS = 6
 _MIN_ROADMAP_STEPS = 2
 
 
-def _wrap_detail(detail: str, *, max_units: int = 82, max_lines: int = 2) -> list[str]:
-    """按显示宽度折行（CJK 记 2 个单位），最多 max_lines 行，超出部分用省略号。"""
+def _char_width(char: str) -> int:
+    """中文/全角标点按 2 个视觉宽度，其余按 1 个宽度。"""
+    return 2 if "\u4e00" <= char <= "\u9fff" or "\u3000" <= char <= "\u303f" else 1
+
+
+def _wrap_cjk(text: str, width: int = 24, *, max_lines: int = 3) -> list[str]:
+    """按视觉字符宽折行（中文按 2 宽、ASCII 按 1 宽），确保绝不溢出框边界。"""
     lines: list[str] = []
-    current: list[str] = []
-    width = 0
-    consumed = 0
-    for index, char in enumerate(detail):
-        char_width = 2 if ord(char) > 127 else 1
-        if width + char_width > max_units and current:
-            lines.append("".join(current))
-            current = []
-            width = 0
-            if len(lines) == max_lines:
-                consumed = index
-                break
-        current.append(char)
-        width += char_width
-        consumed = index + 1
-    if current and len(lines) < max_lines:
-        lines.append("".join(current))
-    if consumed < len(detail) and lines:
-        stripped = lines[-1].rstrip("，。；、,.;:： ")
-        while stripped and sum(2 if ord(ch) > 127 else 1 for ch in stripped) > max_units - 2:
-            stripped = stripped[:-1].rstrip("，。；、,.;:： ")
-        lines[-1] = f"{stripped}…" if stripped else "…"
-    return lines or [detail[: max_units // 2]]
+    buf: list[str] = []
+    acc = 0
+    for char in text.strip():
+        char_width = _char_width(char)
+        if acc + char_width > width and buf:
+            lines.append("".join(buf))
+            buf = [char]
+            acc = char_width
+        else:
+            buf.append(char)
+            acc += char_width
+    if buf:
+        lines.append("".join(buf))
+    if len(lines) <= max_lines:
+        return lines
+    # 截断时补省略号，保证读者能看出内容被折叠（同时把末行收窄一个字符宽度）
+    visible = lines[:max_lines]
+    last = visible[-1]
+    while last and _visual_width(last) + 1 > width:
+        last = last[:-1]
+    visible[-1] = f"{last}…"
+    return visible
+
+
+def _visual_width(text: str) -> int:
+    """计算一行文本的视觉宽度（中文/全角按 2，其余按 1）。"""
+    return sum(_char_width(char) for char in text)
 
 
 def extract_roadmap_steps(markdown: str) -> list[tuple[str, str]]:
@@ -102,14 +111,32 @@ def extract_roadmap_steps(markdown: str) -> list[tuple[str, str]]:
 
 
 def build_tech_roadmap_figure(
-    steps: Sequence[tuple[str, str]],
+    steps: Sequence[tuple[str, str] | tuple[str, str, str]],
     *,
     asset_id: str = "tech_roadmap",
 ) -> FigureAsset | None:
-    """根据技术路线阶段绘制纵向流程框图（300 DPI PNG）；阶段不足 2 个返回 None。"""
-    cleaned = [(str(name).strip(), str(detail).strip()) for name, detail in steps]
-    cleaned = [(name, detail) for name, detail in cleaned if name or detail]
-    if len(cleaned) < _MIN_ROADMAP_STEPS:
+    """绘制三栏泳道式学术技术路线图（300 DPI PNG，严格折行零溢出）。
+
+    - 左栏：阶段编号 + 阶段名（深蓝底白字）；
+    - 中栏：核心技术与实施内容（按中文字符宽严格折行）；
+    - 右栏：阶段交付/目标（浅灰虚线框）；
+    - 右侧虚线闭环箭头表示阶段间迭代优化，黑白打印依然清晰。
+    """
+    if len(steps) < _MIN_ROADMAP_STEPS:
+        return None
+
+    normalized: list[tuple[str, str, str]] = []
+    for item in list(steps)[:_MAX_ROADMAP_STEPS]:
+        if len(item) >= 3:  # type: ignore[arg-type]
+            title, core, deliverable = str(item[0]), str(item[1]), str(item[2])
+        else:
+            title, detail = str(item[0]), str(item[1])
+            parts = [part.strip() for part in re.split(r"[。；;]", detail) if part.strip()]
+            core = parts[0] if parts else detail
+            deliverable = parts[1] if len(parts) > 1 else "阶段验证与里程碑评审"
+        title = re.sub(r"[（(][^）)]*[）)]", "", title).strip() or title.strip()
+        normalized.append((title, core, deliverable))
+    if len(normalized) < _MIN_ROADMAP_STEPS:
         return None
 
     import matplotlib
@@ -127,68 +154,197 @@ def build_tech_roadmap_figure(
     ]
     plt.rcParams["axes.unicode_minus"] = False
 
-    count = len(cleaned)
-    box_h = 1.05
-    gap = 0.5
-    fig_h = count * box_h + (count - 1) * gap + 0.6
-    fig, ax = plt.subplots(figsize=(7.0, fig_h), dpi=300)
-    ax.set_axis_off()
-    ax.set_xlim(0, 10)
-    ax.set_ylim(0, count * (box_h + gap) + 0.4)
+    count = len(normalized)
+    row_h = 1.35
+    gap = 0.45
+    total_h = count * (row_h + gap) + 0.6
 
-    for idx, (name, detail) in enumerate(cleaned):
-        y = (count - 1 - idx) * (box_h + gap) + 0.2
-        box = FancyBboxPatch(
-            (0.9, y),
-            8.2,
-            box_h,
-            boxstyle="round,pad=0.02,rounding_size=0.12",
-            linewidth=1.1,
-            edgecolor="#1F4E78",
-            facecolor="#EAF1F8",
+    fig, ax = plt.subplots(figsize=(7.2, max(4.2, count * 1.25)), dpi=300)
+    ax.set_xlim(0, 12.2)
+    ax.set_ylim(0, total_h)
+    ax.axis("off")
+
+    # 顶部三栏表头引导
+    ax.text(
+        1.35,
+        total_h - 0.25,
+        "研究阶段",
+        ha="center",
+        va="center",
+        fontsize=9.5,
+        fontweight="bold",
+        color="#1F4E78",
+    )
+    ax.text(
+        5.35,
+        total_h - 0.25,
+        "核心技术与实施内容",
+        ha="center",
+        va="center",
+        fontsize=9.5,
+        fontweight="bold",
+        color="#1F4E78",
+    )
+    ax.text(
+        10.05,
+        total_h - 0.25,
+        "阶段交付与目标",
+        ha="center",
+        va="center",
+        fontsize=9.5,
+        fontweight="bold",
+        color="#1F4E78",
+    )
+
+    top_y = total_h - 0.65
+    for idx, (title, core, deliverable) in enumerate(normalized):
+        y = top_y - (idx + 1) * row_h - idx * gap
+
+        # 左栏：阶段编号 + 阶段名（深蓝底白字）
+        left_box = FancyBboxPatch(
+            (0.25, y),
+            2.2,
+            row_h,
+            boxstyle="round,pad=0.04,rounding_size=0.12",
+            linewidth=0,
+            facecolor="#1F4E78",
         )
-        ax.add_patch(box)
+        ax.add_patch(left_box)
         ax.text(
-            1.25,
-            y + box_h * 0.72,
-            f"阶段 {idx + 1}｜{name[:34]}",
-            fontsize=9.5,
-            fontweight="bold",
-            color="#163A59",
+            1.35,
+            y + row_h * 0.68,
+            f"阶段 {idx + 1}",
+            ha="center",
             va="center",
+            fontsize=8.5,
+            color="#D9E2EC",
+            fontweight="bold",
         )
-        detail_lines = _wrap_detail(detail)
-        for line_index, line_text in enumerate(detail_lines):
-            ax.text(
-                1.25,
-                y + box_h * (0.42 - 0.18 * line_index),
-                line_text,
-                fontsize=8,
-                color="#33475B",
-                va="center",
-            )
-        if idx < count - 1:
-            arrow = FancyArrowPatch(
-                (5.0, y),
-                (5.0, y - gap),
-                arrowstyle="-|>",
-                mutation_scale=12,
-                linewidth=1.2,
-                color="#1F4E78",
-            )
-            ax.add_patch(arrow)
+        title_wrapped = "\n".join(_wrap_cjk(title, width=12, max_lines=2))
+        ax.text(
+            1.35,
+            y + row_h * 0.34,
+            title_wrapped,
+            ha="center",
+            va="center",
+            fontsize=9.0,
+            color="#FFFFFF",
+            fontweight="bold",
+            linespacing=1.2,
+        )
 
-    fig.tight_layout(pad=0.2)
-    buffer = io.BytesIO()
-    fig.savefig(buffer, format="png", dpi=300)
+        # 中栏：核心技术内容（严格折行）
+        mid_box = FancyBboxPatch(
+            (2.75, y),
+            5.2,
+            row_h,
+            boxstyle="round,pad=0.04,rounding_size=0.12",
+            linewidth=1.0,
+            edgecolor="#1F4E78",
+            facecolor="#F7FAFC",
+        )
+        ax.add_patch(mid_box)
+        core_lines = "\n".join(_wrap_cjk(core, width=30, max_lines=3))
+        ax.text(
+            2.98,
+            y + row_h / 2,
+            core_lines,
+            ha="left",
+            va="center",
+            fontsize=8.4,
+            color="#102A43",
+            linespacing=1.3,
+        )
+
+        # 右栏：阶段交付/验证指标（浅灰虚线框）
+        right_box = FancyBboxPatch(
+            (8.35, y),
+            3.3,
+            row_h,
+            boxstyle="round,pad=0.04,rounding_size=0.12",
+            linewidth=0.9,
+            linestyle="--",
+            edgecolor="#627D98",
+            facecolor="#FFFFFF",
+        )
+        ax.add_patch(right_box)
+        deliv_lines = "\n".join(_wrap_cjk(deliverable, width=18, max_lines=3))
+        ax.text(
+            8.55,
+            y + row_h / 2,
+            deliv_lines,
+            ha="left",
+            va="center",
+            fontsize=8.2,
+            color="#334E68",
+            linespacing=1.3,
+        )
+
+        # 横向连接虚线（中栏 → 右栏）
+        ax.add_patch(
+            FancyArrowPatch(
+                (7.98, y + row_h / 2),
+                (8.32, y + row_h / 2),
+                arrowstyle="-|>,head_width=3,head_length=4",
+                color="#627D98",
+                linewidth=0.9,
+            )
+        )
+
+        # 纵向主流程箭头（左栏向下）
+        if idx < count - 1:
+            ax.add_patch(
+                FancyArrowPatch(
+                    (1.35, y - 0.02),
+                    (1.35, y - gap + 0.04),
+                    arrowstyle="-|>,head_width=4,head_length=5",
+                    color="#1F4E78",
+                    linewidth=1.3,
+                )
+            )
+
+    # 最右侧反馈闭环箭头（末阶段 → 第 2 阶段迭代优化）
+    if count >= 3:
+        y_bottom = top_y - count * row_h - (count - 1) * gap + row_h / 2
+        y_target = top_y - 2 * row_h - gap + row_h / 2
+        ax.plot(
+            [11.7, 12.0, 12.0],
+            [y_bottom, y_bottom, y_target],
+            linestyle=":",
+            color="#486581",
+            linewidth=1.0,
+        )
+        ax.add_patch(
+            FancyArrowPatch(
+                (12.0, y_target),
+                (11.68, y_target),
+                arrowstyle="-|>,head_width=3,head_length=4",
+                color="#486581",
+                linewidth=1.0,
+            )
+        )
+        ax.text(
+            12.08,
+            (y_bottom + y_target) / 2,
+            "迭代优化",
+            rotation=90,
+            ha="center",
+            va="center",
+            fontsize=7.5,
+            color="#486581",
+        )
+
+    fig.tight_layout(pad=0.15)
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=300)
     plt.close(fig)
 
     return FigureAsset(
         asset_id=asset_id,
-        image_bytes=buffer.getvalue(),
+        image_bytes=buf.getvalue(),
         caption_zh="本文研究技术路线图",
-        caption_en="Technical Roadmap of the Thesis",
-        width_cm=13.5,
+        caption_en="Technical Roadmap of the Proposed Research",
+        width_cm=14.2,
     )
 
 

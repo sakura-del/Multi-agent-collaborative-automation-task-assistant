@@ -201,7 +201,10 @@ $$
 
         # P1-1 / P1-2：内置母版封面主标题单倍行距分两行；Heading1/2/3 纯黑；含「一、文献综述」
         assert doc.paragraphs[1].paragraph_format.line_spacing_rule == WD_LINE_SPACING.SINGLE
-        assert "\n文献综述" in doc.paragraphs[1].text
+        assert doc.paragraphs[1].text == "毕业论文（设计）"
+        assert "/" not in doc.paragraphs[1].text
+        assert doc.paragraphs[2].paragraph_format.line_spacing_rule == WD_LINE_SPACING.SINGLE
+        assert doc.paragraphs[2].text == "文献综述"
         assert any("一、文献综述" in p.text for p in doc.paragraphs)
         for style_name in ("Heading 1", "Heading 2", "Heading 3"):
             assert doc.styles[style_name].font.color.rgb == RGBColor(0x00, 0x00, 0x00)
@@ -252,3 +255,76 @@ $$
                     xml_txt = zf.read(name).decode("utf-8", "ignore")
                     assert "__MAATPLBLOCK_" not in xml_txt
                     assert not re.search(r"\[E\d+\]", xml_txt)
+
+
+class TestScheduleAggregation:
+    """Fix 5：研究计划进度安排章节的叙述式阶段段落 → 四列三线表。"""
+
+    _SCHEDULE_MARKDOWN = """## 3 研究计划进度安排
+
+本课题周期为 12 个月，分四个阶段推进。
+
+第一阶段：需求分析与架构设计（第 1-3 个月）
+
+调研运动手环心率监测现状，明确低功耗与精度指标，完成系统总体架构。此阶段需输出需求规格说明书与总体架构图。
+
+第二阶段：硬件平台搭建（第 4-6 个月）
+
+完成 STM32 主控与 PPG 传感器选型，绘制原理图并制作样机。交付硬件原理图与低功耗预算表。
+
+第三阶段：算法实现与联调（第 7-9 个月）
+
+实现自适应滤波与异常检测算法，完成端到端联调。形成可运行算法原型与联调报告。
+
+第四阶段：系统测试与论文撰写（第 10-12 个月）
+
+开展实验室与真实场景测试，整理数据并撰写论文。提交测试报告与学位论文初稿。
+"""
+
+    def test_narrative_stages_become_four_column_three_line_table(self) -> None:
+        blocks = parse_rich_blocks(self._SCHEDULE_MARKDOWN)
+
+        tables = [block for block in blocks if isinstance(block, TableBlock)]
+        assert len(tables) == 1
+        table = tables[0]
+        assert table.headers == ["起止时间", "研究阶段", "主要工作内容", "阶段性成果"]
+        assert len(table.rows) == 4
+        assert table.rows[0][0] == "第 1-3 个月"
+        assert table.rows[0][1] == "需求分析与架构设计"
+        assert "硬件原理图" in table.rows[1][3]
+        assert table.caption == "表 2.1 研究计划进度安排表"
+
+    def test_markdown_table_takes_precedence_over_aggregation(self) -> None:
+        markdown = """## 3 研究计划进度安排
+
+| 起止时间 | 研究阶段 | 主要工作内容 | 阶段性成果 |
+| --- | --- | --- | --- |
+| 第 1-3 个月 | 需求分析 | 调研现状 | 需求规格 |
+
+第一阶段：另一段叙述（第 4-6 个月）
+
+说明文字。
+
+第二阶段：第三段叙述（第 7-9 个月）
+
+说明文字。
+"""
+        blocks = parse_rich_blocks(markdown)
+
+        tables = [block for block in blocks if isinstance(block, TableBlock)]
+        assert len(tables) == 1
+        assert tables[0].rows[0][1] == "需求分析"
+
+    def test_technical_route_paragraphs_are_not_aggregated(self) -> None:
+        markdown = """## 2.2 技术路线
+
+第一阶段为硬件平台搭建。确定主控芯片型号并设计 PCB 电路。
+
+第二阶段为算法研发。部署自适应滤波基线算法。
+
+第三阶段为系统集成。实现 BLE 数据传输模块。
+"""
+        blocks = parse_rich_blocks(markdown)
+
+        assert not any(isinstance(block, TableBlock) for block in blocks)
+        assert any(isinstance(block, LineBlock) and "第一阶段为" in block.line for block in blocks)

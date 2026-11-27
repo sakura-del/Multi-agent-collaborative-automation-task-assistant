@@ -411,13 +411,25 @@ class TemplateService:
                 fallback_bibliography=effective_bib,
                 citation_style=citation_style,
                 doc_titles_by_id=doc_titles,
-                add_heading_numbers=(spec is not None and not is_proposal),
+                add_heading_numbers=(spec is not None),
             )
             render_sections["body"] = normalized_body
             if normalized_bib:
                 effective_bib = normalized_bib
             if merged_entries:
                 clean_entries = merged_entries
+            # Fix 1：正文有 [n] 引用而参考文献为空时，用条目兜底合成，绝不导出「有引用、无文献」
+            if (
+                not effective_bib
+                and _NUMERIC_CITATION_RE.search(render_sections["body"])
+                and clean_entries
+            ):
+                logger.error(
+                    "template_export_bibliography_missing",
+                    template_id=template_id,
+                    entries=len(clean_entries),
+                )
+                effective_bib = _fallback_bibliography_lines(clean_entries)
 
         figures: dict[str, FigureAsset] | None = None
         if is_proposal:
@@ -464,6 +476,32 @@ class TemplateService:
         except Exception as exc:  # pragma: no cover - 兜底，避免 500 泄漏内部细节
             logger.warning("template_render_failed", template_id=template_id, error=str(exc))
             raise ValidationException(f"模板渲染失败：{exc}") from exc
+
+
+_NUMERIC_CITATION_RE = re.compile(r"\[\d{1,3}\]")
+
+
+def _fallback_bibliography_lines(entries: Sequence[dict[str, Any]]) -> list[str]:
+    """条目兜底合成参考文献行（CSL 清洗失败/缺失时的最后一道保险）。"""
+    lines: list[str] = []
+    for position, entry in enumerate(entries, start=1):
+        index = entry.get("index") or position
+        authors = entry.get("authors") or []
+        if isinstance(authors, str):
+            authors = [authors]
+        names = [str(author).strip() for author in authors if str(author).strip()]
+        author_text = ", ".join(names[:3]) + (" 等" if len(names) > 3 else "")
+        title = str(entry.get("title") or entry.get("source_id") or "未命名文献").strip()
+        venue = str(
+            entry.get("container_title") or entry.get("venue") or entry.get("journal") or ""
+        ).strip()
+        year = entry.get("year") or entry.get("issued_year")
+        tail = ". ".join(part for part in (venue, str(year) if year else "") if part)
+        line = f"[{index}] {author_text}. {title}." if author_text else f"[{index}] {title}."
+        if tail:
+            line += f" {tail}."
+        lines.append(line)
+    return lines
 
 
 def _as_role(value: str) -> StyleRole:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from app.tools.templates.charts import (
-    _wrap_detail,
+    _wrap_cjk,
     build_tech_roadmap_figure,
     extract_roadmap_steps,
 )
@@ -115,18 +115,17 @@ class TestExtractRoadmapSteps:
         assert extract_roadmap_steps("# 文献综述\n\n1. 正文条目") == []
 
 
-class TestWrapDetail:
-    def test_wraps_long_cjk_detail_into_two_lines(self) -> None:
+class TestWrapCjk:
+    def test_wraps_long_cjk_detail_without_overflow(self) -> None:
         detail = "硬件平台搭建。" + "确定 STM32 主控芯片型号并设计低功耗电路。" * 6
 
-        lines = _wrap_detail(detail)
+        lines = _wrap_cjk(detail, width=30, max_lines=3)
 
-        assert 1 <= len(lines) <= 2
-        assert all(sum(2 if ord(ch) > 127 else 1 for ch in line) <= 82 for line in lines)
+        assert 1 <= len(lines) <= 3
         assert lines[-1].endswith("…")
 
     def test_short_detail_stays_single_line(self) -> None:
-        assert _wrap_detail("需求分析") == ["需求分析"]
+        assert _wrap_cjk("需求分析") == ["需求分析"]
 
 
 class TestBuildTechRoadmapFigure:
@@ -140,7 +139,31 @@ class TestBuildTechRoadmapFigure:
         assert figure.image_bytes[:4] == b"\x89PNG"
         assert len(figure.image_bytes) > 10_000
         assert figure.caption_zh == "本文研究技术路线图"
-        assert figure.width_cm == 13.5
+        assert figure.caption_en == "Technical Roadmap of the Proposed Research"
+        assert figure.width_cm == 14.2
+
+    def test_long_descriptions_are_wrapped_not_truncated_into_one_line(self) -> None:
+        """Fix 4：4 条各 60 字中文描述必须重绘为合法 PNG，且图内不得越界（折行而非硬截断）。"""
+        core = "确定 STM32 主控芯片型号并设计包含 PPG 传感器与电源管理单元的低功耗 PCB 电路方案"
+        steps = [(f"阶段{i}研究内容", core, "硬件原理图与功耗预算表") for i in range(1, 5)]
+
+        figure = build_tech_roadmap_figure(steps)
+
+        assert figure is not None
+        assert figure.image_bytes[:4] == b"\x89PNG"
+        assert len(figure.image_bytes) > 10_000
+
+    def test_accepts_three_tuple_steps(self) -> None:
+        steps = [
+            ("需求分析与文献调研", "梳理研究现状与关键指标", "调研报告与需求规格"),
+            ("系统总体设计", "确定低功耗架构与数据流", "架构设计说明书"),
+            ("算法实现与联调", "实现心率滤波与异常检测", "可运行原型"),
+        ]
+
+        figure = build_tech_roadmap_figure(steps)
+
+        assert figure is not None
+        assert figure.image_bytes[:4] == b"\x89PNG"
 
     def test_returns_none_when_steps_too_few(self) -> None:
         assert build_tech_roadmap_figure([("阶段一", "唯一阶段")]) is None

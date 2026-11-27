@@ -25,9 +25,12 @@ from uuid import UUID, uuid4
 from docx import Document as DocxDocument
 
 from app.core.exceptions import NotFoundException, ValidationException
+from app.core.logging import get_logger
 from app.orchestration.contracts import ReviewReport
 from app.tools.csl.models import clean_csl_title, strip_html_tags
 from app.tools.literature.models import Artifact
+
+logger = get_logger(__name__)
 
 _ARTIFACT_ID = re.compile(r"^[0-9a-f]{32}$")
 _UNSAFE_SCHEME = re.compile(r"(?i)\b(?:javascript|data|file|vbscript)\s*:")
@@ -202,8 +205,16 @@ class LiteratureExporter:
         body = (report.final_markdown or "").strip()
         stats = report.stats or {}
         title = str(stats.get("title") or self._first_heading(body) or "文献综述")
-        abstract = str(stats.get("abstract") or self._first_paragraph(body))
-        limitations = stats.get("limitations") or report.issues or []
+        # Fix 2：没有机器摘要时不要用正文首段冒充「## 摘要」，否则与正文第一段逐字重复
+        abstract = str(stats.get("abstract") or "").strip()
+        raw_limitations = stats.get("limitations") or report.issues or []
+        limitations = [
+            item
+            for item in (
+                raw_limitations if isinstance(raw_limitations, list) else [raw_limitations]
+            )
+            if not _is_empty_limitation_item(item)
+        ]
 
         rendered_lines: list[str] | None = None
         if citation_style and report.bibliography:
@@ -216,8 +227,7 @@ class LiteratureExporter:
         if body:
             parts.append(body)
         if limitations and "## 局限性" not in body:
-            items = limitations if isinstance(limitations, list) else [limitations]
-            parts.append("## 局限性\n" + "\n".join(f"- {item}" for item in items))
+            parts.append("## 局限性\n" + "\n".join(f"- {item}" for item in limitations))
         if rendered_lines is not None:
             # CSL 渲染结果优先：替换既有「参考文献」段落（保留其后的「引用核验」段落）
             document = "\n\n".join(parts)
@@ -232,6 +242,21 @@ class LiteratureExporter:
                 ]
                 parts.append("## 参考文献\n" + "\n".join(lines))
             document = "\n\n".join(parts)
+
+        # Fix 3/6：相邻重复段落去重、空「局限性（无）」整节剔除
+        document = _cleanup_export_body(document)
+        # Fix 1：正文有 [n] 引用却没有任何参考文献条目时，用 report.bibliography 兜底补齐
+        if _has_numeric_citations(document) and not _has_bibliography_entries(document):
+            if report.bibliography:
+                lines = [
+                    self._bibliography_line(index, entry)
+                    for index, entry in enumerate(report.bibliography, start=1)
+                ]
+                document = self._replace_bibliography_section(
+                    document, "## 参考文献\n" + "\n".join(lines)
+                )
+            else:
+                logger.error("export_bibliography_missing", cited=True)
 
         verification = stats.get("reference_verification")
         if isinstance(verification, dict) and _REFERENCE_SECTION not in document:
@@ -705,6 +730,75 @@ def number_markdown_headings(body: str) -> str:
     return "\n".join(out)
 
 
+_EMPTY_LIMITATION_VALUES = frozenset({"", "无", "（无）", "(无)", "暂无", "none", "null", "n/a"})
+_NUMERIC_CITATION_RE = re.compile(r"\[\d{1,3}\]")
+
+
+def _is_empty_limitation_item(item: Any) -> bool:
+    """判断「局限性」条目是否为 (无) 之类的空占位。"""
+    text = strip_html_tags(str(item or "")).strip()
+    text = re.sub(r"^[-*•\d.、)\s]+", "", text).strip()
+    cleaned = re.sub(r"[。；;，,.\s]+$", "", text).strip()
+    return cleaned.casefold() in _EMPTY_LIMITATION_VALUES
+
+
+def _strip_empty_limitations(body: str) -> str:
+    """Fix 6：整节局限性均为空占位时删掉该节，避免成稿出现「局限性 •（无）」。"""
+    lines = body.splitlines()
+    out: list[str] = []
+    i = 0
+    total = len(lines)
+    while i < total:
+        if re.match(r"^#{1,6}\s*局限性\s*$", lines[i].strip()):
+            j = i + 1
+            section: list[str] = []
+            while j < total and not re.match(r"^#{1,6}\s", lines[j].strip()):
+                section.append(lines[j])
+                j += 1
+            kept = [
+                line for line in section if line.strip() and not _is_empty_limitation_item(line)
+            ]
+            if kept:
+                out.append(lines[i])
+                out.extend(kept)
+            i = j
+            continue
+        out.append(lines[i])
+        i += 1
+    return "\n".join(out)
+
+
+def _dedupe_adjacent_paragraphs(body: str) -> str:
+    """Fix 2/3：删除相邻的完全重复段落（摘要与正文首段逐字重复的兜底）。"""
+    paragraphs = [
+        paragraph.strip() for paragraph in re.split(r"\n\s*\n", body) if paragraph.strip()
+    ]
+    kept: list[str] = []
+    for paragraph in paragraphs:
+        if kept and re.sub(r"\s+", "", paragraph) == re.sub(r"\s+", "", kept[-1]):
+            continue
+        kept.append(paragraph)
+    return "\n\n".join(kept)
+
+
+def _cleanup_export_body(body: str) -> str:
+    return _dedupe_adjacent_paragraphs(_strip_empty_limitations(body))
+
+
+def _has_numeric_citations(document: str) -> bool:
+    return bool(_NUMERIC_CITATION_RE.search(document))
+
+
+def _has_bibliography_entries(document: str) -> bool:
+    match = re.search(r"^#{1,6}\s*参考文献\s*$", document, re.MULTILINE)
+    if match is None:
+        return False
+    rest = document[match.end() :]
+    following = re.search(r"^#{1,6}\s", rest, re.MULTILINE)
+    section = rest[: following.start()] if following else rest
+    return bool(_NUMERIC_CITATION_RE.search(section))
+
+
 def prepare_template_export(
     body: str,
     bibliography_entries: Sequence[Mapping[str, Any]] | None,
@@ -747,6 +841,7 @@ def prepare_template_export(
     )
     if add_heading_numbers:
         normalized_body = number_markdown_headings(normalized_body)
+    normalized_body = _cleanup_export_body(normalized_body)
 
     return normalized_body, rendered_bib, cleaned_entries
 

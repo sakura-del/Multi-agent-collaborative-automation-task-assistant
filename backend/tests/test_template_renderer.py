@@ -210,6 +210,20 @@ class TestRenderDocument:
         xml = _xml(payload, "word/document.xml")
         assert "<w:b/>" in xml or "<w:b " in xml
 
+    def test_whole_line_bold_heading_keeps_with_next(self) -> None:
+        """Fix 3：整行加粗小标题应去掉星号、保持加粗，并带 keepNext 防止页尾孤行。"""
+        sections = dict(SECTIONS)
+        sections["body_main"] = "**第一阶段：需求分析与架构设计**\n正文说明。"
+
+        payload = _render(sections=sections)
+
+        paragraphs = _paragraphs(payload)
+        _style_of(paragraphs, "第一阶段：需求分析与架构设计")
+        assert all("**" not in text for _style_id, text in paragraphs)
+        xml = _xml(payload, "word/document.xml")
+        assert "<w:keepNext" in xml
+        assert "<w:b/>" in xml or "<w:b " in xml
+
     def test_citation_paragraph_keeps_text_before_and_after_markers(self) -> None:
         sections = dict(SECTIONS)
         sections["body_main"] = (
