@@ -172,6 +172,21 @@ def render_document(
 
     if bibliography_lines and not bibliography_handled:
         _append_bibliography(document, bibliography_lines, role_to_style)
+
+    # 页眉/页脚也可能引用了与正文封面同名的占位符（如 {{ title }}）；
+    # 只做行内文本替换，不插块级表格/段落，避免破坏版心。
+    for paragraph in list(_iter_header_footer_paragraphs(document)):
+        text = paragraph.text
+        for key, sentinel in sentinels.items():
+            if sentinel not in text:
+                continue
+            replacement = (
+                " ".join(bibliography_lines)
+                if key == bibliography_key
+                else str(sections.get(key, ""))
+            )
+            _replace_inline(paragraph, sentinel, replacement)
+
     _assert_no_sentinel_left(document)
 
     buffer = io.BytesIO()
@@ -195,6 +210,9 @@ def _assert_no_sentinel_left(document: Any) -> None:
             raise TemplateRenderError(
                 "模板中存在无法定位的块级占位符（可能被拆到多个 run），已拒绝静默丢内容"
             )
+    for paragraph in _iter_header_footer_paragraphs(document):
+        if _SENTINEL_MARKER in paragraph.text:
+            raise TemplateRenderError("模板页眉/页脚中存在未替换的占位符哨兵，已拒绝产出残缺文档")
 
 
 def _validate_contract(
@@ -500,6 +518,30 @@ def _iter_paragraphs(document: Any) -> Iterable[Any]:
     body = document.element.body
     for element in body.iter(qn("w:p")):
         yield Paragraph(element, document)
+
+
+def _iter_header_footer_paragraphs(document: Any) -> Iterable[Any]:
+    """遍历全部节的页眉与页脚（含奇偶/首页页眉页脚与其中表格）中的段落。"""
+    from docx.text.paragraph import Paragraph
+
+    seen_parts: set[int] = set()
+    for section in document.sections:
+        parts = (
+            section.header,
+            section.even_page_header,
+            section.first_page_header,
+            section.footer,
+            section.even_page_footer,
+            section.first_page_footer,
+        )
+        for part in parts:
+            element = part._element
+            part_id = id(element)
+            if part_id in seen_parts:
+                continue
+            seen_parts.add(part_id)
+            for p_el in element.iter(qn("w:p")):
+                yield Paragraph(p_el, part)
 
 
 def _sentinel(key: str) -> str:

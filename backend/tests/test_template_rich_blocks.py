@@ -144,10 +144,18 @@ $$
             chapter_no=1,
         )
 
-        # 确认不残留内部块级哨兵
+        # 确认不残留内部块级哨兵（含正文及全部页眉/页脚），且奇数页眉已填入真实题目
         with zipfile.ZipFile(io.BytesIO(out_bytes)) as zf:
             doc_xml = zf.read("word/document.xml").decode("utf-8")
             assert "__MAATPLBLOCK_" not in doc_xml
+            header_texts: list[str] = []
+            for name in zf.namelist():
+                if name.startswith(("word/header", "word/footer")) and name.endswith(".xml"):
+                    part_xml = zf.read(name).decode("utf-8")
+                    assert "__MAATPLBLOCK_" not in part_xml, f"Sentinel leaked into {name}"
+                    if name.startswith("word/header"):
+                        header_texts.append(part_xml)
+            assert any("基于多智能体的学术文献综述质量评估" in txt for txt in header_texts)
             assert any(name.startswith("word/media/") for name in zf.namelist())
 
         doc = Document(io.BytesIO(out_bytes))
