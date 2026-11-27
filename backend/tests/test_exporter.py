@@ -476,3 +476,17 @@ class TestIssue72ExportPolish:
         )
 
         assert text.count("同一段重复文字") == 1
+
+    def test_prepare_template_export_drops_numbered_empty_limitations(self) -> None:
+        """编号发生在清洗之后；编号后的「## 6. 局限性」仍须整节删除。"""
+        body = "## 6. 局限性\n- （无）\n\n## 7. 预期目标\n完成系统验证。"
+        normalized, _bib, _entries = prepare_template_export(
+            body,
+            [],
+            citation_style="gbt7714",
+            add_heading_numbers=True,
+        )
+
+        assert "局限性" not in normalized
+        assert "（无）" not in normalized
+        assert "## 7. 预期目标" in normalized or "预期目标" in normalized

@@ -749,7 +749,7 @@ def _strip_empty_limitations(body: str) -> str:
     i = 0
     total = len(lines)
     while i < total:
-        if re.match(r"^#{1,6}\s*局限性\s*$", lines[i].strip()):
+        if re.match(r"^#{1,6}\s*(?:\d+(?:\.\d+)*[.、．]?\s*)?局限性\s*$", lines[i].strip()):
             j = i + 1
             section: list[str] = []
             while j < total and not re.match(r"^#{1,6}\s", lines[j].strip()):
@@ -839,9 +839,9 @@ def prepare_template_export(
         item_id_map=item_id_map,
         is_numeric=is_numeric,
     )
+    normalized_body = _cleanup_export_body(normalized_body)
     if add_heading_numbers:
         normalized_body = number_markdown_headings(normalized_body)
-    normalized_body = _cleanup_export_body(normalized_body)
 
     return normalized_body, rendered_bib, cleaned_entries
 

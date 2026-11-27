@@ -114,6 +114,17 @@ class TestExtractRoadmapSteps:
     def test_returns_empty_without_roadmap_section(self) -> None:
         assert extract_roadmap_steps("# 文献综述\n\n1. 正文条目") == []
 
+    def test_supports_numbered_heading_after_template_export(self) -> None:
+        """模板导出会给章节补序号（## 3. 技术路线），仍需识别出阶段。"""
+        markdown = """## 3. 技术路线
+1. 需求分析：明确目标
+2. 系统设计：确定架构
+3. 实验验证：评估效果
+"""
+        steps = extract_roadmap_steps(markdown)
+
+        assert [name for name, _detail in steps] == ["需求分析", "系统设计", "实验验证"]
+
 
 class TestWrapCjk:
     def test_wraps_long_cjk_detail_without_overflow(self) -> None:
