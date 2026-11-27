@@ -176,6 +176,28 @@ def _contributes_to_body(result: Any, *, has_write_nodes: bool = False) -> bool:
 _INLINE_MODEL_INFER_PREFIX = re.compile(r"(?:模型推断[：:]\s*|（模型推断）|\(模型推断\))")
 _EXTRACT_HEADING_RE = re.compile(r"^#{1,3}\s+.*证据局限性说明\s*$")
 _CITE_TAG_RE = re.compile(r"\s*\[E\d+\]")
+#: 带编号的引用标记（连同前面的空白一起匹配，剔除后不会留下双空格）。
+_CITE_MARKER_RE = re.compile(r"\s*\[E(\d+)\]")
+
+
+def _strip_unknown_citations(text: str, allowed: set[int]) -> str:
+    """剔除不在参考文献编号集合里的引用标记（Issue #25 复盘舷窗回归）。
+
+    ## 为什么需要这层兜底
+
+    LLM 润色看到的节点内容已经按 ``local_to_global`` 全局化（见
+    ``_build_literature_review``），但仍可能凭训练习惯补写「[E12]」之类的编号，
+    或复述未被引用的局部编号。落库前闸门只认成稿里的 ``[E#]`` 与最终
+    bibliography 的双向一致，任何多余编号都会让整篇报告被判失败。
+
+    因此这里以最终 bibliography 为唯一真源：合法编号原样保留，悬空编号连同
+    前面的空白一起删除，保证不会留下 ``差异 [E3]。`` 这样的死标记。
+    """
+
+    def _replace(match: re.Match[str]) -> str:
+        return match.group(0) if int(match.group(1)) in allowed else ""
+
+    return _CITE_MARKER_RE.sub(_replace, text)
 
 
 def _strip_internal_noise(text: str) -> str:
@@ -530,6 +552,11 @@ class ReviewerAgent(BaseAgent):
         ]
         # Issue #3：核验最终 bibliography（导出报告展示的就是这份列表）
         bibliography, verification_summary = await self._verify_bibliography(bibliography)
+        allowed_citations = {
+            int(entry["index"])
+            for entry in bibliography
+            if isinstance(entry.get("index"), int) and entry["index"] > 0
+        }
         scores = self._literature_scores(validations)
         issues = [
             check.message
@@ -552,13 +579,32 @@ class ReviewerAgent(BaseAgent):
         claim_stats = summarize_claim_checks(claim_checks)
 
         if self.llm is not None:
+            # Issue #25：润色输入也必须先全局编号。原始节点 content 里是各节点
+            # 自己的局部 [E#]（每个节点从 E1 起），直接喂给 LLM 会让它在摘要/
+            # 局限性里复述局部编号，与最终 bibliography 错位 → 落库前闸门判失败
+            # （生产任务 b79d0e43 两次失败即此因）。
+            polish_results: list[Any] = []
+            for result in results:
+                payload = result.model_dump(mode="json")
+                payload["content"] = _renumber_citations(
+                    str(payload.get("content") or ""),
+                    str(payload.get("node_id") or ""),
+                    local_to_global,
+                )
+                polish_results.append(payload)
+
             polished = await self._polish_literature_review(
-                topic, results, validations, event_stats
+                topic, polish_results, validations, event_stats
             )
             abstract = str(polished.get("abstract") or abstract)
             refined = polished.get("limitations")
             if isinstance(refined, list) and refined:
                 limitations = [str(item) for item in refined]
+
+        # Issue #25：摘要/局限性的引用编号以最终 bibliography 为准兜底过滤，
+        # 合法编号保留、悬空编号剔除（确定性 limitations 也一并过滤）。
+        abstract = _strip_unknown_citations(abstract, allowed_citations)
+        limitations = [_strip_unknown_citations(item, allowed_citations) for item in limitations]
 
         final_markdown = self._compose_review_markdown(
             topic=topic,
