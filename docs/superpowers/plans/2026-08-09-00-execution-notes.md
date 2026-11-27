@@ -4521,3 +4521,53 @@ air tokens 只服务两页，不替换 success/warning/destructive。证据卡�
 
 - `retry_node` 复跑复盘节点时只恢复已完成节点 id、不恢复输出 → `missing_dependency_output`（既有缺陷，与本轮无关，待单独立项）
 - Phase B（用户自有正文接入）未开始，计划 `docs/superpowers/plans/2026-11-27-fulltext-acquisition-phase-b-plan.md`
+
+### 文献正文获取 Phase B：用户自有正文接入上线（2026-11-27）
+
+计划：`docs/superpowers/plans/2026-11-27-fulltext-acquisition-phase-b-plan.md`；Issue #73。
+
+**实现（B1-B5，子代理驱动，每个 Task 先红后绿）**
+
+- B1 `7152d42`：知识库上传按 `ref_id` → DOI → 标题自动关联引用库条目
+  （`ReferenceLinker`；歧义不关联；`meta_info` 写 `ref_id/doi`）
+- B2 `f895256`：用户已关联全文升级为带页码 locator 的 excerpt 证据
+  （`UserFulltextEvidenceService`；`literature_review._prepare_node` 依次取
+  用户全文 → metadata → 知识库检索证据，fail-open）；测试对齐 `a8c2e40`
+- B3 `3fed161`：Zotero Web API 条目 + PDF 附件同步
+  （`POST /api/v1/reference-library/sync-zotero`；凭据复用 `DataSourceCredential(provider="zotero")`）
+- B4 `fb48c16`：剪藏扩展支持「题录 + 附带 PDF」一次提交（manifest 1.1.0，
+  `verify-extension.mjs` 重写为 50 项/11 场景）；打包 `97f76be`
+  （`release/veripaper-clipper-1.1.0.zip`，17,915 bytes）
+- 剪藏上传鉴权补丁（TDD）：`a69d2f5` 知识库上传端点支持 X-API-Key +
+  `knowledge:write` scope；`373ceab` 命名 scope 依赖并更新测试；
+  `7b218b4` `ApiKeyScope` 放行 `knowledge:write`
+- B5 `efa6d1b`：前端任务全文开关、证据占比、上传 PDF 升级入口、`.caj` 提示
+
+**门禁**
+
+- 测试机：B1 49 passed、B2 67 passed、B3 82 passed、knowledge 补丁 62 passed、
+  B6 定向 17 文件 **240 passed**；前端 Vitest **149 passed**（5 文件）
+- 剪藏扩展 fixture 冒烟 50 项 **RESULT=PASS**；本机 black/ruff/mypy 全绿
+
+**部署与生产验收**
+
+- 后端镜像 `sha256:295ae8edbbb8b22f1c6c6a6b7fdd505da4977615197cf577a3e03ec93540ef96`
+  （HEAD `7b218b4`），`/health/ready` 200
+- 前端 Cloudflare Pages 部署成功：别名 `https://2d613f3e.multi-agent-assistant.pages.dev`
+- API 验收：API Key 上传 PDF（带 `ref_id`）201 → 任务
+  `4301978d-f117-46a6-9599-9ac4a4dec5b8` completed；bibliography 命中上传文献，
+  excerpt 2 条，locator `{page_start:1,page_end:3,section_title:"1 引言"}`
+- UI 验收（Playwright 截图 + 录屏/GIF）：全文证据占比「全文证据 1 篇 / 仅题录摘要 7 篇」、
+  「上传 PDF」升级入口、全文开关、API Key 页均可见；`PAGE_ERRORS=[]`
+- 证据：Issue #73 评论
+  https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant/issues/73#issuecomment-7218492480
+  （6 张图内嵌渲染，回读 `body_html` 校验）；Issue #73 已关闭（completed）
+- 清理：测试 API Key、2 个测试知识库文档、测试引用库条目已删除；
+  `knowledge_doc=14`、`fulltext_cache=1`（Phase A OA 缓存保留）、`reference_library_item=2`
+
+**遗留边界**
+
+- 真机知网/维普剪藏验收需用户账号，未跑（本地 fixture + 生产 API/UI 验收替代，Issue #73 注明）
+- Zotero 真实账号未联调（MockTransport 覆盖协议与错误码）
+- `POST /reference-library/sync-zotero` 用 `ApiUserDep`（JWT 或 X-API-Key），
+  与规范 §6.3「JWT only」不一致，已在 Issue #73 注明

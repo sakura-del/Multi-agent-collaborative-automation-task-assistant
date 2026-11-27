@@ -391,11 +391,59 @@ node scripts/deploy-pages.mjs
 
 ## 自审清单（完成后逐项勾）
 
-- [ ] 上传按 ref_id/DOI/标题关联，歧义不自动关联（测试覆盖）
-- [ ] 跨用户隔离（关联、检索、证据、Zotero）全部有测试
-- [ ] `.caj` 前端明确提示；后端仍只收 `.pdf/.docx/.md/.txt`
-- [ ] Zotero 凭据加密存储、不落日志；单文件 ≤30MB；失败可跳过
-- [ ] 剪藏扩展无新增高危权限；不抓付费正文；测试 fixture 覆盖
-- [ ] `full_text` 开关与 TaskResult 统计/升级入口前端测试全绿
+- [x] 上传按 ref_id/DOI/标题关联，歧义不自动关联（测试覆盖）
+- [x] 跨用户隔离（关联、检索、证据、Zotero）全部有测试
+- [x] `.caj` 前端明确提示；后端仍只收 `.pdf/.docx/.md/.txt`
+- [x] Zotero 凭据加密存储、不落日志；单文件 ≤30MB；失败可跳过
+- [x] 剪藏扩展无新增高危权限；不抓付费正文；测试 fixture 覆盖
+- [x] `full_text` 开关与 TaskResult 统计/升级入口前端测试全绿
 - [ ] 真机知网/维普验收证据（截图 + 录屏/GIF）已内嵌 Issue #73
-- [ ] 本机静态检查、测试机定向回归、生产真机验收全部留证
+  - 未跑：真实站点需要用户账号，尚未提供；已用本地 fixture 自动化冒烟
+    （`verify-extension.mjs`，50 项 PASS）与生产 API/UI 验收替代，边界已在 Issue #73 注明。
+- [x] 本机静态检查、测试机定向回归、生产真机验收全部留证
+
+---
+
+## 实施记录（2026-11-27 完成）
+
+**提交链（main）**
+
+- B1 `7152d42`：知识库上传按 `ref_id`/DOI/标题自动关联引用库条目
+- B2 `f895256`：用户已关联全文升级为带页码 locator 的 excerpt 证据；
+  期间测试对齐 `a8c2e40`（缺 `user_id` 时既有 `HumanActionRequiredError` 语义）
+- B3 `3fed161`：Zotero Web API 条目与 PDF 附件同步
+- B4 `fb48c16`：剪藏扩展支持附带 PDF 上传并自动关联引用库；
+  打包 `97f76be`（`release/veripaper-clipper-1.1.0.zip`，17,915 bytes）
+- 额外修复：`a69d2f5` 知识库上传端点支持 X-API-Key + `knowledge:write` scope；
+  `373ceab` 命名 scope 依赖并更新测试；`7b218b4` `ApiKeyScope` 放行 `knowledge:write`
+- B5 `efa6d1b`：任务全文开关、证据占比与上传 PDF 升级入口
+
+**门禁**
+
+- 测试机：B1 49 passed、B2 67 passed、B3 82 passed、knowledge 补丁 62 passed、
+  B6 定向 17 文件 **240 passed**；前端 Vitest **149 passed**（5 文件）
+- 剪藏扩展：fixture 冒烟 50 项 **RESULT=PASS**（含 multipart PDF + ref_id）
+- 本机：black/ruff/mypy 全绿
+
+**部署与生产验收**
+
+- 后端镜像 `sha256:295ae8edbbb8b22f1c6c6a6b7fdd505da4977615197cf577a3e03ec93540ef96`
+  （HEAD `7b218b4`），`/health/ready` 200
+- 前端 Cloudflare Pages 部署成功，别名 `https://2d613f3e.multi-agent-assistant.pages.dev`
+- API 验收（容器内脚本）：API Key 上传 PDF（带 `ref_id`）201 → 任务
+  `4301978d-f117-46a6-9599-9ac4a4dec5b8` completed；bibliography 命中上传文献，
+  excerpt 2 条，locator `{page_start:1,page_end:3,section_title:"1 引言"}`
+- UI 验收（Playwright 双证据）：全文证据占比「1 篇 / 7 篇」、上传 PDF 升级入口、
+  全文开关、API Key 页均可见；`PAGE_ERRORS=[]`
+- 证据：Issue #73 评论 https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant/issues/73#issuecomment-7218492480
+  （5 截图 + GIF 内嵌，回读 6 张图渲染）；Issue #73 已关闭（completed）
+- 清理：测试 API Key / 2 个测试知识库文档 / 测试引用库条目已删除；
+  `knowledge_doc=14`、`fulltext_cache=1`（Phase A OA 缓存保留）、`reference_library_item=2`
+
+**遗留边界**
+
+- 真机知网/维普剪藏验收需用户账号，未跑（本地 fixture + 生产 API/UI 替代）
+- Zotero 真实账号未联调（MockTransport 覆盖协议与错误码）
+- `POST /reference-library/sync-zotero` 采用 `ApiUserDep`（JWT 或 X-API-Key），
+  与规范 §6.3 的「JWT only」不一致，已在 Issue #73 评论注明
+
