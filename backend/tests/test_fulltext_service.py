@@ -360,9 +360,11 @@ async def test_single_document_failure_does_not_block_batch(
 
 async def test_save_bytes_validates_extension_signature_and_size(tmp_path: Path) -> None:
     """``save_bytes`` 与 ``save`` 共用白名单/签名/大小校验，落盘仍按用户隔离。"""
-    storage = DocumentStorage(tmp_path / "uploads", max_file_bytes=1024)
     user_id = uuid4()
     pdf = _sample_pdf()
+    # 上限略大于样例 PDF，便于先验证正常落盘，再用超限内容验证大小闸门。
+    limit = max(len(pdf) + 1, 2048)
+    storage = DocumentStorage(tmp_path / "uploads", max_file_bytes=limit)
 
     stored = await storage.save_bytes(user_id, "oa-paper.pdf", pdf)
     assert stored.original_name == "oa-paper.pdf"
@@ -378,4 +380,4 @@ async def test_save_bytes_validates_extension_signature_and_size(tmp_path: Path)
     with pytest.raises(ValidationException, match="文件签名"):
         await storage.save_bytes(user_id, "fake.pdf", b"not a pdf body")
     with pytest.raises(ValidationException, match="30 MB"):
-        await storage.save_bytes(user_id, "big.txt", b"x" * 1025)
+        await storage.save_bytes(user_id, "big.txt", b"x" * (limit + 1))
