@@ -4484,3 +4484,40 @@ air tokens 只服务两页，不替换 success/warning/destructive。证据卡�
   smoke 通过）→ Deploy 自动触发 → ff-only + rollback 标签 + 健康 200 + 检索冒烟 →
   通知 success；服务器 HEAD `9fceda6`、latest=`f1a9fc045adc`、rollback=`dfb98608a4b7`。
 - 门禁有效性反证：上一次 CI 冒烟红（8a9c3d9）对应的 Deploy 是 **skipped**。
+
+### 文献正文获取 Phase A：OA 自动正文上线（2026-11-27）
+
+计划：`docs/superpowers/plans/2026-11-27-fulltext-acquisition-phase-a-plan.md`；规范：
+`docs/superpowers/specs/2026-11-26-fulltext-acquisition-spec.md`；Issue #73。
+
+**实现（8 个 Task，子代理驱动，每个 Task 先红后绿）**
+
+- Task 1 `5579cce`：`FulltextConfig` + `TaskCreate`/`LiteratureReviewRequest` 增 `full_text: bool = True`
+- Task 2 `5c405e6`：`fulltext_cache` 模型 + 迁移 `a1f2b3c4d5e6`（down=`d8b2f5c3a1e9`）
+- Task 3 `0cc0144`：`CleanFullTextParser`（PyMuPDF 双栏重排、页眉页脚裁剪、扫描件密度检测、References/Acknowledgements 截断、section_role）
+- Task 4 `96f39db`：`FullTextResolver`（OpenAlex OA → arXiv HTML → arXiv PDF → Europe PMC → Unpaywall → CORE；license 白名单、SSRF、单篇 20s/总 60s）
+- Task 5 `e7e0f9a`：`FulltextService`（缓存去重、落 `fulltext_cache`、挂用户 `knowledge_doc` + 分块 + 向量、`FulltextStats` 五计数）
+- Task 6 `cf6cd26`：`PaperCardService`（首次落库轻量 LLM 生成 Paper Card，失败静默）
+- Task 7 `426673d`：工作流接入（`ExecutionResult.stats` 存 `fulltext_summary`；离线/引用库模式零外呼；证据靠既有 context_builder locator 自动升级 excerpt）
+- 期间修正 3 处测试问题：`1297f35`（迁移 head 断言）、`d4e609c`（超时 mock 只对非 arXiv 生效）、`b3bf335`（save_bytes 上限）
+
+**门禁**
+
+- 每个 Task 在 10.0.10.2 上「红→绿」：Task1 3 passed、Task2/3 24 passed、Task4 16 passed、Task5/6 19 passed、Task7 84 passed
+- 定向回归（9 个相关测试文件）**112 passed**；本机 black/ruff/mypy 全绿（572 files / 289 files）
+
+**部署与生产验收**
+
+- 镜像 `sha256:8fdafbb13933183ece86857d3197721f32ef08e1b72b224d1bd97fa46b1de4c1`，容器 healthy，`/health/ready` 200；迁移自动升到 `a1f2b3c4d5e6`
+- 主验收任务 `d6c812d2-64a5-442b-9a3b-97d2b17393f2`（RAG evaluation benchmarks）16:30:08 completed，6 节点全 completed，正文 6,570 字符
+  - `subtask n1 stats.fulltext_summary = {attempted: 8, succeeded: 1, fallback_metadata: 7, scanned_skipped: 0, failed: 0}`
+  - `fulltext_cache` active=1（provider `openalex_oa`、license `cc-by`、26 页、DOI `10.18653/v1/2025.emnlp-main.292`）
+  - 挂载 `knowledge_doc` origin=`oa_auto`、chunk_count=188、index ready；证据 **excerpt 18 / metadata 10**，locator 带真实页码与章节（Introduction 1–2、Evaluation 3–5、Limitations 9–14）
+  - UI 点击引用角标 → 论断核验抽屉显示「出处定位：PDF 第 9–14 页 · Limitations」
+- 降级任务 `f690dac0-7bd7-4948-92c2-2018db4c8996`（`full_text=false`）16:35:05 completed；无 `fulltext_summary`、缓存未增加（零外呼）；excerpt 12 条来自用户知识库既有文档，非 OA 抓取
+- 证据：Issue #73 评论 https://github.com/sakura-del/Multi-agent-collaborative-automation-task-assistant/issues/73#issuecomment-7213872487 （4 截图 + GIF 内嵌，回读 body_html 5 张图渲染）；本地副本 `docs/evidence/2026-11-27-fulltext-phase-a/`（未提交 git）
+
+**遗留**
+
+- `retry_node` 复跑复盘节点时只恢复已完成节点 id、不恢复输出 → `missing_dependency_output`（既有缺陷，与本轮无关，待单独立项）
+- Phase B（用户自有正文接入）未开始，计划 `docs/superpowers/plans/2026-11-27-fulltext-acquisition-phase-b-plan.md`

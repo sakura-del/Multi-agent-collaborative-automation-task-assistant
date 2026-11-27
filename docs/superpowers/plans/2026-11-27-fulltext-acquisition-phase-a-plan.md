@@ -820,14 +820,14 @@ scp -i 'C:\Users\Lenovo\.ssh\id_ed25519_hermes' $b root@47.253.81.6:/root/vp73.b
 
 ## 自审清单（完成后逐项勾）
 
-- [ ] `full_text` 默认 True；离线/引用库模式零外呼（测试覆盖）
-- [ ] license 白名单外一律不下载、不缓存（测试覆盖）
-- [ ] 扫描件不入库、不建向量，warning 可读（测试覆盖）
-- [ ] References/Acknowledgements 被截断（测试覆盖）
-- [ ] 同 DOI 二次解析零下载（测试覆盖）
-- [ ] 外部下载 SSRF 防护（测试覆盖）
-- [ ] 任意外呼失败任务仍 `completed`（测试覆盖）
-- [ ] 证据 locator 带页码/章节（测试覆盖）
-- [ ] 用户私有全文跨用户隔离（Phase B 测试补齐前先保证 `knowledge_doc.user_id` 过滤）
-- [ ] 迁移可 upgrade/downgrade（测试机验证）
-- [ ] 本机静态检查、测试机定向回归、生产真实任务验收全部留证
+- [x] `full_text` 默认 True；离线/引用库模式零外呼（测试覆盖）
+- [x] license 白名单外一律不下载、不缓存（测试覆盖）
+- [x] 扫描件不入库、不建向量，warning 可读（测试覆盖）
+- [x] References/Acknowledgements 被截断（测试覆盖）
+- [x] 同 DOI 二次解析零下载（测试覆盖）
+- [x] 外部下载 SSRF 防护（测试覆盖）
+- [x] 任意外呼失败任务仍 `completed`（测试覆盖）
+- [x] 证据 locator 带页码/章节（测试覆盖）
+- [x] 用户私有全文跨用户隔离（Phase B 测试补齐前先保证 `knowledge_doc.user_id` 过滤）
+- [x] 迁移可 upgrade/downgrade（测试机验证）
+- [x] 本机静态检查、测试机定向回归、生产真实任务验收全部留证
