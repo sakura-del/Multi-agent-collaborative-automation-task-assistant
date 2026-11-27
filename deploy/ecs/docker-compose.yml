@@ -97,7 +97,8 @@ services:
 
   gateway:
     # 只做 API 反代：前端在 Cloudflare Pages，不需要在这里编译前端产物
-    image: nginx:alpine
+    # 锁定 1.31.9-alpine 修复 HTTP/2 漏洞 CVE-2026-123007 与 CVE-2026-123633
+    image: nginx:1.31.9-alpine
     container_name: vp-gateway
     logging: *default-logging
     restart: unless-stopped

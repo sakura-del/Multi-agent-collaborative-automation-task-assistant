@@ -9,6 +9,7 @@ RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
-FROM nginx:1.25-alpine
+# 锁定 1.31.9-alpine 修复 HTTP/2 漏洞 CVE-2026-123007 与 CVE-2026-123633
+FROM nginx:1.31.9-alpine
 COPY nginx/nginx.conf /etc/nginx/nginx.conf
 COPY --from=frontend /frontend/dist /usr/share/nginx/html
