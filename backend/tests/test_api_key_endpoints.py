@@ -120,6 +120,20 @@ class TestCreateKey:
 
         assert set(resp.json()["scopes"]) == {"tasks:read", "tasks:write"}
 
+    def test_knowledge_write_scope_accepted(self, key_app) -> None:
+        """剪藏扩展附带 PDF 需要 `knowledge:write`；schema 必须允许该 scope。"""
+        user = _user(key_app.state.factory, "mk_knowledge")
+        client = key_app.state.client
+
+        resp = client.post(
+            "/api/v1/api-keys",
+            headers=_headers(user),
+            json={"name": "剪藏", "scopes": ["knowledge:write"]},
+        )
+
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["scopes"] == ["knowledge:write"]
+
     def test_unknown_scope_rejected(self, key_app) -> None:
         """未知 scope → **422**（Pydantic `Literal` 在 schema 层就拦住）。
 

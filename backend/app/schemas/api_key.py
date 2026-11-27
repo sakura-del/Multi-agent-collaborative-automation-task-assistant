@@ -20,7 +20,13 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-ApiKeyScope = Literal["tasks:read", "tasks:write", "artifacts:read", "annotations:write"]
+ApiKeyScope = Literal[
+    "tasks:read",
+    "tasks:write",
+    "artifacts:read",
+    "annotations:write",
+    "knowledge:write",
+]
 
 
 class ApiKeyCreate(BaseModel):
