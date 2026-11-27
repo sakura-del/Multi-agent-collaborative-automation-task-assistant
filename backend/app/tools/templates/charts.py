@@ -33,7 +33,13 @@ def build_year_distribution_figure(
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    plt.rcParams["font.sans-serif"] = ["Noto Sans CJK SC", "SimSun", "FangSong", "DejaVu Sans"]
+    plt.rcParams["font.sans-serif"] = [
+        "Noto Sans CJK SC",
+        "WenQuanYi Zen Hei",
+        "SimSun",
+        "FangSong",
+        "DejaVu Sans",
+    ]
     plt.rcParams["axes.unicode_minus"] = False
 
     counts = sorted(Counter(years).items())

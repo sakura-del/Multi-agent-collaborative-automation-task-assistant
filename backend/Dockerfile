@@ -11,11 +11,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # 系统依赖：build-essential 用于编译；libpq-dev 给 asyncpg；curl 用于健康探针
 # libgomp1：sentence-transformers(torch) 运行依赖
+# fonts-wqy-zenhei：matplotlib 绘制中文学术统计图表所需中文字体
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
     libgomp1 \
     curl \
+    fonts-wqy-zenhei \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
