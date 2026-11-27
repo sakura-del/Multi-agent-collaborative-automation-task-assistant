@@ -1,7 +1,7 @@
 """知识库管理 API：鉴权 multipart 上传/删除/统计/检索（owner 隔离）。
 
 端点设计：
-    POST   /api/v1/knowledge/documents        上传文档（multipart file + title）
+    POST   /api/v1/knowledge/documents        上传文档（multipart file + title [+ ref_id]）
     GET    /api/v1/knowledge/documents        列出当前用户文档
     DELETE /api/v1/knowledge/documents/{doc_id} 删除当前用户文档
     GET    /api/v1/knowledge/stats            当前用户索引统计
@@ -93,11 +93,28 @@ async def upload_document(
     file: Annotated[UploadFile, File(description="pdf/docx/md/txt 文件，≤30MB")],
     title: Annotated[str, Form(min_length=1, max_length=256)],
     strategy: Annotated[ChunkStrategy, Form()] = ChunkStrategy.RECURSIVE,
+    ref_id: Annotated[
+        str | None,
+        Form(
+            max_length=200,
+            description="可选：引用库条目 ref_id（如 doi:10.1234/abc），命中后写入文档 meta_info",
+        ),
+    ] = None,
     current_user: User = Depends(get_current_active_user),
     service: KnowledgeDocumentService = Depends(get_document_service),
 ) -> KnowledgeDocumentOut:
-    """上传文档：受控存储 → 解析分块 → 双索引 → 持久化。"""
-    doc = await service.ingest(current_user.id, file, title=title, strategy=strategy)
+    """上传文档：受控存储 → 解析分块 → 双索引 → 持久化。
+
+    `ref_id` 为可选关联提示：命中当前用户引用库条目时，文档 `meta_info` 会写回
+    `ref_id` / `doi`，供全文补全把 OA 正文挂到引用库那一条文献上。
+    """
+    doc = await service.ingest(
+        current_user.id,
+        file,
+        title=title,
+        strategy=strategy,
+        ref_id=ref_id,
+    )
     return _to_out(doc)
 
 

@@ -33,6 +33,7 @@ from app.knowledge.models.document import ChunkStrategy, RetrievalResult, TextCh
 from app.knowledge.services.document_storage import DocumentStorage
 from app.knowledge.services.index_manager import IndexManager
 from app.knowledge.services.knowledge_base import KnowledgeBase
+from app.knowledge.services.reference_linker import ReferenceLinker, doi_from_ref_id
 from app.schemas.knowledge import KnowledgeSearchIn
 
 logger = get_logger(__name__)
@@ -121,14 +122,38 @@ class KnowledgeDocumentService:
         *,
         title: str,
         strategy: ChunkStrategy,
+        ref_id: str | None = None,
     ) -> KnowledgeDoc:
-        """上传并索引文档：存储 → 建索引 → 持久化，失败回滚为 failed 记录。"""
+        """上传并索引文档：存储 → 建索引 → 持久化，失败回滚为 failed 记录。
+
+        `ref_id` 是可选的上传提示（计划 Task B1）：命中引用库条目时把 `ref_id` /
+        `doi` 写进 `meta_info`，Phase B 的全文补全据此把 OA 正文挂到引用库那一条
+        文献上。匹配失败不影响上传，只是不写关联字段。
+        """
         # 1. 受控存储（路径穿越/签名/大小校验）
         stored = await self._storage.save(user_id, upload)
         doc_type = _EXT_TO_DOC_TYPE.get(stored.extension, "txt")
         doc_id_str = str(stored.doc_uuid)
+        ref_hint = ref_id.strip() if ref_id else None
+        doi_hint = doi_from_ref_id(ref_hint)
 
-        # 2. 创建索引中的文档记录
+        # 2. 关联引用库条目（ref_id 精确 → 归一化 DOI → 归一化标题）
+        linked = await ReferenceLinker(self._db).match(
+            user_id,
+            ref_id=ref_hint,
+            doi=doi_hint,
+            title=title,
+        )
+        meta_info: dict[str, Any] = {
+            "original_name": stored.original_name,
+            "file_size": stored.size,
+        }
+        if linked is not None:
+            # 计划 Task B1 约定：命中后原样写回条目 ref_id 与 DOI（无 DOI 时为 None）
+            meta_info["ref_id"] = linked.ref_id
+            meta_info["doi"] = linked.doi or doi_hint
+
+        # 3. 创建索引中的文档记录
         doc = KnowledgeDoc(
             id=stored.doc_uuid,
             user_id=user_id,
@@ -139,12 +164,12 @@ class KnowledgeDocumentService:
             file_path=stored.path.as_posix(),
             index_status="indexing",
             chunk_count=0,
-            meta_info={"original_name": stored.original_name, "file_size": stored.size},
+            meta_info=meta_info,
         )
         self._db.add(doc)
         await self._db.flush()
 
-        # 3. 解析 + 分块 + 写双索引（CPU/模型密集，放线程池避免阻塞事件循环）
+        # 4. 解析 + 分块 + 写双索引（CPU/模型密集，放线程池避免阻塞事件循环）
         try:
             # 解析器只认本地文件：S3 后端在 localize 里下载到临时文件，退出即删除。
             # local 后端直接返回原路径，行为与改造前一致。
