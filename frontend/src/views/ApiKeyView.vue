@@ -58,6 +58,11 @@ const SCOPE_INFO: { value: ApiKeyScope; label: string; hint: string }[] = [
   { value: "tasks:write", label: "创建与控制任务", hint: "建任务、确认规划、取消/重试" },
   { value: "artifacts:read", label: "下载产出", hint: "Markdown / DOCX / .bib / .ris" },
   { value: "annotations:write", label: "写批注", hint: "给任务加导师批注" },
+  {
+    value: "knowledge:write",
+    label: "上传文档（剪藏全文）",
+    hint: "剪藏扩展附带 PDF 上传知识库",
+  },
 ];
 
 const SCOPE_LABEL_MAP = new Map<ApiKeyScope, string>(

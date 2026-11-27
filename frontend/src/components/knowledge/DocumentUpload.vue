@@ -22,6 +22,8 @@ import {
 // 上传工具：支持多文件选择、文件夹递归导入与拖拽入队，保留单文件既有表单与 E2E 契约
 const MAX_BYTES = 30 * 1024 * 1024;
 const ACCEPTED = [".pdf", ".docx", ".md", ".markdown", ".txt"] as const;
+// 知网 CAJ 是用户最常误传的格式：后端只收 PDF/DOCX/MD/TXT，这里给出可执行的替代路径。
+const CAJ_HINT = "知网 CAJ 格式暂不支持，请先在官网下载 PDF 再上传";
 
 type QueueItemStatus = "pending" | "uploading" | "done" | "error";
 
@@ -70,6 +72,9 @@ function formatSize(bytes: number): string {
 }
 
 function singleFileError(file: File): string | null {
+  if (extensionOf(file.name) === ".caj") {
+    return CAJ_HINT;
+  }
   if (!ACCEPTED.includes(extensionOf(file.name) as (typeof ACCEPTED)[number])) {
     return `仅支持 ${ACCEPTED.join(" / ")} 格式`;
   }
@@ -109,7 +114,11 @@ function enqueueFiles(rawFiles: File[], replaceWhenSingleEmpty = false) {
     MAX_BYTES,
     remainingSlots || MAX_BATCH_FILES,
   );
-  skippedFiles.value = skipped;
+  // 知网 CAJ 是最常见的「看起来能传其实不行」格式：批量/拖拽路径也给出明确指引，
+  // 而不是一句笼统的「格式不支持」。
+  skippedFiles.value = skipped.map((item) =>
+    extensionOf(item.name) === ".caj" ? { ...item, reason: CAJ_HINT } : item,
+  );
 
   if (!valid.length) {
     if (skipped.length > 0 && queue.value.length === 0) {

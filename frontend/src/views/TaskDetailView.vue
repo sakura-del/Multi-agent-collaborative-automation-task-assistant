@@ -715,6 +715,7 @@ onBeforeUnmount(() => {
           :report="store.snapshot.review_report"
           :artifacts="artifacts"
           :workflow-preset="store.snapshot.workflow_preset ?? null"
+          :subtasks="store.snapshot.subtasks ?? []"
           @refresh="refresh"
         />
         <EmptyState

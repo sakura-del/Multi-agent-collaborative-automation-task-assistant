@@ -4,6 +4,7 @@ import { BookOpen, Download, FileText } from "lucide-vue-next";
 import { Motion, useReducedMotion } from "motion-v";
 import { routerKey } from "vue-router";
 
+import { knowledgeApi } from "@/api/knowledge";
 import { taskApi } from "@/api/tasks";
 import { renderTemplate } from "@/api/templates";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
@@ -25,6 +26,7 @@ import type {
   QualityFlag,
   ReferenceVerificationSummary,
   ReviewReport,
+  SubtaskSnapshot,
   VerificationStatus,
 } from "@/api/types";
 import { parseClaimChecks } from "@/utils/claim-verdict";
@@ -54,6 +56,12 @@ const props = defineProps<{
   artifacts?: Artifact[];
   /** Phase 2：任务工作流预设；thesis_proposal 任务不再显示「生成开题报告」入口 */
   workflowPreset?: string | null;
+  /**
+   * 任务快照的节点输出（全文获取 Phase B · Task B5）。
+   * 检索节点的全文统计在 `output.execution_result.stats.fulltext_summary`；
+   * 不传 = 结果页不展示全文证据占比（不臆造 0 值）。
+   */
+  subtasks?: SubtaskSnapshot[] | null;
 }>();
 
 const emit = defineEmits<{ refresh: [] }>();
@@ -198,18 +206,168 @@ const verificationSummary = computed<ReferenceVerificationSummary | null>(() =>
   parseVerificationSummary(props.report.stats?.reference_verification)
 );
 
+// ===== 全文证据占比（全文获取 Phase B · Task B5）=====
+//
+// 数据来源：检索节点的 ExecutionResult.stats["fulltext_summary"]，随任务快照的
+// subtasks[].output 持久化（output.execution_result.stats，历史负载也有可能在
+// output.stats 顶层）。五个计数缺一不可 —— 缺字段/类型不符时整块不显示，不瞎猜 0。
+
+interface FulltextSummary {
+  attempted: number;
+  succeeded: number;
+  fallback_metadata: number;
+  scanned_skipped: number;
+  failed: number;
+}
+
+const FULLTEXT_COUNT_KEYS = [
+  "attempted",
+  "succeeded",
+  "fallback_metadata",
+  "scanned_skipped",
+  "failed",
+] as const;
+
+function parseFulltextSummary(value: unknown): FulltextSummary | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const counts: Partial<Record<(typeof FULLTEXT_COUNT_KEYS)[number], number>> = {};
+  for (const key of FULLTEXT_COUNT_KEYS) {
+    const raw = record[key];
+    if (typeof raw !== "number" || !Number.isFinite(raw)) {
+      return null;
+    }
+    counts[key] = raw;
+  }
+  return {
+    attempted: counts.attempted as number,
+    succeeded: counts.succeeded as number,
+    fallback_metadata: counts.fallback_metadata as number,
+    scanned_skipped: counts.scanned_skipped as number,
+    failed: counts.failed as number,
+  };
+}
+
+/** 从快照里找第一个带全文统计的节点输出（不依赖节点类型字段，历史快照没有）。 */
+function extractFulltextSummary(subtasks: SubtaskSnapshot[] | null | undefined): FulltextSummary | null {
+  for (const subtask of subtasks ?? []) {
+    const output = subtask?.output;
+    if (typeof output !== "object" || output === null) {
+      continue;
+    }
+    const record = output as Record<string, unknown>;
+    const executionResult =
+      typeof record.execution_result === "object" && record.execution_result !== null
+        ? (record.execution_result as Record<string, unknown>)
+        : null;
+    const candidates = [
+      executionResult?.stats && typeof executionResult.stats === "object"
+        ? (executionResult.stats as Record<string, unknown>).fulltext_summary
+        : undefined,
+      record.stats && typeof record.stats === "object"
+        ? (record.stats as Record<string, unknown>).fulltext_summary
+        : undefined,
+    ];
+    for (const candidate of candidates) {
+      const parsed = parseFulltextSummary(candidate);
+      if (parsed) {
+        return parsed;
+      }
+    }
+  }
+  // 复盘报告里也可能被复制一份（未来契约变化时兜底），同样严格解析。
+  return parseFulltextSummary(props.report.stats?.fulltext_summary);
+}
+
+const fulltextSummary = computed<FulltextSummary | null>(() =>
+  extractFulltextSummary(props.subtasks)
+);
+
+// ===== 上传 PDF 升级全文核验（全文获取 Phase B · Task B5）=====
+
+const MAX_UPGRADE_PDF_BYTES = 30 * 1024 * 1024;
+const CAJ_HINT = "知网 CAJ 格式暂不支持，请先在官网下载 PDF 再上传";
+
+/** 当前正在上传的参考文献序号；null = 空闲。 */
+const upgradingIndex = ref<number | null>(null);
+/** 待上传的文献条目 + 隐藏文件输入（每个结果页只保留一个 input，避免 N 个 DOM 节点）。 */
+const pendingUpgradeEntry = ref<BibliographyEntry | null>(null);
+const upgradePdfInput = ref<HTMLInputElement | null>(null);
+
+/**
+ * 生成知识库上传的 `ref_id`（全文获取 Phase B · Task B1 契约）：
+ * 有 DOI → `doi:<归一化 DOI>`（小写、去掉 `doi:` 前缀，与后端 normalize_doi 对齐）；
+ * 无 DOI → null（后端按标题关联）。
+ */
+function upgradeRefId(entry: BibliographyEntry): string | null {
+  const raw = entry.doi?.trim();
+  if (!raw) {
+    return null;
+  }
+  const normalized = raw.replace(/^doi:\s*/i, "").trim().toLowerCase();
+  return normalized ? `doi:${normalized}` : null;
+}
+
+function pickUpgradePdf(entry: BibliographyEntry) {
+  if (upgradingIndex.value !== null) {
+    return;
+  }
+  pendingUpgradeEntry.value = entry;
+  upgradePdfInput.value?.click();
+}
+
+async function onUpgradePdfChange(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0] ?? null;
+  // 允许再次选择同一个文件（否则 change 不再触发）
+  input.value = "";
+  const entry = pendingUpgradeEntry.value;
+  pendingUpgradeEntry.value = null;
+  if (!file || !entry) {
+    return;
+  }
+  const fileName = file.name.toLowerCase();
+  if (fileName.endsWith(".caj")) {
+    toastError(CAJ_HINT);
+    return;
+  }
+  if (!fileName.endsWith(".pdf")) {
+    toastError("仅支持上传 PDF 文件");
+    return;
+  }
+  if (file.size > MAX_UPGRADE_PDF_BYTES) {
+    toastError("文件超过 30 MB 上限");
+    return;
+  }
+  upgradingIndex.value = entry.index;
+  try {
+    await knowledgeApi.upload(file, entry.title, "recursive", undefined, upgradeRefId(entry));
+    toastSuccess("已上传并关联，后续任务该文献将使用全文证据");
+    emit("refresh");
+  } catch (error) {
+    toastError((error as Error)?.message || "上传失败，请稍后重试");
+  } finally {
+    upgradingIndex.value = null;
+  }
+}
+
 const bibliography = computed<BibliographyEntry[]>(() =>
   (props.report.bibliography ?? []).map((item, position) => {
     const record = item as Record<string, unknown>;
     const index = Number(record.index ?? position + 1);
     const qualityFlags = parseQualityFlags(record.quality_flags);
     const sourceType = parseSourceType(record.source_type);
+    const doiValue = record.doi ?? record.DOI;
     return {
       index,
       title: String(record.title ?? record.source_id ?? `文献 ${index}`),
       url: safeUrl(record.source_url ?? record.url),
       verification_status: parseVerificationStatus(record.verification_status),
       is_retracted: typeof record.is_retracted === "boolean" ? record.is_retracted : null,
+      // DOI 只在后端真的给出时展开：旧报告没有该键，既有断言不受影响。
+      ...(typeof doiValue === "string" && doiValue.trim() ? { doi: doiValue.trim() } : {}),
       // 质量字段只在后端真的给出时展开：旧报告（无这些键）与既有断言保持原样。
       ...(qualityFlags.length ? { quality_flags: qualityFlags } : {}),
       ...(sourceType ? { source_type: sourceType } : {}),
@@ -662,6 +820,34 @@ async function confirmThesisTemplateExport() {
 
     <!-- 证据栏始终在正文之后：桌面并列，移动端正文优先。所有数字都来自真实报告。 -->
     <aside class="flex flex-col gap-5" data-test="evidence-rail">
+      <!-- 全文证据占比（全文获取 Phase B）：没有 fulltext_summary 时整块不显示 -->
+      <section
+        v-if="fulltextSummary"
+        class="border-b border-border pb-5"
+        data-test="fulltext-summary"
+      >
+        <div class="mb-2 flex items-center justify-between gap-2">
+          <h3 class="text-sm font-medium">全文证据占比</h3>
+          <span class="text-[9px] tracking-wider text-muted-foreground">开放获取抓取</span>
+        </div>
+        <p class="text-xs leading-5" data-test="fulltext-summary-counts">
+          全文证据 {{ fulltextSummary.succeeded }} 篇 / 仅题录摘要
+          {{ fulltextSummary.fallback_metadata }} 篇
+          <span
+            v-if="fulltextSummary.scanned_skipped > 0"
+            class="text-muted-foreground"
+          >
+            · 扫描件跳过 {{ fulltextSummary.scanned_skipped }} 篇
+          </span>
+          <span v-if="fulltextSummary.failed > 0" class="text-muted-foreground">
+            · 抓取失败 {{ fulltextSummary.failed }} 篇
+          </span>
+        </p>
+        <p class="mt-1 text-[11px] leading-4 text-muted-foreground">
+          全文来自开放获取自动抓取；中文付费文献可用剪藏扩展附带 PDF 上传。
+        </p>
+      </section>
+
       <section class="border-b border-border pb-5">
         <ReferenceVerificationPanel :summary="verificationSummary" :entries="bibliography" />
       </section>
@@ -754,6 +940,16 @@ async function confirmThesisTemplateExport() {
                   {{ qualityBadgeLabel(flag, entry) }}
                 </span>
               </span>
+              <!-- 上传 PDF 升级全文核验（全文获取 Phase B）：仅调用 API，不在前端编造 locator -->
+              <button
+                type="button"
+                class="mt-0.5 self-start text-[11px] text-primary underline-offset-4 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+                :data-test="`upload-pdf-upgrade-${entry.index}`"
+                :disabled="upgradingIndex !== null"
+                @click="pickUpgradePdf(entry)"
+              >
+                {{ upgradingIndex === entry.index ? "上传中…" : "上传 PDF" }}
+              </button>
             </div>
           </li>
         </ol>
@@ -822,6 +1018,16 @@ async function confirmThesisTemplateExport() {
         </div>
         <ErrorBanner :message="errorMessage" class="mt-2" @dismiss="errorMessage = null" />
       </section>
+
+      <!-- 上传 PDF 升级全文核验的隐藏选择器：每个结果页只保留一个，避免 N 个 input -->
+      <input
+        ref="upgradePdfInput"
+        type="file"
+        accept=".pdf,application/pdf"
+        class="hidden"
+        data-test="upload-pdf-input"
+        @change="onUpgradePdfChange"
+      />
     </aside>
 
     <!-- 高校标准综述母版封面信息弹窗（记住除标题外的常用信息） -->

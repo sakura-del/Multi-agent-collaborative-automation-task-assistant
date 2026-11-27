@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { toastInfo, toastWarning } from "@/lib/toast";
 import {
     clearTaskDraft,
@@ -141,6 +142,12 @@ const selectedSources = ref<string[]>([]);
 const hasWanfangKey = ref(false);
 // 引用核验默认关闭：与全局默认一致，避免用户无感知地引入外呼延迟（Issue #3 遗留项）
 const verifyReferences = ref(activePreset.value.defaults.verifyReferences);
+// 自动获取全文（全文获取 Phase B）：默认开——开放获取抓取是证据强度的主要提升手段；
+// 离线语料 / 引用库任务完全不外呼，由 fullTextDisabled 禁用并给出原因。
+const fullText = ref(true);
+const fullTextDisabled = computed(
+    () => offlineDataset.value || useReferenceLibrary.value,
+);
 
 function selectPreset(presetId: WorkflowPreset) {
     workflowPreset.value = presetId;
@@ -569,6 +576,7 @@ function resetToDefaults() {
     offlineDataset.value = false;
     useReferenceLibrary.value = false;
     verifyReferences.value = activePreset.value.defaults.verifyReferences;
+    fullText.value = true;
     selectedDocuments.value = [];
     selectedSources.value = [];
     modelSource.value = "platform";
@@ -1181,6 +1189,9 @@ async function handleSubmit() {
         citation_style: citationStyle.value,
         offline_dataset: offlineDataset.value,
         reference_library: useReferenceLibrary.value,
+        // 全景全文开关（Phase B）：离线/引用库任务后端会忽略，但 payload 始终显式带上，
+        // 避免「用户看到的开关」与「后端实际行为」出现两份缺省值。
+        full_text: fullText.value,
         document_ids: [...selectedDocuments.value],
         verify_references: verifyReferences.value,
         // Phase 2：开题报告可从已完成综述衍生，后端据此继承研究空白与基线
@@ -1629,6 +1640,36 @@ async function handleSubmit() {
                     />
                     <span>使用离线演示语料（冻结 10 篇，不访问 arXiv）</span>
                 </label>
+
+                <!-- 自动获取全文（全文获取 Phase B）：默认开；离线/引用库模式下禁用并说明原因 -->
+                <div class="flex items-start gap-2.5 border-t border-border/70 pt-3">
+                    <Switch
+                        id="task-full-text"
+                        v-model="fullText"
+                        data-test="full-text-toggle"
+                        :disabled="fullTextDisabled"
+                        aria-describedby="task-full-text-hint"
+                        class="mt-0.5"
+                    />
+                    <div class="grid gap-1">
+                        <label for="task-full-text" class="text-sm font-medium leading-none">
+                            自动获取全文（开放获取）
+                        </label>
+                        <p
+                            id="task-full-text-hint"
+                            class="text-xs leading-relaxed text-muted-foreground"
+                        >
+                            从开放获取源自动抓取 PDF / HTML 全文，提升证据强度；关闭后只用题录与摘要。
+                        </p>
+                        <p
+                            v-if="fullTextDisabled"
+                            data-test="full-text-disabled-reason"
+                            class="text-xs leading-relaxed text-muted-foreground"
+                        >
+                            离线/引用库任务不发起外部全文抓取
+                        </p>
+                    </div>
+                </div>
             </div>
 
             <!-- 检索文献源（Issue #67）：万方中文源走用户自带 Key（BYOK） -->

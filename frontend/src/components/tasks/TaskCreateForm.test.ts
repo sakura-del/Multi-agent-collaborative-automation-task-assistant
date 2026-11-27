@@ -153,8 +153,46 @@ describe("TaskCreateForm", () => {
             offline_dataset: true,
             // 设计变更（2026-10-26 引用库计划）：新增文献源开关，默认 false
             reference_library: false,
+            // 全文获取 Phase B：自动获取全文默认开启，显式随任务下发
+            full_text: true,
             document_ids: ["doc-1"],
             verify_references: false,
+        });
+    });
+
+    // ===== 自动获取全文开关（全文获取 Phase B · Task B5）=====
+
+    it("enables full-text acquisition by default", () => {
+        const wrapper = mountForm();
+
+        const toggle = wrapper.find('[data-test="full-text-toggle"]');
+        expect(toggle.exists()).toBe(true);
+        expect(toggle.attributes("aria-checked")).toBe("true");
+        expect(toggle.attributes("disabled")).toBeUndefined();
+        expect(
+            wrapper.find('[data-test="full-text-disabled-reason"]').exists(),
+        ).toBe(false);
+    });
+
+    it("disables full-text acquisition for offline dataset tasks", async () => {
+        const wrapper = mountForm();
+        await wrapper.find('[data-test="offline"]').setValue(true);
+
+        const toggle = wrapper.find('[data-test="full-text-toggle"]');
+        expect(toggle.attributes("disabled")).toBeDefined();
+        expect(
+            wrapper.find('[data-test="full-text-disabled-reason"]').text(),
+        ).toContain("离线/引用库任务不发起外部全文抓取");
+    });
+
+    it("sends full_text=false when the switch is turned off", async () => {
+        const wrapper = mountForm();
+        await fillValidForm(wrapper);
+        await wrapper.find('[data-test="full-text-toggle"]').trigger("click");
+        await wrapper.find('[data-test="submit"]').trigger("click");
+
+        expect(wrapper.emitted("submit")?.[0][0]).toMatchObject({
+            full_text: false,
         });
     });
 

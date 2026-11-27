@@ -98,6 +98,28 @@ describe("knowledge api", () => {
     expect(onProgress).toHaveBeenCalledWith(50);
   });
 
+  it("appends ref_id only when a reference id is provided", async () => {
+    vi.mocked(api.post).mockResolvedValue({ data: documentRow() });
+
+    await knowledgeApi.upload(
+      pdfFile(),
+      "RAG 综述",
+      "recursive",
+      undefined,
+      "doi:10.1000/xyz.1",
+    );
+
+    const form = vi.mocked(api.post).mock.calls[0][1] as FormData;
+    expect(form.get("ref_id")).toBe("doi:10.1000/xyz.1");
+
+    await knowledgeApi.upload(pdfFile(), "RAG 综述", "recursive");
+
+    const omitted = vi.mocked(api.post).mock.calls[1][1] as FormData;
+    // 无 ref_id 时不得发空字段：后端会把它当成真实引用键去关联
+    expect(omitted.get("ref_id")).toBeNull();
+    expect(omitted.has("ref_id")).toBe(false);
+  });
+
   it("mirrors the read routes", async () => {
     vi.mocked(api.get).mockResolvedValue({ data: { documents: [documentRow()] } });
     vi.mocked(api.delete).mockResolvedValue({ data: documentRow() });
@@ -130,6 +152,19 @@ describe("DocumentUpload", () => {
 
     expect(knowledgeStore.upload).not.toHaveBeenCalled();
     expect(wrapper.find('[data-test="upload-error"]').text()).toContain("30 MB");
+  });
+
+  it("explains that CAJ is unsupported instead of a generic format error", async () => {
+    const wrapper = mount(DocumentUpload);
+
+    await chooseFile(wrapper, pdfFile("知网文献.caj"));
+    await wrapper.find("form").trigger("submit");
+
+    expect(knowledgeStore.upload).not.toHaveBeenCalled();
+    // 后端只收 pdf/docx/md/txt：CAJ 必须给「先去官网下载 PDF」的可执行指引
+    expect(wrapper.find('[data-test="upload-error"]').text()).toContain(
+      "知网 CAJ 格式暂不支持，请先在官网下载 PDF 再上传",
+    );
   });
 
   it("uploads with the chosen title and strategy, then refreshes the list", async () => {

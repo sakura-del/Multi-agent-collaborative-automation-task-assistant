@@ -219,7 +219,7 @@ const isFiltered = computed(() => typeFilter.value !== "all" || keyword.value.tr
           松开即可导入文件或文件夹
         </p>
         <p class="text-xs text-muted-foreground">
-          自动识别 pdf / docx / md / txt，支持多文件与子目录批量解析
+          自动识别 pdf / docx / md / txt，支持多文件与子目录批量解析；知网 CAJ 请先转 PDF
         </p>
       </div>
     </div>
@@ -228,7 +228,7 @@ const isFiltered = computed(() => typeFilter.value !== "all" || keyword.value.tr
         class="mb-0"
         eyebrow="文献知识库"
         title="知识库"
-        description="文献综述的证据来源。支持 pdf / docx / md / txt，单文件 ≤ 30 MB。"
+        description="文献综述的证据来源。支持 pdf / docx / md / txt，单文件 ≤ 30 MB（知网 CAJ 请先转为 PDF）。"
       />
       <Button
         variant="outline"

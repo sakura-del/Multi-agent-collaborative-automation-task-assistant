@@ -14,12 +14,20 @@ export const knowledgeApi = {
     file: File,
     title: string,
     strategy: ChunkStrategy = "recursive",
-    onProgress?: (percent: number) => void
+    onProgress?: (percent: number) => void,
+    /**
+     * 关联引用库条目的引用标识（全文获取 Phase B · Task B1）：
+     * `doi:<归一化 DOI>` 或标题；为空时不传，后端按 DOI → 标题自行关联。
+     */
+    refId?: string | null
   ) => {
     const form = new FormData();
     form.append("file", file);
     form.append("title", title);
     form.append("strategy", strategy);
+    if (refId) {
+      form.append("ref_id", refId);
+    }
     return api
       .post<KnowledgeDocument>("/knowledge/documents", form, {
         // 大文件（≤30MB）需完成解析、分块与向量嵌入，显式放宽至 180s

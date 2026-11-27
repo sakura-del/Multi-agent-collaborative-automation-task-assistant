@@ -115,6 +115,11 @@ export interface TaskCreate {
    * 不传 = 由后端按输出语言与用户万方 Key 自动决定；引用库/离线语料模式下忽略。
    */
   literature_sources?: string[] | null;
+  /**
+   * 是否发起开放获取全文抓取（全文获取 Phase B · Task B5）。
+   * 默认 true；离线语料 / 引用库任务不会外呼，后端忽略该字段。
+   */
+  full_text?: boolean;
   /** 本任务是否做外部引用核验：true 时即使离线语料也与 CrossRef/OpenAlex 比对（Issue #3 遗留项） */
   verify_references?: boolean;
   /**
@@ -660,6 +665,11 @@ export interface BibliographyEntry {
   index: number;
   title: string;
   url: string | null;
+  /**
+   * DOI（全文获取 Phase B）：只在后端真的给出该键时存在。
+   * 「上传 PDF 升级全文核验」用它生成 `ref_id = doi:<归一化 DOI>`；缺失时传 null。
+   */
+  doi?: string | null;
   verification_status: VerificationStatus | null;
   /**
    * 撤稿状态（与四态核验正交）：true=已撤稿、false=来源未标记撤稿、null/缺失=未知。
@@ -897,7 +907,9 @@ export type ApiKeyScope =
   | 'tasks:read'
   | 'tasks:write'
   | 'artifacts:read'
-  | 'annotations:write';
+  | 'annotations:write'
+  /** 上传知识库文档（剪藏扩展附带 PDF 全文） */
+  | 'knowledge:write';
 
 /** Key 元数据（**绝不含明文**） */
 export interface ApiKeyInfo {
