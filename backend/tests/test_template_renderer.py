@@ -210,6 +210,24 @@ class TestRenderDocument:
         xml = _xml(payload, "word/document.xml")
         assert "<w:b/>" in xml or "<w:b " in xml
 
+    def test_citation_paragraph_keeps_text_before_and_after_markers(self) -> None:
+        sections = dict(SECTIONS)
+        sections["body_main"] = (
+            "**第一阶段：需求分析**\n"
+            "重点完成硬件选型与系统架构定义 [1]。同时确定通信架构 [2]。"
+            "此阶段需输出硬件原理图。"
+        )
+
+        payload = _render(sections=sections)
+
+        paragraphs = _paragraphs(payload)
+        _style_of(
+            paragraphs,
+            "重点完成硬件选型与系统架构定义 [1]。" "同时确定通信架构 [2]。此阶段需输出硬件原理图。",
+        )
+        xml = _xml(payload, "word/document.xml")
+        assert "superscript" in xml
+
     def test_render_is_deterministic(self) -> None:
         first = _paragraphs(_render())
         second = _paragraphs(_render())

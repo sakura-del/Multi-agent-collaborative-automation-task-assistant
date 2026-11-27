@@ -518,11 +518,11 @@ def _build_paragraph(
                     run_props.append(vert)
                 vert.set(qn("w:val"), "superscript")
 
-        text_element = OxmlElement("w:t")
-        text_element.set(qn("xml:space"), "preserve")
-        text_element.text = part
-        run.append(text_element)
-        new_paragraph.append(run)
+            text_element = OxmlElement("w:t")
+            text_element.set(qn("xml:space"), "preserve")
+            text_element.text = part
+            run.append(text_element)
+            new_paragraph.append(run)
     return new_paragraph
 
 
