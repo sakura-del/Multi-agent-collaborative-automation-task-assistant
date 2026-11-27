@@ -29,6 +29,8 @@
                   （Issue #27：定时重跑排期 + 每次增量刷新的运行记录）
   reference_library.py: REFERENCE_LIBRARY_ITEM
                   （2026-10-26：个人引用库——导入的 BibTeX/RIS 可存下来供任务使用）
+  fulltext_cache.py: FULLTEXT_CACHE
+                  （Issue #73 Phase A：OA 文献全局正文缓存，仅存 license 白名单内文献）
 """
 
 from app.db.models.agent import Agent, AgentInteraction
@@ -43,6 +45,7 @@ from app.db.models.data_source_credential import DataSourceCredential
 from app.db.models.email_token import EmailToken
 from app.db.models.extraction import ExtractionCell, ExtractionTable
 from app.db.models.feedback import HumanFeedback
+from app.db.models.fulltext_cache import FulltextCache
 from app.db.models.knowledge import DocChunk, KnowledgeDoc, VectorIndex
 from app.db.models.llm_credential import LLMCredential, LLMNodeRouting
 from app.db.models.log import ExecutionLog, FailureCase, ValidationResult
@@ -76,6 +79,7 @@ __all__ = [
     "ExtractionCell",
     "ExtractionTable",
     "FailureCase",
+    "FulltextCache",
     "HumanFeedback",
     "KnowledgeDoc",
     "LLMCredential",
