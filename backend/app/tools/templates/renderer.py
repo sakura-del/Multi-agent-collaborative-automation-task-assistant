@@ -44,6 +44,17 @@ from app.tools.templates.models import (
     TemplateRenderError,
     TemplateSecurityError,
 )
+from app.tools.templates.rich_blocks import (
+    FigureAsset,
+    FigureBlock,
+    FormulaBlock,
+    LineBlock,
+    TableBlock,
+    insert_figure_block,
+    insert_formula_block,
+    insert_three_line_table,
+    parse_rich_blocks,
+)
 
 logger = get_logger(__name__)
 
@@ -88,6 +99,8 @@ def render_document(
     sections: dict[str, str],
     bibliography: Sequence[str],
     style_map: dict[str, StyleRole],
+    figures: dict[str, FigureAsset] | None = None,
+    chapter_no: int = 1,
 ) -> bytes:
     """把章节正文与已渲染的参考文献行写入模板，返回 docx 字节。"""
     template_path = Path(template)
@@ -136,17 +149,20 @@ def render_document(
                 bibliography_handled = True
             if text.strip() == sentinel:
                 if key == bibliography_key:
-                    lines: list[str] = bibliography_lines
+                    raw_text = "\n".join(bibliography_lines)
                     default_role = StyleRole.REFERENCE
                 else:
-                    lines = _section_lines(sections.get(key, ""))
+                    raw_text = str(sections.get(key, ""))
                     default_role = StyleRole.BODY
                 _replace_block(
+                    document,
                     paragraph,
-                    lines,
+                    raw_text,
                     default_role=default_role,
                     style_map=style_map,
                     role_to_style=role_to_style,
+                    figures=figures,
+                    chapter_no=chapter_no,
                 )
                 break
             replacement = (
@@ -232,19 +248,21 @@ def _load_rendered(data: bytes) -> Any:
 
 
 def _replace_block(
+    document: Any,
     paragraph: Any,
-    lines: Sequence[str],
+    raw_text: str,
     *,
     default_role: StyleRole,
     style_map: dict[str, StyleRole],
     role_to_style: dict[StyleRole, str],
+    figures: dict[str, FigureAsset] | None = None,
+    chapter_no: int = 1,
 ) -> None:
-    """用若干段落替换占位符段落；样式按语义角色→styleId 应用（坑 #3）。"""
+    """用富内容块（段落/三线表/插图/公式）替换占位符段落；样式按语义角色→styleId 应用（坑 #3）。"""
     placeholder = paragraph._p
     parent = placeholder.getparent()
     if parent is None:  # pragma: no cover - 防御：脱离文档树的段落
         return
-    position = list(parent).index(placeholder)
     paragraph_properties = placeholder.find(qn("w:pPr"))
     run_properties = _first_run_properties(placeholder)
     placeholder_style_id = _paragraph_style_id(paragraph)
@@ -252,15 +270,86 @@ def _replace_block(
         style_map.get(placeholder_style_id, default_role) if placeholder_style_id else default_role
     )
 
-    if not lines:
+    # 参考文献块维持逐行渲染契约，保证与历史单测 100% 一致
+    if default_role == StyleRole.REFERENCE:
+        lines = _section_lines(raw_text)
+        if not lines:
+            parent.remove(placeholder)
+            return
+        cursor = placeholder
+        for raw_line in lines:
+            role, content = _line_role_and_text(raw_line, base_role)
+            style_id = role_to_style.get(role) or placeholder_style_id
+            new_paragraph = _build_paragraph(
+                content, style_id, paragraph_properties, run_properties
+            )
+            cursor.addnext(new_paragraph)
+            cursor = new_paragraph
         parent.remove(placeholder)
         return
 
-    for offset, raw_line in enumerate(lines):
-        role, content = _line_role_and_text(raw_line, base_role)
-        style_id = role_to_style.get(role) or placeholder_style_id
-        new_paragraph = _build_paragraph(content, style_id, paragraph_properties, run_properties)
-        parent.insert(position + offset, new_paragraph)
+    blocks = parse_rich_blocks(raw_text)
+    if not blocks:
+        parent.remove(placeholder)
+        return
+
+    cursor = placeholder
+    table_no = 0
+    figure_no = 0
+    formula_no = 0
+    figure_map = figures or {}
+
+    for block in blocks:
+        if isinstance(block, TableBlock):
+            table_no += 1
+            inserted = insert_three_line_table(
+                document,
+                cursor,
+                block,
+                chapter_no=chapter_no,
+                table_no=table_no,
+            )
+            cursor = inserted[-1]
+        elif isinstance(block, FigureBlock):
+            asset = figure_map.get(block.asset_id)
+            if asset is not None:
+                figure_no += 1
+                inserted = insert_figure_block(
+                    document,
+                    cursor,
+                    asset,
+                    chapter_no=chapter_no,
+                    figure_no=figure_no,
+                    caption_override=block.caption,
+                )
+                cursor = inserted[-1]
+            else:
+                fallback_text = block.caption or f"[插图：{block.asset_id}]"
+                style_id = role_to_style.get(base_role) or placeholder_style_id
+                new_paragraph = _build_paragraph(
+                    fallback_text, style_id, paragraph_properties, run_properties
+                )
+                cursor.addnext(new_paragraph)
+                cursor = new_paragraph
+        elif isinstance(block, FormulaBlock):
+            formula_no += 1
+            inserted = insert_formula_block(
+                document,
+                cursor,
+                block,
+                chapter_no=chapter_no,
+                formula_no=formula_no,
+            )
+            cursor = inserted[-1]
+        elif isinstance(block, LineBlock):
+            role, content = _line_role_and_text(block.line, base_role)
+            style_id = role_to_style.get(role) or placeholder_style_id
+            new_paragraph = _build_paragraph(
+                content, style_id, paragraph_properties, run_properties
+            )
+            cursor.addnext(new_paragraph)
+            cursor = new_paragraph
+
     parent.remove(placeholder)
 
 

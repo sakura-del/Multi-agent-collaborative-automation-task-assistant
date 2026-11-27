@@ -1,16 +1,22 @@
-"""Word 模板服务：上传准入、owner-scoped 存储、渲染编排（Phase 1 · P1-A 接线）。
+"""Word 模板服务：内置标准母版 + 上传准入 + owner-scoped 存储 + 渲染编排（Phase 1 · P1-A）。
 
 分层约定（与 `CitationStyleService` 一致）：
 - 准入与安全校验全部委托 `app.tools.templates.inspector`（模板是不可信输入，坑 #7）；
-- 文件落盘 `{storage_root}/{user_id}/{template_id}.docx`，DB 只存元数据；
+- 用户模板文件落盘 `{storage_root}/{user_id}/{template_id}.docx`，DB 只存元数据；
+- 内置标准母版位于 `app/tools/templates/builtin/*.docx`（只读、不可删除）；
 - 跨用户访问统一 404（与不存在同语义，不泄漏存在性）；
-- 渲染**不碰引用引擎**：参考文献行由调用方（工作流/导出层）传入已 CSL 渲染结果。
+- 渲染**不碰引用引擎**：参考文献行由调用方传入已 CSL 渲染结果；若传入结构化
+  `bibliography_entries`（≥3 篇含年份），自动生成真实年份分布图（300 DPI PNG）落版。
 """
 
 from __future__ import annotations
 
+import re
 import uuid
+from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Literal
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,9 +24,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import NotFoundException, ValidationException
 from app.core.logging import get_logger
 from app.db.models.user_template import UserTemplate
+from app.tools.templates.charts import build_year_distribution_figure
 from app.tools.templates.inspector import inspect_template, validate_template_bytes
 from app.tools.templates.models import StyleRole, TemplateMeta, TemplateSecurityError
 from app.tools.templates.renderer import render_document
+from app.tools.templates.rich_blocks import FigureAsset
 
 logger = get_logger(__name__)
 
@@ -30,9 +38,105 @@ MAX_TEMPLATE_BYTES = 5 * 1024 * 1024
 #: 允许的扩展名（`.docm` 等一律拒绝——宏模板不可信，坑 #7）
 ALLOWED_SUFFIXES = frozenset({".docx"})
 
+#: 内置高校标准「文献综述」母版 ID
+BUILTIN_TEMPLATE_ID = "builtin:literature_review_cn_standard"
+_BUILTIN_DIR = Path(__file__).resolve().parents[2] / "tools" / "templates" / "builtin"
+
+
+@dataclass(frozen=True)
+class BuiltinTemplateSpec:
+    template_id: str
+    name: str
+    path: Path
+
+
+BUILTIN_TEMPLATES: dict[str, BuiltinTemplateSpec] = {
+    BUILTIN_TEMPLATE_ID: BuiltinTemplateSpec(
+        template_id=BUILTIN_TEMPLATE_ID,
+        name="高校标准文献综述母版（中仿宋+TNR · 三线表 · 奇数页起章）",
+        path=_BUILTIN_DIR / "literature_review_cn_standard.docx",
+    )
+}
+
+
+@dataclass(frozen=True)
+class TemplateRecord:
+    """模板列表/详情的统一读模型（兼容内置母版与用户上传模板）。"""
+
+    template_id: str
+    name: str
+    checksum: str
+    size: int
+    placeholders: list[dict[str, Any]]
+    style_map: dict[str, str]
+    source: Literal["builtin", "user"] = "user"
+
+
+_BUILTIN_RECORD_CACHE: dict[str, TemplateRecord] = {}
+
+
+def _load_builtin_record(spec: BuiltinTemplateSpec) -> TemplateRecord:
+    cached = _BUILTIN_RECORD_CACHE.get(spec.template_id)
+    if cached is not None:
+        return cached
+    if not spec.path.is_file():
+        raise NotFoundException(f"内置模板文件缺失：{spec.path.name}")
+    meta = inspect_template(spec.path)
+    record = TemplateRecord(
+        template_id=spec.template_id,
+        name=spec.name,
+        checksum=meta.checksum,
+        size=spec.path.stat().st_size,
+        placeholders=[item.model_dump(mode="json") for item in meta.placeholders],
+        style_map={key: str(role) for key, role in meta.style_map.items()},
+        source="builtin",
+    )
+    _BUILTIN_RECORD_CACHE[spec.template_id] = record
+    return record
+
+
+def _user_to_record(row: UserTemplate) -> TemplateRecord:
+    return TemplateRecord(
+        template_id=row.template_id,
+        name=row.name,
+        checksum=row.checksum,
+        size=row.size,
+        placeholders=list(row.placeholders or []),
+        style_map={str(k): str(v) for k, v in (row.style_map or {}).items()},
+        source="user",
+    )
+
+
+def _append_figure_to_review_body(body_text: str, *, caption: str, asset_id: str) -> str:
+    """若正文尚未引用该图且存在「研究现状」章节，将插图标记插在该节末尾，否则附在文末。"""
+    marker = f"![{caption}](fig://{asset_id})"
+    if f"fig://{asset_id}" in body_text:
+        return body_text
+    lines = body_text.splitlines()
+    target_idx: int | None = None
+    target_level = 0
+    for idx, line in enumerate(lines):
+        m = re.match(r"^(#{1,6})\s+(.+)$", line.strip())
+        if m and "研究现状" in m.group(2):
+            target_idx = idx
+            target_level = len(m.group(1))
+            break
+    if target_idx is None:
+        sep = "\n\n" if body_text.strip() else ""
+        return f"{body_text.rstrip()}{sep}{marker}"
+
+    insert_at = len(lines)
+    for idx in range(target_idx + 1, len(lines)):
+        m = re.match(r"^(#{1,6})\s+", lines[idx].strip())
+        if m and len(m.group(1)) <= target_level:
+            insert_at = idx
+            break
+    updated = [*lines[:insert_at], "", marker, "", *lines[insert_at:]]
+    return "\n".join(updated).strip()
+
 
 class TemplateService:
-    """模板上传 / 列表 / 渲染 / 删除（全部 owner-scoped）。"""
+    """模板上传 / 列表 / 渲染 / 删除（全部 owner-scoped，兼容内置只读母版）。"""
 
     def __init__(self, db: AsyncSession, storage_root: Path) -> None:
         self._db = db
@@ -83,22 +187,27 @@ class TemplateService:
             raise NotFoundException("模板不存在")
         return row
 
-    async def list_templates(self, user_id: uuid.UUID) -> list[UserTemplate]:
+    async def list_templates(self, user_id: uuid.UUID) -> list[TemplateRecord]:
+        builtins = [_load_builtin_record(spec) for spec in BUILTIN_TEMPLATES.values()]
         stmt = (
             select(UserTemplate)
             .where(UserTemplate.user_id == user_id)
             .order_by(UserTemplate.created_at.desc())
         )
-        return list((await self._db.execute(stmt)).scalars().all())
+        rows = list((await self._db.execute(stmt)).scalars().all())
+        return [*builtins, *(_user_to_record(row) for row in rows)]
 
-    async def get_template(self, user_id: uuid.UUID, template_id: str) -> UserTemplate:
-        return await self._get_owned(user_id, template_id)
+    async def get_template(self, user_id: uuid.UUID, template_id: str) -> TemplateRecord:
+        spec = BUILTIN_TEMPLATES.get(template_id)
+        if spec is not None:
+            return _load_builtin_record(spec)
+        return _user_to_record(await self._get_owned(user_id, template_id))
 
     # ===== 写入 =====
 
     async def upload(
         self, user_id: uuid.UUID, *, filename: str, content: bytes, name: str = ""
-    ) -> UserTemplate:
+    ) -> TemplateRecord:
         """上传模板：准入 → 落盘 → 解析占位符/style_map → 落库（同内容幂等）。"""
         self._validate_admission(filename=filename, content=content)
 
@@ -123,7 +232,7 @@ class TemplateService:
             template_id=meta.template_id,
             placeholders=len(meta.placeholders),
         )
-        return row
+        return _user_to_record(row)
 
     async def _upsert(
         self, user_id: uuid.UUID, meta: TemplateMeta, name: str, *, size: int
@@ -158,7 +267,12 @@ class TemplateService:
         return row
 
     async def delete(self, user_id: uuid.UUID, template_id: str) -> None:
-        """删除模板：owner-scoped；文件与记录一并清理。"""
+        """删除模板：内置只读模板拒绝删除（400）；用户模板 owner-scoped 删除。"""
+        if template_id in BUILTIN_TEMPLATES or template_id.startswith("builtin:"):
+            raise ValidationException(
+                "内置标准模板不支持删除",
+                details={"reasons": ["内置标准模板为系统预置只读母版，不支持删除"]},
+            )
         row = await self._get_owned(user_id, template_id)
         await self._db.execute(delete(UserTemplate).where(UserTemplate.id == row.id))
         await self._db.commit()
@@ -174,24 +288,41 @@ class TemplateService:
         *,
         sections: dict[str, str],
         bibliography: list[str],
+        bibliography_entries: Sequence[dict[str, Any]] | None = None,
     ) -> bytes:
-        """用模板渲染成稿。
+        """用模板渲染成稿（支持内置只读母版与用户模板，及真实参考文献插图生成）。"""
+        spec = BUILTIN_TEMPLATES.get(template_id)
+        if spec is not None:
+            record = _load_builtin_record(spec)
+            source = spec.path
+        else:
+            row = await self._get_owned(user_id, template_id)
+            record = _user_to_record(row)
+            source = self.path_for(user_id, template_id)
+            if not source.is_file():
+                raise NotFoundException("模板文件已丢失，请重新上传")
 
-        `bibliography` 必须是**已 CSL 渲染好的行**——本服务不解析引用，只做模板填充
-        （分层：引用引擎在 `app.tools.csl`，模板层只负责排版）。
-        """
-        row = await self._get_owned(user_id, template_id)
-        source = self.path_for(user_id, template_id)
-        if not source.is_file():
-            raise NotFoundException("模板文件已丢失，请重新上传")
+        render_sections = dict(sections)
+        figures: dict[str, FigureAsset] | None = None
+        if bibliography_entries:
+            year_fig = build_year_distribution_figure(bibliography_entries)
+            if year_fig is not None:
+                figures = {year_fig.asset_id: year_fig}
+                if "body" in render_sections:
+                    render_sections["body"] = _append_figure_to_review_body(
+                        render_sections["body"],
+                        caption=year_fig.caption_zh,
+                        asset_id=year_fig.asset_id,
+                    )
 
-        style_map = {key: _as_role(value) for key, value in (row.style_map or {}).items()}
+        style_map = {key: _as_role(value) for key, value in record.style_map.items()}
         try:
             return render_document(
                 template=source,
-                sections=sections,
+                sections=render_sections,
                 bibliography=bibliography,
                 style_map=style_map,
+                figures=figures,
             )
         except ValidationException:
             raise

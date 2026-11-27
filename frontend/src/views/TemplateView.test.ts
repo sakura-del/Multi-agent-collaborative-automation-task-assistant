@@ -374,4 +374,30 @@ describe("TemplateView 示例标注与删除确认（2026-10-26）", () => {
     expect(retryBtn.exists()).toBe(true);
     expect(retryBtn.attributes("disabled")).toBeUndefined();
   });
+
+  it("内置标准母版展示「内置母版」标识且不显示删除按钮", async () => {
+    vi.mocked(listTemplates).mockResolvedValue([
+      templateRow({
+        template_id: "builtin:literature_review_cn_standard",
+        name: "高校标准文献综述母版",
+        source: "builtin",
+      }),
+      templateRow({
+        template_id: "tpl-user-1",
+        name: "个人模板",
+        source: "user",
+      }),
+    ]);
+
+    const wrapper = await mountView();
+    const builtinRow = wrapper.get('[data-test="template-row-builtin:literature_review_cn_standard"]');
+    expect(builtinRow.find('[data-test="template-builtin-badge"]').exists()).toBe(true);
+    expect(
+      builtinRow.find('[data-test="template-delete-builtin:literature_review_cn_standard"]').exists(),
+    ).toBe(false);
+
+    const userRow = wrapper.get('[data-test="template-row-tpl-user-1"]');
+    expect(userRow.find('[data-test="template-builtin-badge"]').exists()).toBe(false);
+    expect(userRow.find('[data-test="template-delete-tpl-user-1"]').exists()).toBe(true);
+  });
 });

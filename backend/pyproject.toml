@@ -79,6 +79,7 @@ dependencies = [
     "PyMuPDF>=1.23.26",
     "python-docx>=1.1.0",
     "markdown>=3.5.2",
+    "matplotlib>=3.9,<4",
 
     # Word 模板导入（Phase 1 P1-A）：docx 当模板渲染。
     # ⚠️ docxtpl 是 **LGPL-2.1-only**（不是 MIT）：以库形式 import 使用可接受，
@@ -169,6 +170,9 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["app*"]
+
+[tool.setuptools.package-data]
+app = ["tools/templates/builtin/*.docx", "tools/csl/styles/*.csl"]
 
 # ===== Black 代码格式化 =====
 [tool.black]

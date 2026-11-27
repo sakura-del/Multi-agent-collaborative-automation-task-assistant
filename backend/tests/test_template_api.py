@@ -230,8 +230,24 @@ class TestListAndGet:
 
         assert response.status_code == 200
         items = response.json()["items"]
-        assert len(items) == 1
-        assert items[0]["name"] == "模板A"
+        # 包含内置高校标准母版 + 用户上传的模板A
+        assert len(items) == 2
+        assert items[0]["template_id"] == "builtin:literature_review_cn_standard"
+        assert items[0]["source"] == "builtin"
+        assert items[1]["name"] == "模板A"
+        assert items[1]["source"] == "user"
+
+    def test_get_builtin_template_returns_metadata(self, client: TestClient) -> None:
+        response = client.get("/api/v1/templates/builtin:literature_review_cn_standard")
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["source"] == "builtin"
+        assert {p["key"] for p in data["placeholders"]} >= {"title", "author", "body", "references"}
+
+    def test_delete_builtin_template_returns_400(self, client: TestClient) -> None:
+        response = client.delete("/api/v1/templates/builtin:literature_review_cn_standard")
+        assert response.status_code == 400
+        assert "内置" in response.json()["detail"]
 
     def test_get_unknown_template_returns_404(self, client: TestClient) -> None:
         response = client.get("/api/v1/templates/not-exists")
@@ -302,6 +318,37 @@ class TestRender:
         )
 
         assert response.status_code == 400
+
+    def test_render_builtin_template_with_bibliography_entries_embeds_chart(
+        self, client: TestClient
+    ) -> None:
+        response = client.post(
+            "/api/v1/templates/builtin:literature_review_cn_standard/render",
+            json={
+                "sections": {
+                    "title": "检索增强生成综述",
+                    "author": "李四",
+                    "advisor": "王五",
+                    "major": "软件工程",
+                    "college": "软件学院",
+                    "body": "# 1 研究现状\n\n相关工作进展迅速。\n\n# 2 总结\n\n展望未来。",
+                },
+                "bibliography": ["[1] 文献A", "[2] 文献B", "[3] 文献C"],
+                "bibliography_entries": [
+                    {"year": 2022},
+                    {"year": 2023},
+                    {"year": 2024},
+                ],
+                "filename": "thesis_review.docx",
+            },
+        )
+        assert response.status_code == 200, response.text
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            names = archive.namelist()
+            document = archive.read("word/document.xml").decode("utf-8")
+        assert "检索增强生成综述" in document
+        assert "李四" in document
+        assert any(name.startswith("word/media/") for name in names)
 
 
 class TestDelete:

@@ -13,6 +13,7 @@ import type {
 
 const downloadArtifact = vi.fn();
 const fillMatrixGap = vi.fn();
+const renderTemplateMock = vi.fn();
 vi.mock("@/api/tasks", () => ({
   taskApi: {
     list: vi.fn(),
@@ -25,6 +26,9 @@ vi.mock("@/api/tasks", () => ({
     downloadArtifact: (...args: unknown[]) => downloadArtifact(...args),
     fillMatrixGap: (...args: unknown[]) => fillMatrixGap(...args),
   },
+}));
+vi.mock("@/api/templates", () => ({
+  renderTemplate: (...args: unknown[]) => renderTemplateMock(...args),
 }));
 
 function artifact(kind: "markdown" | "docx"): Artifact {
@@ -666,5 +670,64 @@ describe("TaskResult · 引用核验集成", () => {
     const md = wrapper.find('[data-test="result-markdown"]');
     expect(md.exists()).toBe(true);
     expect((md.element as HTMLElement).style.display).toBe("none");
+  });
+
+  it("支持打开高校标准母版导出弹窗、记忆封面信息并调用 renderTemplate（Phase 1）", async () => {
+    localStorage.clear();
+    renderTemplateMock.mockResolvedValueOnce(
+      new Blob(["docx"], {
+        type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      }),
+    );
+    const createObjectUrl = vi
+      .spyOn(URL, "createObjectURL")
+      .mockReturnValue("blob:thesis-mock");
+    const revokeObjectUrl = vi
+      .spyOn(URL, "revokeObjectURL")
+      .mockImplementation(() => undefined);
+
+    const wrapper = mountResult({
+      report: report({
+        final_markdown: "# 大语言模型综述\n\n## 研究现状\n\n正文字段。",
+      }),
+    });
+
+    await wrapper.get('[data-test="export-thesis-template-btn"]').trigger("click");
+    await nextTick();
+
+    const dialog = document.body.querySelector('[data-test="thesis-template-dialog"]');
+    expect(dialog).not.toBeNull();
+
+    const authorInput = document.body.querySelector(
+      '[data-test="thesis-cover-author"]',
+    ) as HTMLInputElement;
+    authorInput.value = "王小明";
+    authorInput.dispatchEvent(new Event("input"));
+    await nextTick();
+
+    const confirmBtn = document.body.querySelector(
+      '[data-test="thesis-template-confirm"]',
+    ) as HTMLButtonElement;
+    confirmBtn.click();
+    await nextTick();
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(renderTemplateMock).toHaveBeenCalledWith(
+      "builtin:literature_review_cn_standard",
+      expect.objectContaining({
+        sections: expect.objectContaining({
+          title: "大语言模型综述",
+          author: "王小明",
+          body: "# 大语言模型综述\n\n## 研究现状\n\n正文字段。",
+        }),
+      }),
+    );
+    expect(JSON.parse(localStorage.getItem("vp:thesis-cover-meta")!)).toMatchObject({
+      author: "王小明",
+    });
+
+    createObjectUrl.mockRestore();
+    revokeObjectUrl.mockRestore();
+    wrapper.unmount();
   });
 });

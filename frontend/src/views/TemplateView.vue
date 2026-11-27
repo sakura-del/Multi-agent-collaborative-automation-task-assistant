@@ -351,6 +351,12 @@ function placeholderLabel(item: TemplateOut["placeholders"][number]): string {
             <div class="flex min-w-0 flex-wrap items-center gap-2">
               <FileText :size="15" class="shrink-0 text-muted-foreground" aria-hidden="true" />
               <span class="text-sm font-medium">{{ template.name }}</span>
+              <Badge
+                v-if="template.source === 'builtin'"
+                data-test="template-builtin-badge"
+              >
+                内置母版
+              </Badge>
               <Badge variant="muted">{{ template.placeholders.length }} 个占位符</Badge>
             </div>
             <div class="flex items-center gap-1.5">
@@ -371,6 +377,7 @@ function placeholderLabel(item: TemplateOut["placeholders"][number]): string {
                 <span>{{ renderingId === template.template_id ? "校验中…" : "校验模板" }}</span>
               </Button>
               <Button
+                v-if="template.source !== 'builtin'"
                 variant="ghost"
                 size="icon-sm"
                 :data-test="`template-delete-${template.template_id}`"

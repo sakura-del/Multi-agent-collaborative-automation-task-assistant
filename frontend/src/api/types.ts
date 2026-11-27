@@ -517,6 +517,8 @@ export interface TemplateOut {
   placeholders: TemplatePlaceholder[];
   /** Word **styleId** → 语义角色（`h1`/`body`/`reference` 等） */
   style_map: Record<string, string>;
+  /** 模板来源：builtin（系统预置只读母版）或 user（用户上传） */
+  source?: "builtin" | "user";
 }
 
 export interface TemplateListResponse {
@@ -527,6 +529,7 @@ export interface TemplateListResponse {
 export interface TemplateRenderRequest {
   sections: Record<string, string>;
   bibliography: string[];
+  bibliography_entries?: Array<Record<string, unknown>>;
   filename?: string;
 }
 

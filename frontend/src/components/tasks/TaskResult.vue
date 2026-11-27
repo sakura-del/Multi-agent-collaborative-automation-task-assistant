@@ -1,15 +1,19 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, useId, watch } from "vue";
-import { Download } from "lucide-vue-next";
+import { computed, nextTick, reactive, ref, useId, watch } from "vue";
+import { BookOpen, Download } from "lucide-vue-next";
 import { Motion, useReducedMotion } from "motion-v";
 
 import { taskApi } from "@/api/tasks";
+import { renderTemplate } from "@/api/templates";
 import ErrorBanner from "@/components/common/ErrorBanner.vue";
 import ClaimEvidenceDrawer from "@/components/tasks/ClaimEvidenceDrawer.vue";
 import EvidenceMatrixView from "@/components/tasks/EvidenceMatrixView.vue";
 import ReferenceVerificationPanel from "@/components/tasks/ReferenceVerificationPanel.vue";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { MotionDialog } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { SPRING_LAYOUT } from "@/lib/ease";
 import { toastError, toastSuccess } from "@/lib/toast";
 import type {
@@ -387,6 +391,123 @@ async function download(kind: "markdown" | "docx") {
     downloading.value = null;
   }
 }
+
+// ===== 高校标准「文献综述」母版导出（Phase 1）=====
+const THESIS_COVER_STORAGE_KEY = "vp:thesis-cover-meta";
+const BUILTIN_THESIS_TEMPLATE_ID = "builtin:literature_review_cn_standard";
+const thesisDialogOpen = ref(false);
+const exportingThesis = ref(false);
+const coverMeta = reactive({
+  title: "",
+  author: "",
+  advisor: "",
+  major: "",
+  college: "",
+});
+
+const defaultThesisTitle = computed(() => {
+  const match = /^\s*#\s+(.+)$/m.exec(props.report.final_markdown ?? "");
+  return match?.[1]?.trim() || "文献综述";
+});
+
+function loadSavedCoverMeta() {
+  try {
+    const raw = localStorage.getItem(THESIS_COVER_STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as Partial<typeof coverMeta>;
+    if (typeof parsed.author === "string") coverMeta.author = parsed.author;
+    if (typeof parsed.advisor === "string") coverMeta.advisor = parsed.advisor;
+    if (typeof parsed.major === "string") coverMeta.major = parsed.major;
+    if (typeof parsed.college === "string") coverMeta.college = parsed.college;
+  } catch {
+    /* 隐私模式 / JSON 损坏：忽略历史填写 */
+  }
+}
+
+function saveCoverMeta() {
+  try {
+    localStorage.setItem(
+      THESIS_COVER_STORAGE_KEY,
+      JSON.stringify({
+        author: coverMeta.author.trim(),
+        advisor: coverMeta.advisor.trim(),
+        major: coverMeta.major.trim(),
+        college: coverMeta.college.trim(),
+      }),
+    );
+  } catch {
+    /* 忽略存储受限异常 */
+  }
+}
+
+function openThesisTemplateDialog() {
+  loadSavedCoverMeta();
+  if (!coverMeta.title.trim()) {
+    coverMeta.title = defaultThesisTitle.value;
+  }
+  errorMessage.value = null;
+  thesisDialogOpen.value = true;
+}
+
+function formatBibliographyLines(): string[] {
+  return (props.report.bibliography ?? []).map((item, position) => {
+    const record = item as Record<string, unknown>;
+    const idx = Number(record.index ?? position + 1);
+    const title = String(record.title ?? record.source_id ?? `文献 ${idx}`).trim();
+    const rawAuthors = record.authors;
+    const authors = Array.isArray(rawAuthors)
+      ? rawAuthors.map((a) => String(a).trim()).filter(Boolean).slice(0, 3).join(", ")
+      : typeof rawAuthors === "string"
+        ? rawAuthors.trim()
+        : "";
+    const venue = String(record.venue ?? record.journal ?? "").trim();
+    const year = record.year ?? record.issued_year ?? "";
+    const head = authors ? `${authors}. ` : "";
+    const tail = [venue, year ? String(year) : ""].filter(Boolean).join(", ");
+    return `[${idx}] ${head}${title}${tail ? `. ${tail}.` : "."}`;
+  });
+}
+
+async function confirmThesisTemplateExport() {
+  if (exportingThesis.value) return;
+  exportingThesis.value = true;
+  errorMessage.value = null;
+  saveCoverMeta();
+  const safeTitle = coverMeta.title.trim() || defaultThesisTitle.value;
+  let objectUrl: string | null = null;
+  try {
+    const blob = await renderTemplate(BUILTIN_THESIS_TEMPLATE_ID, {
+      sections: {
+        title: safeTitle,
+        author: coverMeta.author.trim() || " ",
+        advisor: coverMeta.advisor.trim() || " ",
+        major: coverMeta.major.trim() || " ",
+        college: coverMeta.college.trim() || " ",
+        body: props.report.final_markdown ?? "",
+      },
+      bibliography: formatBibliographyLines(),
+      bibliography_entries: props.report.bibliography ?? [],
+      filename: `${safeTitle}-高校标准综述.docx`,
+    });
+    objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = `${safeTitle}-高校标准综述.docx`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    thesisDialogOpen.value = false;
+    toastSuccess("已按高校标准母版导出 DOCX");
+  } catch (error) {
+    errorMessage.value = (error as Error).message || "高校标准母版导出失败";
+    toastError(errorMessage.value);
+  } finally {
+    if (objectUrl) {
+      URL.revokeObjectURL(objectUrl);
+    }
+    exportingThesis.value = false;
+  }
+}
 </script>
 
 <template>
@@ -643,10 +764,98 @@ async function download(kind: "markdown" | "docx") {
           >
             <Download :size="15" aria-hidden="true" /> DOCX
           </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            data-test="export-thesis-template-btn"
+            type="button"
+            :disabled="downloading !== null || exportingThesis"
+            @click="openThesisTemplateDialog"
+          >
+            <BookOpen :size="15" aria-hidden="true" /> 高校标准母版
+          </Button>
         </div>
         <ErrorBanner :message="errorMessage" class="mt-2" @dismiss="errorMessage = null" />
       </section>
     </aside>
+
+    <!-- 高校标准综述母版封面信息弹窗（记住除标题外的常用信息） -->
+    <MotionDialog
+      v-model:open="thesisDialogOpen"
+      title="按高校标准母版导出 Word"
+      aria-label="高校标准综述母版封面信息"
+      initial-focus="#thesis-cover-title"
+      :panel-attrs="{ 'data-test': 'thesis-template-dialog', class: 'p-4' }"
+    >
+      <p class="mb-3 text-xs leading-relaxed text-muted-foreground">
+        生成符合高校开题/学位论文规范的可打印 .docx（中仿宋 + 英 Times New Roman、三线表、学术插图、奇数页起章）。
+      </p>
+      <div class="grid gap-2.5">
+        <div class="grid gap-1">
+          <Label for="thesis-cover-title">论文题目</Label>
+          <Input
+            id="thesis-cover-title"
+            v-model="coverMeta.title"
+            data-test="thesis-cover-title"
+            placeholder="输入综述题目"
+          />
+        </div>
+        <div class="grid gap-2 sm:grid-cols-2">
+          <div class="grid gap-1">
+            <Label for="thesis-cover-author">作者姓名</Label>
+            <Input
+              id="thesis-cover-author"
+              v-model="coverMeta.author"
+              data-test="thesis-cover-author"
+              placeholder="如 张三"
+            />
+          </div>
+          <div class="grid gap-1">
+            <Label for="thesis-cover-advisor">指导教师</Label>
+            <Input
+              id="thesis-cover-advisor"
+              v-model="coverMeta.advisor"
+              data-test="thesis-cover-advisor"
+              placeholder="如 李四 教授"
+            />
+          </div>
+        </div>
+        <div class="grid gap-2 sm:grid-cols-2">
+          <div class="grid gap-1">
+            <Label for="thesis-cover-major">专业</Label>
+            <Input
+              id="thesis-cover-major"
+              v-model="coverMeta.major"
+              data-test="thesis-cover-major"
+              placeholder="如 计算机科学与技术"
+            />
+          </div>
+          <div class="grid gap-1">
+            <Label for="thesis-cover-college">学院</Label>
+            <Input
+              id="thesis-cover-college"
+              v-model="coverMeta.college"
+              data-test="thesis-cover-college"
+              placeholder="如 计算机学院"
+            />
+          </div>
+        </div>
+      </div>
+      <div class="mt-4 flex justify-end gap-2">
+        <Button variant="ghost" size="sm" type="button" @click="thesisDialogOpen = false">
+          取消
+        </Button>
+        <Button
+          size="sm"
+          type="button"
+          data-test="thesis-template-confirm"
+          :disabled="exportingThesis"
+          @click="confirmThesisTemplateExport"
+        >
+          {{ exportingThesis ? "生成中…" : "确认导出 DOCX" }}
+        </Button>
+      </div>
+    </MotionDialog>
 
     <!-- 论断核验抽屉：点正文角标或证据矩阵非空格子打开，展示来源质量与逐句判定。 -->
     <ClaimEvidenceDrawer

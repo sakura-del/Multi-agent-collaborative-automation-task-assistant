@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import uuid
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
 from fastapi.responses import StreamingResponse
@@ -32,7 +32,11 @@ from app.core.exceptions import ValidationException
 from app.db.models.user import User
 from app.db.models.user_template import UserTemplate
 from app.db.session import get_db
-from app.knowledge.services.template_service import MAX_TEMPLATE_BYTES, TemplateService
+from app.knowledge.services.template_service import (
+    MAX_TEMPLATE_BYTES,
+    TemplateRecord,
+    TemplateService,
+)
 
 router = APIRouter(prefix="/templates", tags=["templates"])
 
@@ -64,6 +68,7 @@ class TemplateOut(BaseModel):
     size: int
     placeholders: list[PlaceholderOut] = Field(default_factory=list)
     style_map: dict[str, str] = Field(default_factory=dict)
+    source: Literal["builtin", "user"] = "user"
 
 
 class TemplateListOut(BaseModel):
@@ -73,12 +78,13 @@ class TemplateListOut(BaseModel):
 
 
 class RenderRequest(BaseModel):
-    """渲染请求：章节内容 + **已 CSL 渲染好的**参考文献行。"""
+    """渲染请求：章节内容 + **已 CSL 渲染好的**参考文献行 + 可选结构化文献列表（用于图表）。"""
 
     model_config = ConfigDict(extra="forbid")
 
     sections: dict[str, str] = Field(default_factory=dict)
     bibliography: list[str] = Field(default_factory=list)
+    bibliography_entries: list[dict[str, Any]] = Field(default_factory=list)
     filename: str = "review.docx"
 
 
@@ -112,12 +118,15 @@ def _bad_request(exc: ValidationException) -> HTTPException:
     return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
 
 
-def _to_out(row: UserTemplate) -> TemplateOut:
-    """ORM 行 → 响应模型（placeholders 是 JSON 里的 dict 列表）。"""
+def _to_out(row: TemplateRecord | UserTemplate) -> TemplateOut:
+    """模板读模型 / ORM 行 → 响应模型。"""
     placeholders = [
         PlaceholderOut(**item) if isinstance(item, dict) else PlaceholderOut(key=str(item))
         for item in row.placeholders or []
     ]
+    source: Literal["builtin", "user"] = (
+        "builtin" if getattr(row, "source", "user") == "builtin" else "user"
+    )
     return TemplateOut(
         template_id=row.template_id,
         name=row.name,
@@ -125,6 +134,7 @@ def _to_out(row: UserTemplate) -> TemplateOut:
         size=row.size,
         placeholders=placeholders,
         style_map={str(k): str(v) for k, v in (row.style_map or {}).items()},
+        source=source,
     )
 
 
@@ -179,7 +189,10 @@ async def get_template(
 async def delete_template(
     template_id: str, service: ServiceDep, current_user: CurrentUserDep
 ) -> Response:
-    await service.delete(current_user.id, template_id)
+    try:
+        await service.delete(current_user.id, template_id)
+    except ValidationException as exc:
+        raise _bad_request(exc) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -205,6 +218,7 @@ async def render_template(
             template_id,
             sections=payload.sections,
             bibliography=payload.bibliography,
+            bibliography_entries=payload.bibliography_entries,
         )
     except ValidationException as exc:
         raise _bad_request(exc) from exc
