@@ -21,6 +21,7 @@ import pytest
 
 from app.core.config import settings
 from app.tools.literature.fulltext_resolver import (
+    FullTextCandidate,
     FullTextFetchError,
     FullTextResolver,
     LicenseNotAllowed,
@@ -315,8 +316,12 @@ async def test_per_document_timeout_moves_to_next_provider(
 
 
 async def test_total_timeout_keeps_completed_results(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def _slow_openalex(self: FullTextResolver, record: LiteratureRecord) -> None:
-        await asyncio.sleep(5.0)
+    async def _slow_openalex(
+        self: FullTextResolver, record: LiteratureRecord
+    ) -> FullTextCandidate | None:
+        # 只让非 arXiv 记录卡在首个 provider 上；arXiv 记录继续走 arXiv HTML 快速命中。
+        if record.source_id != ARXIV_ID:
+            await asyncio.sleep(5.0)
         return None
 
     monkeypatch.setattr(FullTextResolver, "_openalex_oa", _slow_openalex)
