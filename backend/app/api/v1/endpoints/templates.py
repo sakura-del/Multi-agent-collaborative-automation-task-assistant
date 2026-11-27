@@ -20,6 +20,7 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 from typing import Annotated, Any, Literal
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
 from fastapi.responses import StreamingResponse
@@ -223,11 +224,11 @@ async def render_template(
     except ValidationException as exc:
         raise _bad_request(exc) from exc
 
-    safe_name = _safe_download_name(payload.filename or "review.docx")
+    disposition = _content_disposition_header(payload.filename or "review.docx")
     return StreamingResponse(
         iter([data]),
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
+        headers={"Content-Disposition": disposition},
     )
 
 
@@ -236,6 +237,18 @@ def _safe_download_name(raw: str) -> str:
     stem = Path(raw).stem
     cleaned = "".join(char for char in stem if char.isalnum() or char in "-_ ").strip()
     return f"{cleaned or 'review'}.docx"
+
+
+def _content_disposition_header(raw_filename: str) -> str:
+    """构造兼容 Starlette latin-1 校验与中文下载名的 RFC 5987 响应头。"""
+    safe_name = _safe_download_name(raw_filename)
+    stem = Path(safe_name).stem
+    ascii_stem = "".join(
+        char for char in stem if char.isascii() and (char.isalnum() or char in "-_ ")
+    ).strip()
+    ascii_name = f"{ascii_stem or 'review'}.docx"
+    quoted = quote(safe_name, safe="")
+    return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quoted}"
 
 
 # 让 uuid 的导入在类型标注中可用（部分运行期校验会用到）

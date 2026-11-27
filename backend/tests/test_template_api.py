@@ -350,6 +350,33 @@ class TestRender:
         assert "李四" in document
         assert any(name.startswith("word/media/") for name in names)
 
+    def test_render_with_chinese_filename_sets_rfc5987_content_disposition(
+        self, client: TestClient
+    ) -> None:
+        """含中文文件名不得因 HTTP header latin-1 编码抛 500（线上回归）。"""
+        response = client.post(
+            "/api/v1/templates/builtin:literature_review_cn_standard/render",
+            json={
+                "sections": {
+                    "title": "基于STM32运动手环综述",
+                    "author": "张三",
+                    "advisor": "李四 教授",
+                    "major": "计算机科学与技术",
+                    "college": "计算机学院",
+                    "body": "# 研究现状\n\n相关工作进展迅速。",
+                },
+                "bibliography": ["[1] 文献A"],
+                "filename": "基于STM32运动手环设计与实现-高校标准综述.docx",
+            },
+        )
+        assert response.status_code == 200, response.text
+        disposition = response.headers.get("content-disposition", "")
+        assert disposition.startswith("attachment;")
+        assert "filename*=UTF-8''" in disposition
+        assert "%E9%AB%98%E6%A0%A1%E6%A0%87%E5%87%86%E7%BB%BC%E8%BF%B0.docx" in disposition
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            assert "word/document.xml" in archive.namelist()
+
 
 class TestDelete:
     def test_delete_removes_template(self, client: TestClient) -> None:
