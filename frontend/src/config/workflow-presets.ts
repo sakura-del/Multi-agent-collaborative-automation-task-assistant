@@ -74,6 +74,19 @@ export const WORKFLOW_PRESETS: readonly WorkflowPresetOption[] = [
       verifyReferences: true,
     },
   },
+  {
+    id: "thesis_proposal",
+    label: "开题报告",
+    shortLabel: "开题",
+    description: "按高校开题规范生成三段式开题报告，自动绘制技术路线图与进度三线表。",
+    topicPlaceholder: "例如：基于 STM32 的低功耗运动手环心率监测系统设计",
+    promptPlaceholder: "一句话描述论文选题，生成开题报告…",
+    allowGlobalPrompt: true,
+    defaults: {
+      maxDocuments: 20,
+      verifyReferences: true,
+    },
+  },
 ] as const;
 
 export const GLOBAL_PROMPT_PRESETS: readonly WorkflowPresetOption[] =

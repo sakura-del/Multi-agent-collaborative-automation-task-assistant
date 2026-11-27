@@ -230,12 +230,14 @@ class TestListAndGet:
 
         assert response.status_code == 200
         items = response.json()["items"]
-        # 包含内置高校标准母版 + 用户上传的模板A
-        assert len(items) == 2
+        # 包含两个内置母版（文献综述 + 开题报告）+ 用户上传的模板A
+        assert len(items) == 3
         assert items[0]["template_id"] == "builtin:literature_review_cn_standard"
         assert items[0]["source"] == "builtin"
-        assert items[1]["name"] == "模板A"
-        assert items[1]["source"] == "user"
+        assert items[1]["template_id"] == "builtin:thesis_proposal_cn_standard"
+        assert items[1]["source"] == "builtin"
+        assert items[2]["name"] == "模板A"
+        assert items[2]["source"] == "user"
 
     def test_get_builtin_template_returns_metadata(self, client: TestClient) -> None:
         response = client.get("/api/v1/templates/builtin:literature_review_cn_standard")
@@ -349,6 +351,74 @@ class TestRender:
         assert "检索增强生成综述" in document
         assert "李四" in document
         assert any(name.startswith("word/media/") for name in names)
+
+    def test_render_proposal_template_embeds_roadmap_figure(self, client: TestClient) -> None:
+        """开题报告母版：技术路线 4 步 → 自动插图，正文不留 fig:// 死链。"""
+        body = (
+            "# 1 问题提出的背景\n\n"
+            "现有研究在中文语料上覆盖不足。\n\n"
+            "# 2 论文的主要内容和技术路线\n\n"
+            "## 2.2 技术路线\n\n"
+            "1. 需求分析：梳理指标与场景\n"
+            "2. 系统设计：确定低功耗架构\n"
+            "3. 系统实现：完成算法与联调\n"
+            "4. 实验验证：对比基线方案\n\n"
+            "## 2.3 可行性分析\n\n技术、经济与进度均可行。\n\n"
+            "# 3 研究计划进度安排及预期目标\n\n"
+            "| 起止时间 | 研究阶段 | 主要工作内容 | 阶段性成果 |\n"
+            "| --- | --- | --- | --- |\n"
+            "| 2026.01-2026.03 | 需求分析 | 文献调研 | 开题报告 |\n"
+        )
+        response = client.post(
+            "/api/v1/templates/builtin:thesis_proposal_cn_standard/render",
+            json={
+                "sections": {
+                    "title": "基于 STM32 的低功耗运动手环心率监测系统设计",
+                    "author": "张三",
+                    "advisor": "李四",
+                    "major": "计算机科学与技术",
+                    "college": "计算机学院",
+                    "body": body,
+                },
+                "bibliography": ["[1] 文献A", "[2] 文献B"],
+                "filename": "proposal.docx",
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            names = archive.namelist()
+            document = archive.read("word/document.xml").decode("utf-8")
+        assert any(name.startswith("word/media/") for name in names)
+        assert "fig://" not in document
+        assert "技术路线" in document
+
+    def test_render_proposal_template_without_roadmap_leaves_no_dead_link(
+        self, client: TestClient
+    ) -> None:
+        body = (
+            "# 1 问题提出的背景\n\n现有研究仍有空白。\n\n# 2 论文的主要内容和技术路线\n\n内容待定。"
+        )
+        response = client.post(
+            "/api/v1/templates/builtin:thesis_proposal_cn_standard/render",
+            json={
+                "sections": {
+                    "title": "开题报告主题",
+                    "author": "张三",
+                    "advisor": "李四",
+                    "major": "软件工程",
+                    "college": "软件学院",
+                    "body": body,
+                },
+                "bibliography": [],
+                "filename": "proposal.docx",
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            document = archive.read("word/document.xml").decode("utf-8")
+        assert "fig://" not in document
 
     def test_render_with_chinese_filename_sets_rfc5987_content_disposition(
         self, client: TestClient

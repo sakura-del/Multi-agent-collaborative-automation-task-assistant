@@ -51,6 +51,11 @@ const props = withDefaults(
         // 草稿按用户隔离（localStorage 命名空间）；父组件传 auth.user?.id，
         // 未登录/单测未注入时为 undefined → 落 anonymous 命名空间
         draftUserId?: string | null;
+        // Phase 2：从任务结果页「生成开题报告」跳转时，父组件从路由 query 注入；
+        // 无 query 时为 undefined，表单行为与原来完全一致。
+        initialPreset?: string | null;
+        initialSourceTaskId?: string | null;
+        initialTopic?: string | null;
     }>(),
     { pending: false, error: null, documents: () => [] },
 );
@@ -104,6 +109,11 @@ const isVerifyCitations = computed(
 );
 const isCitationSnowballing = computed(
     () => workflowPreset.value === "citation_snowballing",
+);
+const isThesisProposal = computed(() => workflowPreset.value === "thesis_proposal");
+// 开题报告衍生来源（Phase 2）：只有从已完成综述跳转时才非空，让后端继承研究空白与基线。
+const sourceTaskId = ref<string | null>(
+    props.initialSourceTaskId?.trim() ? props.initialSourceTaskId.trim() : null,
 );
 
 const topic = ref("");
@@ -286,6 +296,21 @@ if (initialDraft) {
     syncedRevision.value = initialDraft.syncedRevision;
     if (!initialDraft.dirty) {
         lastSyncedFingerprint.value = draftFingerprint(initialDraft.values);
+    }
+}
+
+// Phase 2：从结果页「生成开题报告」跳转时预填工作流与主题；
+// 已有草稿时以草稿为准（不覆盖用户正在编辑的内容）。
+if (!initialDraft) {
+    if (props.initialPreset) {
+        const presetIds = WORKFLOW_PRESETS.map((preset) => preset.id);
+        if (presetIds.includes(props.initialPreset as WorkflowPreset)) {
+            selectPreset(props.initialPreset as WorkflowPreset);
+        }
+    }
+    const initialTopicValue = (props.initialTopic ?? "").trim();
+    if (initialTopicValue && !topic.value.trim()) {
+        topic.value = initialTopicValue.slice(0, TOPIC_MAX);
     }
 }
 
@@ -1057,7 +1082,7 @@ function validate(): { messages: string[]; fields: Set<string>; firstField: stri
         if (effectiveKeywords.length < 1 && effectiveSeeds.length < 1) {
             mark("keyword", "关键词或种子论文至少填写 1 项");
         }
-    } else if (effectiveKeywords.length < 1) {
+    } else if (effectiveKeywords.length < 1 && !sourceTaskId.value) {
         mark("keyword", "关键词至少 1 个");
     }
     if (effectiveKeywords.length > KEYWORD_MAX) {
@@ -1158,6 +1183,8 @@ async function handleSubmit() {
         reference_library: useReferenceLibrary.value,
         document_ids: [...selectedDocuments.value],
         verify_references: verifyReferences.value,
+        // Phase 2：开题报告可从已完成综述衍生，后端据此继承研究空白与基线
+        ...(sourceTaskId.value ? { source_task_id: sourceTaskId.value } : {}),
         // 引用库/离线语料模式不传检索源；不选 = 后端按语言与万方 Key 自动决定
         ...(!useReferenceLibrary.value &&
         !offlineDataset.value &&
@@ -1236,6 +1263,23 @@ async function handleSubmit() {
                 @click="discardDraft"
             >
                 清除草稿
+            </button>
+        </div>
+        <!-- 开题报告衍生提示（Phase 2）：从已完成综述跳转而来时继承研究空白与基线 -->
+        <div
+            v-if="sourceTaskId"
+            data-test="proposal-inherit-hint"
+            role="status"
+            class="flex flex-wrap items-center justify-between gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-foreground"
+        >
+            <span>已关联前置文献综述，将继承其研究空白与参考文献基线。</span>
+            <button
+                type="button"
+                data-test="proposal-detach"
+                class="text-primary underline underline-offset-2 hover:opacity-85"
+                @click="sourceTaskId = null"
+            >
+                取消继承
             </button>
         </div>
         <div class="grid gap-1.5">

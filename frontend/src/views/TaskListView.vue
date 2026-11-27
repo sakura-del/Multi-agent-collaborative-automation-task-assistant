@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { ChevronRight, Clock, List, Loader2, Plus, Search, Sparkles, X } from "lucide-vue-next";
 
 import AnimatedCollapse from "@/components/common/AnimatedCollapse.vue";
@@ -48,6 +48,22 @@ const auth = useAuthStore();
 const store = useTaskStore();
 const knowledge = useKnowledgeStore();
 const router = useRouter();
+const route = useRoute();
+
+/**
+ * Phase 2：结果页「生成开题报告」跳转参数。
+ * `/tasks?preset=thesis_proposal&sourceTaskId=<id>&topic=<标题>`：
+ * 预设与主题预填、来源综述 ID 透传给后端（后端继承研究空白与基线）。
+ */
+const derivedPreset = computed(() =>
+  typeof route.query.preset === "string" ? route.query.preset : null,
+);
+const derivedSourceTaskId = computed(() =>
+  typeof route.query.sourceTaskId === "string" ? route.query.sourceTaskId : null,
+);
+const derivedTopic = computed(() =>
+  typeof route.query.topic === "string" ? route.query.topic : null,
+);
 
 const showForm = ref(false);
 const viewMode = ref<"list" | "timeline">("list");
@@ -99,6 +115,15 @@ function toggleCreateForm() {
 
 onMounted(() => {
   void refresh(1);
+  // Phase 2：从结果页「生成开题报告」跳转时自动展开表单并加载知识库文档
+  if (derivedPreset.value === "thesis_proposal") {
+    showForm.value = true;
+    if (knowledge.documents.length === 0 && !knowledge.loading) {
+      void knowledge.loadAll().catch(() => {
+        /* 文档列表加载失败不阻塞开题报告创建 */
+      });
+    }
+  }
   void revealDraftIfAny();
 });
 
@@ -440,6 +465,9 @@ const rows = computed(() =>
         :error="errorMessage"
         :documents="knowledge.documents"
         :draft-user-id="draftUserId"
+        :initial-preset="derivedPreset"
+        :initial-source-task-id="derivedSourceTaskId"
+        :initial-topic="derivedTopic"
         @submit="handleCreate"
         @dismiss-error="errorMessage = null"
       />

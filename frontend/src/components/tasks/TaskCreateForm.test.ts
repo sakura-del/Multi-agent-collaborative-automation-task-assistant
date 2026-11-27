@@ -1710,3 +1710,61 @@ describe("任务创建草稿跨设备云端同步（Issue #68）", () => {
         expect(api.delete).toHaveBeenCalledWith("/tasks/draft");
     });
 });
+
+describe("TaskCreateForm · 开题报告衍生（Phase 2）", () => {
+    it("按预设与来源任务预填，提交携带 source_task_id 且允许关键词为空", async () => {
+        const wrapper = mountForm({
+            initialPreset: "thesis_proposal",
+            initialSourceTaskId: "src-task-1",
+            initialTopic: "基于 STM32 的低功耗运动手环心率监测系统设计",
+        });
+        await flushPromises();
+
+        expect(
+            wrapper.get('[data-test="preset-thesis_proposal"]').attributes("aria-checked"),
+        ).toBe("true");
+        expect(
+            (wrapper.get('[data-test="topic"]').element as HTMLInputElement).value,
+        ).toContain("STM32");
+        expect(wrapper.find('[data-test="proposal-inherit-hint"]').exists()).toBe(true);
+
+        await wrapper.get('[data-test="submit"]').trigger("click");
+
+        const submitted = wrapper.emitted("submit")?.[0]?.[0] as {
+            workflow_preset?: string;
+            source_task_id?: string;
+            keywords?: string[];
+        };
+        expect(submitted.workflow_preset).toBe("thesis_proposal");
+        expect(submitted.source_task_id).toBe("src-task-1");
+        expect(submitted.keywords).toEqual([]);
+    });
+
+    it("取消继承后关键词恢复必填校验", async () => {
+        const wrapper = mountForm({
+            initialPreset: "thesis_proposal",
+            initialSourceTaskId: "src-task-1",
+            initialTopic: "基于 STM32 的低功耗运动手环心率监测系统设计",
+        });
+        await flushPromises();
+
+        await wrapper.get('[data-test="proposal-detach"]').trigger("click");
+        expect(wrapper.find('[data-test="proposal-inherit-hint"]').exists()).toBe(false);
+
+        await wrapper.get('[data-test="submit"]').trigger("click");
+
+        expect(wrapper.emitted("submit")).toBeUndefined();
+        expect(wrapper.text()).toContain("关键词至少 1 个");
+    });
+
+    it("没有来源任务时按普通关键词规则校验", async () => {
+        const wrapper = mountForm({ initialPreset: "thesis_proposal" });
+        await flushPromises();
+
+        expect(wrapper.find('[data-test="proposal-inherit-hint"]').exists()).toBe(false);
+        await wrapper.get('[data-test="submit"]').trigger("click");
+
+        expect(wrapper.emitted("submit")).toBeUndefined();
+        expect(wrapper.text()).toContain("关键词至少 1 个");
+    });
+});

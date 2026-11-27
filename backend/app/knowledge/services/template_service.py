@@ -26,7 +26,11 @@ from app.core.logging import get_logger
 from app.db.models.knowledge import KnowledgeDoc
 from app.db.models.user_template import UserTemplate
 from app.tools.literature.exporter import prepare_template_export
-from app.tools.templates.charts import build_year_distribution_figure
+from app.tools.templates.charts import (
+    build_tech_roadmap_figure,
+    build_year_distribution_figure,
+    extract_roadmap_steps,
+)
 from app.tools.templates.inspector import inspect_template, validate_template_bytes
 from app.tools.templates.models import StyleRole, TemplateMeta, TemplateSecurityError
 from app.tools.templates.renderer import render_document
@@ -42,6 +46,8 @@ ALLOWED_SUFFIXES = frozenset({".docx"})
 
 #: 内置高校标准「文献综述」母版 ID
 BUILTIN_TEMPLATE_ID = "builtin:literature_review_cn_standard"
+#: 内置高校标准「开题报告」母版 ID（Phase 2）
+BUILTIN_PROPOSAL_TEMPLATE_ID = "builtin:thesis_proposal_cn_standard"
 _BUILTIN_DIR = Path(__file__).resolve().parents[2] / "tools" / "templates" / "builtin"
 
 
@@ -57,7 +63,12 @@ BUILTIN_TEMPLATES: dict[str, BuiltinTemplateSpec] = {
         template_id=BUILTIN_TEMPLATE_ID,
         name="高校标准文献综述母版（中仿宋+TNR · 三线表 · 奇数页起章）",
         path=_BUILTIN_DIR / "literature_review_cn_standard.docx",
-    )
+    ),
+    BUILTIN_PROPOSAL_TEMPLATE_ID: BuiltinTemplateSpec(
+        template_id=BUILTIN_PROPOSAL_TEMPLATE_ID,
+        name="高校标准开题报告母版（中仿宋+TNR · 技术路线图 · 奇数页起章）",
+        path=_BUILTIN_DIR / "thesis_proposal_cn_standard.docx",
+    ),
 }
 
 
@@ -153,6 +164,41 @@ def _append_figure_to_review_body(body_text: str, *, caption: str, asset_id: str
             break
     updated = [*lines[:insert_at], "", marker, "", *lines[insert_at:]]
     return "\n".join(updated).strip()
+
+
+def _insert_roadmap_marker(body_text: str, *, caption: str, asset_id: str) -> str:
+    """把技术路线图标记插入「技术路线」章节末尾（Phase 2）；已存在则不重复插。"""
+    marker = f"![{caption}](fig://{asset_id})"
+    if f"fig://{asset_id}" in body_text:
+        return body_text
+    lines = body_text.splitlines()
+    target_idx: int | None = None
+    target_level = 0
+    for idx, line in enumerate(lines):
+        m = re.match(r"^(#{1,6})\s+(.+)$", line.strip())
+        if m and "技术路线" in m.group(2):
+            target_idx = idx
+            target_level = len(m.group(1))
+            break
+    if target_idx is None:
+        sep = "\n\n" if body_text.strip() else ""
+        return f"{body_text.rstrip()}{sep}{marker}"
+
+    insert_at = len(lines)
+    for idx in range(target_idx + 1, len(lines)):
+        m = re.match(r"^(#{1,6})\s+", lines[idx].strip())
+        if m and len(m.group(1)) <= target_level:
+            insert_at = idx
+            break
+    updated = [*lines[:insert_at], "", marker, "", *lines[insert_at:]]
+    return "\n".join(updated).strip()
+
+
+def _strip_figure_marker(body_text: str, *, asset_id: str) -> str:
+    """移除指定 fig:// 占位行（图无法生成时避免死链占位）。"""
+    pattern = re.compile(rf"^\s*!\[[^\]]*\]\(fig://{re.escape(asset_id)}\)\s*$")
+    kept = [line for line in body_text.splitlines() if not pattern.match(line)]
+    return "\n".join(kept).strip()
 
 
 class TemplateService:
@@ -326,7 +372,9 @@ class TemplateService:
             KnowledgeDoc.id.in_(doc_ids),
         )
         rows = (await self._db.execute(stmt)).all()
-        return {str(doc_id): str(title).strip() for doc_id, title in rows if str(title or "").strip()}
+        return {
+            str(doc_id): str(title).strip() for doc_id, title in rows if str(title or "").strip()
+        }
 
     async def render(
         self,
@@ -354,6 +402,7 @@ class TemplateService:
         effective_bib = list(bibliography)
         clean_entries: Sequence[dict[str, Any]] = list(bibliography_entries or [])
 
+        is_proposal = template_id == BUILTIN_PROPOSAL_TEMPLATE_ID
         if "body" in render_sections:
             doc_titles = await self._load_doc_titles(user_id, bibliography_entries)
             normalized_body, normalized_bib, merged_entries = prepare_template_export(
@@ -362,7 +411,7 @@ class TemplateService:
                 fallback_bibliography=effective_bib,
                 citation_style=citation_style,
                 doc_titles_by_id=doc_titles,
-                add_heading_numbers=(spec is not None),
+                add_heading_numbers=(spec is not None and not is_proposal),
             )
             render_sections["body"] = normalized_body
             if normalized_bib:
@@ -371,7 +420,25 @@ class TemplateService:
                 clean_entries = merged_entries
 
         figures: dict[str, FigureAsset] | None = None
-        if clean_entries:
+        if is_proposal:
+            # 开题报告：从「技术路线」章节抽取阶段并生成纵向技术路线图（Phase 2）
+            body_text = render_sections.get("body", "")
+            steps = extract_roadmap_steps(body_text)
+            roadmap_fig = build_tech_roadmap_figure(steps) if steps else None
+            if roadmap_fig is not None:
+                figures = {roadmap_fig.asset_id: roadmap_fig}
+                if "body" in render_sections:
+                    render_sections["body"] = _insert_roadmap_marker(
+                        render_sections["body"],
+                        caption=roadmap_fig.caption_zh,
+                        asset_id=roadmap_fig.asset_id,
+                    )
+            elif "body" in render_sections:
+                # 阶段不足：静默移除占位行，绝不落死链
+                render_sections["body"] = _strip_figure_marker(
+                    render_sections["body"], asset_id="tech_roadmap"
+                )
+        elif clean_entries:
             year_fig = build_year_distribution_figure(clean_entries)
             if year_fig is not None:
                 figures = {year_fig.asset_id: year_fig}
@@ -390,6 +457,7 @@ class TemplateService:
                 bibliography=effective_bib,
                 style_map=style_map,
                 figures=figures,
+                chapter_no=2 if is_proposal else 1,
             )
         except ValidationException:
             raise

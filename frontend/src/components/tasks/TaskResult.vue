@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, useId, watch } from "vue";
-import { BookOpen, Download } from "lucide-vue-next";
+import { computed, inject, nextTick, reactive, ref, useId, watch } from "vue";
+import { BookOpen, Download, FileText } from "lucide-vue-next";
 import { Motion, useReducedMotion } from "motion-v";
+import { routerKey } from "vue-router";
 
 import { taskApi } from "@/api/tasks";
 import { renderTemplate } from "@/api/templates";
@@ -51,9 +52,13 @@ const props = defineProps<{
   taskId: string;
   report: ReviewReport;
   artifacts?: Artifact[];
+  /** Phase 2：任务工作流预设；thesis_proposal 任务不再显示「生成开题报告」入口 */
+  workflowPreset?: string | null;
 }>();
 
 const emit = defineEmits<{ refresh: [] }>();
+
+const optionalRouter = inject(routerKey, null);
 
 const downloading = ref<"markdown" | "docx" | null>(null);
 const errorMessage = ref<string | null>(null);
@@ -392,9 +397,16 @@ async function download(kind: "markdown" | "docx") {
   }
 }
 
-// ===== 高校标准「文献综述」母版导出（Phase 1）=====
+// ===== 高校标准「文献综述」/「开题报告」母版导出（Phase 1 / Phase 2）=====
 const THESIS_COVER_STORAGE_KEY = "vp:thesis-cover-meta";
 const BUILTIN_THESIS_TEMPLATE_ID = "builtin:literature_review_cn_standard";
+/** Phase 2：开题报告母版（技术路线图由后端从正文「2.2 技术路线」章节自动生成） */
+const BUILTIN_PROPOSAL_TEMPLATE_ID = "builtin:thesis_proposal_cn_standard";
+const isProposalTask = computed(() => props.workflowPreset === "thesis_proposal");
+const activeThesisTemplateId = computed(() =>
+  isProposalTask.value ? BUILTIN_PROPOSAL_TEMPLATE_ID : BUILTIN_THESIS_TEMPLATE_ID,
+);
+const thesisExportSuffix = computed(() => (isProposalTask.value ? "开题报告" : "高校标准综述"));
 const thesisDialogOpen = ref(false);
 const exportingThesis = ref(false);
 const coverMeta = reactive({
@@ -407,8 +419,23 @@ const coverMeta = reactive({
 
 const defaultThesisTitle = computed(() => {
   const match = /^\s*#\s+(.+)$/m.exec(props.report.final_markdown ?? "");
-  return match?.[1]?.trim() || "文献综述";
+  return match?.[1]?.trim() || (isProposalTask.value ? "开题报告" : "文献综述");
 });
+
+/** Phase 2：从综述结果页一键生成开题报告（携带来源任务 ID 与选题）。 */
+function createProposalTask() {
+  const query = new URLSearchParams({
+    preset: "thesis_proposal",
+    sourceTaskId: props.taskId,
+    topic: defaultThesisTitle.value,
+  });
+  const path = `/tasks?${query.toString()}`;
+  if (optionalRouter) {
+    void optionalRouter.push(path);
+  } else {
+    window.location.assign(path);
+  }
+}
 
 function loadSavedCoverMeta() {
   try {
@@ -474,9 +501,10 @@ async function confirmThesisTemplateExport() {
   errorMessage.value = null;
   saveCoverMeta();
   const safeTitle = coverMeta.title.trim() || defaultThesisTitle.value;
+  const filename = `${safeTitle}-${thesisExportSuffix.value}.docx`;
   let objectUrl: string | null = null;
   try {
-    const blob = await renderTemplate(BUILTIN_THESIS_TEMPLATE_ID, {
+    const blob = await renderTemplate(activeThesisTemplateId.value, {
       sections: {
         title: safeTitle,
         author: coverMeta.author.trim() || " ",
@@ -486,18 +514,20 @@ async function confirmThesisTemplateExport() {
         body: props.report.final_markdown ?? "",
       },
       bibliography: formatBibliographyLines(),
-      bibliography_entries: props.report.bibliography ?? [],
-      filename: `${safeTitle}-高校标准综述.docx`,
+      bibliography_entries: isProposalTask.value ? [] : (props.report.bibliography ?? []),
+      filename,
     });
     objectUrl = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = objectUrl;
-    anchor.download = `${safeTitle}-高校标准综述.docx`;
+    anchor.download = filename;
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
     thesisDialogOpen.value = false;
-    toastSuccess("已按高校标准母版导出 DOCX");
+    toastSuccess(
+      isProposalTask.value ? "已按高校标准开题报告母版导出 DOCX" : "已按高校标准母版导出 DOCX",
+    );
   } catch (error) {
     errorMessage.value = (error as Error).message || "高校标准母版导出失败";
     toastError(errorMessage.value);
@@ -772,7 +802,20 @@ async function confirmThesisTemplateExport() {
             :disabled="downloading !== null || exportingThesis"
             @click="openThesisTemplateDialog"
           >
-            <BookOpen :size="15" aria-hidden="true" /> 高校标准母版
+            <BookOpen :size="15" aria-hidden="true" />
+            {{ isProposalTask ? "开题报告母版" : "高校标准母版" }}
+          </Button>
+          <!-- Phase 2：文献综述结果页一键生成开题报告（继承研究空白与参考文献基线） -->
+          <Button
+            v-if="!isProposalTask"
+            variant="outline"
+            size="sm"
+            data-test="create-proposal-btn"
+            type="button"
+            :disabled="downloading !== null"
+            @click="createProposalTask"
+          >
+            <FileText :size="15" aria-hidden="true" /> 生成开题报告
           </Button>
         </div>
         <ErrorBanner :message="errorMessage" class="mt-2" @dismiss="errorMessage = null" />
@@ -782,13 +825,17 @@ async function confirmThesisTemplateExport() {
     <!-- 高校标准综述母版封面信息弹窗（记住除标题外的常用信息） -->
     <MotionDialog
       v-model:open="thesisDialogOpen"
-      title="按高校标准母版导出 Word"
-      aria-label="高校标准综述母版封面信息"
+      :title="isProposalTask ? '按高校标准开题报告母版导出 Word' : '按高校标准母版导出 Word'"
+      :aria-label="isProposalTask ? '高校标准开题报告母版封面信息' : '高校标准综述母版封面信息'"
       initial-focus="#thesis-cover-title"
       :panel-attrs="{ 'data-test': 'thesis-template-dialog', class: 'p-4' }"
     >
       <p class="mb-3 text-xs leading-relaxed text-muted-foreground">
-        生成符合高校开题/学位论文规范的可打印 .docx（中仿宋 + 英 Times New Roman、三线表、学术插图、奇数页起章）。
+        {{
+          isProposalTask
+            ? "生成符合高校开题报告规范的可打印 .docx（中仿宋 + 英 Times New Roman、技术路线流程图、进度三线表、奇数页起章）。"
+            : "生成符合高校开题/学位论文规范的可打印 .docx（中仿宋 + 英 Times New Roman、三线表、学术插图、奇数页起章）。"
+        }}
       </p>
       <div class="grid gap-2.5">
         <div class="grid gap-1">

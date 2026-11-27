@@ -498,6 +498,21 @@ class TaskExecution:
 
         async with self._session_factory() as session:
             reference_library_count: int | None = None
+            repo = TaskRepository(session)
+            inherited_context: dict[str, Any] | None = None
+            if request.source_task_id is not None:
+                # Phase 2：开题报告可继承已完成的文献综述（研究空白 + 基线摘要）。
+                # 归属/状态校验失败统一给可读原因，绝不静默忽略 source_task_id。
+                source = await repo.get_for_user(user_id, request.source_task_id)
+                if source is None:
+                    raise NotFoundException("来源综述任务不存在")
+                if source.status != TaskStatus.COMPLETED.value:
+                    raise ValidationException(
+                        "只有已完成的文献综述任务才能作为开题报告的衍生来源",
+                        details={"status": source.status},
+                    )
+                inherited_context = self._inherited_context(source)
+                config["inherited_context"] = inherited_context
             if request.reference_library:
                 from app.knowledge.services.reference_library_service import (
                     ReferenceLibraryService,
@@ -509,8 +524,11 @@ class TaskExecution:
                 config["reference_library_count"] = reference_library_count
                 config["max_documents"] = min(request.max_documents, reference_library_count)
 
-            description = self._describe(request, reference_library_count=reference_library_count)
-            repo = TaskRepository(session)
+            description = self._describe(
+                request,
+                reference_library_count=reference_library_count,
+                inherited_context=inherited_context,
+            )
             task = Task(
                 user_id=user_id,
                 title=request.topic,
@@ -3306,6 +3324,12 @@ class TaskExecution:
             "工作流目标：围绕种子论文执行引文滚雪球（向后参考文献 + 向前施引文献），"
             "梳理研究脉络、方法演进与后续跟进工作"
         ),
+        "thesis_proposal": (
+            "工作流目标：按高校开题报告规范输出「问题提出背景 / 论文主要内容与技术路线 / "
+            "研究计划进度安排及预期目标」三段式开题报告，技术路线 4–6 个阶段并用 "
+            "![本文研究技术路线图](fig://tech_roadmap) 标记技术路线图位置，进度安排用四列"
+            " Markdown 三线表（起止时间 / 研究阶段 / 主要工作内容 / 阶段性成果）"
+        ),
     }
 
     @classmethod
@@ -3314,17 +3338,86 @@ class TaskExecution:
         key = str(preset or "literature_review")
         return cls._PRESET_DIRECTIVES.get(key, cls._PRESET_DIRECTIVES["literature_review"])
 
+    #: 开题报告（Phase 2）从源综述继承的上限：研究空白条数与基线摘要字符数
+    _INHERITED_GAP_LIMIT: ClassVar[int] = 4
+    _INHERITED_BASELINE_CHARS: ClassVar[int] = 600
+
+    @classmethod
+    def _inherited_context(cls, source: Task) -> dict[str, Any]:
+        """从已完成的文献综述抽取开题报告可继承的研究空白与基线摘要（0 LLM 调用）。"""
+        report = getattr(source, "review_report", None) or {}
+        gaps: list[str] = []
+        if isinstance(report, Mapping):
+            matrix = report.get("evidence_matrix")
+            if isinstance(matrix, Mapping):
+                questions = matrix.get("questions") or []
+                cells = matrix.get("cells") or []
+                gap_indices: set[int] = set()
+                for cell in cells:
+                    if isinstance(cell, Mapping) and cell.get("bucket") in {
+                        "gap",
+                        "weak_or_caveat",
+                    }:
+                        idx = cell.get("question_index")
+                        if (
+                            isinstance(idx, int)
+                            and not isinstance(idx, bool)
+                            and 0 <= idx < len(questions)
+                        ):
+                            gap_indices.add(idx)
+                for idx in sorted(gap_indices):
+                    text = str(questions[idx]).strip()
+                    if text and text not in gaps:
+                        gaps.append(text[:160])
+
+        baseline = ""
+        markdown = ""
+        if isinstance(report, Mapping):
+            markdown = str(report.get("final_markdown") or "")
+        if not markdown:
+            markdown = str(getattr(source, "final_output", "") or "")
+        for block in markdown.split("\n\n"):
+            cleaned = block.strip()
+            if cleaned and not cleaned.startswith("#"):
+                baseline = re.sub(r"\s+", " ", cleaned)[: cls._INHERITED_BASELINE_CHARS]
+                break
+
+        return {
+            "source_task_id": str(source.id),
+            "source_title": str(getattr(source, "title", "") or ""),
+            "open_gaps": gaps[: cls._INHERITED_GAP_LIMIT],
+            "baseline": baseline,
+        }
+
+    @staticmethod
+    def _format_inherited_context(context: Mapping[str, Any] | None) -> str:
+        """把继承上下文压成可注入规划需求的一段文本；无内容时返回空串。"""
+        if not context:
+            return ""
+        parts = ["【继承自前置文献综述的研究空白与基线】"]
+        gaps = [str(item).strip() for item in (context.get("open_gaps") or []) if str(item).strip()]
+        if gaps:
+            parts.append("待进一步研究的问题：" + "；".join(gaps))
+        baseline = str(context.get("baseline") or "").strip()
+        if baseline:
+            parts.append(f"原综述基线：{baseline}")
+        return "；".join(parts)
+
     @classmethod
     def _describe(
         cls,
         request: LiteratureReviewRequest,
         *,
         reference_library_count: int | None = None,
+        inherited_context: Mapping[str, Any] | None = None,
     ) -> str:
         """把结构化请求压成任务描述（供规划 Agent 作为需求输入）。"""
         parts = [f"研究主题：{request.topic}"]
         parts.append(f"关键词：{', '.join(request.keywords)}")
         parts.append(cls._preset_directive(request.workflow_preset))
+        inherited_text = cls._format_inherited_context(inherited_context)
+        if inherited_text:
+            parts.append(inherited_text)
         if request.date_from or request.date_to:
             parts.append(f"时间范围：{request.date_from or '不限'} ~ {request.date_to or '不限'}")
         effective_max_docs = (
@@ -3362,6 +3455,11 @@ class TaskExecution:
         if config.get("output_language"):
             parts.append(f"输出语言：{config['output_language']}")
         parts.append(cls._preset_directive(config.get("workflow_preset")))
+        inherited = config.get("inherited_context")
+        if isinstance(inherited, Mapping):
+            inherited_text = cls._format_inherited_context(inherited)
+            if inherited_text:
+                parts.append(inherited_text)
         return "；".join(parts)
 
     @staticmethod

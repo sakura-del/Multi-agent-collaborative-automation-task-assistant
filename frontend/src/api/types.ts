@@ -72,12 +72,13 @@ export type TaskCommand =
 
 export type PlanNodeType = "search" | "extract" | "write" | "validate" | "review";
 
-/** 预设工作流（Issue #32）：文献综述 / 研究空白分析 / 验证引用 / 引文滚雪球。 */
+/** 预设工作流（Issue #32 / Phase 2）：文献综述 / 研究空白 / 验证引用 / 引文滚雪球 / 开题报告。 */
 export type WorkflowPreset =
   | "literature_review"
   | "research_gaps"
   | "verify_citations"
-  | "citation_snowballing";
+  | "citation_snowballing"
+  | "thesis_proposal";
 
 export type SnowballDirection = "both" | "backward" | "forward";
 
@@ -86,6 +87,11 @@ export interface TaskCreate {
   keywords: string[];
   /** 预设工作流标识；缺省时后端按 literature_review 处理 */
   workflow_preset?: WorkflowPreset;
+  /**
+   * 开题报告衍生来源（Phase 2）：必须是当前用户已完成的文献综述任务。
+   * 传了后台会继承该综述的研究空白与参考文献基线。
+   */
+  source_task_id?: string | null;
   /** 验证引用模式（verify_citations）下的待核验草稿文本 */
   draft_text?: string | null;
   /** 引文滚雪球模式（citation_snowballing）下的种子论文 DOI 或标题（最多 5 篇） */

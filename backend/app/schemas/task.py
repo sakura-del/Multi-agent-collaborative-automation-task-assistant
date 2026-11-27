@@ -49,6 +49,12 @@ class TaskCreate(BaseModel):
     topic: str = Field(min_length=5, max_length=200)
     keywords: list[str] = Field(default_factory=list, max_length=10)
     workflow_preset: WorkflowPreset = "literature_review"
+    source_task_id: UUID | None = None
+    """开题报告（thesis_proposal）的衍生来源任务（Phase 2）。
+
+    必须是当前用户名下、状态为 completed 的文献综述任务；提交时会把源综述的
+    研究空白与研究基线上限摘要写入 `task.config["inherited_context"]`。
+    """
     draft_text: str | None = Field(default=None, max_length=30000)
     seed_dois: list[str] = Field(default_factory=list, max_length=5)
     snowball_direction: SnowballDirection = "both"
@@ -122,6 +128,12 @@ class TaskCreate(BaseModel):
                 self.keywords = list(self.seed_dois[:5])
             if len(self.keywords) < 1:
                 raise ValueError("keywords 或 seed_dois 至少需要提供 1 项")
+        elif self.workflow_preset == "thesis_proposal":
+            # 开题报告：全新选题需关键词；从已完成综述衍生时关键词可省略（继承上下文补足）
+            if len(self.keywords) < 1 and self.source_task_id is None:
+                raise ValueError(
+                    "开题报告需提供 keywords，或从已完成的文献综述衍生（source_task_id）"
+                )
         elif len(self.keywords) < 1:
             raise ValueError("keywords 至少需要 1 个关键词")
         return self

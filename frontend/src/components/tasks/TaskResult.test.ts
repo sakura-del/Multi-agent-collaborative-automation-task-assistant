@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { mount } from "@vue/test-utils";
+import { flushPromises, mount } from "@vue/test-utils";
 import { nextTick } from "vue";
+import { createMemoryHistory, createRouter } from "vue-router";
 
 import TaskResult from "@/components/tasks/TaskResult.vue";
 import ReferenceVerificationPanel from "@/components/tasks/ReferenceVerificationPanel.vue";
@@ -725,6 +726,97 @@ describe("TaskResult · 引用核验集成", () => {
     expect(JSON.parse(localStorage.getItem("vp:thesis-cover-meta")!)).toMatchObject({
       author: "王小明",
     });
+
+    createObjectUrl.mockRestore();
+    revokeObjectUrl.mockRestore();
+    wrapper.unmount();
+  });
+});
+
+describe("TaskResult · 开题报告入口（Phase 2）", () => {
+  function mountWithRouter(overrides: Record<string, unknown> = {}) {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: "/tasks", name: "tasks", component: { template: "<div />" } },
+        {
+          path: "/tasks/:taskId",
+          name: "task-detail",
+          component: { template: "<div />" },
+        },
+      ],
+    });
+    const wrapper = mount(TaskResult, {
+      props: {
+        taskId: "task-42",
+        report: report({ final_markdown: "# 大语言模型综述\n\n正文。" }),
+        artifacts: [artifact("markdown")],
+        ...overrides,
+      },
+      global: { plugins: [router] },
+    });
+    return { wrapper, router };
+  }
+
+  it("非开题任务展示「生成开题报告」按钮，点击跳转并带上来源任务与选题", async () => {
+    const { wrapper, router } = mountWithRouter();
+
+    const button = wrapper.get('[data-test="create-proposal-btn"]');
+    expect(button.text()).toContain("生成开题报告");
+
+    await button.trigger("click");
+    await flushPromises();
+
+    expect(router.currentRoute.value.path).toBe("/tasks");
+    expect(router.currentRoute.value.query.preset).toBe("thesis_proposal");
+    expect(router.currentRoute.value.query.sourceTaskId).toBe("task-42");
+    expect(router.currentRoute.value.query.topic).toBe("大语言模型综述");
+    wrapper.unmount();
+  });
+
+  it("开题报告任务不展示生成按钮，导出使用开题报告母版", async () => {
+    const { wrapper } = mountWithRouter({ workflowPreset: "thesis_proposal" });
+
+    expect(wrapper.find('[data-test="create-proposal-btn"]').exists()).toBe(false);
+    expect(wrapper.get('[data-test="export-thesis-template-btn"]').text()).toContain(
+      "开题报告母版",
+    );
+    wrapper.unmount();
+  });
+
+  it("开题报告导出调用 thesis_proposal 母版且不传 bibliography_entries", async () => {
+    localStorage.clear();
+    renderTemplateMock.mockResolvedValueOnce(
+      new Blob(["docx"], {
+        type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      }),
+    );
+    const createObjectUrl = vi
+      .spyOn(URL, "createObjectURL")
+      .mockReturnValue("blob:proposal-mock");
+    const revokeObjectUrl = vi
+      .spyOn(URL, "revokeObjectURL")
+      .mockImplementation(() => undefined);
+
+    const { wrapper } = mountWithRouter({ workflowPreset: "thesis_proposal" });
+
+    await wrapper.get('[data-test="export-thesis-template-btn"]').trigger("click");
+    await nextTick();
+
+    const confirmBtn = document.body.querySelector(
+      '[data-test="thesis-template-confirm"]',
+    ) as HTMLButtonElement;
+    confirmBtn.click();
+    await nextTick();
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(renderTemplateMock).toHaveBeenCalledWith(
+      "builtin:thesis_proposal_cn_standard",
+      expect.objectContaining({
+        bibliography_entries: [],
+        sections: expect.objectContaining({ title: "大语言模型综述" }),
+      }),
+    );
 
     createObjectUrl.mockRestore();
     revokeObjectUrl.mockRestore();
