@@ -58,8 +58,11 @@ logger = get_logger(__name__)
 #: 上传端点双通道鉴权：`X-API-Key` 优先，其次 Bearer（JWT 不校验 scope）。
 ApiUserDep = Annotated[User, Depends(get_current_user_or_api_key)]
 
-#: 上传端点 scope（只对 Key 认证的请求生效；JWT 直接放行）。
-KnowledgeWriteScope = Annotated[None, Depends(require_scope("knowledge:write"))]
+#: 上传端点 scope 依赖（只对 Key 认证的请求生效；JWT 直接放行）。
+#: 单独命名以便测试用 dependency_overrides 替换。
+knowledge_write_scope = require_scope("knowledge:write")
+
+KnowledgeWriteScope = Annotated[None, Depends(knowledge_write_scope)]
 
 
 def get_document_service(db: AsyncSession = Depends(get_db)) -> KnowledgeDocumentService:

@@ -401,9 +401,11 @@ def _upload_endpoint_client() -> tuple[TestClient, dict[str, Any]]:
     app = FastAPI()
     app.include_router(knowledge_endpoints.router, prefix="/api/v1")
     app.dependency_overrides[knowledge_endpoints.get_document_service] = lambda: _StubService()
-    app.dependency_overrides[knowledge_endpoints.get_current_active_user] = lambda: SimpleNamespace(
-        id=uuid4()
+    # 上传端点是双通道鉴权 + scope 依赖（剪藏用 X-API-Key）；此处统一替换为固定用户/放行。
+    app.dependency_overrides[knowledge_endpoints.get_current_user_or_api_key] = (
+        lambda: SimpleNamespace(id=uuid4())
     )
+    app.dependency_overrides[knowledge_endpoints.knowledge_write_scope] = lambda: None
     return TestClient(app), captured
 
 
