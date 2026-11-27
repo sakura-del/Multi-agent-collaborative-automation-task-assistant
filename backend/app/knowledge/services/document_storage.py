@@ -185,6 +185,58 @@ class DocumentStorage:
         finally:
             staging.unlink(missing_ok=True)
 
+    async def save_bytes(
+        self,
+        user_id: UUID,
+        filename: str,
+        content: bytes,
+    ) -> StoredDocument:
+        """保存内存中的字节内容（服务端抓取的 OA 正文）。
+
+        与 :meth:`save` 共用全部校验语义（扩展名白名单 → 大小上限 → 文件签名），
+        区别只在数据来源：这里不消费 ``UploadFile`` 的流，而是先整块写临时文件，
+        校验通过后才移动（local）或上传（s3）。失败时不留临时文件、不产生对象。
+        """
+        original = Path(filename or "").name
+        extension = Path(original).suffix.lower()
+        if extension not in self.ALLOWED:
+            raise ValidationException("不支持的文件类型")
+        if not original:
+            raise ValidationException("文件名不能为空")
+        if len(content) > self.max_file_bytes:
+            raise ValidationException("文件超过 30 MB 限制")
+
+        stem = uuid4().hex
+        staging = self._tmp_dir / f"{stem}{extension}"
+        try:
+            staging.write_bytes(content)
+            self._validate_signature(extension, staging)
+        except (ValidationException, OSError):
+            staging.unlink(missing_ok=True)
+            raise
+
+        try:
+            if self.backend == "s3":
+                key = self._object_key(user_id, f"{stem}{extension}")
+                content_type = mimetypes.guess_type(original)[0] or "application/octet-stream"
+                # boto3 是同步阻塞 IO：必须放线程，避免卡住事件循环
+                await asyncio.to_thread(
+                    self._s3_client.put_object,
+                    Bucket=self.config.s3_bucket,
+                    Key=key,
+                    Body=content,
+                    ContentType=content_type,
+                )
+                return StoredDocument(Path(key), original, extension, len(content))
+
+            target_dir = self.root / str(user_id)
+            target_dir.mkdir(parents=True, exist_ok=True)
+            target = target_dir / f"{stem}{extension}"
+            os.replace(staging, target)
+            return StoredDocument(target, original, extension, len(content))
+        finally:
+            staging.unlink(missing_ok=True)
+
     # ------------------------------------------------------------------
     # 读
     # ------------------------------------------------------------------
