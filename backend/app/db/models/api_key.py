@@ -26,6 +26,7 @@ GitHub Secret Scanning / gitleaks 能通过固定前缀识别并告警。行业�
 | `tasks:write` | 建任务 / 确认规划 / 控制（取消、重试） |
 | `artifacts:read` | 下载 Markdown/DOCX/`.bib`/`.ris` |
 | `annotations:write` | 写批注（导师脚本场景） |
+| `knowledge:write` | 上传文档到知识库（剪藏扩展附带 PDF 场景） |
 
 **不只给「全权」**：只读 Key 是最常见的集成需求（把任务状态同步到自己的看板），
 给全权等于过度授权。
@@ -54,6 +55,7 @@ API_KEY_SCOPES: tuple[str, ...] = (
     "tasks:write",
     "artifacts:read",
     "annotations:write",
+    "knowledge:write",
 )
 
 #: 新建 Key 的默认 scope（「读 + 写任务」是最常见组合）。

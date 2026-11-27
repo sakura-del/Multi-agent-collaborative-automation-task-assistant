@@ -8,7 +8,10 @@
     POST   /api/v1/knowledge/search           当前用户检索
 
 设计要点：
-- 全部端点经 get_current_active_user 鉴权，业务调用一律传 current_user.id
+- 上传端点走**双通道鉴权**（`X-API-Key` 或 Bearer JWT）：剪藏扩展没有登录态，
+  必须用用户自己生成的 Key 附带 PDF；Key 需具备 `knowledge:write` scope。
+  其余端点仍为 JWT only。
+- 业务调用一律传 current_user.id
 - 跨用户访问返回 404（与不存在同语义，避免泄漏资源存在性）
 - 上传为 multipart file，不再接受服务端 file_path 或裸 text（P0 路径读取修复）
 """
@@ -25,7 +28,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 from fastapi.responses import FileResponse, RedirectResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_active_user
+from app.api.deps import get_current_active_user, get_current_user_or_api_key, require_scope
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.db.models.knowledge import KnowledgeDoc
@@ -51,6 +54,12 @@ logger = get_logger(__name__)
 
 
 # ===== 依赖注入 =====
+
+#: 上传端点双通道鉴权：`X-API-Key` 优先，其次 Bearer（JWT 不校验 scope）。
+ApiUserDep = Annotated[User, Depends(get_current_user_or_api_key)]
+
+#: 上传端点 scope（只对 Key 认证的请求生效；JWT 直接放行）。
+KnowledgeWriteScope = Annotated[None, Depends(require_scope("knowledge:write"))]
 
 
 def get_document_service(db: AsyncSession = Depends(get_db)) -> KnowledgeDocumentService:
@@ -92,6 +101,8 @@ def _to_out(doc: KnowledgeDoc) -> KnowledgeDocumentOut:
 async def upload_document(
     file: Annotated[UploadFile, File(description="pdf/docx/md/txt 文件，≤30MB")],
     title: Annotated[str, Form(min_length=1, max_length=256)],
+    current_user: ApiUserDep,
+    _scope: KnowledgeWriteScope,
     strategy: Annotated[ChunkStrategy, Form()] = ChunkStrategy.RECURSIVE,
     ref_id: Annotated[
         str | None,
@@ -100,10 +111,12 @@ async def upload_document(
             description="可选：引用库条目 ref_id（如 doi:10.1234/abc），命中后写入文档 meta_info",
         ),
     ] = None,
-    current_user: User = Depends(get_current_active_user),
     service: KnowledgeDocumentService = Depends(get_document_service),
 ) -> KnowledgeDocumentOut:
     """上传文档：受控存储 → 解析分块 → 双索引 → 持久化。
+
+    **鉴权双通道**：网页用 JWT；剪藏扩展用 `X-API-Key`（需 `knowledge:write` scope），
+    因为扩展没有登录态，却要上传用户刚下载的 PDF。
 
     `ref_id` 为可选关联提示：命中当前用户引用库条目时，文档 `meta_info` 会写回
     `ref_id` / `doi`，供全文补全把 OA 正文挂到引用库那一条文献上。

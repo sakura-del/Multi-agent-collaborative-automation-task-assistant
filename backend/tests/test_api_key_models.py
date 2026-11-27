@@ -232,6 +232,7 @@ class TestApiKeyScopes:
             "tasks:write",
             "artifacts:read",
             "annotations:write",
+            "knowledge:write",
         }
 
     def test_default_scopes(self) -> None:
